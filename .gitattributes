@@ -1,0 +1,17 @@
+# 统一换行符，避免 Windows 与 macOS/Linux 协作时反复出现 CRLF 警告
+* text=auto eol=lf
+
+# Windows 批处理必须保留 CRLF
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# 二进制素材不做任何转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
+*.docx binary
+*.zip binary
