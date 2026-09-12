@@ -35,11 +35,17 @@ export type TerminalStep = {
 
 export type TerminalScript = {
   key: string;
-  /** 任务名，控制台选择器上用 */
+  /** 任务名 */
   label: string;
   /** 脚本文件名，控制台标题上显示，方便对着终端核对 */
   command: string;
-  /** 这个任务干什么，一句话 */
+  /** 作业号 */
+  runId: string;
+  /** 提交人 */
+  owner: string;
+  /** 提交时间 */
+  submittedAt: string;
+  /** 这次作业的配置摘要（轮数 / 学习率这类），控制台标题栏用 */
   summary: string;
   steps: TerminalStep[];
   /** 总时长（毫秒），用于进度显示 */
@@ -114,12 +120,15 @@ export const TRAIN_DEFAULTS: TrainScriptConfig = {
 /**
  * 播放节奏。
  *
- * 脚本的默认单轮时长是 10 秒、16 轮 = 160 秒，完整跑一遍太长；
- * 这里按「整个任务 ~70 秒」压缩（脚本自己也有 `--duration` 参数做同一件事）。
- * 各阶段的比例照搬脚本的 `pre_budget = target * 0.25` 与
- * `t_training = target * 0.75`。
+ * 脚本默认单轮 10 秒 × 16 轮 = 160 秒，完整跑一遍太久；这里压到约 34 秒
+ * （脚本自己也有 `--duration` 参数做同一件事）。各阶段比例照搬脚本的
+ * `pre_budget = target * 0.25` 与 `t_training = target * 0.75`。
+ *
+ * ⚠️ 这个数不能往大调。进度条每帧的停留时间 = 单轮时长 / 帧数，
+ * 70 秒时每帧 260ms，看上去是「一秒钟跳四格」的幻灯片，不像在跑；
+ * 34 秒时每帧约 89ms（≈11fps），才是真实训练终端里进度条该有的刷新感。
  */
-const TRAIN_TOTAL_MS = 70_000;
+const TRAIN_TOTAL_MS = 34_000;
 
 function buildFakeCommand(cfg: TrainScriptConfig): string {
   return (
@@ -357,7 +366,10 @@ export function buildTrainScript(cfg: TrainScriptConfig = TRAIN_DEFAULTS): Termi
     key: "train",
     label: "全量重训",
     command: "train_multimodal_retrain.py",
-    summary: `EFCW-YOLO v3.6 + RadarNet 联合训练 · ${cfg.epochs} epoch`,
+    runId: "run-20260911-0231",
+    owner: "史 · 人工智能架构师",
+    submittedAt: "2026-09-11 09:41",
+    summary: `${cfg.epochs} epoch · batch ${cfg.batchSize} · lr ${cfg.lr.toExponential(1)}`,
     steps,
     totalMs: steps.reduce((sum, step) => sum + step.dwellMs, 0),
   };
@@ -391,7 +403,7 @@ export const DISTILL_DEFAULTS: DistillScriptConfig = {
   targetDevice: "Jetson-Orin-NX",
 };
 
-const DISTILL_TOTAL_MS = 62_000;
+const DISTILL_TOTAL_MS = 26_000;
 
 export function buildDistillScript(cfg: DistillScriptConfig = DISTILL_DEFAULTS): TerminalScript {
   const rand = makePyRandom(3407);
@@ -561,7 +573,10 @@ export function buildDistillScript(cfg: DistillScriptConfig = DISTILL_DEFAULTS):
     key: "distill",
     label: "蒸馏与量化",
     command: "distill_int8_quant.py",
-    summary: `知识蒸馏 ${cfg.kdEpochs} epoch → INT8 PTQ → TensorRT → 固件封装归档`,
+    runId: "run-20260911-0244",
+    owner: "史 · 人工智能架构师",
+    submittedAt: "2026-09-11 10:12",
+    summary: `KD ${cfg.kdEpochs} epoch · T=${cfg.temperature} α=${cfg.alpha} · 目标 ${cfg.targetDevice}`,
     steps,
     totalMs: steps.reduce((sum, step) => sum + step.dwellMs, 0),
   };

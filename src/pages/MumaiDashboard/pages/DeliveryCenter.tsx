@@ -21,7 +21,7 @@
 
 import { useMemo, useState } from "react";
 import { Panel } from "../Panel";
-import { Btn, Modal, SourceTag, StateBlock, StatusChip } from "../ui";
+import { Btn, Modal, StateBlock, StatusChip } from "../ui";
 import { useMumai } from "../context";
 import { permissionHint } from "../auth";
 import { DELIVERY_ARTIFACTS } from "../seed/scenario";
@@ -278,7 +278,6 @@ export function DeliveryTab() {
         title="待提交产物"
         extra={
           <span className="fw-console__actions">
-            <SourceTag label="演示记录" />
             <Btn tone="ghost" onClick={() => setUploadOpen(true)}>
               上传产物
             </Btn>

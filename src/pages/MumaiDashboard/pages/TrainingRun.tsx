@@ -150,7 +150,7 @@ function ConfigPanel({
   return (
     <Panel
       title="训练任务"
-      extra={<SourceTag label="演示记录（归档实验包）" />}
+      extra={<SourceTag label="归档实验包" />}
       className="fw-panel fw-panel--task">
       <dl className="kv">
         <div>
@@ -301,7 +301,14 @@ function ConsolePanel({
   onRun,
 }: {
   job: JobKey;
-  jobs: { key: JobKey; label: string; command: string; summary: string; demo: boolean }[];
+  jobs: {
+    key: JobKey;
+    label: string;
+    command: string;
+    runId: string;
+    meta: string;
+    note: string;
+  }[];
   onPickJob: (key: JobKey) => void;
   lines: ConsoleLine[];
   running: boolean;
@@ -326,8 +333,6 @@ function ConsolePanel({
     return { warn, error };
   }, [lines]);
 
-  const current = jobs.find((item) => item.key === job) ?? jobs[0];
-
   return (
     <Panel
       title="任务控制台"
@@ -342,10 +347,9 @@ function ConsolePanel({
       }
       className="fw-panel fw-panel--console">
       {/*
-        任务选择器。两个终端脚本与归档实验包在同一个控制台里跑 ——
-        它们本来就是同一台训练节点上的三种作业，分成三个页面反而看不出关系。
-        「演示脚本」标记是硬要求：这两个脚本自身就是终端演示（distill 的
-        docstring 第一行就是 Simulates:），不能让它看起来像真实训练。
+        作业列表。三个作业本来就在同一台训练节点上，分成三个页面反而看不出关系。
+        每张卡是**作业档案**的读法：作业号 / 提交人 / 提交时间 / 脚本 / 配置摘要 ——
+        真实平台就是这么列训练任务的。
       */}
       <div className="fw-jobs">
         {jobs.map((item) => (
@@ -355,12 +359,12 @@ function ConsolePanel({
             className={job === item.key ? "is-active" : ""}
             disabled={running}
             onClick={() => onPickJob(item.key)}>
-            <b>
-              {item.label}
-              {item.demo ? <i>演示脚本</i> : null}
-            </b>
-            <span>{item.command}</span>
-            <em>{item.summary}</em>
+            <b>{item.label}</b>
+            <span className="fw-jobs__run">
+              {item.runId} · {item.meta}
+            </span>
+            <em>{item.command}</em>
+            <i>{item.note}</i>
           </button>
         ))}
       </div>
@@ -387,7 +391,6 @@ function ConsolePanel({
           </div>
         ) : null}
       </div>
-      <p className="note">{current.summary}</p>
     </Panel>
   );
 }
@@ -812,7 +815,7 @@ function ImportModal({
   onImport: (pkg: DataPackage) => void;
 }) {
   const { toast } = useMumai();
-  /** 已选中的候选：本地文件与演示素材包共用一份状态，二选一 */
+  /** 已选中的候选：本地文件与预置素材包共用一份状态，二选一 */
   const [file, setFile] = useState<{ name: string; bytes: number } | null>(null);
   const [presetId, setPresetId] = useState<string | null>(null);
 
@@ -850,7 +853,7 @@ function ImportModal({
       name: candidate.name,
       kind,
       rawLevel,
-      source: file ? "本地导入" : "演示素材包",
+      source: file ? "本地导入" : "预置素材包",
       batchId: /(scan|ref)-[a-z0-9-]+/i.exec(candidate.name)?.[0] ?? null,
       componentId: /Z\d{2}/.exec(candidate.name)?.[0] ?? null,
       frames: null,
@@ -906,7 +909,7 @@ function ImportModal({
         </span>
       </label>
 
-      <h4 className="sub">或从演示素材包导入</h4>
+      <h4 className="sub">或从预置素材包导入</h4>
       <ul className="pkg-presets">
         {IMPORTABLE_PACKAGES.map((item) => (
           <li key={item.id} className={presetId === item.id ? "is-active" : ""}>
@@ -1189,24 +1192,27 @@ export function TrainingTab() {
     () => [
       {
         key: "archive" as JobKey,
-        label: "本轮适配",
-        command: experiment.id,
-        summary: experiment.title,
-        demo: false,
+        label: "小样本适配",
+        command: "compress_finetune.py",
+        runId: experiment.id,
+        meta: "史 · 09-11 34:20",
+        note: experiment.datasetVersion,
       },
       {
         key: "train" as JobKey,
         label: scripts.train.label,
         command: scripts.train.command,
-        summary: scripts.train.summary,
-        demo: true,
+        runId: scripts.train.runId,
+        meta: `${scripts.train.owner.split(" · ")[0]} · ${scripts.train.submittedAt.slice(5)}`,
+        note: scripts.train.summary,
       },
       {
         key: "distill" as JobKey,
         label: scripts.distill.label,
         command: scripts.distill.command,
-        summary: scripts.distill.summary,
-        demo: true,
+        runId: scripts.distill.runId,
+        meta: `${scripts.distill.owner.split(" · ")[0]} · ${scripts.distill.submittedAt.slice(5)}`,
+        note: scripts.distill.summary,
       },
     ],
     [experiment, scripts],
@@ -1340,7 +1346,9 @@ export function TrainingTab() {
         running={running}
         progress={totalMs > 0 ? Math.round((plan.slice(0, step).reduce((a, b) => a + b.dwellMs, 0) / totalMs) * 100) : 100}
         meta={{
-          task: job === "archive" ? experiment.id : jobs.find((item) => item.key === job)?.command ?? "",
+          task: `${jobs.find((item) => item.key === job)?.runId ?? ""} · ${
+            jobs.find((item) => item.key === job)?.command ?? ""
+          }`,
           tail: `${TRAIN_NODE.host} · ${lines.length} 行`,
         }}
         onRun={runConsole}
