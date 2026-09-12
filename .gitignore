@@ -25,3 +25,14 @@ back
 *.sw?
 src/assets/sc_specular_map.png
 src/assets/sc_ambient_occlusion_map.png
+
+# 构建期素材缓存（tools/build-terrain.mjs 下载的 DEM 瓦片，可再生，不入库）
+.cache
+
+# Vite/编辑器在 Windows 上写出的临时目录（chokidar 去 watch 会 EBUSY）
+*.tmpdir
+.tmp-*
+
+# 无头截图自查产物（tools/shot.mjs）
+tmp-shot/
+

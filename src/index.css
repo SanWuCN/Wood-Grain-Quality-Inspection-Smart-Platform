@@ -1,8 +1,157 @@
-body {
-  margin: 0;
+@import "./styles/tokens.css";
+
+/* ==================================================================
+   木脉智检 · 全局基线（唯一入口）
+   ------------------------------------------------------------------
+   职责只有四件事，其余视觉一律交给 design tokens 与各层的 class：
+     1) 引入 src/styles/tokens.css（规范 §9，唯一主题来源）
+     2) Reset 与页面底座：深色中性底、全屏不滚动、统一中文字体
+     3) 文字层级默认值：正文 13px/22px，行高与字号全部取 token
+     4) 焦点可见、选区、滚动条：低对比，不发光
+   规范 §11：普通正文不发光、普通边框低对比；这里不放任何装饰线。
+   ================================================================== */
+
+/* 历史遗留字体（旧 Logo 用），不属于设计系统；保留声明只为避免 404 */
+@font-face {
+  font-family: "MumaiDisplay";
+  src: url("/font/pmzd.woff2") format("woff2");
+  font-display: swap;
 }
 
-@font-face {
-  font-family: "pmzd";
-  src: url("/sc-datav/font/pmzd.woff2") format("woff2");
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg-page);
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-weight: 400;
+  color: var(--text-secondary);
+  background: var(--bg-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* 中文不回退到合成字重，避免「假粗体」的廉价感 */
+  font-synthesis: none;
+}
+
+/* 表单控件跟随 UI 字体，不出现浏览器默认字体 */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* 浏览器给 button 的 2px outset 黑边属于 UA 默认值，会把「已删掉边框」的按钮
+   重新画成 2px 黑框：全平台统一清掉，边框只由设计系统显式声明 */
+button {
+  border: 0;
+  background: none;
+  padding: 0;
+}
+
+/* 原生下拉面板（option）是浏览器控件，默认深色不统一；这里固定到面板色 */
+option {
+  background-color: var(--bg-page) !important;
+  color: var(--text-primary);
+}
+
+/* 浏览器默认 small = 0.8333em，在 11px 上下文里会算出 9.17px 这种第六个字号层级；
+   统一到辅助级，字号层级保持 5 档 */
+small {
+  font-size: var(--fs-aux);
+}
+
+/* 浏览器给 button 的 2px outset 黑边属于 UA 默认值，会把「已删掉边框」的按钮
+   重新画成 2px 黑框：全平台统一清掉，边框只由设计系统显式声明 */
+button {
+  border: 0;
+  background: none;
+  padding: 0;
+}
+
+/* 原生下拉面板（option）是浏览器控件，默认深色不统一；这里固定到面板色 */
+option {
+  background-color: var(--bg-page) !important;
+  color: var(--text-primary);
+}
+
+/* 浏览器默认 small = 0.8333em，在 11px 上下文里会算出 9.17px 这种第六个字号层级；
+   统一到辅助级，字号层级保持 5 档 */
+small {
+  font-size: var(--fs-aux);
+}
+
+/* 编号 / 坐标 / 时间戳：Inter + 等宽数字，纵向对齐不跳动 */
+time,
+.num,
+.mono {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--border-active);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--fill-active);
+  color: var(--text-primary);
+}
+
+/* 滚动条：低对比细条，不用亮蓝 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-default) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 4px;
+  background-color: var(--border-default);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--border-hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
