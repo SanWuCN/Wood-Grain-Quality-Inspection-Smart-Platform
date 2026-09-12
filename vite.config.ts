@@ -51,6 +51,17 @@ export default defineConfig({
         "**/.cache/**",
         "**/tmp-shot/**",
         "**/dist/**",
+        /**
+         * 只 watch 参与构建的东西。`docs/` 与所有 Markdown 都是纯文档，
+         * 改了它们根本不需要 HMR —— 但 Vite 默认会 watch 整个项目根目录，
+         * 于是「用编辑器打开一份文档」这个动作就能把 dev server 干掉：
+         *   最后一次崩溃就是 watch 'docs/design/视觉设计规范-v1.1.md' 抛 EBUSY
+         *   → FSWatcher 抛 error → Node 进程直接退出
+         * 这已经是第三次被同一类问题搞挂了，所以直接把文档整体排除掉。
+         */
+        "**/docs/**",
+        "**/*.md",
+        "**/prd及第二章剧本/**",
       ],
     },
   },
