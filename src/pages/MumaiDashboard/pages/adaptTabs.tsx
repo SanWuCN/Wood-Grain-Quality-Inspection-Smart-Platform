@@ -1,4 +1,14 @@
 /**
+ * 检测适配的六个页签组件（共享模块）
+ *
+ * 这一版把原来的单页「检测适配」拆成两个页面：
+ *   - pages/Hardware.tsx  硬件详情 —— 采集作业 / 异常排查 / 硬件监看
+ *   - pages/Firmware.tsx  固件及模型 —— 全局配置 / 数据集 / 训练验证 / 更新交付 / 融合分析
+ *
+ * 六个页签的实现原样保留在这里，两个页面按职责各自组合，避免把已经做完的内容重写一遍。
+ * 页签切换器与 Toolbar 归各页面自己负责，所以本文件只导出组件、不导出页面。
+ */
+/**
  * 检测适配（`/adapt`）
  *
  * PRD 2.2：检测适配下分采集、异常排查、数据集、训练验证、更新交付、融合分析六个页签；
@@ -11,20 +21,20 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useMumai } from "../context";
+import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
 import {
   Btn,
   ConfusionMatrix,
   DataTable,
   LineChart,
+  PermNote,
   SourceTag,
   StateBlock,
   StatusChip,
   StepFlow,
-  Toolbar,
   WaveChart,
 } from "../ui";
-import { ADAPT_TABS } from "../design";
 import { checkGrouping, fmtNum, fmtPct, runEvaluation } from "../lib";
 import {
   ANOMALY_EVENTS,
@@ -47,7 +57,7 @@ import type { SplitGroup } from "../seed/types";
  * 采集
  * ------------------------------------------------------------------ */
 
-function CaptureTab() {
+export function CaptureTab() {
   const { domainPending, toast } = useMumai();
   /** PRD 2.2：当前批次写在 URL 里，切页签 / 刷新都保留（单一批次来源） */
   const [params, setParams] = useSearchParams();
@@ -139,7 +149,7 @@ function CaptureTab() {
         ) : null}
       </Panel>
 
-      <Panel title="接收情况（三类分开呈现）">
+      <Panel title="接收情况">
         <DataTable head={["数据类型", "已接收 / 预期", "状态"]} rows={receiveRows} />
         <h4 className="sub">实时波形</h4>
         <WaveChart
@@ -177,7 +187,7 @@ function CaptureTab() {
  * 异常排查
  * ------------------------------------------------------------------ */
 
-function TriageTab() {
+export function TriageTab() {
   const { domainPending, setDomainPending, toast, pushEvent } = useMumai();
   const [conclusions, setConclusions] = useState<Record<string, string>>({});
   const [signed, setSigned] = useState<Record<string, string>>({});
@@ -318,7 +328,7 @@ function TriageTab() {
  * 数据集
  * ------------------------------------------------------------------ */
 
-function DatasetTab() {
+export function DatasetTab() {
   const { toast } = useMumai();
 
   /** 分组可调整：默认取冻结版本的划分，调整只改这份副本，不改种子 */
@@ -395,10 +405,6 @@ function DatasetTab() {
             step.reason,
           ])}
         />
-        <p className="note">
-          空文件与格式损坏标为「不可用」；疑似重复、饱和与离群先进待审核队列，不自动当噪声删除。
-          原始文件保留，清洗只生成新版本。
-        </p>
       </Panel>
 
       <Panel title="样本清单" extra={<span className="muted">{SAMPLES.length} 条记录</span>}>
@@ -421,7 +427,7 @@ function DatasetTab() {
       </Panel>
 
       <Panel
-        title="分组检查（受限 Python 校验单元）"
+        title="分组检查"
         extra={
           <StatusChip
             text={grouping.passed ? "校验通过" : "存在问题"}
@@ -570,7 +576,7 @@ function DatasetTab() {
  * 训练验证
  * ------------------------------------------------------------------ */
 
-function TrainingTab() {
+export function TrainingTab() {
   const [useFailed, setUseFailed] = useState(false);
   const experiment = useFailed ? FAILED_EXPERIMENT : EXPERIMENT;
 
@@ -626,7 +632,7 @@ function TrainingTab() {
         </label>
       </Panel>
 
-      <Panel title="损失曲线（来自同一份实验包）">
+      <Panel title="损失曲线">
         <LineChart
           series={[
             {
@@ -645,13 +651,10 @@ function TrainingTab() {
           xLabel="轮次"
           yLabel="损失"
         />
-        <p className="note">
-          训练误差下降但验证误差上升，通常说明开始过度适应训练样本；按验证表现选候选版本。
-        </p>
       </Panel>
 
       <Panel
-        title="独立测试集对比（真算统计值）"
+        title="独立测试集对比"
         extra={
           <StatusChip
             text={`同一测试集 ${evaluation.testSetIds.length} 条`}
@@ -772,8 +775,8 @@ function TrainingTab() {
  * 更新交付
  * ------------------------------------------------------------------ */
 
-function DeliveryTab() {
-  const { toast, pushEvent } = useMumai();
+export function DeliveryTab() {
+  const { toast, pushEvent, can } = useMumai();
   const pkg = UPDATE_PACKAGE;
 
   return (
@@ -848,8 +851,11 @@ function DeliveryTab() {
           }))}
         />
         <div className="adapt-actions">
+          {/* PRD 2.1：封装下发属于架构师；接收与回验属于全栈 */}
           <Btn
             tone="primary"
+            disabled={!can("package:deliver")}
+            title={can("package:deliver") ? "下发给接收人并产生交付记录" : permissionHint("package:deliver")}
             onClick={() => {
               toast(`更新包 ${pkg.id} 已下发，等待全栈接收`, "ok");
               pushEvent(`下发演示更新包 ${pkg.id}`, "ok");
@@ -857,6 +863,8 @@ function DeliveryTab() {
             下发更新包
           </Btn>
           <Btn
+            disabled={!can("deployment:receive")}
+            title={can("deployment:receive") ? "读取设备回报版本" : permissionHint("deployment:receive")}
             onClick={() => {
               toast(
                 `设备回报版本 ${pkg.deviceVersion.demoReported}；实机版本 ${pkg.deviceVersion.liveReported} 未接入`,
@@ -865,6 +873,7 @@ function DeliveryTab() {
             }}>
             读取设备版本
           </Btn>
+          <PermNote permissions={["package:deliver", "deployment:receive"]} />
         </div>
         <StateBlock
           kind="empty"
@@ -880,7 +889,7 @@ function DeliveryTab() {
  * 融合分析
  * ------------------------------------------------------------------ */
 
-function FusionTab() {
+export function FusionTab() {
   const { toast } = useMumai();
 
   return (
@@ -906,7 +915,7 @@ function FusionTab() {
         </ul>
       </Panel>
 
-      <Panel title="图像标注（JSON 载入）">
+      <Panel title="图像标注">
         <DataTable
           head={["标注框", "图像", "标签", "置信度", "测区"]}
           rows={FUSION_RECORD.annotations.map((item) => [
@@ -978,56 +987,7 @@ function FusionTab() {
           }}>
           保存融合结果
         </Btn>
-        <p className="note">
-          不对两个模型分数做相加或平均，也不制造一个更高的综合置信度：返回优先级、依据和下一步动作。
-        </p>
       </Panel>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * 页面
- * ------------------------------------------------------------------ */
-
-export default function Adapt() {
-  const [params, setParams] = useSearchParams();
-  const tab = params.get("tab") ?? ADAPT_TABS[0].key;
-  const batch = params.get("batch") ?? SCAN_BATCHES[0]?.batchId ?? "";
-
-  const setTab = (key: string) => {
-    const next = new URLSearchParams(params);
-    next.set("tab", key);
-    // PRD 2.2：切换页签保留筛选条件与当前批次
-    next.set("batch", batch);
-    setParams(next, { replace: true });
-  };
-
-  return (
-    <div className="page page--adapt">
-      <Toolbar
-        note={
-          <>
-            <SourceTag label="演示回放" />
-            <span>当前批次 {batch}</span>
-            <span>切换页签保留筛选条件与当前批次</span>
-          </>
-        }>
-        {ADAPT_TABS.map((item) => (
-          <Btn key={item.key} active={tab === item.key} onClick={() => setTab(item.key)}>
-            {item.label}
-          </Btn>
-        ))}
-      </Toolbar>
-
-      <div className="adapt-body">
-        {tab === "capture" ? <CaptureTab /> : null}
-        {tab === "triage" ? <TriageTab /> : null}
-        {tab === "dataset" ? <DatasetTab /> : null}
-        {tab === "training" ? <TrainingTab /> : null}
-        {tab === "delivery" ? <DeliveryTab /> : null}
-        {tab === "fusion" ? <FusionTab /> : null}
-      </div>
     </div>
   );
 }
