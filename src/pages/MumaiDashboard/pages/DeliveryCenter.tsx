@@ -1,0 +1,394 @@
+/**
+ * 更新交付（`/firmware?tab=delivery`）
+ *
+ * 形态是**产物提交与分发**，不是流程展示：
+ *   训练侧把训好的东西提交到平台 → 硬件侧从平台取走下载、烧录。
+ *
+ * 原来的实现是一张「更新包清单」+「量化与兼容性」+ 底部一条「交付步骤」时间线
+ * （量化记录 → 兼容性检查 → 封装 → 下发 → 接收 → 更新 → 重启自检 → 版本确认）。
+ * 那条时间线是用户点名要去掉的「太假」—— 它把一次交付画成固定的八步仪式，
+ * 而真实平台上这一步只有两个动作：**提交**、**取用**。步骤名再漂亮也不解决
+ * 「我要的东西在不在平台上、能不能下」这个问题。
+ *
+ * 现在三块：
+ *   ① 待提交产物 —— 训好但还没上平台的（含手工上传），逐项提交前校验；
+ *   ② 提交前校验 —— 校验不通过的产物不给提交入口，并写明差在哪；
+ *   ③ 已发布产物 —— 已在平台上，可下载 / 记录烧录，并留下取用记录。
+ *
+ * 三类目标分开列（硬件侧端模型 / 平台模型 / 小车 OTA）：它们的校验项、
+ * 目标载体与回退方式都不一样，混成一张表就只能比大小了。
+ */
+
+import { useMemo, useState } from "react";
+import { Panel } from "../Panel";
+import { Btn, Modal, SourceTag, StateBlock, StatusChip } from "../ui";
+import { useMumai } from "../context";
+import { permissionHint } from "../auth";
+import { DELIVERY_ARTIFACTS } from "../seed/scenario";
+import type { DeliveryArtifact, DeliveryTarget } from "../seed/types";
+
+const TARGETS: DeliveryTarget[] = ["硬件侧端模型", "平台模型", "小车 OTA"];
+
+/** 目标 → 语义色。三类产物在界面上要能一眼分开 */
+const TARGET_TONE: Record<DeliveryTarget, "ok" | "info" | "warn"> = {
+  硬件侧端模型: "ok",
+  平台模型: "info",
+  "小车 OTA": "warn",
+};
+
+/** 允许上传的产物格式 */
+const ALLOWED_EXT = [".engine", ".bin", ".pt", ".onnx", ".tar", ".gz", ".zip"];
+
+/** 从文件名推断产物给谁用 —— 推不出来就归平台模型，并让提交人自己确认 */
+function inferTarget(name: string): DeliveryTarget {
+  const lower = name.toLowerCase();
+  if (lower.includes("cart") || lower.includes("ota") || lower.includes("slam")) return "小车 OTA";
+  if (lower.includes("engine") || lower.includes("fw") || lower.includes(".bin")) return "硬件侧端模型";
+  return "平台模型";
+}
+
+/** 文件名 → 展示用的版本号：去掉扩展名，够用且不会编造版本 */
+function versionFromName(name: string): string {
+  return name.replace(/\.(engine|bin|pt|onnx|tar|gz|zip)$/i, "");
+}
+
+/* ------------------------------------------------------------------ *
+ * 上传产物
+ * ------------------------------------------------------------------ */
+
+function UploadModal({
+  onClose,
+  onSubmit,
+}: {
+  onClose: () => void;
+  onSubmit: (artifact: DeliveryArtifact) => void;
+}) {
+  const { toast } = useMumai();
+  const [file, setFile] = useState<{ name: string; bytes: number } | null>(null);
+  const [target, setTarget] = useState<DeliveryTarget>("硬件侧端模型");
+
+  const extOk = file ? ALLOWED_EXT.some((ext) => file.name.toLowerCase().endsWith(ext)) : false;
+  const sizeOk = Boolean(file && file.bytes > 0);
+  const canSubmit = Boolean(file) && extOk && sizeOk;
+
+  const submit = () => {
+    if (!file || !canSubmit) return;
+    onSubmit({
+      id: `art-upload-${Date.now()}`,
+      name: file.name,
+      target,
+      modelVersion: versionFromName(file.name),
+      // 手工上传没有对应的训练任务，留空 —— 不编一个任务号上去
+      fromJob: null,
+      producedAt: "2026-09-11 42:10",
+      sizeText: `${(file.bytes / 1024 / 1024).toFixed(2)} MB`,
+      sha256: "待平台计算",
+      state: "待提交",
+      checks: [
+        { key: "ext", label: "文件格式", pass: true, detail: `识别为 ${ALLOWED_EXT.find((e) => file.name.toLowerCase().endsWith(e))}` },
+        { key: "digest", label: "摘要", pass: false, detail: "上传后由平台计算，尚未复核" },
+        { key: "verify", label: "提交前校验", pass: false, detail: "尚未跑目标侧校验，提交后进入待校验" },
+      ],
+      used: [],
+    });
+    toast(`${file.name} 已加入待提交产物`, "ok");
+    onClose();
+  };
+
+  return (
+    <Modal
+      title="上传产物"
+      subtitle={<span>上传后进入待提交列表，不会直接发布</span>}
+      onClose={onClose}
+      footer={
+        <>
+          <span className="muted">
+            {!file ? "请选择文件" : !extOk ? "格式不在允许列表" : !sizeOk ? "空文件" : "可以提交"}
+          </span>
+          <Btn onClick={onClose}>取消</Btn>
+          <Btn tone="primary" disabled={!canSubmit} onClick={submit}>
+            上传
+          </Btn>
+        </>
+      }>
+      <label className="pkg-drop">
+        <input
+          type="file"
+          accept={ALLOWED_EXT.join(",")}
+          onChange={(event) => {
+            const picked = event.target.files?.[0];
+            if (!picked) return;
+            setFile({ name: picked.name, bytes: picked.size });
+            setTarget(inferTarget(picked.name));
+          }}
+        />
+        <span>
+          <b>{file ? file.name : "点击选择产物文件"}</b>
+          <em>
+            {file
+              ? `${(file.bytes / 1024 / 1024).toFixed(2)} MB`
+              : `支持 ${ALLOWED_EXT.join(" / ")}`}
+          </em>
+        </span>
+      </label>
+
+      <h4 className="sub">产物用途</h4>
+      <div className="art-targets">
+        {TARGETS.map((item) => (
+          <button
+            key={item}
+            type="button"
+            className={target === item ? "is-active" : ""}
+            onClick={() => setTarget(item)}>
+            {item}
+          </button>
+        ))}
+      </div>
+      <p className="note">
+        从文件名推断为「{file ? inferTarget(file.name) : "—"}」，可在这里改。
+      </p>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 页签
+ * ------------------------------------------------------------------ */
+
+export function DeliveryTab() {
+  const { toast, pushEvent, can } = useMumai();
+  /** 产物清单放进 state：提交会就地把它从待提交挪到已发布 */
+  const [artifacts, setArtifacts] = useState<DeliveryArtifact[]>(DELIVERY_ARTIFACTS);
+  const [selectedId, setSelectedId] = useState<string>(
+    DELIVERY_ARTIFACTS.find((item) => item.state === "待提交")?.id ?? "",
+  );
+  const [uploadOpen, setUploadOpen] = useState(false);
+
+  const pending = artifacts.filter((item) => item.state === "待提交");
+  const published = artifacts.filter((item) => item.state === "已发布");
+  const selected = pending.find((item) => item.id === selectedId) ?? pending[0] ?? null;
+
+  const failed = useMemo(
+    () => selected?.checks.filter((check) => !check.pass) ?? [],
+    [selected],
+  );
+
+  const canSubmit = can("package:deliver");
+
+  /** 提交：产物从「待提交」变成「已发布」，其他工程师这才看得到 */
+  const submit = (artifact: DeliveryArtifact) => {
+    setArtifacts((current) =>
+      current.map((item) =>
+        item.id === artifact.id
+          ? {
+              ...item,
+              state: "已发布" as const,
+              checks: item.checks.map((check) =>
+                check.key === "verify" || check.key === "digest" ? { ...check, pass: true, detail: "提交时由平台校验通过" } : check,
+              ),
+            }
+          : item,
+      ),
+    );
+    pushEvent(`产物 ${artifact.name} 已提交到平台`, "ok");
+    toast(`${artifact.name} 已发布，其他工程师可以下载`, "ok");
+  };
+
+  /** 取用：下载 / 烧录都记一条，谁在什么时候拿走了什么 */
+  const recordUse = (artifact: DeliveryArtifact, action: string) => {
+    setArtifacts((current) =>
+      current.map((item) =>
+        item.id === artifact.id
+          ? { ...item, used: [...item.used, { at: "2026-09-11 42:20", by: "饶 · 全栈开发工程师", action }] }
+          : item,
+      ),
+    );
+    toast(`${artifact.name} ${action}`, "ok");
+  };
+
+  const renderRow = (artifact: DeliveryArtifact, mode: "pending" | "published") => (
+    <li
+      key={artifact.id}
+      className={`art-row${mode === "pending" && selected?.id === artifact.id ? " is-selected" : ""}`}>
+      <button
+        type="button"
+        className="art-row__main"
+        disabled={mode === "published"}
+        onClick={() => setSelectedId(artifact.id)}>
+        <span className="art-row__name">
+          <b>{artifact.name}</b>
+          <i>
+            {artifact.fromJob ?? "手工上传"} · {artifact.producedAt}
+          </i>
+        </span>
+        <StatusChip text={artifact.target} tone={TARGET_TONE[artifact.target] ?? "info"} />
+        <span className="art-row__ver">{artifact.modelVersion}</span>
+        <span className="art-row__num">{artifact.sizeText}</span>
+        <span className="art-row__num">{artifact.sha256}</span>
+        {mode === "pending" ? (
+          <span className="art-row__checks">
+            {artifact.checks.filter((check) => !check.pass).length > 0 ? (
+              <StatusChip
+                text={`${artifact.checks.filter((check) => !check.pass).length} 项待处理`}
+                tone="warn"
+              />
+            ) : (
+              <StatusChip text="校验通过" tone="ok" />
+            )}
+          </span>
+        ) : (
+          <span className="art-row__checks">
+            <StatusChip text={`${artifact.used.length} 次取用`} tone="muted" />
+          </span>
+        )}
+      </button>
+      <span className="art-row__act">
+        {mode === "pending" ? (
+          <Btn
+            tone="primary"
+            disabled={!canSubmit || artifact.checks.some((check) => !check.pass)}
+            title={
+              !canSubmit
+                ? permissionHint("package:deliver")
+                : artifact.checks.some((check) => !check.pass)
+                  ? "有未通过的提交前校验，不能发布"
+                  : "提交到平台，其他工程师可下载"
+            }
+            onClick={() => submit(artifact)}>
+            提交
+          </Btn>
+        ) : (
+          <>
+            <Btn onClick={() => recordUse(artifact, "已下载")}>下载</Btn>
+            <Btn
+              disabled={!can("deployment:receive")}
+              title={can("deployment:receive") ? "记录一次烧录" : permissionHint("deployment:receive")}
+              onClick={() => recordUse(artifact, "已烧录")}>
+              记录烧录
+            </Btn>
+          </>
+        )}
+      </span>
+    </li>
+  );
+
+  return (
+    <div className="delivery">
+      <Panel
+        title="待提交产物"
+        extra={
+          <span className="fw-console__actions">
+            <SourceTag label="演示记录" />
+            <Btn tone="ghost" onClick={() => setUploadOpen(true)}>
+              上传产物
+            </Btn>
+          </span>
+        }
+        className="dl-panel">
+        {pending.length > 0 ? (
+          <>
+            <div className="art-head">
+              <span>产物</span>
+              <span>用途</span>
+              <span>版本</span>
+              <span>大小</span>
+              <span>摘要</span>
+              <span>提交前校验</span>
+              <span />
+            </div>
+            <ul className="art-list">{pending.map((item) => renderRow(item, "pending"))}</ul>
+          </>
+        ) : (
+          <StateBlock
+            kind="empty"
+            title="没有待提交产物"
+            hint="训练产出的模型或手工上传的文件会出现在这里。"
+          />
+        )}
+      </Panel>
+
+      <Panel
+        title="提交前校验"
+        extra={
+          selected ? (
+            <StatusChip
+              text={failed.length > 0 ? `${failed.length} 项未通过` : "全部通过"}
+              tone={failed.length > 0 ? "warn" : "ok"}
+              dot
+            />
+          ) : undefined
+        }
+        className="dl-panel dl-panel--checks">
+        {selected ? (
+          <>
+            <p className="note">
+              {selected.name} · {selected.target}
+            </p>
+            <ul className="pkg-checks">
+              {selected.checks.map((check) => (
+                <li key={check.key} className={check.pass ? "is-ok" : "is-bad"}>
+                  <b>{check.label}</b>
+                  <span>{check.detail}</span>
+                </li>
+              ))}
+            </ul>
+            {failed.length > 0 ? (
+              <p className="dl-block">
+                有 {failed.length} 项未通过，暂不能发布。校验不通过的产物不给提交入口 ——
+                发布出去的是别人要烧进设备的东西，不能靠「先发了再说」。
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <StateBlock kind="empty" title="先选一份待提交产物" />
+        )}
+      </Panel>
+
+      <Panel
+        title="已发布产物"
+        extra={<span className="muted">{published.length} 项 · 平台可下载</span>}
+        className="dl-panel">
+        <div className="art-head">
+          <span>产物</span>
+          <span>用途</span>
+          <span>版本</span>
+          <span>大小</span>
+          <span>摘要</span>
+          <span>取用记录</span>
+          <span />
+        </div>
+        <ul className="art-list">{published.map((item) => renderRow(item, "published"))}</ul>
+
+        {/* 取用记录：谁下载 / 谁烧录。交付的闭环就在这张表上 */}
+        <h4 className="sub">最近取用</h4>
+        <ol className="art-used">
+          {published
+            .flatMap((item) => item.used.map((use) => ({ ...use, name: item.name })))
+            .sort((a, b) => b.at.localeCompare(a.at))
+            .slice(0, 6)
+            .map((use, index) => (
+              <li key={`${use.at}-${use.name}-${index}`}>
+                <time>{use.at}</time>
+                <b>{use.by}</b>
+                <span>
+                  {use.action} · {use.name}
+                </span>
+              </li>
+            ))}
+        </ol>
+      </Panel>
+
+      {uploadOpen ? (
+        <UploadModal
+          onClose={() => setUploadOpen(false)}
+          onSubmit={(artifact) => {
+            setArtifacts((current) => [artifact, ...current]);
+            setSelectedId(artifact.id);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+export default DeliveryTab;

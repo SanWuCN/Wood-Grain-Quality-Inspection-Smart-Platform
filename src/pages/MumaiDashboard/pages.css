@@ -5429,3 +5429,217 @@
 .twin-wavepick button.is-active em {
   color: var(--primary);
 }
+
+/* ------------------------------------------------------------------
+   固件及模型 · 更新交付（/firmware?tab=delivery）
+   产物提交与分发：待提交 / 提交前校验 / 已发布可下载。
+   原来底部的「交付步骤」时间线已按用户意见删除。
+   ------------------------------------------------------------------ */
+
+.delivery {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+
+/* 待提交与已发布都要放下 7 列（产物/用途/版本/大小/摘要/校验/操作），横跨整行 */
+.dl-panel {
+  grid-column: span 12;
+  min-width: 0;
+}
+
+/* 提交前校验并到已发布旁边：它是提交动作的解释，不需要占满一整行 */
+.dl-panel--checks {
+  grid-column: span 12;
+}
+
+@media (min-width: 1400px) {
+  .dl-panel--checks {
+    grid-column: span 5;
+  }
+
+  /* 校验与「已发布」并排时，已发布占剩下的 7 列 */
+  .dl-panel--checks + .dl-panel {
+    grid-column: span 7;
+  }
+}
+
+/* 列轨道与产物行共用，保证表头和数据对齐 */
+.art-head,
+.art-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.6fr) 116px 176px 76px 104px 116px auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.art-head {
+  padding: 0 var(--space-2) 5px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.art-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 一行 = 主体（可选中）+ 操作。主体是按钮但只有悬停/选中才提亮 */
+.art-row {
+  border-bottom: 1px solid var(--border-subtle);
+  border-left: 2px solid transparent;
+  padding-left: var(--space-2);
+}
+
+.art-row:hover {
+  background: var(--fill-weak);
+}
+
+.art-row.is-selected {
+  border-left-color: var(--primary);
+  background: var(--fill-soft);
+}
+
+.art-row__main {
+  grid-column: 1 / 7;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 38px;
+  padding: 3px 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 已发布的行不可选中（右侧只有下载/烧录两个动作），去掉手型 */
+.art-row__main:disabled {
+  cursor: default;
+  color: inherit;
+}
+
+.art-row__name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.art-row__name b {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: var(--font-data);
+  font-size: var(--fs-table);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.art-row__name i {
+  overflow: hidden;
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.art-row__ver {
+  overflow: hidden;
+  color: var(--ma-text-2);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.art-row__num {
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+  font-variant-numeric: tabular-nums;
+}
+
+.art-row__act {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.art-row__act .btn {
+  height: 24px;
+  padding: 0 var(--space-3);
+  font-size: var(--fs-aux);
+}
+
+/* 校验不通过时的说明：整块留白 + 左侧告警线，不用红色正文刷屏 */
+.dl-block {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--ma-warn);
+  background: var(--fill-weak);
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+}
+
+/* 取用记录：时间 / 人 / 做了什么 */
+.art-used {
+  margin: 0;
+  padding: 0 0 0 var(--space-3);
+  list-style: none;
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.art-used li {
+  display: grid;
+  grid-template-columns: 118px 148px minmax(0, 1fr);
+  gap: var(--space-2);
+  font-size: var(--fs-aux);
+  color: var(--ma-text-2);
+}
+
+.art-used time {
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.art-used b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* 上传弹窗里的用途选择 */
+.art-targets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.art-targets button {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  background: var(--fill-weak);
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+  cursor: pointer;
+}
+
+.art-targets button:hover {
+  border-color: var(--border-hover);
+}
+
+.art-targets button.is-active {
+  border-color: var(--primary);
+  background: var(--fill-soft);
+  color: var(--primary);
+}

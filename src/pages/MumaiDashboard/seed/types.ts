@@ -582,7 +582,48 @@ export type DataPackageCheck = {
   detail: string;
 };
 
-/** 更新交付（PRD 3.6 / 11.3） */export type DeliveryStep = {
+/**
+ * 交付产物。
+ *
+ * 「更新交付」页的形态是**产物提交与分发**，不是流程展示：
+ * 训练侧把训好的东西提交到平台，硬件侧再从平台取走下载、烧录。
+ * 所以一份产物要能回答两件事 ——
+ *   提交前：它是什么、给谁用、校验过没有（`checks`）；
+ *   提交后：谁取走了、做什么用（`used`）。
+ *
+ * `state` 只有「待提交 / 已发布」两种：草稿之类的中间态在演示里没有意义，
+ * 而且会让「到底上没上平台」这个唯一重要的问题变模糊。
+ */
+export type DeliveryArtifact = {
+  id: string;
+  /** 产物文件名 */
+  name: string;
+  /** 给哪一侧用（用户点名的三类） */
+  target: DeliveryTarget;
+  modelVersion: string;
+  /** 由哪个训练任务产出；手工上传的为 null，不编一个任务号上去 */
+  fromJob: string | null;
+  producedAt: string;
+  sizeText: string;
+  sha256: string;
+  state: "待提交" | "已发布";
+  /** 提交前校验：不通过的不给提交入口 */
+  checks: DeliveryCheck[];
+  /** 已发布产物的取用记录（谁下载 / 谁烧录） */
+  used: { at: string; by: string; action: string }[];
+};
+
+export type DeliveryTarget = "硬件侧端模型" | "平台模型" | "小车 OTA";
+
+export type DeliveryCheck = {
+  key: string;
+  label: string;
+  pass: boolean;
+  detail: string;
+};
+
+/** 更新交付（PRD 3.6 / 11.3） */
+export type DeliveryStep = {
   key: string;
   label: string;
   owner: string;

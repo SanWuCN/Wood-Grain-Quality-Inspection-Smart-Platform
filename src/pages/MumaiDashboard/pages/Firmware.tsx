@@ -27,7 +27,8 @@ import { useSearchParams } from "react-router";
 import { Panel } from "../Panel";
 import { Btn, Modal, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
 import { useMumai } from "../context";
-import { DatasetTab, DeliveryTab, FusionTab } from "./adaptTabs";
+import { DatasetTab, FusionTab } from "./adaptTabs";
+import { DeliveryTab } from "./DeliveryCenter";
 import { TrainingTab } from "./TrainingRun";
 import {
   VERSION_ITEMS,

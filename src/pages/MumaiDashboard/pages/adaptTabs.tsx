@@ -3,7 +3,6 @@
  *
  * 原「检测适配」单页已经拆开，本文件只剩三个页签的内容：
  *   - DatasetTab   数据集      → `/firmware?tab=dataset`
- *   - DeliveryTab  更新交付    → `/firmware?tab=delivery`
  *   - FusionTab    融合分析    → `/firmware?tab=fusion`
  *
  * 首尾三段各自独立成文件了，因为它们的形态与剩下这几个差别太大：
@@ -13,6 +12,8 @@
  *     异常事件列表 + 详情弹窗 + 设备日志
  *   - TrainingRun.tsx  训练验证 → `/firmware?tab=training`
  *     训练配置、任务控制台、执行节点占用
+ *   - DeliveryCenter.tsx 更新交付 → `/firmware?tab=delivery`
+ *     产物提交与分发（待提交 / 提交前校验 / 已发布可下载）
  *
  * ⚠️ 文件名里的 `adapt` 是历史遗留，**没有 `/adapt` 这条路由了**。
  * 往这里加跳转时请指向 `/hardware?tab=…` 或 `/firmware?tab=…`：
@@ -27,16 +28,12 @@
 
 import { useMemo, useState } from "react";
 import { useMumai } from "../context";
-import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
 import {
   Btn,
   DataTable,
-  PermNote,
   SourceTag,
-  StateBlock,
   StatusChip,
-  StepFlow,
 } from "../ui";
 import { checkGrouping } from "../lib";
 import {
@@ -45,7 +42,6 @@ import {
   FUSION_RECORD,
   FUSION_RULES,
   SAMPLES,
-  UPDATE_PACKAGE,
 } from "../seed/scenario";
 import type { SplitGroup } from "../seed/types";
 
@@ -293,120 +289,6 @@ export function DatasetTab() {
           }}>
           冻结数据集版本
         </Btn>
-      </Panel>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * 更新交付
- * ------------------------------------------------------------------ */
-
-export function DeliveryTab() {
-  const { toast, pushEvent, can } = useMumai();
-  const pkg = UPDATE_PACKAGE;
-
-  return (
-    <div className="adapt-grid">
-      <Panel title="更新包清单" extra={<StatusChip text={pkg.artifactKind === "demo_nonflashable" ? "不可烧录演示包" : pkg.artifactKind} tone="warn" />}>
-        <dl className="kv">
-          <div>
-            <dt>包编号</dt>
-            <dd>{pkg.id}</dd>
-          </div>
-          <div>
-            <dt>模型版本</dt>
-            <dd>{pkg.modelVersion}</dd>
-          </div>
-          <div>
-            <dt>预处理</dt>
-            <dd>{pkg.preprocess}</dd>
-          </div>
-          <div>
-            <dt>输入规格</dt>
-            <dd>{pkg.inputSpec}</dd>
-          </div>
-          <div>
-            <dt>输出规格</dt>
-            <dd>{pkg.outputSpec}</dd>
-          </div>
-          <div>
-            <dt>目标环境</dt>
-            <dd>{pkg.targetEnv}</dd>
-          </div>
-          <div>
-            <dt>包大小</dt>
-            <dd>{pkg.sizeText}</dd>
-          </div>
-          <div>
-            <dt>恢复版本</dt>
-            <dd>{pkg.fallbackVersion}</dd>
-          </div>
-        </dl>
-      </Panel>
-
-      <Panel title="量化与兼容性">
-        <h4 className="sub">量化</h4>
-        <ul className="pkg-list">
-          {pkg.quantization.map((item) => (
-            <li key={item.key}>
-              <b>{item.label}</b>
-              <span>{item.detail}</span>
-            </li>
-          ))}
-        </ul>
-        <h4 className="sub">兼容性</h4>
-        <ul className="pkg-list">
-          {pkg.compatibility.map((item) => (
-            <li key={item.key} className={item.pass ? "is-ok" : "is-bad"}>
-              <b>{item.label}</b>
-              <span>{item.detail}</span>
-              <StatusChip text={item.pass ? "通过" : "未通过"} tone={item.pass ? "ok" : "danger"} />
-            </li>
-          ))}
-        </ul>
-      </Panel>
-
-      <Panel title="交付步骤">
-        <StepFlow
-          steps={pkg.steps.map((step) => ({
-            key: step.key,
-            label: `${step.label}（${step.owner}）`,
-            state: step.state,
-            at: step.at,
-            note: step.note,
-          }))}
-        />
-        <div className="adapt-actions">
-          {/* PRD 2.1：封装下发属于架构师；接收与回验属于全栈 */}
-          <Btn
-            tone="primary"
-            disabled={!can("package:deliver")}
-            title={can("package:deliver") ? "下发给接收人并产生交付记录" : permissionHint("package:deliver")}
-            onClick={() => {
-              toast(`更新包 ${pkg.id} 已下发，等待全栈接收`, "ok");
-              pushEvent(`下发演示更新包 ${pkg.id}`, "ok");
-            }}>
-            下发更新包
-          </Btn>
-          <Btn
-            disabled={!can("deployment:receive")}
-            title={can("deployment:receive") ? "读取设备回报版本" : permissionHint("deployment:receive")}
-            onClick={() => {
-              toast(
-                `设备回报版本 ${pkg.deviceVersion.demoReported}；实机版本 ${pkg.deviceVersion.liveReported} 未接入`,
-                "info",
-              );
-            }}>
-            读取设备版本
-          </Btn>
-          <PermNote permissions={["package:deliver", "deployment:receive"]} />
-        </div>
-        <StateBlock
-          kind="empty"
-          title="实机写入未接入"
-          hint="本批次交付物为不可烧录演示包，实机写入未接入。"
-        />
       </Panel>
     </div>
   );

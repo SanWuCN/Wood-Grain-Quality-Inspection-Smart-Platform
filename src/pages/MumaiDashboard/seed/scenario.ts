@@ -23,6 +23,7 @@ import type {
   Curve,
   DataPackage,
   DataPackageKind,
+  DeliveryArtifact,
   Dataset,
   DemoEvent,
   DeviceLogEntry,
@@ -1532,6 +1533,106 @@ export const FAILED_EXPERIMENT: Experiment = {
 /* ------------------------------------------------------------------ *
  * 12. 更新交付（PRD 3.6 / 11.3）
  * ------------------------------------------------------------------ */
+
+/**
+ * 交付产物（更新交付页）。
+ *
+ * 这一页回答的是「训好的东西怎么交到别人手上」：
+ *   · 待提交 —— 训练产出的模型 / 固件 / OTA 包，还没上平台；
+ *   · 已发布 —— 已上传到平台，其他工程师可以下载、烧录，`used` 是取用记录。
+ *
+ * 三类目标按用户点名的分：硬件侧端模型（烧进手持设备）、平台模型（平台侧推理）、
+ * 小车 OTA（推给演示车）。三类不能混在一张表里比大小 —— 它们的校验项、
+ * 目标载体、回退方式都不一样。
+ */
+export const DELIVERY_ARTIFACTS: DeliveryArtifact[] = [
+  {
+    id: "art-int8-engine", name: "best_int8.engine", target: "硬件侧端模型",
+    modelVersion: "EF-Nano-v1.2 + RadarNet-Lite-v1.0", fromJob: "蒸馏与量化（distill_int8_quant.py）",
+    producedAt: "2026-09-11 41:20", sizeText: "3.12 MB", sha256: "b7e4a0913cf8", state: "待提交",
+    checks: [
+      { key: "input", label: "输入规格", pass: true, detail: "1×420 频谱向量，与采集配置 CFG-02 一致" },
+      { key: "op", label: "算子支持", pass: true, detail: "conv2d / bn / relu / gap / fc 均在端侧支持列表" },
+      { key: "mem", label: "内存容量", pass: true, detail: "模型区占用 3.12 MB ≤ 可用 6 MB" },
+      { key: "digest", label: "摘要复核", pass: true, detail: "与训练侧导出的摘要一致" },
+      { key: "calib", label: "标定覆盖", pass: true, detail: "覆盖本批次使用的杉木与楠木参考样本" },
+    ],
+    used: [],
+  },
+  {
+    id: "art-m03-candidate", name: "demo_m03_candidate.pt", target: "平台模型",
+    modelVersion: "DEMO-M03-candidate", fromJob: "本轮适配（EXP-2026-0911）",
+    producedAt: "2026-09-11 36:41", sizeText: "3.21 MB", sha256: "e2f71b4c9a08", state: "待提交",
+    checks: [
+      { key: "preprocess", label: "预处理版本", pass: true, detail: "comp-v1.4，与训练完全一致" },
+      { key: "contract", label: "接口契约", pass: true, detail: "输入输出定义未变，调用方无需改动" },
+      { key: "metric", label: "验收指标", pass: true, detail: "漏检 3→2，误报 4→2，原有材种无退化" },
+      { key: "domain", label: "适用域", pass: false, detail: "该批次木材缺有效标定记录，结论仍待核验" },
+    ],
+    used: [],
+  },
+  {
+    id: "art-cart-rc2", name: "DEMO-CART-1.7.0-rc2.tar", target: "小车 OTA",
+    modelVersion: "DEMO-CART-1.7.0-rc2", fromJob: null,
+    producedAt: "2026-09-10 18:02", sizeText: "18.4 MB", sha256: "7a3d15e8b062", state: "待提交",
+    checks: [
+      { key: "map", label: "地图版本兼容", pass: true, detail: "适配 MAP-SH-06" },
+      { key: "fallback", label: "回退包可用", pass: true, detail: "DEMO-CART-1.6.0 备份完整" },
+      { key: "field", label: "实机验证", pass: false, detail: "仅在演示车跑过，实机未获运动权限" },
+    ],
+    used: [],
+  },
+  {
+    id: "art-fw-mumai", name: "fw_mumai_v3.6.0.bin", target: "硬件侧端模型",
+    modelVersion: "EFCW-YOLO v3.6 + RadarNet v2.4", fromJob: "蒸馏与量化（distill_int8_quant.py）",
+    producedAt: "2026-09-11 40:55", sizeText: "4.08 MB", sha256: "3f9c1d2a7b45", state: "已发布",
+    checks: [
+      { key: "input", label: "输入规格", pass: true, detail: "与采集配置 CFG-02 一致" },
+      { key: "sign", label: "签名", pass: true, detail: "SHA256-HMAC 校验通过" },
+      { key: "fallback", label: "回退版本", pass: true, detail: "FW-2.4.1 备份完整，可恢复" },
+    ],
+    used: [
+      { at: "2026-09-11 41:02", by: "饶 · 全栈开发工程师", action: "下载" },
+      { at: "2026-09-11 41:15", by: "饶 · 全栈开发工程师", action: "烧录到 scan-dev-02" },
+    ],
+  },
+  {
+    id: "art-demo-pkg", name: "DEMO-PKG-02.demo.zip", target: "硬件侧端模型",
+    modelVersion: "DEMO-M02b（候选）", fromJob: "本轮适配（EXP-2026-0911）",
+    producedAt: "2026-09-11 37:48", sizeText: "3.2 MB", sha256: "a17e5b93c204", state: "已发布",
+    checks: [
+      { key: "kind", label: "包类型", pass: true, detail: "artifact_kind=demo_nonflashable，不可烧录" },
+      { key: "compat", label: "兼容性", pass: true, detail: "4 项通过，烧录能力项按演示包标记为不适用" },
+    ],
+    used: [
+      { at: "2026-09-11 38:14", by: "饶 · 全栈开发工程师", action: "接收并校验摘要" },
+    ],
+  },
+  {
+    id: "art-agent-rc1", name: "AGENT-1.3.0-rc1.tar.gz", target: "平台模型",
+    modelVersion: "AGENT-1.3.0-rc1", fromJob: null,
+    producedAt: "2026-09-08 15:30", sizeText: "1.1 MB", sha256: "6f14d0b83a25", state: "已发布",
+    checks: [
+      { key: "tools", label: "工具白名单", pass: true, detail: "与 1.3 白名单一致" },
+      { key: "rollback", label: "回滚点", pass: true, detail: "多步编排任一步失败可退到该步之前" },
+    ],
+    used: [
+      { at: "2026-09-09 09:12", by: "史 · 人工智能架构师", action: "下载并部署到测试环境" },
+    ],
+  },
+  {
+    id: "art-map-sh06", name: "MAP-SH-06_slam.tar", target: "小车 OTA",
+    modelVersion: "MAP-SH-06", fromJob: null,
+    producedAt: "2026-09-11 22:40", sizeText: "86 MB", sha256: "c42b809f1de7", state: "已发布",
+    checks: [
+      { key: "quality", label: "建图质量", pass: true, detail: "回环成功，重定位耗时 3s" },
+      { key: "zone", label: "禁区一致", pass: true, detail: "3 处禁入区已随地图下发" },
+    ],
+    used: [
+      { at: "2026-09-11 22:52", by: "马 · 具身智能工程师", action: "下载并加载到演示车" },
+    ],
+  },
+];
 
 export const UPDATE_PACKAGE: UpdatePackage = {
   id: "DEMO-PKG-02",
