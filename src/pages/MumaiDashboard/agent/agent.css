@@ -1,0 +1,1022 @@
+/**
+ * 小木语音智能体 · 语音控制台样式
+ *
+ * 只用 docs/design/视觉设计规范-v1.0.md 的 token（另一个并行任务正在建立
+ * src/styles/tokens.css）。tokens.css 还没生成，因此这里在同一组变量名上补一份
+ * 同值 fallback：`:root { --primary: #4ea8ff; }` 这样的声明在 tokens.css 存在时
+ * 会被后者覆盖（后加载者胜），不会产生第二套颜色。
+ *
+ * 视觉原则（设计规范 §6）：
+ *   - 只有一个 UI 主色 #4EA8FF；青色 #5DE4FF 只用于声波、扫描、光效
+ *   - 普通面板不发光，只有当前焦点（状态徽标、确认层）允许局部 glow
+ *   - 动效 180–320ms，easing 用 power2.out / power3.out，禁止 bounce / elastic
+ */
+
+:root {
+  --bg-page: #030812;
+  --bg-workspace: #060d18;
+  --bg-panel: #091321;
+  --bg-panel-hover: #0c1929;
+  --bg-emphasis: #102037;
+  --primary: #4ea8ff;
+  --glow-cyan: #5de4ff;
+  --text-primary: #eaf3ff;
+  --text-secondary: #aabbd0;
+  --text-tertiary: #70849c;
+  --text-disabled: #465a70;
+  --success: #39d5a3;
+  --warning: #f2b84b;
+  --danger: #ff5c70;
+  --info: #4ea8ff;
+  --border-subtle: rgba(78, 168, 255, 0.12);
+  --border-default: rgba(78, 168, 255, 0.18);
+  --border-hover: rgba(78, 168, 255, 0.32);
+  --border-active: rgba(78, 168, 255, 0.55);
+  --font-ui: "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-data: "Inter", "DIN Alternate", sans-serif;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --motion-fast: 180ms;
+  --motion-normal: 260ms;
+  --motion-page: 560ms;
+  /* 动效曲线：power2.out / power3.out 的 CSS 等价写法 */
+  --vc-ease: cubic-bezier(0.215, 0.61, 0.355, 1);
+  --vc-ease-strong: cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+
+.vc-root {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+}
+
+.vc-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgba(3, 8, 18, 0.72);
+  backdrop-filter: blur(3px);
+  cursor: pointer;
+  animation: vc-fade var(--motion-normal) var(--vc-ease) both;
+}
+
+.vc {
+  position: relative;
+  width: min(1680px, 96vw);
+  height: min(980px, 95vh);
+  display: grid;
+  /* 行固定分配：提示条可能不存在，用显式 grid-row 保证对话流始终拿到弹性高度 */
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  background: linear-gradient(180deg, var(--bg-workspace), var(--bg-page));
+  border: 1px solid var(--border-default);
+  border-radius: 2px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  animation: vc-rise var(--motion-page) var(--vc-ease-strong) both;
+  overflow: hidden;
+}
+
+.vc__head {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(420px, auto) auto auto;
+  align-items: center;
+  gap: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.vc-subtitle {
+  grid-row: 2;
+}
+
+.vc-banner {
+  grid-row: 3;
+}
+
+.vc__list {
+  grid-row: 4;
+}
+
+.vc__foot {
+  grid-row: 5;
+}
+
+@keyframes vc-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes vc-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------------- 1. 状态机 + 电平 ---------------- */
+
+.vc__title b {
+  display: block;
+  font-size: 18px;
+  letter-spacing: 0.04em;
+}
+
+.vc__title small {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.vc-state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: 2px;
+  transition: border-color var(--motion-fast) var(--vc-ease);
+}
+
+.vc-state i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-disabled);
+}
+
+.vc-state b {
+  font-family: var(--font-data);
+  font-size: 14px;
+  letter-spacing: 0.08em;
+}
+
+.vc-state span {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.vc-state em {
+  font-size: 12px;
+  font-style: normal;
+  color: var(--text-tertiary);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 识别中 = 蓝、成功 = 绿、风险 = 红、待处理 = 黄（设计规范 1.3） */
+.vc-state.is-idle i {
+  background: var(--text-disabled);
+}
+
+.vc-state.is-active {
+  border-color: var(--border-active);
+}
+
+.vc-state.is-active i {
+  background: var(--primary);
+  box-shadow: 0 0 0 4px rgba(78, 168, 255, 0.18);
+  animation: vc-pulse 1.4s var(--vc-ease) infinite;
+}
+
+.vc-state.is-ok {
+  border-color: rgba(57, 213, 163, 0.4);
+}
+
+.vc-state.is-ok i {
+  background: var(--success);
+}
+
+.vc-state.is-warn {
+  border-color: rgba(242, 184, 75, 0.45);
+}
+
+.vc-state.is-warn i {
+  background: var(--warning);
+  animation: vc-pulse 1.4s var(--vc-ease) infinite;
+}
+
+.vc-state.is-danger {
+  border-color: rgba(255, 92, 112, 0.45);
+}
+
+.vc-state.is-danger i {
+  background: var(--danger);
+}
+
+@keyframes vc-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.vc-meter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.vc-meter__bar {
+  position: relative;
+  width: 180px;
+  height: 6px;
+  background: var(--bg-emphasis);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.vc-meter__bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary), var(--glow-cyan));
+  transition: width 90ms linear;
+}
+
+.vc-meter small {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.vc-wave {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 28px;
+}
+
+.vc-wave i {
+  width: 3px;
+  border-radius: 2px;
+  background: var(--glow-cyan);
+  transition: height 90ms linear, opacity var(--motion-fast) var(--vc-ease);
+}
+
+.vc-wave.is-active i {
+  box-shadow: 0 0 8px rgba(93, 228, 255, 0.5);
+}
+
+.vc__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.vc-btn {
+  padding: var(--space-2) var(--space-4);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--vc-ease), border-color var(--motion-fast) var(--vc-ease),
+    color var(--motion-fast) var(--vc-ease);
+}
+
+.vc-btn:hover {
+  background: var(--bg-panel-hover);
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.vc-btn.is-on {
+  color: var(--primary);
+  border-color: var(--border-active);
+}
+
+.vc-btn--ghost {
+  padding: var(--space-2) var(--space-3);
+}
+
+.vc-btn--danger {
+  color: var(--danger);
+  border-color: rgba(255, 92, 112, 0.45);
+}
+
+.vc-btn--danger:hover {
+  background: rgba(255, 92, 112, 0.12);
+  color: var(--danger);
+}
+
+/* ---------------- 2. 实时字幕 ---------------- */
+
+.vc-subtitle {
+  padding: var(--space-3) var(--space-5);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+}
+
+.vc-subtitle__line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-height: 34px;
+  font-size: 22px;
+  letter-spacing: 0.02em;
+}
+
+.vc-subtitle__line .is-partial {
+  color: var(--text-tertiary);
+}
+
+.vc-subtitle__line .is-final {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.vc-subtitle__line .is-idle {
+  font-size: 15px;
+  color: var(--text-disabled);
+}
+
+.vc-caret {
+  width: 2px;
+  height: 22px;
+  background: var(--primary);
+  animation: vc-caret 1s steps(2, end) infinite;
+}
+
+@keyframes vc-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.vc-subtitle__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.vc-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  font-size: 13px;
+  color: var(--warning);
+  background: rgba(242, 184, 75, 0.08);
+  border: 1px solid rgba(242, 184, 75, 0.28);
+}
+
+.vc-banner button {
+  border: 0;
+  background: none;
+  color: var(--warning);
+  cursor: pointer;
+}
+
+/* ---------------- 3. 对话流 ---------------- */
+
+.vc__list {
+  overflow-y: auto;
+  padding-right: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-hover) transparent;
+}
+
+.vc-empty {
+  padding: var(--space-5);
+  background: var(--bg-panel);
+  border: 1px dashed var(--border-default);
+  color: var(--text-secondary);
+}
+
+.vc-empty b {
+  display: block;
+  margin-bottom: var(--space-3);
+  color: var(--text-primary);
+}
+
+.vc-empty ol {
+  margin: 0;
+  padding-left: var(--space-5);
+  display: grid;
+  gap: var(--space-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.vc-bubble {
+  max-width: 92%;
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+  animation: vc-bubble-in var(--motion-normal) var(--vc-ease-strong) both;
+}
+
+@keyframes vc-bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.vc-bubble--user {
+  align-self: flex-end;
+  background: var(--bg-emphasis);
+  border-color: var(--border-hover);
+  max-width: 62%;
+}
+
+.vc-bubble--user p {
+  margin: 0;
+  font-size: 15px;
+}
+
+.vc-bubble--user footer,
+.vc-bubble--bot footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.vc-bubble--bot {
+  align-self: flex-start;
+}
+
+.vc-bubble__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.vc-bubble__who {
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.vc-intent {
+  padding: 1px var(--space-2);
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--info);
+  background: rgba(78, 168, 255, 0.1);
+  border: 1px solid var(--border-subtle);
+}
+
+.vc-intent--rule {
+  color: var(--success);
+  background: rgba(57, 213, 163, 0.1);
+  border-color: rgba(57, 213, 163, 0.3);
+}
+
+.vc-intent--low,
+.vc-intent--fallback {
+  color: var(--warning);
+  background: rgba(242, 184, 75, 0.1);
+  border-color: rgba(242, 184, 75, 0.3);
+}
+
+.vc-bubble__conf,
+.vc-bubble__voice {
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.vc-bubble__rule {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+  color: var(--success);
+}
+
+.vc-bubble__text {
+  margin: var(--space-3) 0 0;
+  font-size: 15px;
+  line-height: 1.72;
+  color: var(--text-primary);
+}
+
+/* 工具卡片：内容是实际调用状态（PRD 4.1） */
+.vc-tools {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.vc-tool {
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-workspace);
+  border: 1px solid var(--border-subtle);
+  border-left: 2px solid var(--info);
+}
+
+.vc-tool.is-done {
+  border-left-color: var(--success);
+}
+
+.vc-tool.is-failed {
+  border-left-color: var(--danger);
+}
+
+.vc-tool.is-waiting {
+  border-left-color: var(--warning);
+}
+
+.vc-tool.is-cancelled {
+  border-left-color: var(--text-disabled);
+}
+
+.vc-tool header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.vc-tool header b {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.vc-tool header em,
+.vc-tool header i {
+  font-family: var(--font-data);
+  font-style: normal;
+  color: var(--text-tertiary);
+}
+
+.vc-tool header span {
+  margin-left: auto;
+  color: var(--info);
+}
+
+.vc-tool p {
+  margin: var(--space-1) 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.vc-tool small {
+  display: block;
+  margin-top: var(--space-1);
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--text-disabled);
+  word-break: break-all;
+}
+
+/* 步骤清单：✓ / ● / ○ */
+.vc-steps {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: var(--bg-workspace);
+  border: 1px solid var(--border-default);
+}
+
+.vc-steps header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.vc-steps header em {
+  font-family: var(--font-data);
+  font-style: normal;
+  color: var(--text-tertiary);
+}
+
+.vc-steps__bar {
+  height: 2px;
+  margin: var(--space-2) 0 var(--space-3);
+  background: var(--bg-emphasis);
+}
+
+.vc-steps__bar i {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+  transition: width var(--motion-normal) var(--vc-ease);
+}
+
+.vc-steps ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.vc-steps li {
+  display: grid;
+  grid-template-columns: 18px minmax(140px, auto) 1fr;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.vc-steps li b {
+  font-family: var(--font-data);
+  text-align: center;
+}
+
+.vc-steps li.is-done {
+  color: var(--text-secondary);
+}
+
+.vc-steps li.is-done b {
+  color: var(--success);
+}
+
+.vc-steps li.is-running {
+  color: var(--text-primary);
+}
+
+.vc-steps li.is-running b {
+  color: var(--primary);
+  animation: vc-pulse 1.2s var(--vc-ease) infinite;
+}
+
+.vc-steps li.is-failed b {
+  color: var(--danger);
+}
+
+.vc-steps li.is-failed {
+  color: var(--danger);
+}
+
+.vc-steps li em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.vc-entities {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.vc-entities span {
+  padding: 1px var(--space-2);
+  background: var(--bg-panel-hover);
+  border: 1px solid var(--border-subtle);
+}
+
+.vc-entities b {
+  font-family: var(--font-data);
+  color: var(--primary);
+}
+
+.vc-facts {
+  margin-top: var(--space-3);
+}
+
+.vc-facts__toggle {
+  padding: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--text-tertiary);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.vc-facts__toggle:hover {
+  color: var(--primary);
+}
+
+.vc-facts dl {
+  margin: var(--space-2) 0 0;
+  display: grid;
+  gap: 1px;
+  background: var(--border-subtle);
+  border: 1px solid var(--border-subtle);
+}
+
+.vc-facts dl > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 190px) 1fr;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-panel);
+  font-size: 13px;
+}
+
+.vc-facts dt {
+  font-family: var(--font-data);
+  color: var(--text-tertiary);
+}
+
+.vc-facts dd {
+  margin: 0;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.vc-facts .is-risk dd {
+  color: var(--danger);
+}
+
+.vc-facts .is-warn dd {
+  color: var(--warning);
+}
+
+.vc-facts .is-ok dd {
+  color: var(--success);
+}
+
+.vc-facts .is-info dd {
+  color: var(--info);
+}
+
+/* ---------------- 4. 输入区 ---------------- */
+
+.vc__foot {
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.vc-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  max-height: 84px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-hover) transparent;
+}
+
+.vc-examples button {
+  padding: var(--space-1) var(--space-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--vc-ease), border-color var(--motion-fast) var(--vc-ease),
+    color var(--motion-fast) var(--vc-ease);
+}
+
+.vc-examples button:hover {
+  background: var(--bg-panel-hover);
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.vc-examples__task {
+  color: var(--glow-cyan) !important;
+  border-color: rgba(93, 228, 255, 0.3) !important;
+}
+
+.vc-input {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "ptt form" "hint hint";
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.vc-ptt {
+  grid-area: ptt;
+  min-width: 132px;
+  padding: var(--space-3) var(--space-5);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-emphasis);
+  border: 1px solid var(--border-hover);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--vc-ease), border-color var(--motion-fast) var(--vc-ease),
+    box-shadow var(--motion-fast) var(--vc-ease);
+  touch-action: none;
+}
+
+.vc-ptt:hover {
+  border-color: var(--border-active);
+}
+
+.vc-ptt.is-hold {
+  border-color: var(--border-active);
+  background: rgba(78, 168, 255, 0.16);
+  box-shadow: 0 0 0 3px rgba(78, 168, 255, 0.12);
+}
+
+.vc-input form {
+  grid-area: form;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-2);
+}
+
+.vc-input input {
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: 2px;
+  outline: none;
+  transition: border-color var(--motion-fast) var(--vc-ease);
+}
+
+.vc-input input::placeholder {
+  color: var(--text-disabled);
+}
+
+.vc-input input:focus {
+  border-color: var(--border-active);
+}
+
+.vc-input form button {
+  padding: var(--space-3) var(--space-5);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--bg-page);
+  background: var(--primary);
+  border: 0;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: filter var(--motion-fast) var(--vc-ease);
+}
+
+.vc-input form button:hover {
+  filter: brightness(1.08);
+}
+
+.vc-input__hint {
+  grid-area: hint;
+  font-size: 11px;
+  color: var(--text-disabled);
+}
+
+/* ---------------- 5. 确认层 ---------------- */
+
+.vc-confirm {
+  position: absolute;
+  inset: auto var(--space-5) var(--space-5) auto;
+  display: grid;
+  place-items: end;
+  animation: vc-fade var(--motion-fast) var(--vc-ease) both;
+}
+
+.vc-confirm__box {
+  width: min(560px, 82%);
+  padding: var(--space-5);
+  background: var(--bg-panel);
+  border: 1px solid rgba(255, 92, 112, 0.45);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5), 0 0 0 3px rgba(255, 92, 112, 0.08);
+  animation: vc-rise var(--motion-normal) var(--vc-ease-strong) both;
+}
+
+.vc-confirm__box header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.vc-confirm__box header b {
+  color: var(--danger);
+  letter-spacing: 0.04em;
+}
+
+.vc-confirm__box header em {
+  font-family: var(--font-data);
+  font-style: normal;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.vc-confirm__title {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.vc-confirm__detail {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.vc-confirm__actions {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.vc-confirm__box small {
+  display: block;
+  margin-top: var(--space-3);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* ---------------- 小木面板标题栏里的语音入口 ---------------- */
+/* 只给「语音」按钮补样式；.xm__* 的其余规则仍在 pages.css 里，这里不覆盖任何已有声明 */
+
+.xm__head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.xm__voice-open {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--primary);
+  background: rgba(78, 168, 255, 0.08);
+  border: 1px solid var(--border-default);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--vc-ease), border-color var(--motion-fast) var(--vc-ease);
+}
+
+.xm__voice-open:hover {
+  background: rgba(78, 168, 255, 0.16);
+  border-color: var(--border-active);
+}
+
+.xm__voice-open svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 尊重用户的「减少动效」偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .vc,
+  .vc-bubble,
+  .vc-backdrop,
+  .vc-confirm__box {
+    animation: none;
+  }
+  .vc-state.is-active i,
+  .vc-state.is-warn i,
+  .vc-steps li.is-running b,
+  .vc-caret {
+    animation: none;
+  }
+}
