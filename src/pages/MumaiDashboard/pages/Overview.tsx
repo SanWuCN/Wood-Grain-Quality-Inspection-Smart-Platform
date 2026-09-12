@@ -1,0 +1,591 @@
+/**
+ * 任务总览（`/`）
+ *
+ * PRD 3.1：总览展示当前寺院、工单、四柱状态、当前阶段，以及地图、场景、手持采集
+ * 三个通道；主区域用场地概览和本轮任务串联，左右两栏分别承载「场地与构件」和
+ * 「风险与待办」。统计来自种子数据，**未检测显示「未采集」，不显示为零风险**。
+ *
+ * 布局（对齐 docs/design/*.png）：地图铺满内容区，左右各一栏、每栏上下两块面板
+ * 浮在地图上，靠半透明底 + 折角边框让地图从下方透出来。
+ * 面板位置/高度全部由 pages.css 的 `.ov__side` / `.ov > .ov__panel` 决定。
+ *
+ * 信息密度（规范 §3.3 + §4.3 + §10 P1「减少首页字段，采用渐进披露」）
+ * ------------------------------------------------------------------
+ * 每块 Panel 只保留三层：①当前对象/任务 ②核心状态 ③关键辅助数据；
+ * 详细字段走「首页摘要 → 展开 → 查看工单 → 证据/历史」的渐进披露，
+ * 展开一律用面板内 `useState` 就地展开（演示场景不用弹窗）。具体口径：
+ *   - 场地概览：通道版本号（③）与工单状态/风险等级（本属右栏工单表）不进层①；
+ *   - 四柱构件：柱号 + 采集状态是②，三条风险分数与处置建议是③，建议默认截断一行；
+ *   - 风险与工单：工单表负责「列表 + 选中」，卡片只留表里没有的
+ *     问题类型 / 构件 / 得分一行摘要，点位、区县、发现时间收进「详情」；
+ *   - 待办与事件：待办、事件各默认 3 条，其余「更多」。
+ * 一行里「数字 + 它的文字标签」放在同一个元素内（如 `<b>0.87<i>疑似受潮</i></b>`），
+ * 靠字号/颜色/留白分层而不是再加一层标签元素（§4.3），也不画独立边框卡片。
+ * 地图是视觉主角（§0）：面板只留摘要行，不再用字段平铺和它抢注意力。
+ */
+
+import { useCallback, useMemo, useState } from "react";
+import { useNavigate } from "react-router";
+import { useDashboardStore, requestMapMode } from "../map/store";
+import Map from "../mapDemo";
+import { Panel } from "../Panel";
+import { Icon } from "../icons";
+import { SourceTag, StateBlock, StatusChip } from "../ui";
+import { useMumai } from "../context";
+import { STATUS_COLOR } from "../map/status";
+import {
+  COMPONENTS,
+  CURRENT_RISKS,
+  DEVICES,
+  HISTORIC_ORDERS,
+  HISTORY_STATS,
+  MISSION,
+  RECENT_EVENTS,
+  SCENES,
+  TODO_ITEMS,
+  WORK_ORDER,
+} from "../seed/scenario";
+import {
+  DEMO_GEO_POSITION,
+  EVENT_PREVIEW_ITEMS,
+  ORDER_COUNTERS,
+  ORDER_LEVEL_TONE,
+  ORDER_PREVIEW_ROWS,
+  ORDER_STATUS_TONE,
+  OVERVIEW_SLOGAN,
+  TODO_PREVIEW_ITEMS,
+} from "./overview.constants";
+
+/** 首页工单列表：本轮工单 + 历史工单，共 6 条（设计稿「工单列表」） */
+const OVERVIEW_ORDERS = [WORK_ORDER, ...HISTORIC_ORDERS];
+
+/** 地图通道版本号：以任务实际下发的地图版本为准，不用 MAP_VERSIONS[0] */
+const MISSION_MAP_VERSION = MISSION.mapVersion;
+
+/* ------------------------------------------------------------------ *
+ * 渐进披露：面板内「更多 / 收起」开关（§3.3，不用弹窗）
+ * ------------------------------------------------------------------ */
+
+function MoreButton({
+  open,
+  moreText,
+  onClick,
+}: {
+  open: boolean;
+  /** 收起态按钮文案，写清「还有多少」比只写「更多」更好判断 */
+  moreText: string;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" className="ov-more" aria-expanded={open} onClick={onClick}>
+      {open ? "收起" : moreText}
+    </button>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 左栏 · 面板一：场地概览（阶段 / 本轮工单 + 三通道）
+ * ------------------------------------------------------------------ */
+
+/** 三角色通道一行（PRD 3.1：地图 / 场景 / 手持采集三个通道） */
+function SitePanel({
+  stageLabel,
+  orderId,
+  sourceMode,
+  domainPending,
+}: {
+  stageLabel: string;
+  orderId: string;
+  sourceMode: string;
+  domainPending: boolean;
+}) {
+  /** 通道版本/批次号属于第三层辅助数据，默认收起 */
+  const [detailOpen, setDetailOpen] = useState(false);
+
+  const channels = useMemo(() => {
+    const scene = SCENES.find((item) => item.round === "本轮") ?? SCENES[0];
+    return [
+      {
+        key: "map",
+        label: "地图",
+        value: `${MISSION_MAP_VERSION} · ${DEVICES.demoCart.mode === "replay" ? "回放" : "实时"}`,
+        tone: "info" as const,
+        state: "在线",
+      },
+      {
+        key: "scene",
+        label: "场景",
+        value: `${scene?.version ?? "—"} · ${scene?.published ?? "待检查"}`,
+        tone: "warn" as const,
+        state: scene?.published ?? "待检查",
+      },
+      {
+        key: "handheld",
+        label: "手持采集",
+        value: `${DEVICES.scanner.name.replace("手持毫米波 ", "")} · ${DEVICES.scanner.id}`,
+        tone: "ok" as const,
+        state: "已接收",
+      },
+    ];
+  }, []);
+
+  return (
+    <Panel
+      title="场地概览 · 示例寺"
+      className="ov__panel ov__panel--site"
+      extra={<SourceTag label={`${sourceMode === "replay" ? "演示回放" : sourceMode} · session-A`} />}>
+      {/* 第一层：当前对象/任务。工单状态与风险等级属于右栏工单表，不在这里重复 */}
+      <div className="ov-meta">
+        <strong>
+          {stageLabel}
+          <small>当前阶段</small>
+        </strong>
+        <strong>
+          {orderId}
+          <small>本轮工单</small>
+        </strong>
+      </div>
+
+      <h4 className="ov-sec">
+        数据通道
+        <MoreButton open={detailOpen} moreText="详情" onClick={() => setDetailOpen((v) => !v)} />
+      </h4>
+      {/* 第二层：三条通道各自的连接状态（状态点 + 状态词） */}
+      <ul className="ov-channels">
+        {channels.map((item) => (
+          <li key={item.key} className="ov-channel">
+            <span className="ov-channel__label">
+              <i
+                style={{
+                  background:
+                    STATUS_COLOR[item.key === "map" ? "collected" : item.key === "scene" ? "workorder" : "inspected"],
+                }}
+              />
+              {item.label}
+            </span>
+            {/* 第三层：版本 / 批次号，展开后才出现 */}
+            {detailOpen ? <b>{item.value}</b> : null}
+            <StatusChip text={item.state} tone={item.tone} />
+          </li>
+        ))}
+      </ul>
+
+      {domainPending ? (
+        <StateBlock
+          kind="partial"
+          title="适用域待核验"
+          hint="该批次已冻结诊断输出，等待专业复核；页面不输出病害结论。"
+        />
+      ) : null}
+    </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 左栏 · 面板二：四柱构件状态（未检测一律「未采集」）
+ * ------------------------------------------------------------------ */
+
+function ComponentPanel() {
+  const [componentId, setComponentId] = useState(COMPONENTS[COMPONENTS.length - 1]?.id ?? "Z04");
+  /** 显式点过的风险；为空时取该构件得分最高的一条 */
+  const [pickedRiskId, setPickedRiskId] = useState<string | null>(null);
+  const [noteOpen, setNoteOpen] = useState(false);
+
+  const risks = useMemo(() => CURRENT_RISKS.filter((item) => item.componentId === componentId), [componentId]);
+
+  const activeRisk = useMemo(
+    () =>
+      risks.find((item) => item.id === pickedRiskId) ??
+      risks.reduce<(typeof risks)[number] | null>((best, item) => (best === null || item.score > best.score ? item : best), null),
+    [risks, pickedRiskId],
+  );
+
+  const pickComponent = useCallback((id: string) => {
+    setComponentId(id);
+    setPickedRiskId(null);
+    setNoteOpen(false);
+  }, []);
+
+  return (
+    <Panel
+      title="四柱构件状态"
+      className="ov__panel ov__panel--comp"
+      extra={<StatusChip text={risks.length > 0 ? "已标记" : "未标记"} tone={risks.length > 0 ? "warn" : "muted"} />}>
+      {/* 第一层 + 第二层：柱号（含部位）与采集状态；卡片本身就是选中入口，
+          不再另起一排 Z01–Z04 切换按钮 */}
+      <ul className="ov-components">
+        {COMPONENTS.map((component) => (
+          <li key={component.id}>
+            <button
+              type="button"
+              className={component.id === componentId ? "is-active" : ""}
+              onClick={() => pickComponent(component.id)}>
+              <b>
+                {component.id}
+                <i>{component.part}</i>
+              </b>
+              {component.radarScore === null ? (
+                <StatusChip text="未采集" tone="muted" />
+              ) : (
+                <StatusChip text={`回波 ${component.radarScore.toFixed(2)}`} tone="warn" />
+              )}
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <h4 className="ov-sec">
+        当前风险
+        <span>{risks.length > 0 ? `${risks.length} 条待复核` : "未精扫不判定"}</span>
+      </h4>
+
+      {risks.length > 0 ? (
+        /* 第三层：分数 + 它是什么，一行一条；点一行看该条的处置建议 */
+        <ul className="ov-risks">
+          {risks.map((risk) => (
+            <li key={risk.id} className={risk.id === activeRisk?.id ? "is-active" : ""}>
+              <button
+                type="button"
+                onClick={() => {
+                  setPickedRiskId(risk.id);
+                  setNoteOpen(false);
+                }}>
+                <b className={risk.score >= 0.8 ? "is-danger" : ""}>
+                  {risk.score.toFixed(2)}
+                  <i>{risk.label}</i>
+                </b>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <StateBlock kind="empty" title="该构件暂无本轮风险" hint="未精扫部分不写成内部正常。" />
+      )}
+
+      {activeRisk ? (
+        <div className="ov-rec">
+          <h4 className="ov-sec">
+            处置建议
+            <MoreButton open={noteOpen} moreText="展开" onClick={() => setNoteOpen((v) => !v)} />
+          </h4>
+          <p className={noteOpen ? "ov-note is-open" : "ov-note"}>{activeRisk.recommendation}</p>
+        </div>
+      ) : null}
+    </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 右栏 · 面板一：风险与工单
+ * ------------------------------------------------------------------ */
+
+function RiskOrderPanel() {
+  const navigate = useNavigate();
+  const [selectedId, setSelectedId] = useState(WORK_ORDER.id);
+  /** 工单表默认 4 行，其余收进「更多」 */
+  const [listOpen, setListOpen] = useState(false);
+  /** 当前工单卡默认只给一行摘要，点位/区县/发现时间收进「详情」 */
+  const [detailOpen, setDetailOpen] = useState(false);
+
+  const selected = OVERVIEW_ORDERS.find((item) => item.id === selectedId) ?? WORK_ORDER;
+
+  /** 计数按种子工单真实统计，不写死数字 */
+  const counts = useMemo(
+    () => ORDER_COUNTERS.map((counter) => ({ ...counter, value: OVERVIEW_ORDERS.filter(counter.match).length })),
+    [],
+  );
+
+  /**
+   * 收起态只给前 4 条；**当前选中的那条必须在场**——选中第 5/6 条时用选中行
+   * 顶掉预览区的最后一行，顺序仍按原列表，避免选中项被挤到滚动区外看不见。
+   */
+  const rows = useMemo(() => {
+    if (listOpen) return OVERVIEW_ORDERS;
+    const preview = OVERVIEW_ORDERS.slice(0, ORDER_PREVIEW_ROWS);
+    if (preview.some((order) => order.id === selectedId)) return preview;
+    return OVERVIEW_ORDERS.filter((order, index) => index < ORDER_PREVIEW_ROWS - 1 || order.id === selectedId);
+  }, [listOpen, selectedId]);
+
+  /** 问题类型取该工单来源风险里优先级最高的一条，没有来源风险时退回检测范围 */
+  const issueType = useMemo(() => {
+    const risks = CURRENT_RISKS.filter((item) => selected.sourceRiskIds.includes(item.id));
+    const top = risks.reduce<(typeof risks)[number] | null>(
+      (best, risk) => (best === null || risk.score > best.score ? risk : best),
+      null,
+    );
+    return top?.label ?? selected.scope;
+  }, [selected]);
+
+  /** 设计稿里 `SH-2026-0901` 额外显示 Z04 下部与疑似空洞读数。
+      取该构件本轮得分最高的一条（0.87），与设计稿一致。 */
+  const z04Risk = useMemo(() => {
+    if (selected.id !== WORK_ORDER.id) return undefined;
+    const z04 = WORK_ORDER.componentIds[WORK_ORDER.componentIds.length - 1];
+    const risks = CURRENT_RISKS.filter((item) => item.componentId === z04);
+    return risks.reduce<(typeof risks)[number] | undefined>(
+      (best, risk) => (best === undefined || risk.score > best.score ? risk : best),
+      undefined,
+    );
+  }, [selected]);
+
+  return (
+    <>
+      {/* 第二层：三条计数只做数字 + 标签，不各自包一张边框卡（§4.3） */}
+      <div className="ov-counts">
+        {counts.map((counter) => (
+          <div key={counter.key} className={`ov-count ov-count--${counter.tone}`}>
+            <strong>
+              {counter.value}
+              <small>{counter.label}</small>
+            </strong>
+          </div>
+        ))}
+      </div>
+
+      <h4 className="ov-sec">
+        工单列表
+        <MoreButton
+          open={listOpen}
+          moreText={`共 ${OVERVIEW_ORDERS.length} 条 · 更多`}
+          onClick={() => setListOpen((v) => !v)}
+        />
+      </h4>
+      {/* 表格负责「列表 + 选中」：编号 + 点位 / 风险 / 状态，都是一行的东西 */}
+      <div className={`ov-orders${listOpen ? " is-open" : ""}`}>
+        <div className="ov-orders__head">
+          <span>工单 · 点位</span>
+          <span>风险</span>
+          <span>状态</span>
+        </div>
+        <div className="ov-orders__list">
+          {rows.map((order) => (
+            <button
+              key={order.id}
+              type="button"
+              className={order.id === selected.id ? "is-active" : ""}
+              onClick={() => setSelectedId(order.id)}>
+              <span className="ov-orders__id">
+                {order.id}
+                <i>{order.site}</i>
+              </span>
+              <StatusChip text={order.level} tone={ORDER_LEVEL_TONE[order.level]} />
+              <StatusChip text={order.status} tone={ORDER_STATUS_TONE[order.status]} />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 第一层：当前工单。点位/区县已在上面表格里，这里只留表格没有的
+          问题类型 / 构件 / 得分，压成一行摘要；明细进「详情」 */}
+      <article className="ov-coc">
+        <h3>
+          {selected.id}
+          <i>{selected.title}</i>
+        </h3>
+        <div className="ov-coc__chips">
+          <StatusChip text={selected.level} tone={ORDER_LEVEL_TONE[selected.level]} />
+          <StatusChip text={selected.status} tone={ORDER_STATUS_TONE[selected.status]} />
+        </div>
+        <p className="ov-coc__sum">
+          问题类型 {issueType} · 构件 {z04Risk ? z04Risk.componentId : selected.componentIds.join("/")}
+          {z04Risk ? <em>{z04Risk.score.toFixed(2)}</em> : null}
+        </p>
+        {detailOpen ? (
+          <dl className="ov-coc__dl">
+            <div>
+              <dt>点位</dt>
+              <dd>
+                {selected.site} · {selected.componentIds.join("/")}
+              </dd>
+            </div>
+            <div>
+              <dt>区县</dt>
+              <dd>{selected.district}</dd>
+            </div>
+            <div>
+              <dt>发现时间</dt>
+              <dd>{selected.discoveredAt}</dd>
+            </div>
+          </dl>
+        ) : null}
+        <div className="ov-coc__foot">
+          <MoreButton open={detailOpen} moreText="详情" onClick={() => setDetailOpen((v) => !v)} />
+          <button
+            type="button"
+            className="btn btn--primary ov-coc__go"
+            onClick={() => navigate(`/orders?order=${selected.id}`)}>
+            查看工单
+            <Icon name="arrow" />
+          </button>
+        </div>
+      </article>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 右栏 · 面板二：待办与最近事件 + 历史风险统计
+ * ------------------------------------------------------------------ */
+
+function TodoEventPanel() {
+  const [todoOpen, setTodoOpen] = useState(false);
+  const [eventOpen, setEventOpen] = useState(false);
+
+  const todos = todoOpen ? TODO_ITEMS : TODO_ITEMS.slice(0, TODO_PREVIEW_ITEMS);
+  const events = eventOpen ? RECENT_EVENTS : RECENT_EVENTS.slice(0, EVENT_PREVIEW_ITEMS);
+
+  return (
+    <Panel title="待办与最近事件" className="ov__panel ov__panel--todo">
+      <h4 className="ov-sec">
+        待办事项
+        <MoreButton
+          open={todoOpen}
+          moreText={`共 ${TODO_ITEMS.length} 项 · 更多`}
+          onClick={() => setTodoOpen((v) => !v)}
+        />
+      </h4>
+      <ul className="ov-todo">
+        {todos.map((item) => (
+          <li key={item.id} className={`is-${item.level}`}>
+            <span className="ov-todo__text">
+              {item.id} · {item.text}
+              <i>
+                {item.owner} · {item.due.slice(5)}
+              </i>
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <h4 className="ov-sec">
+        最近事件
+        <MoreButton
+          open={eventOpen}
+          moreText={`共 ${RECENT_EVENTS.length} 条 · 更多`}
+          onClick={() => setEventOpen((v) => !v)}
+        />
+      </h4>
+      <ol className="ov-events">
+        {events.map((event) => (
+          <li key={event.at + event.text}>
+            <time>{event.at}</time>
+            {event.text}
+          </li>
+        ))}
+      </ol>
+
+      {/* 第三层：历史风险口径（数字由种子算出，不写死） */}
+      <div className="ov-stats">
+        <span>
+          历史风险<b>{HISTORY_STATS.total}</b>
+        </span>
+        <span>
+          已关闭<b className="is-ok">{HISTORY_STATS.closed}</b>
+        </span>
+        <span>
+          未关闭<b className="is-danger">{HISTORY_STATS.open}</b>
+        </span>
+      </div>
+    </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 页面
+ * ------------------------------------------------------------------ */
+
+export default function Overview() {
+  const mode = useDashboardStore((state) => state.mode);
+  const transitioning = useDashboardStore((state) => state.transitioning);
+  const { currentOrder, stageLabel, domainPending, toast } = useMumai();
+
+  const enterShanghai = useCallback(() => requestMapMode("shanghai"), []);
+  const returnChina = useCallback(() => requestMapMode("china"), []);
+
+  return (
+    <div className="ov">
+      {/* 地图铺满整个内容区，面板浮在它上面 */}
+      <div className="ov__map">
+        <Map mode={mode} />
+      </div>
+      <div className="ov__vignette" />
+
+      {/* 左栏：场地概览（含三通道）+ 四柱构件状态 */}
+      <div className="ov__side ov__side--left">
+        <SitePanel
+          stageLabel={stageLabel}
+          orderId={currentOrder.id}
+          sourceMode={currentOrder.sourceMode}
+          domainPending={domainPending}
+        />
+        <ComponentPanel />
+      </div>
+
+      {/* 右栏：风险与工单 + 待办与最近事件 */}
+      <div className="ov__side ov__side--right">
+        <Panel title="风险与工单" className="ov__panel">
+          <RiskOrderPanel />
+        </Panel>
+        <TodoEventPanel />
+      </div>
+
+      {/* 面包屑与图例 */}
+      <div className="ov__crumb">
+        <button type="button" className={mode === "china" ? "is-current" : ""} onClick={returnChina}>
+          全国总览
+        </button>
+        <button type="button" className={mode === "shanghai" ? "is-current" : ""} onClick={enterShanghai}>
+          上海市
+        </button>
+      </div>
+
+      <div className="ov__actions">
+        <div className="legend">
+          {(
+            [
+              ["collected", "已采集"],
+              ["inspected", "已巡检"],
+              ["risk", "风险点"],
+              ["workorder", "工单点"],
+            ] as const
+          ).map(([key, label]) => (
+            <span key={key}>
+              <i style={{ background: STATUS_COLOR[key] }} />
+              {label}
+            </span>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="btn btn--primary"
+          disabled={transitioning}
+          onClick={() => {
+            if (mode === "china") {
+              enterShanghai();
+              toast("镜头推进中，进入上海市区级地图", "info");
+            } else {
+              returnChina();
+              toast("返回全国总览", "info");
+            }
+          }}>
+          {mode === "china" ? "进入上海" : "返回全国"}
+          <Icon name="arrow" />
+        </button>
+      </div>
+
+      <div className="ov__hint">
+        <Icon name="pin" /> 拖拽旋转 · 滚轮缩放 · 点击上海轮廓下钻
+      </div>
+
+      <footer className="ov__foot">
+        <span className="ov__motto">{OVERVIEW_SLOGAN}</span>
+        <span>
+          数据源 {currentOrder.sourceMode === "replay" ? "演示回放" : currentOrder.sourceMode} · 地图版本 {MISSION_MAP_VERSION}
+        </span>
+        <span>
+          实时位置 {DEMO_GEO_POSITION.lat.toFixed(4)}°N {DEMO_GEO_POSITION.lon.toFixed(4)}°E
+        </span>
+      </footer>
+    </div>
+  );
+}

@@ -1,0 +1,457 @@
+/* ==================================================================
+   木脉智检 · 外壳（顶栏 / 内容区 / 小木 / 状态条）
+   ------------------------------------------------------------------
+   规范 §6.1 / §7.1 / §11：
+     - 普通 Panel、普通按钮不发光；只有地图、当前焦点、关键风险可以亮
+     - 顶栏导航：默认 #73869D，Hover #BBD7F0，Active #EAF4FF，
+       只保留一条 2px --primary 指示线；不要每个导航都画框
+     - 颜色一律 var(--token)，字号一律 var(--fs-*)，间距走 4/8/12/16/20/24/32
+   ================================================================== */
+
+.appshell {
+  --appshell-ticker: 26px;
+  position: relative;
+  isolation: isolate;
+  width: 100vw;
+  height: 100vh;
+  min-width: 1180px;
+  min-height: 660px;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text-secondary);
+  background:
+    radial-gradient(ellipse 66% 58% at 50% 44%, var(--fill-weak) 0%, transparent 68%),
+    linear-gradient(180deg, var(--bg-page) 0%, var(--bg-workspace) 55%, var(--bg-page) 100%);
+}
+
+/* 背景网格：只做底纹暗示，透明度压到几乎看不见（§11 减少无意义装饰） */
+.appshell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--fill-weak) 1px, transparent 1px),
+    linear-gradient(90deg, var(--fill-weak) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 74% 66% at 50% 48%, #000 10%, transparent 78%);
+}
+
+/* ---------------- 顶栏 ---------------- */
+
+.appshell__header {
+  position: relative;
+  z-index: 24;
+  height: var(--appshell-header, 85px);
+  flex: 0 0 auto;
+}
+
+.appshell__header--native > * {
+  height: 100%;
+}
+
+/* 设备四路通道：只留文字与状态点，不再一条一个框 */
+.appshell__channels {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.appshell__channels button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.appshell__channels-label {
+  font-size: var(--fs-aux);
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.appshell__channels em {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  font-style: normal;
+  font-size: var(--fs-aux);
+  color: var(--text-tertiary);
+  text-align: left;
+}
+
+.appshell__source {
+  font-size: var(--fs-aux);
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* 投屏按钮 = 规范 §4.5 Secondary */
+.appshell__present {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-hover);
+  background: var(--fill-soft);
+  color: var(--text-primary);
+  font-size: var(--fs-aux);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+
+.appshell__present svg {
+  width: 14px;
+}
+
+.appshell__present:hover {
+  border-color: var(--primary);
+  background: var(--fill-soft);
+}
+
+/* ---------------- 内容区：铺满顶栏以下、状态条以上 ---------------- */
+
+.appshell__stage {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--appshell-header, 85px);
+  bottom: var(--appshell-ticker);
+  overflow: hidden;
+  border: 0;
+}
+
+/* presentation 角色：整屏，无外壳 */
+.appshell--present .appshell__stage {
+  position: static;
+  height: 100vh;
+}
+
+/* ---------------- 加载 / 断线 ---------------- */
+
+.appshell__boot {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-3);
+  text-align: center;
+  background: var(--overlay-scrim);
+}
+
+.appshell__boot strong {
+  font-size: var(--fs-panel);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-primary);
+}
+
+.appshell__boot em {
+  font-style: normal;
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+  color: var(--text-tertiary);
+  max-width: 460px;
+  line-height: var(--lh-aux);
+}
+
+.appshell__boot--warn strong {
+  color: var(--warning);
+}
+
+.appshell__boot-mark {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  height: 30px;
+}
+
+.appshell__boot-mark i {
+  width: 4px;
+  background: var(--primary);
+  animation: appshellPulse 1.1s ease-in-out infinite;
+}
+
+.appshell__boot-mark i:nth-child(1) { height: 16px; animation-delay: 0s; }
+.appshell__boot-mark i:nth-child(2) { height: 26px; animation-delay: 0.14s; }
+.appshell__boot-mark i:nth-child(3) { height: 20px; animation-delay: 0.28s; }
+
+.appshell__boot-bar {
+  width: 240px;
+  height: 2px;
+  background: var(--fill-soft);
+  overflow: hidden;
+}
+
+.appshell__boot-bar i {
+  display: block;
+  width: 40%;
+  height: 100%;
+  background: var(--primary);
+  animation: appshellSweep 1.2s linear infinite;
+}
+
+@keyframes appshellPulse {
+  0%, 100% { transform: scaleY(0.6); opacity: 0.6; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+
+@keyframes appshellSweep {
+  from { transform: translateX(-60%); }
+  to { transform: translateX(260%); }
+}
+
+/* ---------------- 小木浮标（唯一允许的圆形入口，不发光） ---------------- */
+
+.appshell__fab {
+  position: absolute;
+  z-index: 26;
+  right: var(--space-4);
+  bottom: 52px;
+  width: 52px;
+  height: 52px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--panel-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background var(--motion-fast);
+}
+
+.appshell__fab svg {
+  width: 22px;
+}
+
+.appshell__fab span {
+  position: absolute;
+  bottom: -16px;
+  font-size: var(--fs-aux);
+  color: var(--text-tertiary);
+}
+
+.appshell__fab:hover,
+.appshell__fab.is-open {
+  background: var(--fill-soft);
+}
+
+/* ---------------- 左下账号提示：靠留白，不画框 ---------------- */
+
+.appshell__login {
+  position: absolute;
+  z-index: 18;
+  left: var(--space-4);
+  bottom: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--fs-aux);
+  color: var(--text-secondary);
+}
+
+.appshell__login span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.appshell__login span i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.appshell__login em {
+  font-style: normal;
+  color: var(--text-tertiary);
+}
+
+/* ---------------- 提示条 ---------------- */
+
+.appshell__toasts {
+  position: absolute;
+  z-index: 30;
+  right: var(--space-4);
+  bottom: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  max-width: 360px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-left: 2px solid var(--info);
+  background: var(--overlay-solid);
+  color: var(--text-secondary);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  text-align: left;
+  cursor: pointer;
+  animation: toastIn var(--motion-normal) ease;
+}
+
+.toast--ok { border-left-color: var(--success); }
+.toast--warn { border-left-color: var(--warning); }
+.toast--danger { border-left-color: var(--danger); }
+.toast--info { border-left-color: var(--info); }
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------------- 底部滚动条 ---------------- */
+
+.appshell__ticker {
+  position: absolute;
+  z-index: 22;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding: 0 var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-page);
+  font-size: var(--fs-aux);
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.appshell__ticker b {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------------
+   顶栏收敛（规范 §2.2 / §7.1）
+   ------------------------------------------------------------------
+   DemoHeader 由 styled-components 渲染，运行时注入的 <style> 排在打包 CSS
+   之后，同权重会盖过本文件，所以这里用 !important 强制把顶栏的字号、颜色和
+   旧主色（#3061DB 的按钮底色）收敛到设计系统。顶栏改成引用 token 后，
+   这一整块可以删掉。
+   - 字号只允许 28（Logo）/ 13（正文）/ 11（辅助）
+   - 导航默认 --text-tertiary ≈ 规范 §7.1 的 #73869D，Hover --text-secondary，
+     Active --text-primary；只留一条 2px --primary 指示线，不画框
+   - 纯装饰的 SVG 框线（1920x85 那一层）整层隐藏，对应 §7.1「不要每个导航都画框」
+   ------------------------------------------------------------------ */
+
+.appshell__header {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* 装饰 SVG 层：TitleWrapper 的第一个 div，只画框线，没有交互 */
+.appshell__header--native > header > div:first-child > svg {
+  display: none;
+}
+
+.appshell__header--native > header > div > b {
+  font-size: var(--fs-logo) !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em !important;
+  color: var(--text-primary) !important;
+  text-shadow: none !important;
+}
+
+.appshell__header--native > header > div > span {
+  font-size: var(--fs-aux) !important;
+  letter-spacing: 0.16em !important;
+  color: var(--text-tertiary) !important;
+}
+
+.appshell__header--native nav button {
+  font-size: var(--fs-body) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.03em !important;
+  color: var(--text-tertiary) !important;
+  text-shadow: none !important;
+}
+
+.appshell__header--native nav button:hover {
+  color: var(--text-secondary) !important;
+  background: none !important;
+}
+
+.appshell__header--native nav button.is-active {
+  color: var(--text-primary) !important;
+}
+
+.appshell__header--native time,
+.appshell__header--native .device {
+  font-size: var(--fs-aux) !important;
+  color: var(--text-tertiary) !important;
+}
+
+.appshell__header--native .device b {
+  color: var(--primary) !important;
+}
+
+.appshell__header--native .device i {
+  background: var(--success) !important;
+  box-shadow: none !important;
+}
+
+/* 顶栏两个按钮：旧主色 #3061DB 的实底 + 亮边框 → 规范 §4.5 Secondary */
+.appshell__header--native .appshell__present,
+.appshell__header--native .account-select {
+  border: 1px solid var(--border-hover) !important;
+  background: var(--fill-soft) !important;
+  color: var(--text-primary) !important;
+}
+
+.appshell__header--native .appshell__present:hover,
+.appshell__header--native .account-select:hover {
+  border-color: var(--primary) !important;
+  background: var(--fill-soft) !important;
+}
+
+.appshell__header--native .account-select select {
+  font-size: var(--fs-aux) !important;
+}
+
+/* ---------------- 三档分辨率（§8） ---------------- */
+
+@media (max-width: 1720px) {
+  .appshell__present { height: 30px; padding: 0 10px; }
+}
+
+@media (max-width: 1440px) {
+  .appshell__channels em { display: none; }
+  .appshell__source { display: none; }
+  .appshell__login em { display: none; }
+}
+
+@media (max-height: 800px) {
+  .appshell__fab { width: 44px; height: 44px; bottom: 42px; }
+  .appshell__fab svg { width: 18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .appshell__boot-mark i,
+  .appshell__boot-bar i,
+  .toast {
+    animation: none;
+  }
+}

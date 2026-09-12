@@ -1,0 +1,475 @@
+/**
+ * 木脉智检 · 演示种子数据类型（PRD 16 素材种子）
+ *
+ * 所有页面共用这里的类型与 scenario.ts 的同一份数据，禁止在页面源码里
+ * 单独硬编码日期、风险数、版本号。
+ *
+ * 取值口径：
+ *   - source_mode: live 实采 / replay 回放 / simulation 模拟（PRD 1.2）
+ *   - 未检测一律用 null 表达「未采集」，不要用 0 冒充「无风险」
+ */
+
+/** PRD 1.2：每条记录必须标注来源模式 */
+export type SourceMode = "live" | "replay" | "simulation";
+
+/** 任务总览阶段，对齐 PRD 7.1 全程阶段表 */
+export type StageKey =
+  | "history"
+  | "prepare"
+  | "mapping"
+  | "reconstruction"
+  | "screening"
+  | "scanning"
+  | "exception"
+  | "dataset"
+  | "adaptation"
+  | "deployment"
+  | "rescan"
+  | "fusion"
+  | "delivery";
+
+export type StageDef = {
+  key: StageKey;
+  label: string;
+  /** 剧本定位（第二章 S01–S23） */
+  script: string;
+  /** 剧本时间节点 mm:ss */
+  clock: string;
+  detail: string;
+};
+
+/** 设备四路通道状态（PRD 3.2：地图 / 位姿 / 视频 / 车辆各自更新时间） */
+export type ChannelKey = "map" | "pose" | "video" | "vehicle";
+export type ChannelState = "online" | "stale" | "offline";
+
+export type ChannelStatus = {
+  key: ChannelKey;
+  label: string;
+  state: ChannelState;
+  /** 上一次更新时间，界面直接显示 */
+  updatedAt: string;
+  /** 距今秒数，用于「3 秒前」这类表达 */
+  ageSec: number;
+  /** 数据来源标识，例如「演示车 · replay」 */
+  source: string;
+};
+
+/** 环境记录（PRD 3.1 / 12：温度℃、湿度 0–100、风速非负、仪表、位置、测量时间） */
+export type EnvRecord = {
+  recordId: string;
+  airTempC: number;
+  relativeHumidityPct: number;
+  windSpeedMs: number;
+  instrumentId: string;
+  /** 仪表量程由配置给定 */
+  instrumentRange: { min: number; max: number; unit: string };
+  position: string;
+  measuredAt: string;
+  operator: string;
+  /** 校验状态机：待校验 → 已提交 → 设备已确认 */
+  submitState: "待校验" | "已提交" | "设备已确认";
+  configVersion: string | null;
+  sourceMode: SourceMode;
+};
+
+export type ConfigDiffRow = {
+  field: string;
+  before: string;
+  after: string;
+  note: string;
+};
+
+export type Member = {
+  id: string;
+  name: string;
+  role: string;
+  duty: string;
+  workspace: string;
+};
+
+export type Attachment = {
+  assetId: string;
+  name: string;
+  kind: "报告" | "图像" | "原始数据" | "地图" | "场景" | "数据集" | "模型" | "日志" | "清单";
+  sizeText: string;
+  from: string;
+  sourceMode: SourceMode;
+};
+
+/** Z01–Z04 构件档案（PRD 3.1 / 3.3） */
+export type Component = {
+  id: string;
+  name: string;
+  part: string;
+  zoneId: string;
+  /** 三维场景坐标（scene 坐标，非地图坐标） */
+  scene: { x: number; z: number };
+  /** 雷达响应状态；未检测必须为 null */
+  radarScore: number | null;
+  visibleNote: string;
+  archive: string;
+  defaultBookmark: string;
+};
+
+/** 本轮风险 CUR-Z04-01~03（PRD 3.7 三条样例响应 0.71 / 0.84 / 0.87） */
+export type CurrentRisk = {
+  id: string;
+  componentId: string;
+  zoneId: string;
+  label: string;
+  branch: "雷达" | "视觉" | "融合";
+  score: number;
+  /** PRD 3.7：融合是规则，不是分数相加平均 */
+  priority: "优先复核" | "补充检测" | "待核对";
+  quality: "合格" | "不合格" | "部分合格";
+  evidence: string[];
+  recommendation: string;
+};
+
+/** 历史风险 R01–R06（PRD 5.3 MAY-DEMO-01） */
+export type HistoryRisk = {
+  id: string;
+  title: string;
+  status: "验收关闭" | "待验收" | "待处理";
+  reported: boolean;
+  closed: boolean;
+  next: string;
+  sceneId: string;
+  bookmark: string;
+};
+
+/** 工单状态机（PRD 3.8），design.ts ORDER_STATUS 为展示顺序 */
+export type OrderStatus = "草稿" | "待复核" | "待处理" | "处理中" | "待验收" | "已关闭";
+
+export type Order = {
+  id: string;
+  title: string;
+  site: string;
+  district: string;
+  location: string;
+  scope: string;
+  componentIds: string[];
+  status: OrderStatus;
+  current: boolean;
+  createdAt: string;
+  /** 问题发现时间：可取来源风险的发现时刻，也可取建单时刻，由种子给定 */
+  discoveredAt: string;
+  owner: string;
+  level: "高风险" | "中风险" | "低风险";
+  sourceRiskIds: string[];
+  attachments: Attachment[];
+  acceptanceNote: string;
+  revisitPlanId: string | null;
+  sourceMode: SourceMode;
+};
+
+export type LogEntry = {
+  at: string;
+  actor: string;
+  action: string;
+  object: string;
+  result: string;
+};
+
+export type MapVersion = {
+  id: string;
+  label: string;
+  resolutionM: number;
+  sizeText: string;
+  coveragePct: number;
+  updatedAt: string;
+  state: "采集中" | "待检查" | "已保存";
+  note: string;
+};
+
+/** 占据栅格地图（PRD 3.2） */
+export type GridMap = {
+  width: number;
+  height: number;
+  resolutionM: number;
+  origin: [number, number];
+  /** 行优先，0 可通行 / 1 占据 / 2 未知 */
+  cells: number[];
+  legend: { code: number; label: string; color: string }[];
+};
+
+export type Waypoint = {
+  id: string;
+  label: string;
+  componentId: string | null;
+  cell: [number, number];
+  state: "已到达" | "当前目标" | "待执行";
+};
+
+export type ForbiddenZone = {
+  id: string;
+  label: string;
+  cell: [number, number];
+  w: number;
+  h: number;
+  reason: string;
+};
+
+export type PoseSample = { t: string; cell: [number, number] };
+
+export type MissionStep = { at: string; label: string; actor: string; result: string };
+
+export type Mission = {
+  id: string;
+  robotId: string;
+  mapVersion: string;
+  speedProfile: string;
+  state: "草稿" | "已预览" | "等待机器人确认" | "执行中" | "已暂停" | "已完成" | "已取消";
+  waypoints: Waypoint[];
+  /** 平台计划路径（cell 序列） */
+  plannedPath: [number, number][];
+  /** 机器人实际路径（单独着色） */
+  actualPath: [number, number][];
+  steps: MissionStep[];
+  takeover: { at: string; reason: string; operator: string }[];
+  anomalies: { at: string; text: string }[];
+};
+
+export type SceneAsset = {
+  id: string;
+  title: string;
+  round: "历史" | "本轮";
+  sourceVideo: string;
+  keyframes: number;
+  version: string;
+  published: "已发布" | "待检查" | "草稿";
+  format: string;
+  bbox: string;
+  updatedAt: string;
+  sourceMode: SourceMode;
+};
+
+export type HotspotEvidence = {
+  hotspotId: string;
+  componentId: string;
+  zoneId: string;
+  label: string;
+  image: { name: string; note: string };
+  echo: { peakIndex: number; amplitude: number; unit: string; note: string };
+  screening: { material: string; score: number; note: string };
+  fusion: { ruleVersion: string; priority: string; branches: string[] };
+  history: { at: string; text: string; operator: string }[];
+};
+
+/** 手持采集批次（PRD 9.2 原始数据包契约） */
+export type ScanBatch = {
+  batchId: string;
+  componentId: string;
+  zoneId: string;
+  round: "初扫" | "复扫" | "补扫";
+  configVersion: string;
+  modelVersion: string;
+  rawLevel: "ADC" | "IQ" | "spectrum" | "features" | "result_only" | "opaque";
+  startedAt: string;
+  /** 三路分别呈现接收情况：原始数据 / 表面图像 / 结果文件 */
+  receive: {
+    radar: { received: number; expected: number; state: "完成" | "部分接收" | "未开始"; }
+    image: { received: number; expected: number; state: "完成" | "部分接收" | "未开始"; }
+    result: { received: number; expected: number; state: "完成" | "部分接收" | "未开始"; }
+  };
+  frozen: boolean;
+  freezeReason: string | null;
+  sourceMode: SourceMode;
+};
+
+export type WaveSample = { x: number; y: number };
+
+export type Waveform = {
+  id: string;
+  batchId: string;
+  /** 横轴口径：频谱已是频谱，不再做 FFT */
+  axisLabel: string;
+  unit: string;
+  points: WaveSample[];
+  markers: { x: number; label: string; tone: "red" | "amber" | "cyan" }[];
+};
+
+export type TriageItem = {
+  id: string;
+  key: "device" | "signal" | "zone" | "applicability";
+  title: string;
+  owner: string;
+  records: { at: string; text: string; result: string }[];
+  conclusion: string | null;
+  signature: string | null;
+  state: "未开始" | "已填结论" | "已签名";
+};
+
+export type AnomalyEvent = {
+  id: string;
+  at: string;
+  kind: string;
+  detail: string;
+  frozenBatch: string;
+  outputsFrozen: boolean;
+  trigger: "演示控制事件" | "实机检查结果";
+  evidence: string[];
+};
+
+/** 数据集与样本（PRD 3.5 / 11.1） */
+export type Sample = {
+  physicalSampleId: string;
+  recordId: string;
+  path: string;
+  materialSource: string;
+  knownState: "正常" | "已知缺陷" | "未知待核验";
+  labelBasis: string;
+  quality: "可用" | "不可用" | "待审核";
+  qualityReason: string;
+  groupId: string;
+  distanceMm: number;
+  direction: string;
+  saturationPct: number;
+  duplicateOf: string | null;
+  sourceBatch: string;
+};
+
+export type CleanStep = {
+  key: string;
+  label: string;
+  input: number;
+  kept: number;
+  review: number;
+  reason: string;
+};
+
+export type SplitGroup = {
+  name: "训练集" | "验证集" | "测试集";
+  sampleIds: string[];
+};
+
+export type Dataset = {
+  id: string;
+  label: string;
+  frozen: boolean;
+  frozenAt: string | null;
+  reviewAssign: { owner: string; task: string; state: "已通过" | "待处理" | "已退回" }[];
+  cleanSteps: CleanStep[];
+  splits: SplitGroup[];
+  indexVersion: string;
+  sourceMode: SourceMode;
+};
+
+/** 训练与验证（PRD 3.6 / 11.2） */
+export type Curve = { id: string; label: string; color: string; points: WaveSample[] };
+
+export type Prediction = {
+  sampleId: string;
+  groupId: string;
+  label: 0 | 1;
+  score: number;
+  materialGroup: string;
+  material: string;
+};
+
+export type Experiment = {
+  id: string;
+  title: string;
+  baselineVersion: string;
+  candidateVersion: string;
+  datasetVersion: string;
+  learningRate: number;
+  stopCondition: string;
+  updateScope: string;
+  inputSpec: string;
+  threshold: number;
+  jobSteps: { key: string; label: string; state: "等待" | "进行中" | "已完成"; at: string | null }[];
+  curveOld: Curve;
+  curveNew: Curve;
+  predictionsOld: Prediction[];
+  predictionsNew: Prediction[];
+  acceptance: { key: string; label: string; detail: string; pass: boolean }[];
+  sourceMode: SourceMode;
+};
+
+/** 更新交付（PRD 3.6 / 11.3） */
+export type DeliveryStep = {
+  key: string;
+  label: string;
+  owner: string;
+  state: "等待" | "进行中" | "已完成" | "失败";
+  at: string | null;
+  note: string;
+};
+
+export type UpdatePackage = {
+  id: string;
+  artifactKind: "demo_nonflashable" | "model_only" | "firmware_integrated";
+  modelVersion: string;
+  preprocess: string;
+  inputSpec: string;
+  outputSpec: string;
+  targetEnv: string;
+  sha256: string;
+  sizeText: string;
+  fallbackVersion: string;
+  quantization: { key: string; label: string; detail: string }[];
+  compatibility: { key: string; label: string; pass: boolean; detail: string }[];
+  steps: DeliveryStep[];
+  deviceVersion: { liveReported: string; demoReported: string };
+  sourceMode: SourceMode;
+};
+
+export type RevisitPlan = {
+  id: string;
+  mapVersion: string;
+  checkpoints: { componentId: string; bookmark: string; note: string }[];
+  date: string;
+  dispatched: boolean;
+  owner: string;
+};
+
+/** 归档清单（PRD 3.8：运行真实 SHA-256 校验演示） */
+export type ArchiveItem = {
+  group: "工单" | "环境" | "原始数据" | "图像" | "地图" | "场景" | "数据集" | "模型记录" | "更新日志" | "报告";
+  assetId: string;
+  name: string;
+  sizeText: string;
+  /** 清单登记的摘要 */
+  declaredSha256: string;
+  /** 演示用的「实际重新计算」摘要，故意留两处不一致 */
+  actualSha256: string;
+  present: boolean;
+  sourceMode: SourceMode;
+};
+
+/** RAG 知识库（PRD 5） */
+export type KnowledgeDoc = {
+  docId: string;
+  title: string;
+  category: "巡检报告" | "构件档案" | "维修反馈" | "方法文档" | "场景索引" | "天气档案";
+  project: string;
+  date: string;
+  version: string;
+  digest: string;
+  source: string;
+  chunks: { chunkId: string; section: string; text: string }[];
+};
+
+/** 演示控制台脚本阶段（第二章时间节点） */
+export type ClockPhase = {
+  key: string;
+  start: string;
+  end: string;
+  title: string;
+  slides: string;
+  speaker: string;
+  stageKey: StageKey;
+  keyLines: string[];
+  eventKey?: string;
+};
+
+/** 演示控制台可选事件 */
+export type DemoEvent = {
+  key: string;
+  label: string;
+  detail: string;
+  /** 触发后置位的异常/状态 */
+  effect: string;
+  tone: "red" | "amber" | "cyan";
+};

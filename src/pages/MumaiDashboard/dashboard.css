@@ -1,0 +1,484 @@
+/* ==================================================================
+   木脉智检 · 大屏视觉层（最后加载，视觉以此为准）
+   ------------------------------------------------------------------
+   唯一依据：docs/design/视觉设计规范-v1.0.md
+     颜色 / 字号 / 间距 / 动效 —— 全部写 var(--token)，不落任何色值
+     §4.1 Panel：rgba(9,19,33,.86) + 1px rgba(78,168,255,.12)，普通 Panel 不发光
+     §4.2 标题：// 标题（// 用 --glow-cyan，标题 #DDEEFF，16px/600，标题栏 40px）
+     §5.2 地图：描边 / 扫描线才用 --glow-cyan
+     §10  砍掉亮边框与装饰线：能靠留白和排版区分的，不再加线
+   本文件只负责「视觉」，不碰业务结构与数据。
+   ================================================================== */
+
+/* ------------------------------------------------------------------
+   0. 面板几何（全平台唯一一套斜切：右上 + 左下 8px）
+   ------------------------------------------------------------------ */
+
+.tech-panel,
+.tech-panel__inner {
+  --panel-cut: 8px;
+  --panel-clip: polygon(
+    0 0,
+    calc(100% - var(--panel-cut)) 0,
+    100% var(--panel-cut),
+    100% 100%,
+    var(--panel-cut) 100%,
+    0 calc(100% - var(--panel-cut))
+  );
+}
+
+.tech-panel {
+  position: relative;
+  min-height: 0;
+  border: 1px solid var(--border-subtle);
+  background: none;
+  clip-path: var(--panel-clip);
+  box-shadow: none;
+}
+
+.tech-panel__inner {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-surface);
+  clip-path: var(--panel-clip);
+}
+
+/* 标题栏：40px，只有一条低对比分隔线；// 交给 h2::before */
+.tech-panel__head {
+  position: relative;
+  flex: 0 0 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0 var(--space-4);
+  padding: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: none;
+}
+
+.tech-panel__head h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--fs-panel);
+  font-weight: 600;
+  line-height: var(--lh-panel);
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+  text-shadow: none;
+  white-space: nowrap;
+}
+
+.tech-panel__head h2::before {
+  content: "//";
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--glow-cyan);
+}
+
+.tech-panel__extra {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+  letter-spacing: 0;
+}
+
+.tech-panel__body {
+  flex: 1;
+  min-height: 0;
+  height: auto !important;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------
+   1. 指标块（§4.3：靠字号与留白建立层级，不再包亮框）
+   ------------------------------------------------------------------ */
+
+.stat-stack {
+  height: 100%;
+  display: grid;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.stat {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-panel-hover);
+  overflow: hidden;
+}
+
+.stat__icon {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  display: grid;
+  place-items: center;
+  margin-right: var(--space-4);
+  border: 0;
+  background: var(--fill-soft);
+  color: var(--primary);
+  transform: none;
+}
+
+.stat__icon svg {
+  width: 22px;
+  transform: none;
+}
+
+.stat__copy {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: end;
+  column-gap: var(--space-3);
+}
+
+.stat__copy > span {
+  grid-column: 1 / -1;
+  margin-bottom: 2px;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+}
+
+.stat__copy strong {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-num);
+  font-weight: 600;
+  line-height: var(--lh-num);
+  color: var(--primary);
+  text-shadow: none;
+}
+
+.stat__copy strong small {
+  margin-left: 4px;
+  font-family: var(--font-ui);
+  font-size: var(--fs-aux);
+  color: var(--text-tertiary);
+}
+
+.stat__copy em {
+  align-self: center;
+  font-style: normal;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.stat--red .stat__icon,
+.stat--red .stat__copy strong {
+  color: var(--danger);
+}
+
+.stat--amber .stat__icon,
+.stat--amber .stat__copy strong {
+  color: var(--warning);
+}
+
+.risk-counters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.risk-counters .stat {
+  height: 88px;
+  display: block;
+  text-align: center;
+  padding: var(--space-3) var(--space-1);
+}
+
+.risk-counters .stat__icon {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  margin: 0 auto var(--space-2);
+}
+
+.risk-counters .stat__icon svg {
+  width: 17px;
+}
+
+.risk-counters .stat__copy {
+  display: block;
+}
+
+.risk-counters .stat__copy strong {
+  font-size: var(--fs-num);
+}
+
+/* ------------------------------------------------------------------
+   2. 地图舞台与点位标签（§5.2）
+   ------------------------------------------------------------------ */
+
+.map-stage {
+  position: relative;
+  overflow: hidden;
+  background: radial-gradient(ellipse 68% 58% at 50% 52%, var(--fill-weak), transparent 70%);
+  border: 0;
+}
+
+.map-vignette {
+  position: absolute;
+  inset: auto 0 0;
+  height: 34%;
+  z-index: 3;
+  pointer-events: none;
+  background: linear-gradient(0deg, var(--bg-page) 2%, transparent 100%);
+}
+
+.map-controls {
+  z-index: 9;
+  bottom: var(--space-5);
+  gap: var(--space-4);
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  height: 34px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border-subtle);
+  background: var(--overlay-deep);
+  font-size: var(--fs-aux);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.legend span {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  letter-spacing: 0;
+}
+
+.legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+.map-caption {
+  z-index: 8;
+  border-left: 2px solid var(--primary);
+  background: linear-gradient(90deg, var(--overlay-deep), transparent);
+}
+
+.map-hint {
+  z-index: 8;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+  letter-spacing: 0.04em;
+  opacity: 1;
+}
+
+/* 地图点位标签：左侧 2px 只表达业务状态，其余靠留白 */
+.site-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 3px var(--space-2);
+  transform: translateY(-2px);
+  background: var(--panel-surface);
+  border-left: 2px solid var(--primary);
+  box-shadow: none;
+  white-space: nowrap;
+  font-size: var(--fs-aux);
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.site-label strong {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.site-label small {
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+}
+
+/* 状态语义（§5.2 地图状态色） */
+.site-label--collected {
+  border-left-color: var(--primary);
+}
+.site-label--inspected {
+  border-left-color: var(--success);
+}
+.site-label--risk {
+  border-left-color: var(--danger);
+}
+.site-label--workorder {
+  border-left-color: var(--warning);
+}
+
+.site-label--risk strong {
+  color: var(--danger);
+}
+.site-label--workorder strong {
+  color: var(--warning);
+}
+
+.site-label.is-selected {
+  background: var(--bg-emphasis);
+  color: var(--text-primary);
+}
+
+/* ------------------------------------------------------------------
+   3. 旧自绘图表（TrendChart）—— §5.1 palette
+   ------------------------------------------------------------------ */
+
+.trend-chart,
+.trend-chart svg {
+  width: 100%;
+  height: 100%;
+}
+
+.trend-chart text {
+  fill: var(--chart-axis-text);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+}
+
+.trend-chart text.axis {
+  fill: var(--chart-axis-text);
+}
+
+.district-bars {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  padding: 2px var(--space-2);
+}
+
+.district-bar {
+  display: grid;
+  grid-template-columns: 68px 1fr 20px;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-aux);
+}
+
+.district-bar span {
+  color: var(--text-secondary);
+}
+
+.district-bar i {
+  height: 6px;
+  background: var(--fill-weak);
+}
+
+.district-bar b {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+}
+
+.district-bar em {
+  font-style: normal;
+  font-family: var(--font-data);
+  color: var(--text-primary);
+  text-align: right;
+}
+
+/* ------------------------------------------------------------------
+   4. 响应式（§8：1920 / 1672 / 1280 三档不溢出）
+   ------------------------------------------------------------------ */
+
+@media (max-width: 1720px) {
+  .tech-panel__head {
+    flex-basis: 36px;
+    height: 36px;
+  }
+  .legend {
+    gap: var(--space-4);
+  }
+}
+
+@media (max-width: 1440px) {
+  .tech-panel__body {
+    padding: var(--space-2) var(--space-3) var(--space-3);
+  }
+  .site-label {
+    font-size: var(--fs-aux);
+  }
+}
+
+@media (max-width: 1320px) {
+  .map-hint {
+    display: none;
+  }
+}
+
+@media (max-height: 800px) {
+  .tech-panel__head {
+    flex-basis: 32px;
+    height: 32px;
+    margin: 0 var(--space-3);
+  }
+  .tech-panel__head h2 {
+    font-size: var(--fs-panel);
+  }
+  .tech-panel__body {
+    padding: var(--space-2) var(--space-3);
+  }
+  .stat-stack {
+    gap: var(--space-1);
+  }
+  .stat {
+    padding: var(--space-2) var(--space-3);
+  }
+  .stat__icon {
+    width: 28px;
+    height: 28px;
+    flex-basis: 28px;
+    margin-right: var(--space-2);
+  }
+  .stat__icon svg {
+    width: 17px;
+  }
+  .stat__copy strong {
+    font-size: var(--fs-num);
+    line-height: var(--lh-num);
+  }
+  .risk-counters .stat {
+    height: 72px;
+  }
+  .legend {
+    height: 30px;
+    gap: var(--space-3);
+  }
+  .map-controls {
+    bottom: var(--space-3);
+    gap: var(--space-3);
+  }
+  .map-hint {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-label {
+    transition: none;
+  }
+}
