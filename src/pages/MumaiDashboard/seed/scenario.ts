@@ -769,6 +769,27 @@ export const SCENE_BOOKMARKS = [
   { id: "BM-hall-overview", componentId: "", label: "殿内总览（复位）", azimuth: 0, polar: 62 },
 ];
 
+/**
+ * 孪生场景内的巡航线（**示意**）。
+ *
+ * ⚠️ 与 `MISSION.plannedPath` 不是同一套坐标：那条是地图栅格坐标（10 cm/格），
+ * 这条是孪生场景坐标（四柱立于 ±2.2，院子 ±3.7）。PRD 3.3 明确
+ * 「未完成坐标标定时以柱号与人工热点对应，不让车辆直接追踪三维点击位置」，
+ * 所以这条线是按航点编号人工对应的示意路线，**不是标定后的真实轨迹** ——
+ * 界面上必须标出来，不能让它看起来像实测路径。
+ *
+ * 观察位取在柱位朝院内偏移 0.8 处：车站在柱子与院子中间看得见柱身，
+ * 不会贴着柱子走。
+ */
+export const TWIN_ROUTE: { id: string; x: number; z: number; label: string }[] = [
+  { id: "P1", x: 0, z: 3.3, label: "殿门起点" },
+  { id: "P2", x: -1.4, z: 2.2, label: "Z01 观察位" },
+  { id: "P3", x: 1.4, z: 2.2, label: "Z02 观察位" },
+  { id: "P4", x: -1.4, z: -2.2, label: "Z03 观察位" },
+  { id: "P5", x: 1.4, z: -2.2, label: "Z04 观察位" },
+  { id: "P6", x: 3.2, z: 0.2, label: "东侧回廊" },
+];
+
 export const HOTSPOTS: HotspotEvidence[] = [
   {
     hotspotId: "hs-Z04-lower", componentId: "Z04", zoneId: "Z04-lower", label: "Z04 下部测区热点",

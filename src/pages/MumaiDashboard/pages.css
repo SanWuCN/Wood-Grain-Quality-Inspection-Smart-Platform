@@ -5239,3 +5239,86 @@
   padding: var(--space-3) var(--space-4);
   border-top: 1px solid var(--border-subtle);
 }
+
+/* ------------------------------------------------------------------
+   数字孪生：热点处理记录 + 频谱批次切换
+   ------------------------------------------------------------------ */
+
+/*
+ * 处理记录：时间 / 人 / 做了什么。
+ * 用左侧细线串起来表达「这是同一根柱子的历次处理」，不画时间轴圆点 ——
+ * 一个热点的记录只有一两条，画轴反而显得空。
+ */
+.hotspot-history {
+  margin: 0;
+  padding: 0 0 0 var(--space-3);
+  list-style: none;
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.hotspot-history li {
+  display: grid;
+  grid-template-columns: 84px 26px minmax(0, 1fr);
+  gap: var(--space-2);
+  font-size: var(--fs-aux);
+  color: var(--ma-text-2);
+}
+
+.hotspot-history time {
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.hotspot-history b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/*
+ * 频谱批次切换：同一构件有初扫与复扫时，两份频谱的形状与标记都不同，
+ * 要看哪一份必须能选。做成小页签而不是下拉 —— 只有两项，下拉要多点一次。
+ */
+.twin-wavepick {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.twin-wavepick button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px var(--space-2);
+  border: 1px solid var(--border-subtle);
+  background: var(--fill-weak);
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+  text-align: left;
+  cursor: pointer;
+}
+
+.twin-wavepick button:hover {
+  border-color: var(--border-hover);
+}
+
+.twin-wavepick button.is-active {
+  border-color: var(--primary);
+  background: var(--fill-soft);
+  color: var(--primary);
+}
+
+.twin-wavepick em {
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-style: normal;
+  font-size: var(--fs-aux);
+}
+
+.twin-wavepick button.is-active em {
+  color: var(--primary);
+}
