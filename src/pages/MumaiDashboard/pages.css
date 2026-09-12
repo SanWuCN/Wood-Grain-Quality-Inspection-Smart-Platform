@@ -2750,11 +2750,251 @@
   }
 }
 
+/*
+   数据集：清洗流程独占整行，下面三块支持面板各占一列。
+
+   `.fw-panel--wide { grid-column: span 12 }` 在 `auto-fit` 里是无效的 ——
+   自动铺的列数不确定，span 12 落不到实处，于是清洗流程被挤成 1/3 宽，
+   里面的步骤表每格只够放两个字，标题一路折行。
+   这里把它换成确定的列数，span 才有意义。
+*/
+.adapt-grid--dataset {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.adapt-grid--dataset > .fw-panel--wide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1400px) {
+  .adapt-grid--dataset {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1000px) {
+  .adapt-grid--dataset {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .adapt-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin-top: 9px;
+}
+
+/* ------------------------------------------------------------------
+   数据集清洗流程（用户要求：真实工程流程，不是静态表）
+   阶段轨道 → 当前阶段的主体 → 下一步动作，一级页面只表达这三件事；
+   算法阈值与逐条核验在弹窗里。
+   ------------------------------------------------------------------ */
+
+.dc-track {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.dc-track li {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding-top: var(--space-3);
+  border-top: 2px solid var(--border-subtle);
+}
+
+.dc-track li.is-done {
+  border-top-color: var(--success);
+}
+
+.dc-track li.is-next {
+  border-top-color: var(--primary);
+}
+
+.dc-track__dot {
+  position: absolute;
+  top: -5px;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-disabled);
+}
+
+.dc-track li.is-done .dc-track__dot {
+  background: var(--success);
+}
+
+.dc-track li.is-next .dc-track__dot {
+  background: var(--primary);
+}
+
+.dc-track li b {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+  font-weight: 500;
+}
+
+.dc-track li.is-next b {
+  color: var(--text-primary);
+}
+
+.dc-track li.is-done b {
+  color: var(--text-secondary);
+}
+
+.dc-stage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.dc-stage--block {
+  display: block;
+}
+
+.dc-kpi,
+.dc-config,
+.dc-checks {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.dc-kpi {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.dc-config {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dc-checks {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.dc-kpi li,
+.dc-config li,
+.dc-checks li {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.dc-kpi li.is-ok {
+  border-left-color: var(--success);
+}
+
+.dc-kpi li.is-warn,
+.dc-checks li.is-bad {
+  border-left-color: var(--warning);
+}
+
+.dc-checks li.is-ok {
+  border-left-color: var(--success);
+}
+
+.dc-kpi small,
+.dc-config span {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.dc-kpi b {
+  color: var(--text-primary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+}
+
+.dc-config b {
+  color: var(--text-primary);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.dc-checks b {
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 500;
+}
+
+.dc-checks span {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+/* 逐条核验：一条一行，采纳 / 排除各一个按钮 */
+.dc-review {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dc-review li {
+  display: grid;
+  grid-template-columns: 96px 110px minmax(0, 1fr) 90px auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: 6px 10px;
+  border-left: 2px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.dc-review li.is-accept {
+  border-left-color: var(--danger);
+}
+
+.dc-review li.is-exclude {
+  border-left-color: var(--success);
+}
+
+.dc-review b {
+  color: var(--text-primary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-table);
+}
+
+.dc-review__sample,
+.dc-review__reason {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.dc-review em {
+  color: var(--text-secondary);
+  font-style: normal;
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-aux);
+}
+
+.dc-review__ops {
+  display: flex;
+  gap: var(--space-1);
+}
+
+@media (max-width: 1200px) {
+  .dc-track {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dc-kpi {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* ------------------------------------------------------------------

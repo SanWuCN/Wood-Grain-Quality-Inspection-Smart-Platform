@@ -29,6 +29,7 @@
 import { useMemo, useState } from "react";
 import { useMumai } from "../context";
 import { Modal } from "../ui";
+import { DatasetCleanFlow } from "./DatasetCleanFlow";
 import { Panel } from "../Panel";
 import {
   Btn,
@@ -61,6 +62,8 @@ export function DatasetTab() {
   const groups = useMemo(() => [...new Set(SAMPLES.map((sample) => sample.physicalSampleId))], []);
   const [group, setGroup] = useState(groups[0] ?? "");
   const [target, setTarget] = useState<SplitGroup["name"]>("训练集");
+  /** 清洗流程产出的新版本号；为空表示本轮还没生成过 */
+  const [datasetVersion, setDatasetVersion] = useState<string | null>(null);
 
   /** PRD 3.5 / 12：经理程序真读训练 / 验证 / 测试的物理样本 ID，输出交集与冲突清单 */
   const grouping = useMemo(() => checkGrouping({ ...DATASET, splits }, SAMPLES), [splits]);
@@ -114,10 +117,22 @@ export function DatasetTab() {
   };
 
   return (
-    <div className="adapt-grid">
+    <div className="adapt-grid adapt-grid--dataset">
+      {/*
+        清洗不再是一张「一进来就全部完成」的静态表（用户原话：「不是拿文字在那里
+        糊弄」）。这里挂真实的分段流程：选数据集 → 配置 → 预检查 → 执行 →
+        人工核验 → 生成版本；每步都要点，结果由规则在当前样本上真算。
+      */}
+      <DatasetCleanFlow onVersioned={(label) => setDatasetVersion(label)} />
+
       <Panel
-        title="智能清洗过程"
-        extra={<StatusChip text={DATASET.frozen ? `已冻结 ${DATASET.frozenAt}` : "未冻结"} tone={DATASET.frozen ? "ok" : "warn"} />}>
+        title="本轮版本"
+        extra={
+          <StatusChip
+            text={datasetVersion ? datasetVersion : DATASET.frozen ? `已冻结 ${DATASET.frozenAt}` : "未冻结"}
+            tone={datasetVersion || DATASET.frozen ? "ok" : "warn"}
+          />
+        }>
         <DataTable
           head={["步骤", "输入", "保留", "待审核", "处理口径"]}
           rows={CLEAN_STEPS.map((step) => [
