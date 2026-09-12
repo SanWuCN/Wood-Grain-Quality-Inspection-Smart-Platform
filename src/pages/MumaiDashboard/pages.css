@@ -3772,12 +3772,77 @@
   font-size: var(--fs-aux);
 }
 
+/*
+   归档一级页面：每组的结论一行，24 项明细在弹窗里。
+   一行 = 组名 + 项数 + 结论，高度统一，一屏能看完全部组。
+*/
+.ar-group-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ar-group-list li {
+  border-left: 2px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.ar-group-list li.is-ok {
+  border-left-color: var(--success);
+}
+
+.ar-group-list li.is-bad {
+  border-left-color: var(--danger);
+}
+
+.ar-group-list button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: 7px 10px;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion-fast);
+}
+
+.ar-group-list button:hover {
+  background: var(--fill-soft);
+}
+
+.ar-group-list b {
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 500;
+}
+
 .ar-side {
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+/*
+  右侧两块的**高度不能被压**。
+
+  .tech-panel__body 是 `overflow: hidden`，而 flex 子项默认 `flex-shrink: 1` ——
+  右列高度不够时，浏览器不是让 .ar-side 滚动，而是把两块面板压扁，
+  多出来的内容被 hidden 吃掉（实测：校验结果隐藏 434px、归档范围隐藏 143px，
+  页面上完全看不出来，只是内容少了一截）。
+  改成不压缩，让 .ar-side 自己去滚。
+*/
+.ar-side > .tech-panel {
+  flex: 0 0 auto;
+  min-height: auto;
 }
 
 .ar-summary {

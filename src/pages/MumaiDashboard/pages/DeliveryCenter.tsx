@@ -446,9 +446,6 @@ export function DeliveryTab() {
         className="dl-panel dl-panel--checks">
         {selected ? (
           <>
-            <p className="note">
-              {selected.name} · {selected.target}
-            </p>
             <ul className="pkg-checks">
               {selected.checks.map((check) => (
                 <li key={check.key} className={check.pass ? "is-ok" : "is-bad"}>
@@ -575,10 +572,6 @@ export function DeliveryTab() {
               </li>
             ))}
         </ol>
-        <p className="note">
-          下载与回验是两步：下载只证明文件取走了，回验要由接收方提交自己算出的摘要。
-          摘要在浏览器内用 SHA-256 现算，选错文件就会走到未通过分支。
-        </p>
       </Panel>
 
       {uploadOpen ? (

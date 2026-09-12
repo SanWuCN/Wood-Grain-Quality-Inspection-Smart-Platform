@@ -13,7 +13,7 @@
 
 import { useMemo, useState } from "react";
 import { Panel } from "../Panel";
-import { Btn, DataTable, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
+import { Btn, DataTable, Modal, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
 import { ARCHIVE_ITEMS, UPDATE_PACKAGE, WORK_ORDER } from "../seed/scenario";
 import { api, isApiError } from "../api/client";
 import { archiveItems as archiveItemsOf, isOnline, useSharedStore } from "../store/shared";
@@ -44,6 +44,9 @@ export default function Archive() {
   const [check, setCheck] = useState<ArchiveCheckResult | null>(null);
   const [running, setRunning] = useState(false);
   const [busyAsset, setBusyAsset] = useState<string | null>(null);
+  /** 明细弹窗：全部 或 按组。一级页面只留每组的结论 */
+  const [listOpen, setListOpen] = useState(false);
+  const [groupOpen, setGroupOpen] = useState<ArchiveItem["group"] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   /**
@@ -159,6 +162,9 @@ export default function Archive() {
 
   const byGroup = (group: ArchiveItem["group"]) => items.filter((item) => item.group === group);
 
+  /** 弹窗里显示的条目：按组筛或全部 */
+  const shown = groupOpen ? items.filter((item) => item.group === groupOpen) : items;
+
   return (
     <div className="page page--archive">
       <Toolbar
@@ -193,75 +199,46 @@ export default function Archive() {
       )}
 
       <div className="ar-layout">
+        {/*
+          一级页面只给**每组的结论**，24 项明细下沉到弹窗。
+
+          用户的要求是「一级页面禁止……长列表；样本详情统一下沉到 Modal / Drawer」。
+          原来这一列把 24 项一条不落铺开，一屏放不下、还得滚着核对；
+          实际要一眼看到的只是「哪一组有问题」。
+        */}
         <Panel
           title="交付清单"
-          extra={<span className="muted">{items.length} 项</span>}
+          extra={
+            <span className="fw-console__actions">
+              <span className="muted">{items.length} 项 · {GROUPS.filter((g) => byGroup(g).length).length} 组</span>
+              <Btn onClick={() => setListOpen(true)}>查看全部 {items.length} 项</Btn>
+            </span>
+          }
           className="ar-list">
-          <div className="ar-groups">
+          <ul className="ar-group-list">
             {GROUPS.map((group) => {
-              const items = byGroup(group);
-              if (!items.length) return null;
+              const groupItems = byGroup(group);
+              if (!groupItems.length) return null;
+              const rows = groupItems.map((item) => rowByAsset.get(item.assetId));
+              const bad = groupItems.filter((_, index) => rows[index] && rows[index].status !== "通过");
+              const done = rows.every(Boolean);
               return (
-                <section key={group}>
-                  <h4 className="sub">
-                    {group}
-                    <span className="muted">{items.length} 项</span>
-                  </h4>
-                  <ul className="ar-items">
-                    {items.map((item) => {
-                      const checked = rowByAsset.get(item.assetId);
-                      return (
-                        <li
-                          key={item.assetId}
-                          className={
-                            checked
-                              ? checked.status === "通过"
-                                ? "is-ok"
-                                : "is-bad"
-                              : item.present
-                                ? ""
-                                : "is-missing"
-                          }>
-                          <b>{item.name}</b>
-                          <em>{item.sizeText}</em>
-                          <span>{item.assetId}</span>
-                          {checked ? (
-                            <StatusChip
-                              text={checked.status}
-                              tone={checked.status === "通过" ? "ok" : "danger"}
-                            />
-                          ) : item.present ? (
-                            <StatusChip text="待校验" tone="muted" />
-                          ) : (
-                            <StatusChip text="清单中缺失" tone="danger" />
-                          )}
-                          {/*
-                            补传 / 重选副本（评审 F11：「提供补传或重选副本入口」）。
-                            只在确实有问题时出现：缺失的补一份，摘要不符的重选一份。
-                          */}
-                          {checked && checked.status !== "通过" ? (
-                            <label className="ar-repair" title="上传一份真实副本，服务端按它的字节重新登记摘要">
-                              {busyAsset === item.assetId ? "上传中…" : checked.status === "缺失" ? "补传" : "重选副本"}
-                              <input
-                                type="file"
-                                hidden
-                                disabled={busyAsset !== null || !online}
-                                onChange={(event) => {
-                                  const picked = event.target.files?.[0];
-                                  event.target.value = "";
-                                  if (picked) void repair(item.assetId, picked);
-                                }}
-                              />
-                            </label>
-                          ) : null}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </section>
+                <li key={group} className={bad.length ? "is-bad" : done ? "is-ok" : ""}>
+                  <button type="button" onClick={() => setGroupOpen(group)}>
+                    <b>{group}</b>
+                    <span className="muted">{groupItems.length} 项</span>
+                    {bad.length ? (
+                      <StatusChip text={`${bad.length} 项有问题`} tone="danger" />
+                    ) : done ? (
+                      <StatusChip text="全部通过" tone="ok" />
+                    ) : (
+                      <StatusChip text="待校验" tone="muted" />
+                    )}
+                  </button>
+                </li>
               );
             })}
-          </div>
+          </ul>
         </Panel>
 
         <div className="ar-side">
@@ -361,6 +338,77 @@ export default function Archive() {
           </Panel>
         </div>
       </div>
+
+      {/*
+        明细弹窗：24 项一条不落，按组分开，出问题的项就地给补传 / 重选副本。
+        `groupFilter` 为空表示「全部」。
+      */}
+      {listOpen || groupOpen ? (
+        <Modal
+          wide
+          title={groupOpen ? `${groupOpen} · 明细` : "交付清单明细"}
+          subtitle={`${shown.length} 项 · 通过 ${shown.filter((i) => rowByAsset.get(i.assetId)?.status === "通过").length} · 缺失 ${shown.filter((i) => rowByAsset.get(i.assetId)?.status === "缺失").length} · 摘要不一致 ${shown.filter((i) => rowByAsset.get(i.assetId)?.status === "摘要不一致").length}`}
+          onClose={() => {
+            setListOpen(false);
+            setGroupOpen(null);
+          }}
+          footer={
+            <>
+              {check ? <span className="muted">校验于 {check.executedAt}</span> : <span className="muted">尚未校验</span>}
+              <Btn disabled={!check} onClick={downloadReport}>
+                下载校验报告
+              </Btn>
+              <Btn
+                tone="primary"
+                onClick={() => {
+                  setListOpen(false);
+                  setGroupOpen(null);
+                }}>
+                关闭
+              </Btn>
+            </>
+          }>
+          <ul className="ar-items">
+            {shown.map((item) => {
+              const checked = rowByAsset.get(item.assetId);
+              return (
+                <li
+                  key={item.assetId}
+                  className={
+                    checked ? (checked.status === "通过" ? "is-ok" : "is-bad") : item.present ? "" : "is-missing"
+                  }>
+                  <b>{item.name}</b>
+                  <em>{item.sizeText}</em>
+                  <span>{item.assetId}</span>
+                  {checked ? (
+                    <StatusChip text={checked.status} tone={checked.status === "通过" ? "ok" : "danger"} />
+                  ) : item.present ? (
+                    <StatusChip text="待校验" tone="muted" />
+                  ) : (
+                    <StatusChip text="清单中缺失" tone="danger" />
+                  )}
+                  {/* 补传 / 重选副本（评审 F11）：只在确实有问题时出现 */}
+                  {checked && checked.status !== "通过" ? (
+                    <label className="ar-repair" title="上传一份真实副本，服务端按它的字节重新登记摘要">
+                      {busyAsset === item.assetId ? "上传中…" : checked.status === "缺失" ? "补传" : "重选副本"}
+                      <input
+                        type="file"
+                        hidden
+                        disabled={busyAsset !== null || !online}
+                        onChange={(event) => {
+                          const picked = event.target.files?.[0];
+                          event.target.value = "";
+                          if (picked) void repair(item.assetId, picked);
+                        }}
+                      />
+                    </label>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </Modal>
+      ) : null}
     </div>
   );
 }
