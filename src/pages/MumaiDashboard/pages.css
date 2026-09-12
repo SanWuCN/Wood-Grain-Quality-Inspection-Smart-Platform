@@ -2731,9 +2731,17 @@
    配套的 .triage-list / .triage-records / .triage-form 一并删除。
    ------------------------------------------------------------------ */
 
+/*
+   异常排查：**异常事件与设备日志并排**。
+
+   原来日志用 `grid-column: 1 / -1` 独占一整行，于是事件列表右边空出一大片 ——
+   用户直接点名了这个现象。两者的高度不齐没关系，`align-items: start` 下
+   各按内容高度排；事件列表短，日志长，并排之后两列都不留白块。
+   日志一条记录是时间 / 级别 / 来源 / 正文四段，右列给宽容度（1.4fr）保证不折行。
+*/
 .triage {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  grid-template-columns: minmax(360px, 0.9fr) minmax(0, 1.4fr);
   gap: var(--space-3);
   align-items: start;
 }
@@ -2743,10 +2751,24 @@
   min-width: 0;
 }
 
-/* 设备日志要宽度：一条记录里时间 / 级别 / 来源 / 正文四段，
-   挤在一列宽里会退化成每段折行 */
-.tri-panel:last-child {
-  grid-column: 1 / -1;
+/* 来源筛选条：就地控件，跟在日志上方一行，不再套一层 Toolbar */
+.tri-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.tri-filter > .muted {
+  margin-left: auto;
+}
+
+/* 窄档退回单列：两列各自低于 360px 时日志的正文会折成三行 */
+@media (max-width: 1180px) {
+  .triage {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /*
@@ -4710,6 +4732,56 @@
   color: var(--text-tertiary);
   font-size: var(--fs-aux);
   line-height: var(--lh-aux);
+}
+
+/*
+   训练任务卡片（一级页面）：只留实验摘要 + 三个关键值 + 一个主操作。
+   完整参数与说明在「配置并提交」的弹窗里（TrainingConfigModal）。
+*/
+.fw-summary {
+  display: grid;
+  gap: 2px;
+  margin-bottom: var(--space-3);
+}
+
+.fw-summary b {
+  color: var(--text-primary);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.fw-summary span {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.fw-kpi {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.fw-kpi li {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.fw-kpi small {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.fw-kpi b {
+  color: var(--text-primary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-sub);
+  font-weight: 600;
 }
 
 .fw-panel--task {

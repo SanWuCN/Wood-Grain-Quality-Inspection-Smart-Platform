@@ -126,37 +126,137 @@ const fmtMetric = (metric: NodeMetric, value: number) =>
  * 可训练参数占比由模型结构决定，数据集版本由冻结状态决定，
  * 这两项不是操作员能随手填的。
  */
+/**
+ * 训练任务的**一级页面卡片**。
+ *
+ * 原来这一块把实验说明（更新范围 / 输入规格 / 停止条件）、7 项完整参数
+ * （每项还带范围与说明）、提交流程全铺在页面上 —— 用户的原话是
+ * 「那些介绍性的文字完全可以去掉，你看过哪些专业的工程平台会有这些内容」。
+ *
+ * 现在一级页面只留：当前实验是哪一份、基线 / 数据集 / 可训练参数三个关键值、
+ * 以及一个主操作。参数与说明全部下沉到配置弹窗（点「配置并提交」）。
+ */
 function ConfigPanel({
   experiment,
   draft,
-  onChange,
-  dirty,
-  invalid,
   running,
   progress,
-  onSubmit,
-  onReset,
+  dirty,
+  onOpenConfig,
 }: {
   experiment: Experiment;
   draft: Record<string, number>;
-  onChange: (key: string, value: number) => void;
-  dirty: boolean;
-  invalid: string[];
   running: boolean;
   progress: number;
-  onSubmit: () => void;
-  onReset: () => void;
+  dirty: boolean;
+  onOpenConfig: () => void;
 }) {
+  const lr = experiment.config.find((field) => field.key === "lr");
+  const epochs = experiment.config.find((field) => field.key === "epochs");
   return (
     <Panel
       title="训练任务"
-      extra={<SourceTag label="归档实验包" />}
+      extra={
+        running ? (
+          <StatusChip text={`装载中 ${progress}%`} tone="info" dot />
+        ) : dirty ? (
+          <StatusChip text="配置已改动" tone="warn" dot />
+        ) : (
+          <SourceTag label="归档实验包" />
+        )
+      }
       className="fw-panel fw-panel--task">
+      <div className="fw-summary">
+        <b>{experiment.title}</b>
+        <span>
+          基线 {experiment.baselineVersion} · 候选 {experiment.candidateVersion}
+        </span>
+      </div>
+
+      <ul className="fw-kpi">
+        <li>
+          <small>数据集版本</small>
+          <b>{experiment.datasetVersion}</b>
+        </li>
+        <li>
+          <small>学习率</small>
+          <b>{fmtNum(draft.lr ?? lr?.value ?? 0, 4)}</b>
+        </li>
+        <li>
+          <small>最大轮数</small>
+          <b>{draft.epochs ?? epochs?.value ?? 0}</b>
+        </li>
+      </ul>
+
+      <div className="fw-actions">
+        <Btn tone="primary" disabled={running} onClick={onOpenConfig}>
+          配置并提交
+        </Btn>
+      </div>
+
+      <StepFlow steps={experiment.jobSteps} />
+    </Panel>
+  );
+}
+
+/**
+ * 训练配置弹窗（二级）：完整参数、每项的用途与范围、以及提交动作。
+ *
+ * 参数与说明属于「配置这个任务时才需要看」的信息，放在一级页面会把
+ * 当前状态与结果挤下去 —— 统一下沉到弹窗，一级页面只留摘要。
+ */
+function TrainingConfigModal({
+  experiment,
+  draft,
+  invalid,
+  dirty,
+  running,
+  progress,
+  onChange,
+  onSubmit,
+  onReset,
+  onClose,
+}: {
+  experiment: Experiment;
+  draft: Record<string, number>;
+  invalid: string[];
+  dirty: boolean;
+  running: boolean;
+  progress: number;
+  onChange: (key: string, value: number) => void;
+  onSubmit: () => void;
+  onReset: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      title="训练配置"
+      subtitle={`${experiment.title} · 数据集 ${experiment.datasetVersion}（已冻结）`}
+      onClose={onClose}
+      footer={
+        <>
+          {invalid.length > 0 ? (
+            <span className="fw-params__error">{invalid.length} 项超出范围，无法提交</span>
+          ) : dirty ? (
+            <span className="muted">配置已改动，提交后随本次 job 一起记录</span>
+          ) : (
+            <span className="muted">当前为实验包原始配置</span>
+          )}
+          <Btn disabled={!dirty || running} onClick={onReset}>
+            恢复实验包配置
+          </Btn>
+          <Btn
+            tone="primary"
+            disabled={running || invalid.length > 0}
+            onClick={() => {
+              onSubmit();
+              onClose();
+            }}>
+            {running ? `装载中 ${progress}%` : "提交训练任务"}
+          </Btn>
+        </>
+      }>
       <dl className="kv">
-        <div>
-          <dt>实验</dt>
-          <dd>{experiment.title}</dd>
-        </div>
         <div>
           <dt>更新范围</dt>
           <dd>{experiment.updateScope}</dd>
@@ -170,8 +270,6 @@ function ConfigPanel({
           <dd>{experiment.stopCondition}</dd>
         </div>
       </dl>
-
-      <h4 className="sub">训练配置</h4>
       <ul className="fw-params">
         {experiment.config.map((field) => (
           <ParamRow
@@ -184,25 +282,7 @@ function ConfigPanel({
           />
         ))}
       </ul>
-
-      <div className="fw-actions">
-        <Btn tone="primary" disabled={running || invalid.length > 0} onClick={onSubmit}>
-          {running ? `装载中 ${progress}%` : "提交训练任务"}
-        </Btn>
-        <Btn disabled={!dirty || running} onClick={onReset}>
-          恢复实验包配置
-        </Btn>
-        {invalid.length > 0 ? (
-          <span className="fw-params__error">{invalid.length} 项超出范围，无法提交</span>
-        ) : dirty ? (
-          <span className="muted">配置已改动，提交后随本次 job 一起记录</span>
-        ) : (
-          <span className="muted">当前为实验包原始配置</span>
-        )}
-      </div>
-
-      <StepFlow steps={experiment.jobSteps} />
-    </Panel>
+    </Modal>
   );
 }
 
@@ -1114,6 +1194,8 @@ export function TrainingTab() {
   const [view, setView] = useState<"curve" | "compare">("curve");
   /** 日志是否展开：运行中自动展开，跑完收回去 */
   const [logOpen, setLogOpen] = useState(false);
+  /** 训练配置弹窗：参数与说明下沉到二级，一级页面只留摘要 */
+  const [configOpen, setConfigOpen] = useState(false);
 
   /** 配置草稿：只存改动过的项，没改的跟着实验包走 */
   const [draft, setDraft] = useState<Record<string, number>>({});
@@ -1391,13 +1473,10 @@ export function TrainingTab() {
       <ConfigPanel
         experiment={experiment}
         draft={draft}
-        onChange={(key, value) => setDraft((prev) => ({ ...prev, [key]: value }))}
-        dirty={dirty}
-        invalid={invalid}
         running={running}
         progress={progress}
-        onSubmit={submit}
-        onReset={() => setDraft({})}
+        dirty={dirty}
+        onOpenConfig={() => setConfigOpen(true)}
       />
 
       <ConsolePanel
@@ -1438,6 +1517,21 @@ export function TrainingTab() {
         />
         切换到失败案例
       </label>
+
+      {configOpen ? (
+        <TrainingConfigModal
+          experiment={experiment}
+          draft={draft}
+          invalid={invalid}
+          dirty={dirty}
+          running={running}
+          progress={progress}
+          onChange={(key, value) => setDraft((prev) => ({ ...prev, [key]: value }))}
+          onSubmit={submit}
+          onReset={() => setDraft({})}
+          onClose={() => setConfigOpen(false)}
+        />
+      ) : null}
 
       {importOpen ? (
         <ImportModal

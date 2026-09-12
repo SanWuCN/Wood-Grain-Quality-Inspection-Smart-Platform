@@ -23,7 +23,7 @@
 
 import { useMemo, useState } from "react";
 import { Panel } from "../Panel";
-import { Btn, Modal, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
+import { Btn, Modal, StateBlock, StatusChip } from "../ui";
 import { useMumai } from "../context";
 import { ANOMALY_EVENTS, DEVICE_LOGS } from "../seed/scenario";
 import type { AnomalyEvent, DeviceLogSource } from "../seed/types";
@@ -237,20 +237,18 @@ export function TriageTab() {
         title="设备日志"
         extra={
           <span className="fw-console__actions">
-            <SourceTag label="设备输出 · 模拟采集" />
             {counts.error > 0 ? <StatusChip text={`${counts.error} 错误`} tone="danger" dot /> : null}
             {counts.warn > 0 ? <StatusChip text={`${counts.warn} 告警`} tone="warn" dot /> : null}
           </span>
         }
         className="tri-panel">
-        <Toolbar
-          note={
-            <span className="muted">
-              {logs.length}/{DEVICE_LOGS.length} 条
-            </span>
-          }>
+        {/*
+          来源筛选与「仅告警」原来放在面板体里占掉一整行，现在收进标题栏 ——
+          一级页面只留状态与操作，筛选属于就地控件，不该单独占一层。
+        */}
+        <div className="tri-filter">
           <Btn active={source === "全部"} onClick={() => setSource("全部")}>
-            全部来源
+            全部
           </Btn>
           {LOG_SOURCES.map((item) => (
             <Btn key={item} active={source === item} onClick={() => setSource(item)}>
@@ -260,7 +258,10 @@ export function TriageTab() {
           <Btn active={warnOnly} onClick={() => setWarnOnly((value) => !value)}>
             仅告警
           </Btn>
-        </Toolbar>
+          <span className="muted">
+            {logs.length}/{DEVICE_LOGS.length}
+          </span>
+        </div>
 
         {logs.length > 0 ? (
           <ol className="devlog">
@@ -276,10 +277,6 @@ export function TriageTab() {
         ) : (
           <StateBlock kind="empty" title="该来源暂无日志" hint="换一个来源或关闭「仅告警」。" />
         )}
-
-        <p className="note">
-          设备侧与链路输出的原始记录，按来源分层保留，未做删改。
-        </p>
       </Panel>
 
       {open ? <EventModal event={open} onClose={() => setOpenId(null)} /> : null}
