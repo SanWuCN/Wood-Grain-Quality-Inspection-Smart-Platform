@@ -1154,32 +1154,6 @@
   letter-spacing: 0.08em;
 }
 
-/* 摘要格：一个元素承载「一个数据点」——值在上、名字在下。
-   不再拆成「标签 + 数值」两个元素排队抢注意力（§4.3） */
-.ov-meta {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 12px;
-}
-
-.ov-meta strong {
-  display: flex;
-  flex-direction: column;
-  font-family: var(--font-data-mixed);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--fs-body);
-  font-weight: 600;
-  line-height: var(--lh-body);
-  color: var(--text-primary);
-}
-
-.ov-meta small {
-  color: var(--ma-text-3);
-  font-size: var(--fs-aux);
-  font-weight: 400;
-  line-height: var(--lh-aux);
-}
-
 /* 面板内分节标题：只用字号 / 字重 / 留白区分，不画竖条（§4.3 高级感原则） */
 .ov-sec {
   display: flex;
@@ -1218,53 +1192,38 @@
   color: var(--text-primary);
 }
 
-/* 三通道：一行一条 = 通道名 + 连接状态（状态点 + 状态词）。
-   版本号 / 批次号属于第三层辅助数据，展开后才出现 */
+/* 四路通道：一行一条 = 通道名 · 连接状态 · 更新时间。
+   `li` 必须自己排成一行（名称定宽、时间右对齐），否则 span / .chip / em
+   都是行内元素，会连成「地图●正常14:22:31」这种连读不出来的一坨。 */
 .ov-channels {
   margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-2);
 }
 
-.ov-channel {
+.ov-channels li {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 2px 0;
   font-size: var(--fs-aux);
 }
 
-.ov-channel__label {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 58px;
+/* 通道名定宽成列，四个通道的状态词因此竖直对齐，能一眼扫下来 */
+.ov-channels li > span:first-child {
+  flex: 0 0 46px;
   color: var(--ma-text-3);
 }
 
-.ov-channel__label i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-
-.ov-channel b {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--ma-text-2);
-  font-size: var(--fs-aux);
-  font-weight: 500;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-/* 收起态没有版本号时，状态词自己贴到右边 */
-.ov-channel .chip {
+/* 更新时间是右端锚点：等宽数字，避免 14:22:31 / 14:22:24 宽度跳动 */
+.ov-channels li > em {
   margin-left: auto;
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 风险与工单：三个计数排一行，靠留白与字号分层，不各自包一张边框卡（§4.3） */
@@ -1497,14 +1456,6 @@
 
 /* 面板内最后一块：面板高度是固定的两行 grid（与地图留白对齐），
    内容变薄后剩下的留白交给这一块吸收，避免面板底部出现一片空白 */
-.ov__panel--site .state-block {
-  margin-top: auto;
-}
-
-.ov-rec {
-  margin-top: auto;
-}
-
 .ov__panel--todo .ov-stats {
   margin-top: auto;
 }
@@ -1521,130 +1472,6 @@
 
 .ov__panel .state-block em {
   font-size: var(--fs-aux);
-}
-
-/* 四柱构件：一张卡 = 柱号（含部位）+ 采集状态，卡片本身就是选中入口，
-   不再另起一排 Z01–Z04 切换按钮。未检测一律「未采集」（不显示为零风险） */
-.ov-components {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
-}
-
-.ov-components button {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  padding: 5px var(--space-2);
-  border: 0;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-}
-
-.ov-components button:hover {
-  background: var(--fill-weak);
-}
-
-.ov-components button.is-active {
-  background: var(--fill-soft);
-}
-
-.ov-components b {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  color: var(--primary);
-  font-family: var(--font-data);
-  font-size: var(--fs-table);
-  font-weight: 600;
-}
-
-.ov-components b i {
-  color: var(--ma-text-3);
-  font-family: var(--font-ui);
-  font-size: var(--fs-aux);
-  font-style: normal;
-  font-weight: 400;
-}
-
-/* 本轮风险：一行一条「分数 + 它是什么」；点一行看该条的处置建议 */
-.ov-risks {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.ov-risks button {
-  width: 100%;
-  display: flex;
-  padding: 3px var(--space-2);
-  border: 0;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-}
-
-.ov-risks button:hover {
-  background: var(--fill-weak);
-}
-
-.ov-risks li.is-active button {
-  background: var(--fill-soft);
-}
-
-.ov-risks b {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  color: var(--warning);
-  font-family: var(--font-data);
-  font-size: var(--fs-body);
-  font-weight: 600;
-}
-
-.ov-risks b.is-danger {
-  color: var(--danger);
-}
-
-.ov-risks b i {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-family: var(--font-ui);
-  font-size: var(--fs-aux);
-  font-style: normal;
-  font-weight: 400;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-/* 处置建议（§3.3 第三层）：收起态只给一行，展开看全文 */
-.ov-note {
-  display: -webkit-box;
-  margin: 0;
-  overflow: hidden;
-  color: var(--ma-text-2);
-  font-size: var(--fs-aux);
-  line-height: var(--lh-aux);
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
-}
-
-.ov-note.is-open {
-  display: block;
-  overflow: visible;
 }
 
 /* 待办：一行一条「编号 · 事项 + 右对齐的负责人与时限」。
@@ -3783,6 +3610,20 @@
   white-space: nowrap;
 }
 
+/* 完成率进度条：细横条，只表达「已完成 / 总量」这一个比例，
+   不做圆角、不加发光，避免和地图的装饰发光抢注意力（规范 §4.3） */
+.ov-tally__rate {
+  height: 3px;
+  margin: 0 0 var(--space-3);
+  background: var(--fill-soft);
+}
+
+.ov-tally__rate > i {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+}
+
 .ov-tally__bar {
   display: flex;
   flex-wrap: wrap;
@@ -3812,8 +3653,12 @@
   font-weight: 500;
 }
 
+/* 「本轮任务」脚注贴到面板底部（与 .ov__panel--todo .ov-stats 同一个手法）：
+   面板是固定高度的两行 grid，KPI 内容比面板矮，不贴底就会在面板下半部
+   留出一大片空白，看起来像没加载完。padding-top 保证内容高时仍有最小间距。 */
 .ov-tally__foot {
-  margin: var(--space-3) 0 0;
+  margin: auto 0 0;
+  padding-top: var(--space-3);
   color: var(--ma-text-3);
   font-size: var(--fs-aux);
 }
