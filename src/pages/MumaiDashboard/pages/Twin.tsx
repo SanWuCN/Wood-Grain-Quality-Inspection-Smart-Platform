@@ -12,12 +12,15 @@
  *     不把手绘虫道、深度或承载能力当成扫描测量
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { useSearchParams } from "react-router";
 import { DoubleSide, MathUtils, Vector3, type Group } from "three";
 import { useMumai } from "../context";
+import { Icon } from "../icons";
+import { isApiError } from "../api/client";
+import { isOnline, scenes as scenesOf, useSharedStore } from "../store/shared";
 import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
 import { Btn, PermNote, SourceTag, StateBlock, StatusChip, Toolbar, WaveChart } from "../ui";
@@ -439,6 +442,122 @@ export default function Twin() {
   const [bookmarkId, setBookmarkId] = useState(SCENE_BOOKMARKS[0]?.id ?? "");
   const [sideBySide, setSideBySide] = useState(true);
 
+  /* ---- 场景版本走共享服务：检查与发布都要落到服务端（评审 F06） ---- */
+
+  const sharedScenes = useSharedStore(scenesOf);
+  const online = useSharedStore(isOnline);
+  const [sceneBusy, setSceneBusy] = useState<string | null>(null);
+
+  /**
+   * 场景库的行 = 服务端版本 ∪ 本地参照条目。
+   *
+   * 服务端那一份是权威（检查/发布状态只在它上面），`SCENES` 只补标题与素材描述 ——
+   * 两边都不重写对方，避免又出现「第三份数据」。
+   */
+  const sceneRows = useMemo(() => {
+    const rows: { id: string; title: string; round: string; version: string; meta: string; detail: string; state: string }[] = [];
+    for (const entity of sharedScenes) {
+      const local = SCENES.find((item) => item.id === entity.id);
+      rows.push({
+        id: entity.id,
+        title: entity.data.title || local?.title || entity.id,
+        round: entity.data.round,
+        version: `rev ${entity.revision}`,
+        meta: `${entity.data.componentAnchors.length} 锚点 · ${entity.data.bookmarkIds.length} 书签`,
+        detail: entity.data.publishedAt
+          ? `发布 ${entity.data.publishedAt.slice(0, 19).replace("T", " ")}`
+          : `提交 ${entity.data.submittedAt.slice(0, 19).replace("T", " ")}`,
+        state: entity.data.state,
+      });
+    }
+    for (const local of SCENES) {
+      if (sharedScenes.some((entity) => entity.id === local.id)) continue;
+      rows.push({
+        id: local.id,
+        title: local.title,
+        round: local.round,
+        version: local.version,
+        meta: `关键帧 ${local.keyframes} · ${local.format}`,
+        detail: `${local.sourceVideo} · ${local.updatedAt}`,
+        state: online ? "未提交" : local.published,
+      });
+    }
+    return rows;
+  }, [online, sharedScenes]);
+
+  const currentSceneEntity = useMemo(
+    () => sharedScenes.find((entity) => entity.id === sceneId) ?? null,
+    [sceneId, sharedScenes],
+  );
+  /** 当前选中的是哪个服务端版本：没有就说明这个场景还没提交到平台 */
+  const currentScene = currentSceneEntity;
+  const canPublishScene =
+    Boolean(currentScene) && currentScene!.data.state !== "已发布" && currentScene!.data.checkResult?.pass === true;
+
+  /**
+   * 把本地参照条目提交成服务端版本。
+   *
+   * 全栈的「提交成果」动作在采集作业页，这里补一个入口是为了让检查/发布这条链
+   * 在本页能独立走通（否则演示到孪生页时没有可发布的版本，只能干看着）。
+   */
+  const ensureSceneEntity = useCallback(async () => {
+    if (currentSceneEntity) return currentSceneEntity;
+    const local = SCENES.find((item) => item.id === sceneId);
+    const created = await useSharedStore.getState().send({
+      action: "scene.submit",
+      payload: {
+        sceneId,
+        title: local?.title ?? sceneId,
+        round: local?.round ?? "本轮",
+        assetId: local?.sourceVideo ?? null,
+        format: local?.format ?? "sog",
+        componentAnchors: COMPONENTS.map((item) => ({ componentId: item.id, zoneId: item.zoneId, position: null })),
+        bookmarkIds: SCENE_BOOKMARKS.map((item) => item.id),
+      },
+    });
+    pushEvent(`场景 ${sceneId} 已提交到平台，等待检查`, "info");
+    return useSharedStore.getState().entities.scene?.find((item) => item.id === created.result.sceneId) ?? null;
+  }, [currentSceneEntity, pushEvent, sceneId]);
+
+  const runSceneCheck = useCallback(async () => {
+    setSceneBusy("scene.check");
+    try {
+      const entity = await ensureSceneEntity();
+      if (!entity) return;
+      const result = await useSharedStore.getState().send({
+        action: "scene.check",
+        entityId: entity.id,
+        expectedRevision: entity.revision,
+      });
+      const pass = result.result.pass === true;
+      toast(pass ? `场景 ${entity.id} 检查通过` : `场景 ${entity.id} 检查未通过，先补齐缺项`, pass ? "ok" : "warn");
+      pushEvent(`场景 ${entity.id} 检查${pass ? "通过" : "未通过"}`, pass ? "ok" : "warn");
+    } catch (error) {
+      toast(isApiError(error) ? error.message : "场景检查失败", "danger");
+    } finally {
+      setSceneBusy(null);
+    }
+  }, [ensureSceneEntity, pushEvent, toast]);
+
+  const publishScene = useCallback(async () => {
+    const entity = currentSceneEntity;
+    if (!entity) return;
+    setSceneBusy("scene.publish");
+    try {
+      await useSharedStore.getState().send({
+        action: "scene.publish",
+        entityId: entity.id,
+        expectedRevision: entity.revision,
+      });
+      toast(`场景 ${entity.id} 已发布，其他客户端按该 sceneVersion 打开同一成果`, "ok");
+      pushEvent(`发布场景 ${entity.id}（rev ${entity.revision}）`, "ok");
+    } catch (error) {
+      toast(isApiError(error) ? error.message : "场景发布失败", "danger");
+    } finally {
+      setSceneBusy(null);
+    }
+  }, [currentSceneEntity, pushEvent, toast]);
+
   const scene = useMemo(() => SCENES.find((item) => item.id === sceneId) ?? SCENES[0], [sceneId]);
   const component = componentById(selected);
   const hotspot = HOTSPOTS.find((item) => item.componentId === selected) ?? HOTSPOTS[0];
@@ -706,40 +825,84 @@ export default function Twin() {
 
         {/* 侧栏：场景库 + 热点详情 */}
         <div className="twin-side">
-          <Panel title="场景库" extra={<span className="muted">{SCENES.length} 个</span>}>
+          <Panel
+            title="场景库"
+            extra={
+              online ? (
+                <span className="muted">{sceneRows.length} 个 · 共享</span>
+              ) : (
+                <StatusChip text="未连接共享服务" tone="warn" />
+              )
+            }>
             <ul className="scene-list">
-              {SCENES.map((item) => (
-                <li key={item.id} className={item.id === sceneId ? "is-active" : ""}>
-                  <button type="button" onClick={() => setSceneId(item.id)}>
-                    <b>{item.title}</b>
+              {sceneRows.map((row) => (
+                <li key={row.id} className={row.id === sceneId ? "is-active" : ""}>
+                  <button type="button" onClick={() => setSceneId(row.id)}>
+                    <b>{row.title}</b>
                     <span>
-                      {item.round} · {item.version} · 关键帧 {item.keyframes}
+                      {row.round} · {row.version} · {row.meta}
                     </span>
-                    <em>
-                      {item.sourceVideo} · {item.updatedAt}
-                    </em>
+                    <em>{row.detail}</em>
                   </button>
-                  <StatusChip
-                    text={item.published}
-                    tone={item.published === "已发布" ? "ok" : "warn"}
-                  />
+                  <StatusChip text={row.state} tone={row.state === "已发布" ? "ok" : "warn"} />
                 </li>
               ))}
             </ul>
-            <Btn
-              tone="primary"
-              disabled={!can("scene:publish")}
-              title={
-                can("scene:publish")
-                  ? "检查该场景并发布版本，通知各客户端"
-                  : permissionHint("scene:publish")
-              }
-              onClick={() => {
-                toast(`场景 ${scene.id} 已发布，各客户端收到通知`, "ok");
-                pushEvent(`发布场景 ${scene.id}`, "ok");
-              }}>
-              检查并发布
-            </Btn>
+            {/*
+              检查与发布走服务端：原来这里只 toast 一句「已发布」，
+              场景其实还是「待检查」，另一端也拿不到任何东西（评审 F06）。
+              现在两步分开 —— 检查产出逐项结论，发布要检查通过才放行，
+              状态与 sceneVersion 存在服务端，换台电脑打开是同一个成果。
+            */}
+            <div className="scene-actions">
+              <Btn
+                disabled={!online || !can("scene:publish") || sceneBusy !== null}
+                title={
+                  !can("scene:publish")
+                    ? permissionHint("scene:publish")
+                    : !online
+                      ? "连接不上共享服务，场景无法发布"
+                      : !currentSceneEntity
+                        ? "这个场景还没提交到平台，没有可检查的版本"
+                        : "核对锚点、书签与资源是否齐备"
+                }
+                onClick={() => void runSceneCheck()}>
+                {sceneBusy === "scene.check" ? "检查中…" : "运行检查"}
+              </Btn>
+              <Btn
+                tone="primary"
+                disabled={!online || !can("scene:publish") || sceneBusy !== null || !canPublishScene}
+                title={
+                  !can("scene:publish")
+                    ? permissionHint("scene:publish")
+                    : !online
+                      ? "连接不上共享服务，场景无法发布"
+                      : !currentSceneEntity
+                        ? "场景尚未提交，先由全栈提交成果"
+                        : currentSceneEntity.data.state === "已发布"
+                          ? "该版本已发布"
+                          : !currentSceneEntity.data.checkResult?.pass
+                            ? "检查未通过，不能发布"
+                            : "发布这一版场景，其他客户端按 sceneVersion 打开同一成果"
+                }
+                onClick={() => void publishScene()}>
+                {sceneBusy === "scene.publish" ? "发布中…" : "发布场景"}
+              </Btn>
+            </div>
+            {currentSceneEntity ? (
+              <ul className="scene-checks">
+                {(currentSceneEntity.data.checkResult?.checks ?? []).map((check) => (
+                  <li key={check.key} className={check.pass ? "is-ok" : "is-bad"}>
+                    <Icon name={check.pass ? "check" : "alert"} />
+                    {check.label}
+                    <em>{check.detail}</em>
+                  </li>
+                ))}
+                {currentSceneEntity.data.checkResult ? null : (
+                  <li className="is-muted">尚未运行检查</li>
+                )}
+              </ul>
+            ) : null}
           </Panel>
           <PermNote permissions={["scene:publish"]} />
 

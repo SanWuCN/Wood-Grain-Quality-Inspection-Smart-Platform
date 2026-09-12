@@ -754,7 +754,7 @@ export const SCENES: SceneAsset[] = [
     updatedAt: "2026-09-11 21:38", sourceMode: "replay",
   },
   {
-    id: "scene-SH-0901-raw", title: "示例寺四柱 · 本轮原始导入（待检查）", round: "本轮",
+    id: "scene-SH-0901-raw", title: "示例寺四柱 · 本轮原始导入", round: "本轮",
     sourceVideo: "precollected_sh_0901_pano.mp4", keyframes: 214, version: "GS-2026.09-rc1",
     published: "待检查", format: "MipMap 导出目录", bbox: "18.6m × 11.4m × 6.9m",
     updatedAt: "2026-09-11 21:12", sourceMode: "replay",

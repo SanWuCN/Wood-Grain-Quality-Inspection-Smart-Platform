@@ -123,23 +123,68 @@ function seedSession(db, sessionId) {
     savedAt: "2026-09-12T01:20:00.000Z",
   });
 
-  /* ---- 场景：历史已发布 / 本轮待检查 ---- */
-  put(db, sessionId, "scene", "SCN-2026.05", {
-    id: "SCN-2026.05",
-    title: "示例寺大雄宝殿 · 五月批次",
+  /* ---- 场景：历史已发布 / 本轮已发布 / 本轮原始导入待检查 ----
+     场景 id 与前端 seed/scenario.ts 的 SCENES 逐字对齐：服务端持有检查与发布状态，
+     前端那份只补标题与素材描述。两边 id 不一致会让场景库出现两套条目。 */
+  const anchors = ["Z01", "Z02", "Z03", "Z04"].map((componentId) => ({
+    componentId,
+    zoneId: `${componentId}-low`,
+    position: null,
+  }));
+  const bookmarks = ["BM-Z01-base", "BM-Z04-base", "BM-Z04-side"];
+
+  put(db, sessionId, "scene", "scene-May", {
+    id: "scene-May",
+    title: "示例寺四柱 · 五月历史场景",
     round: "历史",
-    assetId: null,
+    assetId: "public/model/sog/gs.sog",
     format: "sog",
-    componentAnchors: ["Z01", "Z02", "Z03", "Z04"].map((componentId) => ({ componentId, zoneId: `${componentId}-low`, position: null })),
-    bookmarkIds: ["BM-Z01-base", "BM-Z04-base", "BM-Z04-side"],
-    checkResult: { checks: [], pass: true, checkedBy: "shi", checkedAt: "2026-09-12T01:30:00.000Z" },
+    componentAnchors: anchors,
+    bookmarkIds: bookmarks,
+    checkResult: { checks: [], pass: true, checkedBy: "shi", checkedAt: "2026-05-18T09:40:00.000Z" },
     state: "已发布",
     submittedBy: "rao",
-    submittedAt: "2026-09-12T01:28:00.000Z",
+    submittedAt: "2026-05-18T09:30:00.000Z",
     publishedBy: "shi",
-    publishedAt: "2026-09-12T01:31:00.000Z",
+    publishedAt: "2026-05-18T09:41:00.000Z",
   });
-  pushEvent(db, sessionId, (seq += 1), "scene.published", "scene", "SCN-2026.05", "shi", { sceneId: "SCN-2026.05" });
+  pushEvent(db, sessionId, (seq += 1), "scene.published", "scene", "scene-May", "shi", { sceneId: "scene-May" });
+
+  put(db, sessionId, "scene", "scene-SH-0901", {
+    id: "scene-SH-0901",
+    title: "示例寺四柱 · 本轮场景",
+    round: "本轮",
+    assetId: "public/model/sog/gs.sog",
+    format: "sog",
+    componentAnchors: anchors,
+    bookmarkIds: bookmarks,
+    checkResult: { checks: [], pass: true, checkedBy: "shi", checkedAt: "2026-09-11T21:40:00.000Z" },
+    state: "已发布",
+    submittedBy: "rao",
+    submittedAt: "2026-09-11T21:30:00.000Z",
+    publishedBy: "shi",
+    publishedAt: "2026-09-11T21:41:00.000Z",
+  });
+  pushEvent(db, sessionId, (seq += 1), "scene.published", "scene", "scene-SH-0901", "shi", { sceneId: "scene-SH-0901" });
+
+  // 等待检查的那一版：史在这一页跑检查 → 发布，演示 F06 的闭环。
+  // 资源配置齐全（资源 + 4 个锚点 + 3 个书签），所以检查能通过；
+  // 缺任何一项都会走到「检查未通过、不能发布」那一支 —— 检查是真的在判，不是走过场。
+  put(db, sessionId, "scene", "scene-SH-0901-raw", {
+    id: "scene-SH-0901-raw",
+    title: "示例寺四柱 · 本轮原始导入",
+    round: "本轮",
+    assetId: "public/model/sog/gs.sog",
+    format: "MipMap 导出目录",
+    componentAnchors: anchors,
+    bookmarkIds: bookmarks,
+    checkResult: null,
+    state: "待检查",
+    submittedBy: "rao",
+    submittedAt: "2026-09-11T21:12:00.000Z",
+    publishedBy: null,
+    publishedAt: null,
+  });
 
   /* ---- 交付产物：一个已发布的演示包（真实文件） ---- */
   const pack = buildDemoPackage(db, {

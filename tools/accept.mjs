@@ -114,6 +114,8 @@ for (const [path, label] of routes) {
     bgColors: pick(/bgColors=(\d+)/),
     borderColors: pick(/borderColors=(\d+)/),
     errors: errors.length,
+    /** 出错的原文：只报「错误 1」的话，看报告的人还得自己重跑一遍才知道是什么 */
+    errorTexts: errors.slice(0, 3).map((line) => line.replace(/\s+/g, " ").slice(0, 220)),
     panels: (text.match(/tech-panel[^\n]*/g) ?? []).map((line) =>
       line.replace("tech-panel ", ""),
     ),
@@ -167,6 +169,16 @@ const lines = [
     ...(r.panels.length ? r.panels.map((p) => `- ${p}`) : ["- （无浮层面板）"]),
     "",
   ]),
+  // 出错原文单独一段：报告里只有「错误 1」没法定位，得让人一眼看到是什么
+  ...(results.some((r) => r.errorTexts.length)
+    ? [
+        "## console error 原文",
+        "",
+        ...results
+          .filter((r) => r.errorTexts.length)
+          .flatMap((r) => [`### \`${r.path}\``, ...r.errorTexts.map((t) => `- ${t}`), ""]),
+      ]
+    : []),
 ];
 
 writeFileSync(resolve(outDir, "report.md"), lines.join("\n"), "utf8");
