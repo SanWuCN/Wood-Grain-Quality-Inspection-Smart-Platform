@@ -430,10 +430,29 @@
   color: var(--danger);
 }
 
+/*
+ * 页签选中态。
+ *
+ * 这三项原来写的是 `--border-hover` / `--fill-soft` / `--text-primary`，
+ * 与默认 `.btn` **逐个相同** —— 于是选中态和未选中态在屏幕上完全一样，
+ * 「硬件详情」「固件及模型」这些页签条上看不出当前停在哪一页，
+ * 只能靠内容去猜。
+ *
+ * 规范把「当前选中」明确列进唯一 UI 主色的适用范围，所以选中态走主色：
+ * 主色文字 + 主色描边。不再加一层填充块 —— §4.3 要求减少 Badge 与高饱和色块，
+ * 能用颜色和字重分层的就不叠边框。
+ */
 .btn.is-active {
-  border-color: var(--border-hover);
+  border-color: var(--primary);
   background: var(--fill-soft);
-  color: var(--text-primary);
+  color: var(--primary);
+}
+
+/* 实心主色按钮本身已是强调态，选中时只提亮，不退回描边样式 */
+.btn--primary.is-active {
+  border-color: var(--primary-strong-hover);
+  background: var(--primary-strong-hover);
+  color: var(--on-primary);
 }
 
 .field {
