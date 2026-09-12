@@ -401,9 +401,7 @@ function NodePanel({
           );
         })}
       </ul>
-      <p className="note">
-        占用来自归档实验包的按轮采样记录，与损失曲线同一实验 ID；回放日志时同步推进。
-      </p>
+      <p className="note">按轮采样记录，与损失曲线同来自归档实验包 {TRAIN_NODE.host}。</p>
     </Panel>
   );
 }
@@ -473,8 +471,8 @@ function LossPanel({ experiment }: { experiment: Experiment }) {
       />
       <p className="note">
         {overfit
-          ? `训练损失继续下降而验证损失自第 ${overfit.minEpoch} 轮起回升 ${overfit.rise.toFixed(3)}，属过拟合，应按验证表现选版本而不是按训练表现。`
-          : "两条曲线同向收敛且未分叉，说明本轮适配没有把主干已学到的通用特征冲掉。"}
+          ? `验证损失自第 ${overfit.minEpoch} 轮起回升 ${overfit.rise.toFixed(3)}，训练损失仍在下降；该候选版本按验证表现评估，不按训练表现。`
+          : "训练损失与验证损失同向收敛，未出现分叉。"}
       </p>
     </Panel>
   );

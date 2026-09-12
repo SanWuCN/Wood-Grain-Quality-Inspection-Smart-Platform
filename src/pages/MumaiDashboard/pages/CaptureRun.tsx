@@ -155,11 +155,8 @@ function ScreenPanel({ live }: { live: boolean }) {
         ) : (
           <>
             <span className="cap-screen__placeholder">
-              <b>未接入实时推流</b>
-              <em>
-                接实机后在 <code>CAPTURE_SCREEN_STREAM.url</code> 填入上位机屏幕推流地址，
-                这里自动切换；当前显示最近一帧静态参考画面。
-              </em>
+              <b>未接收屏幕信号</b>
+              <em>上位机屏幕推流未接入，下方为最近一帧静态画面，不作为实时画面使用。</em>
             </span>
             {stream.image ? (
               <img className="cap-screen__media is-still" src={stream.image} alt="采集端屏幕静态参考画面" />
@@ -168,7 +165,9 @@ function ScreenPanel({ live }: { live: boolean }) {
         )}
         <span className="cap-screen__tag">{stream.source}</span>
       </div>
-      <p className="note">{stream.note}</p>
+      <p className="note">
+        {stream.source} · 画面帧率与时间戳随批次记录一并保存。
+      </p>
     </Panel>
   );
 }
@@ -337,7 +336,7 @@ export function CaptureTab() {
             <StateBlock
               kind="empty"
               title="尚未开始启动检查"
-              hint="点「启动采集」后逐条确认并签署，全部签完才开始采集。"
+              hint="点「启动采集」后逐条核对并签署。"
             />
           </Panel>
         )}

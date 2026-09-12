@@ -3806,21 +3806,21 @@
 }
 
 /* ------------------------------------------------------------------
-   固件及模型 · 版本矩阵（/firmware?tab=config）
-   一行一个版本，列对齐到固定轨道，方便竖着扫「哪个版本能退」。
+   固件及模型 · 版本管理（/firmware?tab=config）
+   两级结构：一级是组件摘要表（八个组件一屏看完），二级是版本历史弹窗。
+   平铺七十多条发行记录会让人为了看到「平台版本」往下滑很久。
    ------------------------------------------------------------------ */
 
-/* 版本矩阵要放下 7 列，横跨整行；占一列时列宽不够会退化成每格折行 */
 .fw-panel--matrix {
   grid-column: 1 / -1;
 }
 
-.fw-matrix__group + .fw-matrix__group {
+.vm-group + .vm-group {
   margin-top: var(--space-5);
 }
 
-.fw-matrix__grouptitle {
-  margin: 0 0 var(--space-3);
+.vm-group__title {
+  margin: 0 0 var(--space-2);
   padding-bottom: 5px;
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-tertiary);
@@ -3829,98 +3829,173 @@
   letter-spacing: 0.14em;
 }
 
-.fw-group + .fw-group {
-  margin-top: var(--space-4);
-}
+/* ---- 一级：组件摘要表 ---- */
 
-/* 组件抬头：名称 / 当前值 / 载体 / 设备回报，一行读完 */
-.fw-group__head {
-  display: flex;
+/* 列轨道：组件 / 当前版本 / 包类型 / 最近发布 / 版本数 / 设备回报 / 操作 */
+.vm-list__head,
+.vm-list button {
+  display: grid;
+  /* 当前版本与设备回报两列给足：版本号是「DEMO-M03-candidate」这种不可断的
+     长串，列宽不足时浏览器会在连字符处折断成两行（实测 128px 下折行）。
+     总量 ≈980px，1920 与 1280 两档都放得下。 */
+  grid-template-columns: minmax(180px, 1.4fr) 168px 150px 96px 92px 176px 44px;
   align-items: center;
-  flex-wrap: wrap;
   gap: var(--space-3);
+  text-align: left;
 }
 
-.fw-group__head .fw-group__title {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: var(--fs-body);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.fw-group__now {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--ma-text-1);
-  font-family: var(--font-data);
-  font-size: var(--fs-body);
-  font-weight: 600;
-}
-
-.fw-group__target {
-  color: var(--ma-text-3);
+.vm-list__head {
+  padding: 0 var(--space-3) 5px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
   font-size: var(--fs-aux);
 }
 
-.fw-group__head .chip {
-  margin-left: auto;
+.vm-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.fw-group__note {
-  margin: 3px 0 var(--space-2);
+/* 整行是打开版本历史的入口：左侧留一条状态线，悬停才提亮，不做成一排按钮框 */
+.vm-list li {
+  border-left: 2px solid transparent;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.vm-list li.is-dirty {
+  border-left-color: var(--ma-warn);
+  background: var(--fill-weak);
+}
+
+.vm-list button {
+  width: 100%;
+  min-height: 40px;
+  padding: 5px var(--space-3);
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.vm-list button:hover {
+  background: var(--fill-weak);
+}
+
+.vm-list__name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.vm-list__name b {
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 600;
+}
+
+.vm-list__name i {
   overflow: hidden;
   color: var(--ma-text-3);
   font-size: var(--fs-aux);
-  line-height: var(--lh-aux);
+  font-style: normal;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-/* 列轨道：版本 / 状态 / 包类型 / 发布日 / 大小 / 变更 / 操作 */
-.fw-matrix__head,
-.fw-matrix__row {
+.vm-list__now {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ma-text-1);
+  font-family: var(--font-data);
+  font-size: var(--fs-table);
+  font-weight: 600;
+  /* 版本号整串显示，不折行 */
+  white-space: nowrap;
+}
+
+/* 设备回报同样整串显示；一致与否由 chip 的 ✓ / ≠ 前缀与颜色表达 */
+.vm-list__report {
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.vm-list__meta,
+.vm-list__date,
+.vm-list__count {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.vm-list__date {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.vm-list__count {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-data);
+}
+
+/* 「可退 N」是这一页最该被看到的信息之一，用主色点出来 */
+.vm-list__count i {
+  color: var(--primary);
+  font-style: normal;
+}
+
+.vm-list__act {
+  justify-self: end;
+  color: var(--primary);
+  font-size: var(--fs-aux);
+}
+
+/* ---- 二级：版本历史弹窗 ---- */
+
+.vm-table__head,
+.vm-table__row {
   display: grid;
-  grid-template-columns: 148px 84px 128px 96px 72px minmax(0, 1fr) 72px;
+  grid-template-columns: 152px 82px 124px 96px 68px minmax(0, 1fr) 64px;
   align-items: center;
   gap: var(--space-2);
 }
 
-.fw-matrix__head {
+.vm-table__head {
   padding: 0 var(--space-2) 5px;
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-tertiary);
   font-size: var(--fs-aux);
 }
 
-.fw-matrix ul {
+.vm-table ul {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/* 用左侧细线表达「这一行属于哪个组件」，不画整块边框（规范 §4.3） */
-.fw-matrix li {
+.vm-table li {
   border-left: 2px solid transparent;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
-.fw-matrix li.is-current {
+.vm-table li.is-current {
   border-left-color: var(--ma-ok);
   background: var(--fill-weak);
 }
 
-.fw-matrix__row {
+.vm-table__row {
   min-height: 30px;
   padding: 3px var(--space-2);
 }
 
-.fw-matrix li:hover {
+.vm-table li:hover {
   background: var(--fill-weak);
 }
 
 /* 版本号是这一行的主键，做成可展开的按钮但不画按钮框 */
-.fw-matrix__version {
+.vm-table__version {
   padding: 0;
   border: 0;
   background: none;
@@ -3933,25 +4008,25 @@
   cursor: pointer;
 }
 
-.fw-matrix__version:hover {
+.vm-table__version:hover {
   color: var(--primary);
 }
 
-.fw-matrix__kind,
-.fw-matrix__date,
-.fw-matrix__size {
+.vm-table__kind,
+.vm-table__date,
+.vm-table__size {
   color: var(--ma-text-3);
   font-size: var(--fs-aux);
 }
 
-.fw-matrix__date,
-.fw-matrix__size {
+.vm-table__date,
+.vm-table__size {
   font-family: var(--font-data);
   font-variant-numeric: tabular-nums;
 }
 
 /* 变更说明截一行；全文在展开区的「变更说明」里 */
-.fw-matrix__change {
+.vm-table__change {
   overflow: hidden;
   color: var(--ma-text-2);
   font-size: var(--fs-aux);
@@ -3959,33 +4034,33 @@
   text-overflow: ellipsis;
 }
 
-.fw-matrix__act {
+.vm-table__act {
   justify-self: end;
   font-size: var(--fs-aux);
 }
 
-.fw-matrix__act .btn {
+.vm-table__act .btn {
   height: 22px;
   padding: 0 var(--space-2);
   font-size: var(--fs-aux);
 }
 
-/* 展开区：目标 / 依赖 / 摘要 / 变更全文 */
-.fw-matrix__detail {
+/* 展开区：依赖 / 加载位置 / 摘要 / 变更全文 */
+.vm-table__detail {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 3px var(--space-4);
   margin: 0 0 var(--space-2);
-  padding: var(--space-2) var(--space-3) var(--space-2) 150px;
+  padding: var(--space-2) var(--space-3) var(--space-2) 154px;
   background: var(--fill-weak);
 }
 
-.fw-matrix__detail dt {
+.vm-table__detail dt {
   color: var(--ma-text-3);
   font-size: var(--fs-aux);
 }
 
-.fw-matrix__detail dd {
+.vm-table__detail dd {
   margin: 0 0 4px;
   color: var(--ma-text-2);
   font-size: var(--fs-aux);

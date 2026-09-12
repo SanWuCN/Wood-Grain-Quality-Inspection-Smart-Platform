@@ -1207,15 +1207,15 @@ function nodeSeries(seed: number, start: number, peak: number, end: number, jitt
  * 它们由模型结构决定，不是操作员能随手填的数字。
  */
 const TRAINING_CONFIG: TrainingConfigField[] = [
-  { key: "baseline", label: "基线版本", value: 0, readonly: true, note: "本轮以 DEMO-M02 为对照基线，不参与更新" },
-  { key: "dataset", label: "数据集版本", value: 0, readonly: true, note: "DS-06 已冻结；训练只引用冻结版本（PRD 11.1）" },
-  { key: "scope", label: "可训练参数", value: 8.4, unit: "%", digits: 1, readonly: true, note: "仅最后 2 个卷积块 + 分类头；主干权重冻结" },
-  { key: "lr", label: "学习率", value: 0.0005, digits: 4, min: 0.00001, max: 0.01, step: 0.0001, note: "小样本微调取值偏小，避免把主干已学到的通用特征冲掉" },
-  { key: "batch", label: "批大小", value: 16, min: 4, max: 128, step: 4, note: "受设备侧单批内存限制，上限 128" },
-  { key: "epochs", label: "最大轮数", value: 40, min: 12, max: 120, step: 4, note: "与停止条件配套；上限 120" },
-  { key: "patience", label: "早停耐心", value: 6, min: 2, max: 20, step: 1, note: "验证损失连续多少轮不下降即停止" },
-  { key: "threshold", label: "判定阈值", value: 0.5, digits: 2, min: 0.05, max: 0.95, step: 0.05, note: "新旧版本必须用同一阈值，否则指标不可比" },
-  { key: "seed", label: "随机种子", value: 20260911, readonly: true, note: "固定种子，保证实验可重复（PRD 11.1）" },
+  { key: "baseline", label: "基线版本", value: 0, readonly: true, note: "本轮对照基线" },
+  { key: "dataset", label: "数据集版本", value: 0, readonly: true, note: "DS-06 已冻结" },
+  { key: "scope", label: "可训练参数", value: 8.4, unit: "%", digits: 1, readonly: true, note: "最后 2 个卷积块 + 分类头；主干冻结" },
+  { key: "lr", label: "学习率", value: 0.0005, digits: 4, min: 0.00001, max: 0.01, step: 0.0001, note: "本轮小样本微调取值" },
+  { key: "batch", label: "批大小", value: 16, min: 4, max: 128, step: 4, note: "上限受设备侧单批内存限制" },
+  { key: "epochs", label: "最大轮数", value: 40, min: 12, max: 120, step: 4, note: "上限 120" },
+  { key: "patience", label: "早停耐心", value: 6, min: 2, max: 20, step: 1, note: "验证损失连续多少轮不下降即停止，当前 6" },
+  { key: "threshold", label: "判定阈值", value: 0.5, digits: 2, min: 0.05, max: 0.95, step: 0.05, note: "新旧版本共用同一阈值" },
+  { key: "seed", label: "随机种子", value: 20260911, readonly: true, note: "固定种子" },
 ];
 
 /**
