@@ -22,6 +22,7 @@ import type {
   Curve,
   Dataset,
   DemoEvent,
+  DeviceReading,
   EnvRecord,
   Experiment,
   ForbiddenZone,
@@ -216,6 +217,28 @@ export const DEVICES = {
   realCart: { id: "cart-real-01", name: "实机 FIREBAT-N100", mode: "live" as SourceMode },
   scanner: { id: "scan-dev-02", name: "手持毫米波 02 号机", mode: "simulation" as SourceMode },
 };
+
+/**
+ * 扫描枪读数（硬件详情 · 硬件监看）
+ *
+ * 前三项带 `preflight`：知识库 SOP 要求「每次采集前核对设备电量、存储余量与
+ * 时间同步状态，三项任一不满足即不开始采集」，所以它们各自带阈值，由页面
+ * 按阈值判态 —— 采集条件的结论不在种子里写死，改了读数结论跟着变。
+ *
+ * 后两项只监看不判定（没有阈值就不出结论）。
+ * 与其余设备数据一样属于 `source_mode = simulation` 的模拟读数，
+ * 界面统一挂「模拟采集」来源标识（PRD 1.2）。
+ */
+export const SCANNER_TELEMETRY: DeviceReading[] = [
+  { key: "battery", label: "电池电量", value: 68, unit: "%", min: 40, scale: 100, preflight: true },
+  { key: "storage", label: "存储余量", value: 12.4, unit: "GB", digits: 1, min: 2, scale: 32, preflight: true },
+  { key: "clock", label: "时钟偏差", value: 0.18, unit: "s", digits: 2, max: 1, preflight: true, note: "对工单时间基准" },
+  { key: "temp", label: "机身温度", value: 41.6, unit: "℃", digits: 1, max: 55 },
+  { key: "rssi", label: "无线信号", value: -58, unit: "dBm", min: -75 },
+];
+
+/** 读数采样时间：与 CHANNELS 的更新时间同属一次会话快照 */
+export const SCANNER_TELEMETRY_AT = "14:22:33";
 
 /* ------------------------------------------------------------------ *
  * 2. 四柱构件档案

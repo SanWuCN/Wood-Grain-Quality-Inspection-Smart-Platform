@@ -3468,25 +3468,201 @@
   min-width: 0;
 }
 
-/* 四个版本读数一行铺开，窄屏自动折行 */
+/* 参考样本是硬件监看里唯一的 5 列表格（批次 / 分组 / 材质来源 / 扫描次数 / 方向），
+   而它那几列全是不可断的标识串。占一列时列宽只有 ~88px，浏览器会在连字符处
+   折断：「G-SAMPLE-01」变成「G-」「SAMPLE-」「01」，「0° / 45° / 90°」变成两行
+   （实测整个表格每一格都折行）。让它横跨两列，表格就有 ~940px，整串显示。 */
+.hw-panel--samples {
+  grid-column: span 2;
+}
+
+/* 视口窄到网格只剩一列时 span 2 会撑出隐式列，退回单列 */
+@media (max-width: 1100px) {
+  .hw-panel--samples {
+    grid-column: auto;
+  }
+}
+
+/* 四个版本读数铺开，窄屏自动折行。
+   minmax 取 148px 而不是 120px：版本号是「FW-2.4.1」这种不可断的长串，
+   列宽不足时会在连字符处折成「FW-」/「2.4.1」两行（实测 120px 下四个读数
+   全部折行，面板看起来像坏了）；148px 保证整串放得下，宽度不够时退成
+   两列而不是把版本号折断。 */
 .hw-metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: var(--space-2) var(--space-3);
   margin-bottom: var(--space-3);
 }
 
-/* 三路接收：状态点 + 计数 + 冻结标记，一行读下来 */
-.hw-receive {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
+/* 版本号是标识串，不是 KPI 数字：按 --fs-num(28px) 渲染会占掉面板上半部，
+   把真正的状态信息挤下去。这里退回正文级，只保留「上标签 / 下值」的层级。 */
+.hw-metrics .metric strong {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  white-space: nowrap;
 }
 
-.hw-receive em {
+/* ---- 设备读数（硬件监看） ---- */
+
+/* 一行一条读数：名称 / 数值 / 量程条 / 判定。
+   列宽固定，五条读数的判定词竖直对齐，能一眼扫出哪一条不合格；
+   逐条堆叠「标签 + 数值 + 状态」，单条看不出异常 */
+.hw-readings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.hw-readings li {
+  display: grid;
+  grid-template-columns: minmax(84px, auto) minmax(58px, auto) 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-aux);
+}
+
+.hw-readings__label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ma-text-3);
+}
+
+/* 「核对」标记：采集前必须核对项。用中性描边而不是彩色块 ——
+   它只说明「这条要核对」，合格与否由右侧 StatusChip 表达，两者不抢语义 */
+.hw-readings__label i {
+  padding: 0 4px;
+  border: 1px solid var(--border-subtle);
+  color: var(--ma-text-3);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 14px;
+}
+
+.hw-readings b {
+  justify-self: end;
+  color: var(--ma-text-1);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hw-readings b em {
+  margin-left: 2px;
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.hw-readings__bar {
+  height: 3px;
+  background: var(--fill-soft);
+}
+
+.hw-readings__bar > i {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+}
+
+/* 没有量程的读数（时钟偏差 / 机身温度 / 无线信号）不画条，但保留占位，
+   否则同一列的数值会左右错位 */
+.hw-readings__bar.is-none {
+  background: none;
+}
+
+/* ---- 采集接收：按批次给整批完成度 + 逐路进度 ---- */
+
+.hw-batches {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.hw-batches > li > header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--fs-aux);
+}
+
+.hw-batches > li > header b {
+  color: var(--ma-text-1);
+  font-family: var(--font-data);
+  font-weight: 600;
+}
+
+.hw-batches > li > header em {
+  margin-left: auto;
   color: var(--ma-text-3);
   font-family: var(--font-data);
   font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.hw-batches > li > header em strong {
+  margin-left: var(--space-2);
+  color: var(--ma-text-1);
+  font-size: var(--fs-body);
+}
+
+.hw-batches__bar {
+  display: block;
+  height: 4px;
+  margin: 5px 0 var(--space-2);
+  background: var(--fill-soft);
+}
+
+.hw-batches__bar > i {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+}
+
+.hw-channels {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hw-channels li {
+  display: grid;
+  grid-template-columns: 60px 1fr auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.hw-channels__bar {
+  height: 2px;
+  background: var(--fill-soft);
+}
+
+.hw-channels__bar > i {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+}
+
+.hw-channels em {
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
 }
 
 .hw-frozen {

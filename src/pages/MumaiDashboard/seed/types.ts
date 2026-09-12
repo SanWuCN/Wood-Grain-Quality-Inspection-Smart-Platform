@@ -54,6 +54,29 @@ export type ChannelStatus = {
   source: string;
 };
 
+/**
+ * 手持设备单条读数（硬件监看用）。
+ *
+ * `min` / `max` 是判定阈值，缺省表示该项只监看不判定；
+ * `scale` 是画进度条的量程（如电量 100、存储 32GB），缺省不画条。
+ * 判定一律由页面按阈值现算，种子只给读数与阈值，不给结论。
+ */
+export type DeviceReading = {
+  key: string;
+  label: string;
+  value: number;
+  unit: string;
+  /** 显示小数位，避免同一列里 68 与 68.0 混排 */
+  digits?: number;
+  /** 采集前必须核对项（SOP：电量 / 存储余量 / 时间同步），任一不满足即不开始采集 */
+  preflight?: boolean;
+  min?: number;
+  max?: number;
+  scale?: number;
+  /** 读数来自哪一份记录，便于追溯 */
+  note?: string;
+};
+
 /** 环境记录（PRD 3.1 / 12：温度℃、湿度 0–100、风速非负、仪表、位置、测量时间） */
 export type EnvRecord = {
   recordId: string;
