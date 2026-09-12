@@ -609,8 +609,6 @@ export type DeliveryArtifact = {
   state: "待提交" | "已发布";
   /** 提交前校验：不通过的不给提交入口 */
   checks: DeliveryCheck[];
-  /** 已发布产物的取用记录（谁下载 / 谁烧录） */
-  used: { at: string; by: string; action: string }[];
 };
 
 export type DeliveryTarget = "硬件侧端模型" | "平台模型" | "小车 OTA";

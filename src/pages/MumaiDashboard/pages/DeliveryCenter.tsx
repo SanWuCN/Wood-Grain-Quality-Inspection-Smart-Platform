@@ -83,7 +83,8 @@ function UploadModal({
       modelVersion: versionFromName(file.name),
       // 手工上传没有对应的训练任务，留空 —— 不编一个任务号上去
       fromJob: null,
-      producedAt: "2026-09-11 42:10",
+      // 本机时间：上传发生在什么时候，用户看得见（评审 F09 要求真实日期时间）
+      producedAt: new Date().toLocaleString("zh-CN", { hour12: false }).replace(/\//g, "-"),
       sizeText: `${(file.bytes / 1024 / 1024).toFixed(2)} MB`,
       sha256: "待平台计算",
       state: "待提交",
@@ -92,7 +93,6 @@ function UploadModal({
         { key: "digest", label: "摘要", pass: false, detail: "上传后由平台计算，尚未复核" },
         { key: "verify", label: "提交前校验", pass: false, detail: "尚未跑目标侧校验，提交后进入待校验" },
       ],
-      used: [],
     });
     toast(`${file.name} 已加入待提交产物`, "ok");
     onClose();
