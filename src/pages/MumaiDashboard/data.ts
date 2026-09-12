@@ -1,25 +1,15 @@
 export type MapMode = "china" | "shanghai";
 
 /**
- * 点位状态。四种状态对应用户要求的四类视觉表达：
- *   collected  已采集完成的古建
- *   inspected  已完成巡检
- *   risk       存在风险构件
- *   workorder  已生成工单
- * 另外「当前任务」用 workorder + current 标记（由 MapScene 传 current）。
+ * 点位状态与点位类型已归并到 `seed/sites.ts`（平台唯一数据源），
+ * 这里只做再导出，保持既有 import 路径不变：
+ *   点位状态。四种状态对应用户要求的四类语义：
+ *     collected  已勘察（到过现场、建档，未做内部检测）
+ *     inspected  已检测（做过毫米波 / 影像检测并出结论）
+ *     risk       有风险（检测发现风险构件，尚未建单）
+ *     workorder  有工单（已生成工单，点击直接进工单页）
  */
-export type SiteStatus = "collected" | "inspected" | "risk" | "workorder";
-
-export type Site = {
-  id: string;
-  name: string;
-  province?: string;
-  district?: string;
-  coordinate: [number, number];
-  status: SiteStatus;
-  risk?: string;
-  orderId?: string;
-};
+export type { SiteStatus, SiteSurvey, Site } from "./seed/sites";
 
 export type WorkOrder = {
   id: string;
@@ -32,31 +22,16 @@ export type WorkOrder = {
   score?: string;
 };
 
-/** 首页中国地图上的古建点位（对应第二章剧本里的采集/巡检/风险/工单分布） */
-export const chinaSites: Site[] = [
-  { id: "sh", name: "示例寺", province: "上海", coordinate: [121.4737, 31.2304], status: "workorder", risk: "Z04 下部疑似空洞", orderId: "SH-2026-0901" },
-  { id: "bj", name: "智化寺", province: "北京", coordinate: [116.4074, 39.9042], status: "collected" },
-  { id: "sx", name: "华严寺", province: "山西", coordinate: [113.3001, 40.0768], status: "risk", risk: "含水率异常" },
-  { id: "sc", name: "报国寺", province: "四川", coordinate: [103.4845, 29.5982], status: "risk", risk: "表面裂隙" },
-  { id: "yn", name: "崇圣寺三塔", province: "云南", coordinate: [100.1437, 25.7048], status: "inspected" },
-  { id: "gd", name: "陈家祠", province: "广东", coordinate: [113.2447, 23.1256], status: "collected" },
-  { id: "zj", name: "灵隐寺", province: "浙江", coordinate: [120.1012, 30.2401], status: "inspected" },
-  { id: "js", name: "寒山寺", province: "江苏", coordinate: [120.5752, 31.3117], status: "workorder", orderId: "JS-2026-0828" },
-  { id: "fj", name: "开元寺", province: "福建", coordinate: [118.5885, 24.9139], status: "collected" },
-  { id: "henan", name: "少林寺", province: "河南", coordinate: [112.9353, 34.5073], status: "inspected" },
-  { id: "gs", name: "莫高窟", province: "甘肃", coordinate: [94.8096, 40.0405], status: "risk", risk: "壁画空鼓" },
-  { id: "hb", name: "隆兴寺", province: "河北", coordinate: [114.5857, 38.1476], status: "collected" },
-];
-
-/** 上海地图上的古建点位（比赛实操所在区域） */
-export const shanghaiSites: Site[] = [
-  { id: "sh", name: "示例寺", district: "松江区", coordinate: [121.2235, 31.032], status: "workorder", risk: "Z04 下部疑似空洞", orderId: "SH-2026-0901" },
-  { id: "gfl", name: "广富林", district: "松江区", coordinate: [121.195, 31.057], status: "collected" },
-  { id: "zrs", name: "真如寺", district: "普陀区", coordinate: [121.399, 31.25], status: "inspected" },
-  { id: "lg", name: "龙华寺", district: "徐汇区", coordinate: [121.4571, 31.1816], status: "inspected" },
-  { id: "jn", name: "静安寺", district: "静安区", coordinate: [121.4453, 31.2231], status: "collected" },
-  { id: "yl", name: "玉佛禅寺", district: "普陀区", coordinate: [121.4415, 31.2405], status: "risk", risk: "木构含水率偏高" },
-];
+/**
+ * 首页地图上的古建点位。
+ *
+ * 2026-09 归并：原来这里手写了 `chinaSites` / `shanghaiSites` 两套数组，
+ * 点位名与工单里的点位名对得上、字段却各自为政，与 PRD「禁止页面各自硬编码」
+ * 冲突。现在数据全部来自 `seed/sites.ts`，地图点位与工单 / 任务共用同一份：
+ *   全国图 28 处、上海图 12 处，其中带工单的点位其工单号真实存在于
+ *   `WORK_ORDER` / `HISTORIC_ORDERS`。
+ */
+export { CHINA_SITES as chinaSites, SHANGHAI_SITES as shanghaiSites } from "./seed/sites";
 
 /** 飞线的起点（数据汇聚源），终点在场景里按当前模式动态计算 */
 export const flyLineSeeds: { id: string; from: [number, number] }[] = [
@@ -70,6 +45,13 @@ export const flyLineSeeds: { id: string; from: [number, number] }[] = [
   { id: "fj", from: [118.5885, 24.9139] },
 ];
 
+/**
+ * 旧版单页大屏（`MumaiDashboard/index.tsx`，已不参与路由）用的工单卡片视图。
+ *
+ * 注意：这里**不是**地图点位的数据源 —— 首页地图（`mapDemo/BusinessMarkers`）
+ * 与右栏「风险与工单」都从 `seed/sites.ts` + `seed/scenario.ts` 取数，
+ * 不再是两套。本数组只服务已下线的旧布局，保留是为了不改动既有导出。
+ */
 export const workOrders: WorkOrder[] = [
   { id: "SH-2026-0901", site: "示例寺", component: "Z04", district: "松江区", level: "高风险", status: "待复核", finding: "疑似空洞", score: "0.87" },
   { id: "JS-2026-0828", site: "寒山寺", component: "Z02", district: "姑苏区", level: "中风险", status: "处理中", finding: "局部受潮", score: "0.71" },

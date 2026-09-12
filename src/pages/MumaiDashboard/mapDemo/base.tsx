@@ -189,15 +189,24 @@ export default function Base(props: BaseProps) {
    * 屏幕空间去重叠，保证所有省名字号一致、且尽量都显示出来。
    */
   const labelNames = useMemo(() => {
-    const pinned = new Set(pinnedLabels ?? []);
-    const candidates = toCandidates(regions, bbox).map((item) => ({
-      ...item,
-      pinned: pinned.has(item.name),
-    }));
-    // 11px 字 + 4px 内边距 ≈ 22~46px 宽；地图长边约占屏幕 700px
+    const pinned = [...(pinnedLabels ?? [])];
+    const candidates = toCandidates(regions, bbox).map((item) => {
+      // 用前缀匹配：全国模式的区域名带后缀（"北京市" / "上海市"），
+      // 而传入的是简称（"北京" / "上海"），全等比较会一个都匹配不上。
+      // 优先级取它在列表里的序号 —— 列表顺序就是放置顺序。
+      const index = pinned.findIndex((key) => item.name.startsWith(key));
+      return { ...item, priority: index >= 0 ? index : undefined };
+    });
+    // 标签实际尺寸：11px 字 × 2~3 个字 ≈ 22~36px 宽、15px 高；
+    // 地图长边在屏幕上约 700px，所以归一化后约 0.036 × 0.021。
+    // 纵向再乘前缩补偿：相机俯角约 42°，南北向在屏幕上被压扁，
+    // 所以高度要放大到约 0.030，否则南北相邻的省名会视觉重叠。
+    //
+    // 之前用的是 0.056 × 0.046（比实际大了约 1.6 倍），把大量本来放得下的
+    // 省名误判成冲突丢掉了 —— 「安徽、重庆、上海、福建、北京没有字」就是这么来的。
     return declutterLabels(candidates, {
-      width: 0.056,
-      height: 0.046,
+      width: 0.036,
+      height: 0.030,
     });
   }, [regions, bbox, pinnedLabels]);
 

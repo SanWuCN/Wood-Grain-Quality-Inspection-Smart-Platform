@@ -9,7 +9,7 @@ import Bottom from "./bottom";
 import BeamLight from "./beamLight";
 import { useCanvasRoot } from "./useCanvasRoot";
 import { MAP_MODE_EVENT, useDashboardStore, type MapMode } from "../map/store";
-import { shanghaiSites } from "../data";
+import { chinaSites, shanghaiSites } from "../data";
 import type { CityGeoJSON } from "@/types/map";
 
 import chinaMapData from "@/assets/map/china.json";
@@ -122,16 +122,40 @@ export default function Map(props: MapProps) {
   const dataset = DATASETS[loadedMode];
 
   /**
-   * 上海模式必须有名字的区：有古建点位的区不能被去重叠算法挤掉，
-   * 否则「点位在图上、名字却没了」。
+   * 必须有名字的区域，**列表顺序就是放置优先级**（越靠前越先占位）。
+   *
+   * 两类东西必须显示，否则会「点位在图上、名字却没了」：
+   *   1. 有古建点位的省份
+   *   2. 彼此挨得过近、按面积排序时总被顶掉的小区域 —— 京津、沪苏浙、
+   *      港澳、宁夏、江西。之前地图上少了「北京」就是被更小的天津顶掉的。
    */
-  const pinnedLabels = useMemo(
-    () =>
-      loadedMode === "shanghai"
-        ? shanghaiSites.map((site) => site.district).filter((d): d is string => !!d)
-        : undefined,
-    [loadedMode],
-  );
+  const pinnedLabels = useMemo(() => {
+    if (loadedMode === "shanghai") {
+      return shanghaiSites
+        .map((site) => site.district)
+        .filter((d): d is string => !!d);
+    }
+    const siteProvinces = chinaSites
+      .map((site) => site.province)
+      .filter((p): p is string => !!p);
+    const mustShow = [
+      "北京",
+      "上海",
+      "天津",
+      "重庆",
+      "河北",
+      "江苏",
+      "浙江",
+      "安徽",
+      "福建",
+      "江西",
+      "宁夏",
+      "香港",
+      "澳门",
+      "海南",
+    ];
+    return [...new Set([...mustShow, ...siteProvinces])];
+  }, [loadedMode]);
 
   // 诊断开关：?scene=no<图元名> 逐层关闭地图元素，见 base.tsx 的 debug prop
   const dbg = new URLSearchParams(window.location.search).get("scene") ?? "";

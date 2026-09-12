@@ -31,8 +31,14 @@ export interface LabelCandidate {
   y: number;
   /** 投影后 bbox 面积，用于排序 */
   area: number;
-  /** 业务上必须显示（例如有古建点位的区） */
-  pinned?: boolean;
+  /**
+   * 放置优先级，**越小越先放**；不传表示最后放。
+   *
+   * 为什么是数字而不是布尔：京津、沪苏浙这些区域挨得极近，如果只标一个
+   * 「必显」布尔值，它们之间仍然按面积比大小 —— 结果北京会被更小的天津顶掉，
+   * 地图上就少了「北京」。用显式序号才能让调用方决定谁先谁后。
+   */
+  priority?: number;
 }
 
 export interface DeclutterOptions {
@@ -57,8 +63,14 @@ export function declutterLabels(
   const halfH = height / 2 + gap;
 
   const ordered = [...candidates].sort((a, b) => {
-    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
-    return b.area - a.area;
+    // 先按显式优先级（小的先放），再按面积从小到大 —— 小区域本来就被挤在
+    // 角落，让它们先占到位置。反过来（大到小）会让北京 / 上海 / 重庆 / 安徽 /
+    // 福建 永远排最后、位置被大省占完就被整个丢掉。
+    // 大区域（新疆 / 西藏 / 内蒙古）中心点彼此相距很远，晚放也排得下。
+    const pa = a.priority ?? Number.MAX_SAFE_INTEGER;
+    const pb = b.priority ?? Number.MAX_SAFE_INTEGER;
+    if (pa !== pb) return pa - pb;
+    return a.area - b.area;
   });
 
   const placed: { x: number; y: number }[] = [];
