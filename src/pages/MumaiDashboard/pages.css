@@ -4031,6 +4031,33 @@
   margin-left: 0;
 }
 
+/* 执行步骤一级只留当前一步；完整时间线在弹窗里 */
+.mission-steps--latest {
+  margin-bottom: var(--space-2);
+}
+
+.map-steps__open {
+  margin-left: var(--space-2);
+  padding: 0 6px;
+  border: 1px solid var(--border-hover);
+  background: none;
+  color: var(--primary);
+  font-size: var(--fs-aux);
+  cursor: pointer;
+  transition: background var(--motion-fast);
+}
+
+.map-steps__open:hover {
+  background: var(--fill-soft);
+}
+
+/* 接管记录在一级页面只剩「几次 + 查看」 */
+.mission-takeover {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 /* ------------------------------------------------------------------
    排练控制台（/console，PRD §11 / 评审 F12）
    ------------------------------------------------------------------ */

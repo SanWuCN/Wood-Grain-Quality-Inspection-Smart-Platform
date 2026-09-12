@@ -15,7 +15,7 @@ import { useSearchParams } from "react-router";
 import { useMumai } from "../context";
 import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
-import { Btn, PermNote, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
+import { Btn, Modal, PermNote, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
 import { Icon } from "../icons";
 import RvizView from "./RvizView";
 import {
@@ -68,6 +68,8 @@ const CELL_HINT = "10 cm / 格";
 
 export default function Mapping() {
   const { mission, channels, toast, pushEvent, deviceSource, setDeviceSource, can } = useMumai();
+  /** 执行步骤弹窗：完整时间线在二级，一级页面只留当前这一步 */
+  const [stepsOpen, setStepsOpen] = useState(false);
   const [versionId, setVersionId] = useState(MAP_VERSIONS[0]?.id ?? "");
   const [compare, setCompare] = useState(true);
   const [showLaser, setShowLaser] = useState(true);
@@ -452,21 +454,34 @@ export default function Mapping() {
               })}
             </ol>
 
-            <h4 className="sub">执行步骤</h4>
-            <ol className="mission-steps">
-              {mission.steps.map((step, index) => (
-                <li
-                  key={step.at + step.label}
-                  className={`is-${index === mission.steps.length - 1 ? "running" : "done"}`}>
-                  <i />
-                  <b>{step.label}</b>
-                  <time>{step.at}</time>
-                  <span>
-                    {step.actor} · {step.result}
-                  </span>
-                </li>
-              ))}
-            </ol>
+            {/*
+              执行步骤是任务的事件日志 —— 与工单页的操作记录同类，
+              按「历史记录统一下沉」进弹窗。一级页面只留**当前这一步**，
+              执行到哪、谁在等谁，一眼能看到；完整时间线一次点击。
+            */}
+            <h4 className="sub">
+              执行步骤
+              <span className="muted">
+                {mission.steps.length} 步
+                <button type="button" className="map-steps__open" onClick={() => setStepsOpen(true)}>
+                  查看全部
+                </button>
+              </span>
+            </h4>
+            {mission.steps.length ? (
+              <ol className="mission-steps mission-steps--latest">
+                {mission.steps.slice(-1).map((step) => (
+                  <li className="is-running" key={step.at + step.label}>
+                    <i />
+                    <b>{step.label}</b>
+                    <time>{step.at}</time>
+                    <span>
+                      {step.actor} · {step.result}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            ) : null}
 
             {mission.state === "等待机器人确认" ? (
               <StateBlock
@@ -489,16 +504,74 @@ export default function Mapping() {
 
             <div className="mission-takeover">
               <small>接管记录（{mission.takeover.length} 次）</small>
-              {mission.takeover.map((item) => (
-                <span key={item.at}>
-                  {item.at} · {item.operator}：{item.reason}
-                </span>
-              ))}
+              <button type="button" className="map-steps__open" onClick={() => setStepsOpen(true)}>
+                查看
+              </button>
             </div>
 
           </Panel>
         </div>
       </div>
+
+      {/*
+        任务时间线弹窗：完整执行步骤 + 异常 + 接管记录。
+        这三样都是**历史**，一级页面只留「当前执行到哪一步」与「接管过几次」。
+      */}
+      {stepsOpen ? (
+        <Modal
+          wide
+          title="任务执行步骤"
+          subtitle={`${mission.id} · ${mission.steps.length} 步 · 接管 ${mission.takeover.length} 次`}
+          onClose={() => setStepsOpen(false)}
+          footer={
+            <Btn tone="primary" onClick={() => setStepsOpen(false)}>
+              关闭
+            </Btn>
+          }>
+          <ol className="mission-steps">
+            {mission.steps.map((step, index) => (
+              <li
+                key={step.at + step.label}
+                className={`is-${index === mission.steps.length - 1 ? "running" : "done"}`}>
+                <i />
+                <b>{step.label}</b>
+                <time>{step.at}</time>
+                <span>
+                  {step.actor} · {step.result}
+                </span>
+              </li>
+            ))}
+          </ol>
+
+          {mission.anomalies.length ? (
+            <>
+              <h4 className="sub">异常</h4>
+              <ul className="mission-anomalies">
+                {mission.anomalies.map((item) => (
+                  <li key={item.at}>
+                    <time>{item.at}</time>
+                    {item.text}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+
+          {mission.takeover.length ? (
+            <>
+              <h4 className="sub">接管记录</h4>
+              <ul className="mission-anomalies">
+                {mission.takeover.map((item) => (
+                  <li key={item.at}>
+                    <time>{item.at}</time>
+                    {item.operator}：{item.reason}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </Modal>
+      ) : null}
     </div>
   );
 }
