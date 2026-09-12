@@ -23,7 +23,7 @@ import { isApiError } from "../api/client";
 import { isOnline, scenes as scenesOf, useSharedStore } from "../store/shared";
 import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
-import { Btn, PermNote, SourceTag, StateBlock, StatusChip, Toolbar, WaveChart } from "../ui";
+import { Btn, Modal, PermNote, SourceTag, StateBlock, StatusChip, Toolbar, WaveChart } from "../ui";
 import {
   COMPONENTS,
   CURRENT_RISKS,
@@ -441,6 +441,8 @@ export default function Twin() {
   const [sceneId, setSceneId] = useState(SCENES[1]?.id ?? SCENES[0].id);
   const [bookmarkId, setBookmarkId] = useState(SCENE_BOOKMARKS[0]?.id ?? "");
   const [sideBySide, setSideBySide] = useState(true);
+  /** 热点详情在二级窗口里：完整证据链实测 1510px，侧栏只留一张卡片 */
+  const [detailOpen, setDetailOpen] = useState(false);
 
   /* ---- 场景版本走共享服务：检查与发布都要落到服务端（评审 F06） ---- */
 
@@ -906,9 +908,60 @@ export default function Twin() {
           </Panel>
           <PermNote permissions={["scene:publish"]} />
 
+          {/*
+            热点详情是**异常详情**：构件 / 部位 / 原图 / 回波 / 端侧初筛 / 融合规则 /
+            逐条融合结果 / 历史对照，实测 1510px。用户的要求是「异常详情、样本详情
+            统一下沉至 Modal / Drawer」，所以侧栏只留下面这张卡片，
+            完整证据链点「查看完整证据」在二级窗口里看。
+          */}
           <Panel
             title={`热点详情 · ${component?.id ?? selected}`}
-            extra={<StatusChip text={hotspot?.zoneId ?? "—"} tone="info" />}>
+            extra={
+              <span className="fw-console__actions">
+                <StatusChip text={hotspot?.zoneId ?? "—"} tone="info" />
+                <Btn disabled={!hotspot} onClick={() => setDetailOpen(true)}>
+                  查看完整证据
+                </Btn>
+              </span>
+            }>
+            {hotspot ? (
+              <ul className="hotspot-brief">
+                <li>
+                  <small>构件 / 部位</small>
+                  <b>{(component?.name ?? selected) + " · " + (component?.part ?? "—")}</b>
+                </li>
+                <li>
+                  <small>回波</small>
+                  <b>
+                    {hotspot.echo.amplitude.toFixed(2)} {hotspot.echo.unit}
+                  </b>
+                </li>
+                <li>
+                  <small>融合规则</small>
+                  <b>{hotspot.fusion.ruleVersion}</b>
+                </li>
+              </ul>
+            ) : (
+              <StateBlock kind="empty" title="未选中热点" hint="在场景里点选构件或响应区查看证据。" />
+            )}
+          </Panel>
+        </div>
+      </div>
+      {/*
+        热点详情的完整证据链（原侧栏那块 1510px 的内容）。
+        二级窗口，尺寸给宽 —— 里面有 KV、判定芯片、逐条融合结果与历史对照表。
+      */}
+      {detailOpen && hotspot ? (
+        <Modal
+          wide
+          title={`热点详情 · ${component?.id ?? selected}`}
+          subtitle={`${component?.name ?? selected} · ${component?.part ?? "—"} · 融合规则 ${hotspot.fusion.ruleVersion}`}
+          onClose={() => setDetailOpen(false)}
+          footer={
+            <Btn tone="primary" onClick={() => setDetailOpen(false)}>
+              关闭
+            </Btn>
+          }>
             {hotspot ? (
               <div className="hotspot">
                 <dl className="kv">
@@ -1076,9 +1129,7 @@ export default function Twin() {
                 </article>
               </div>
             ) : null}
-          </Panel>
-        </div>
-      </div>
-    </div>
+        </Modal>
+      ) : null}    </div>
   );
 }

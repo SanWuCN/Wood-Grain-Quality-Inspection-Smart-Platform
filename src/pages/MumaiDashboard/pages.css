@@ -4031,6 +4031,36 @@
   margin-left: 0;
 }
 
+/* 热点详情卡片：一级页面只有构件/部位、回波、规则三项，证据链在二级 */
+.hotspot-brief {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hotspot-brief li {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.hotspot-brief small {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.hotspot-brief b {
+  color: var(--text-primary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-table);
+  font-weight: 600;
+}
+
 /* 执行步骤一级只留当前一步；完整时间线在弹窗里 */
 .mission-steps--latest {
   margin-bottom: var(--space-2);
