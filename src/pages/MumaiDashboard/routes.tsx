@@ -11,6 +11,7 @@
 import { lazy } from "react";
 import { Route, Routes } from "react-router";
 import AppShell from "./AppShell";
+import { UnknownRoute } from "./Shell";
 import { Login, RequireLogin } from "./pages/Login";
 
 const Overview = lazy(() => import("./pages/Overview"));
@@ -44,6 +45,14 @@ export default function RoutesTree() {
         <Route path="/knowledge" element={<Knowledge />} />
         <Route path="/archive" element={<Archive />} />
         <Route path="/present" element={<Present />} />
+        {/*
+          兜底路由：没有它的时候，访问一个未登记的地址（例如拆页前的
+          `#/adapt`）会让 React Router 一个 route 都不匹配 —— 连这层带外壳的
+          布局路由都不挂载，整页没有任何 DOM，现象是**纯黑屏**，只有 console
+          里一行 "No routes matched location"。加了它之后外壳一定会渲染，
+          Shell 再把 Outlet 放行到这里，给出「页面不存在」而不是黑屏。
+        */}
+        <Route path="*" element={<UnknownRoute />} />
       </Route>
     </Routes>
   );

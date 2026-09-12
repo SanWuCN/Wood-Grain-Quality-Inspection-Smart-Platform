@@ -154,8 +154,8 @@ export const TOOLS: ToolDef[] = [
     parameters: {
       type: "object",
       properties: {
-        route: { type: "string", description: "目标路由，例如 /twin、/adapt" },
-        tab: { type: "string", description: "页签 key，例如 fusion（仅检测适配页使用）" },
+        route: { type: "string", description: "目标路由，例如 /twin、/hardware、/firmware" },
+        tab: { type: "string", description: "页签 key，例如 dataset（/hardware 与 /firmware 使用）" },
         batch: { type: "string", description: "批次号，用于采集页" },
         component: { type: "string", description: "构件编号，用于数字孪生页" },
       },
@@ -184,9 +184,11 @@ export const TOOLS: ToolDef[] = [
     requireConfirmation: false,
     run: (args, ctx) => {
       const routes: Record<string, string> = {
-        dataset: withQuery("/adapt", { tab: "dataset" }, []),
-        capture: withQuery("/adapt", { tab: "capture", batch: ctx.entities.batch ?? SCAN_BATCHES[0].batchId }, ["batch"]),
-        fusion: withQuery("/adapt", { tab: "fusion" }, []),
+        // 面板归属按拆页后的实际路由：数据集 / 融合在「固件及模型」，
+        // 采集在「硬件详情」。指向已下线的 /adapt 会让小木把用户带进黑屏。
+        dataset: withQuery("/firmware", { tab: "dataset" }, []),
+        capture: withQuery("/hardware", { tab: "capture", batch: ctx.entities.batch ?? SCAN_BATCHES[0].batchId }, ["batch"]),
+        fusion: withQuery("/firmware", { tab: "fusion" }, []),
         revisit: "/orders",
       };
       const route = routes[args.panel] ?? "/";

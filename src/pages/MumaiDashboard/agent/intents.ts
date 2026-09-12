@@ -233,7 +233,7 @@ export const INTENTS: Intent[] = [
       alternatives: ["异常记录 {anomalyId}（{anomalyDetail}）；建议动作：{nextActions}"],
       facts: ["anomalyId", "anomalyDetail", "nextActions"],
     },
-    action: { tool: "navigate_page", params: { route: "/adapt" } },
+    action: { tool: "navigate_page", params: { route: "/hardware", tab: "triage" } },
   },
   {
     id: "clean_dataset",
@@ -252,7 +252,7 @@ export const INTENTS: Intent[] = [
       alternatives: ["清洗完成：{cleanSteps}，待审核 {reviewCount}。"],
       facts: ["cleanSteps", "reviewCount"],
     },
-    action: { tool: "navigate_page", params: { route: "/adapt", tab: "dataset" } },
+    action: { tool: "navigate_page", params: { route: "/firmware", tab: "dataset" } },
   },
   {
     id: "prepare_split",
@@ -297,7 +297,7 @@ export const INTENTS: Intent[] = [
       ],
       facts: ["experimentTitle", "metrics", "acceptance"],
     },
-    action: { tool: "navigate_page", params: { route: "/adapt", tab: "training" } },
+    action: { tool: "navigate_page", params: { route: "/firmware", tab: "training" } },
   },
   {
     id: "deployment_check",
@@ -341,7 +341,7 @@ export const INTENTS: Intent[] = [
       ],
       facts: ["fusionRecordId", "fusionRule", "fusionBatch", "outputs"],
     },
-    action: { tool: "navigate_page", params: { route: "/adapt", tab: "fusion" } },
+    action: { tool: "navigate_page", params: { route: "/firmware", tab: "fusion" } },
   },
   {
     id: "open_evidence",
@@ -557,7 +557,7 @@ export const INTENTS: Intent[] = [
         "echoNote",
       ],
     },
-    action: { tool: "navigate_page", params: { route: "/adapt", tab: "capture", batch: "{batch}" } },
+    action: { tool: "navigate_page", params: { route: "/hardware", tab: "capture", batch: "{batch}" } },
   },
   /* ---------- 第二章剧本新增：小车与建图控制 ---------- */
   {
@@ -705,7 +705,7 @@ export const INTENTS: Intent[] = [
         "batchFrozen",
       ],
     },
-    action: { tool: "navigate_page", params: { route: "/adapt", tab: "capture", batch: "{batch}" } },
+    action: { tool: "navigate_page", params: { route: "/hardware", tab: "capture", batch: "{batch}" } },
   },
   {
     id: "device_status",

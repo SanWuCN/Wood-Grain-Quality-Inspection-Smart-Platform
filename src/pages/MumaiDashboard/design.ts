@@ -96,7 +96,12 @@ export const HEADER_VIEWBOX = "0 0 1920 85";
 export const ACCOUNTS = [
   { id: "shen", login: "shen", name: "沈", role: "项目经理", workspace: "工单与审核", page: "/orders" },
   { id: "shi", login: "shi", name: "史", role: "人工智能架构师", workspace: "平台总览", page: "/" },
-  { id: "rao", login: "rao", name: "饶", role: "全栈开发工程师", workspace: "采集与交付", page: "/adapt" },
+  // 饶的默认工作区是「硬件详情」而不是已下线的 /adapt：
+  // 「检测适配」拆成 /hardware + /firmware 时漏改了这一个字段，
+  // 结果 rao 一登录就被 workspacePath() 送到一个不存在的路由 —— 纯黑屏。
+  // 改完请连同 auth.ts 的 ROUTE_PERMISSION 一起核对（这个字段必须落在
+  // 该角色 allowsPath 为真的路径上，否则登录后立刻吃一个「无权限」）。
+  { id: "rao", login: "rao", name: "饶", role: "全栈开发工程师", workspace: "采集与交付", page: "/hardware" },
   { id: "ma", login: "mayutian", name: "马昱天", role: "具身智能工程师", workspace: "建图巡检", page: "/mapping" },
 ];
 

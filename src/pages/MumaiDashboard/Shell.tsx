@@ -20,6 +20,7 @@ import { Outlet, useLocation, useNavigate } from "react-router";
 import { ACCOUNTS, HEADER_HEIGHT, NAV_ITEMS } from "./design";
 import {
   allowsPath,
+  isRegisteredPath,
   navFor,
   PERMISSION_LABEL,
   ROUTE_PERMISSION,
@@ -56,6 +57,43 @@ function PermissionNotice({ pathname }: { pathname: string }) {
             ? required.map((item) => `「${PERMISSION_LABEL[item]}」`).join(" 或 ")
             : "独立管理权限"}
           ，请使用具备该权限的账号，或回到本角色的默认工作区。
+        </em>
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => navigate(workspacePath(account.id), { replace: true })}>
+          回到{account.workspace}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 未知地址提示（routes.tsx 的 `*` 兜底路由渲染它）。
+ *
+ * 与「无权限」分开：地址压根不存在时不能报「当前角色无此页面权限」，
+ * 那会把用户支到「换账号」这条错路上。这里直说地址不对，并给回工作区的出口。
+ *
+ * 做成独立组件而不是让 Shell 直接渲染，是因为 Shell 只在**有 route 匹配**时才
+ * 挂载 —— 未登记的地址一个 route 都不匹配，外壳根本不渲染，页面全黑。
+ * 所以必须在路由表里放一个 `path="*"` 把外壳拉起来，再由 Shell 放行 Outlet。
+ */
+export function UnknownRoute() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { accountId } = useMumai();
+  const account = ACCOUNTS.find((item) => item.id === accountId) ?? ACCOUNTS[0];
+
+  return (
+    <div className="appshell__denied">
+      <div className="appshell__denied-box">
+        <span className="appshell__denied-dot" />
+        <strong>页面不存在</strong>
+        <em>
+          <code className="appshell__denied-path">{location.pathname}</code>
+          不是本平台的页面地址，可能来自已下线的旧链接。请从顶部导航进入，或回到
+          {account.name} 的默认工作区。
         </em>
         <button
           type="button"
@@ -210,10 +248,7 @@ export default function Shell() {
           而规范 §6.2 要求开场动画落在 2.4–3.2s。
           改成浮层只做覆盖、不阻塞挂载之后，镜头从 t≈0 就开始推，整段回到 Demo2 的节奏。
         */}
-        {!online ? null : !allowed ? (
-          // 路由守卫：无权限的路由不渲染页面内容，给提示 + 回默认工作区
-          <PermissionNotice pathname={location.pathname} />
-        ) : (
+        {!online ? null : (
           <Suspense
             fallback={
               <div className="appshell__boot">
@@ -223,7 +258,19 @@ export default function Shell() {
                 </div>
               </div>
             }>
-            <Outlet />
+            {/*
+              路由守卫，分三种情况，不能合并：
+                ① 地址未登记（如拆页前的 #/adapt）→ 放行 Outlet，由 routes.tsx
+                   的 `*` 兜底渲染「页面不存在」。这类地址 allowsPath 也是 false，
+                   但报「无权限」是错的 —— 用户会去换账号，而问题在地址。
+                ② 地址登记了、本角色没权限 → PermissionNotice。
+                ③ 正常 → 渲染页面。
+            */}
+            {isRegisteredPath(location.pathname) && !allowed ? (
+              <PermissionNotice pathname={location.pathname} />
+            ) : (
+              <Outlet />
+            )}
           </Suspense>
         )}
 

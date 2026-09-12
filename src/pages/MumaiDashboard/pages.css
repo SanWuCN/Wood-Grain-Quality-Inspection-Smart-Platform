@@ -3449,6 +3449,17 @@
   margin-top: var(--space-2);
 }
 
+/* 「页面不存在」里要显示用户敲的那个地址：等宽 + 中性底，
+   让它和提示文字分得开，也不至于像一条报错堆栈去抢注意力 */
+.appshell__denied-path {
+  margin-right: 4px;
+  padding: 1px 6px;
+  background: var(--fill-soft);
+  color: var(--text-secondary);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+}
+
 /* ------------------------------------------------------------------
    硬件详情（/hardware）与固件及模型（/firmware）
    由原「检测适配」页拆出的两个页面。布局沿用 .adapt-grid 的双列自适应，

@@ -214,6 +214,26 @@ export function allowsPath(accountId: string, pathname: string): boolean {
   return required.length === 0 || required.some((item) => allows(accountId, item));
 }
 
+/**
+ * 该地址是不是本平台登记过的一级路由。
+ *
+ * 必须和 `allowsPath` 分开：`allowsPath` 对「地址不存在」与「有地址但没权限」
+ * 都返回 false，可这两件事对用户完全不同，提示语也该不同。
+ *
+ * 为什么需要它：路由表里没有兜底项时，访问一个未登记的地址（例如拆页前的
+ * `#/adapt`）会让 React Router 一个 route 都不匹配 —— 连外壳都不挂载，
+ * 整页没有 DOM，现象是纯黑屏、只有 console 里一行 "No routes matched"。
+ * Shell 靠这个函数把「不存在」交给 routes.tsx 的 `*` 兜底去渲染，而不是
+ * 误报成「当前角色无此页面权限」。
+ *
+ * `/present` 是展示窗口专用路由，不进权限表、由 Shell 单独放行，所以算登记过。
+ */
+const PATHLESS_ROUTES: readonly string[] = ["/present"];
+
+export function isRegisteredPath(pathname: string): boolean {
+  return pathname in ROUTE_PERMISSION || PATHLESS_ROUTES.includes(pathname);
+}
+
 /** 该角色可见的一级导航（按 ROUTE_PERMISSION 过滤后再渲染） */
 export function navFor(accountId: string): readonly (typeof NAV_ITEMS)[number][] {
   return NAV_ITEMS.filter((item) => allowsPath(accountId, item.path));
