@@ -32,6 +32,7 @@ import {
   TWIN_ROUTE,
   WAVEFORMS,
 } from "../seed/scenario";
+import SplatStage from "./SplatStage";
 
 const LAYERS = [
   { key: "labels", label: "构件标签" },
@@ -486,6 +487,30 @@ export default function Twin() {
    */
   const [camera, setCamera] = useState<CameraTarget | null>(null);
 
+  /**
+   * 主视图来源。
+   *
+   * `splat` = 真实重建产物（SOG，238 万高斯点），`lowpoly` = 原来的手搓低模。
+   * 默认走重建 —— 用户要的就是把孪生画面换成高斯泼溅预览；
+   * 低模保留成**明确的降级路径**：产物加载失败时自动切过去并说明原因，
+   * 而不是留一块黑屏（PRD 3.3 要求加载失败要有明确的降级视图）。
+   */
+  const [view, setView] = useState<"splat" | "lowpoly">("splat");
+  const [splatError, setSplatError] = useState<string | null>(null);
+
+  /**
+   * 重建产物里的相机请求。
+   *
+   * 书签给的是**视角**（方位角 / 俯仰角），但重建产物上并没有标定出 Z01–Z04
+   * 的位置 —— 我们只有一个包围盒。所以这里只转视角、不假装定位到某根柱子：
+   * `focus` 传 null 表示看场景中心。工具栏那句「未完成坐标标定…」说的就是这件事，
+   * 在这里假装聚焦到 Z04 才是编数据。
+   */
+  const splatCamera = useMemo(
+    () => (camera ? { azimuth: camera.azimuth, polar: camera.polar, focus: null, distance: 9 } : null),
+    [camera],
+  );
+
   /** 按书签算一次目标机位并入队运镜 */
   const flyToBookmark = (id: string) => {
     const item = SCENE_BOOKMARKS.find((entry) => entry.id === id) ?? SCENE_BOOKMARKS[0];
@@ -537,19 +562,76 @@ export default function Twin() {
           }}>
           复位
         </Btn>
+        {/*
+          视图来源切换。两个都要能到：重建产物是这一页该有的样子，
+          低模是加载失败时的降级路径，也是「标注层挂在哪儿」的对照。
+        */}
+        <Btn
+          active={view === "splat" && !splatError}
+          disabled={Boolean(splatError)}
+          title={splatError ? `重建产物加载失败：${splatError}` : "显示高斯泼溅重建产物"}
+          onClick={() => setView("splat")}>
+          高斯重建
+        </Btn>
+        <Btn
+          active={view === "lowpoly" || Boolean(splatError)}
+          title="显示手搓低模示意（标注层与它对齐）"
+          onClick={() => setView("lowpoly")}>
+          低模示意
+        </Btn>
       </Toolbar>
 
       <div className="twin-layout">
         {/* 主视图：占页面 2/3 以上 */}
         <div className="twin-stage">
-          <TwinScene
-            selected={selected}
-            layers={layers}
-            onSelect={selectComponent}
-            camera={camera}
-            historyComponents={historyComponents}
-          />
+          {/*
+            两个视图都常驻挂载，用 is-hidden 切换显示。
+            不是图省事：Canvas 卸载会让 Spark 的异步任务在 WebGL 上下文销毁后
+            才回来，抛一个接不住的 Uncaught (in promise)（详见 SplatStage 末尾）。
+            隐藏的那一边渲染循环会停掉，不会白烧 GPU。
+          */}
+          <div
+            className={`twin-view${view === "splat" && !splatError ? "" : " is-hidden"}`}
+            aria-hidden={view !== "splat" || Boolean(splatError)}>
+            <SplatStage
+              url="/model/sog/gs.sog"
+              active={view === "splat" && !splatError}
+              camera={splatCamera}
+              onError={(message) => {
+                setSplatError(message);
+                setView("lowpoly");
+                toast(`重建产物加载失败，已切到低模示意：${message}`, "danger");
+              }}
+            />
+          </div>
+          <div
+            className={`twin-view${view === "lowpoly" || splatError ? "" : " is-hidden"}`}
+            aria-hidden={view !== "lowpoly" && !splatError}>
+            <TwinScene
+              selected={selected}
+              layers={layers}
+              onSelect={selectComponent}
+              camera={camera}
+              historyComponents={historyComponents}
+            />
+          </div>
 
+          {/*
+            高斯重建模式下不显示构件图层与标签浮层。
+            重建产物是一次**示例扫描**（室内工作台），并没有标定出 Z01–Z04
+            的位置 —— 把那几个构件标签挂在一张对不上的扫描上，正是用户一直在
+            说的「一眼假」。低模示意模式下它们才有效，那边有真实对齐的柱位。
+          */}
+          {view === "splat" && !splatError ? (
+            <div className="twin-splatnote">
+              <b>重建产物预览</b>
+              <span>
+                示例扫描 · 238 万高斯点。构件标注层未与该产物标定，切到「低模示意」查看 Z01–Z04 对齐。
+              </span>
+            </div>
+          ) : null}
+
+          {view === "lowpoly" || splatError ? (
           <div className="twin-layers">
             <small>图层</small>
             {LAYERS.map((layer) => (
@@ -565,8 +647,9 @@ export default function Twin() {
               </label>
             ))}
           </div>
+          ) : null}
 
-          {layers.labels ? (
+          {layers.labels && (view === "lowpoly" || splatError) ? (
             <div className="twin-labels">
               {COMPONENTS.map((item) => (
                 <button
@@ -603,9 +686,21 @@ export default function Twin() {
           </div>
 
           <div className="twin-readout">
-            <span>当前构件 {component?.id ?? selected}</span>
-            <span>测区 {component?.zoneId ?? "—"}</span>
-            <span>书签 {SCENE_BOOKMARKS.find((item) => item.id === bookmarkId)?.label ?? "—"}</span>
+            {view === "splat" && !splatError ? (
+              <>
+                <span>视图 高斯重建 gs.sog</span>
+                <span>238 万高斯点</span>
+                <span>
+                  书签 {SCENE_BOOKMARKS.find((item) => item.id === bookmarkId)?.label ?? "—"}（仅改变视角）
+                </span>
+              </>
+            ) : (
+              <>
+                <span>当前构件 {component?.id ?? selected}</span>
+                <span>测区 {component?.zoneId ?? "—"}</span>
+                <span>书签 {SCENE_BOOKMARKS.find((item) => item.id === bookmarkId)?.label ?? "—"}</span>
+              </>
+            )}
           </div>
         </div>
 
