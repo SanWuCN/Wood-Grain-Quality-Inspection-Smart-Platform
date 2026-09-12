@@ -1,0 +1,200 @@
+/* ==================================================================
+   木脉智检 · 古建筑智能巡检平台
+   设计系统 Token —— 唯一权威：docs/design/视觉设计规范-v1.0.md §9
+   ------------------------------------------------------------------
+   1) 字体：离线自托管（HarmonyOS Sans SC + Inter），不引用任何 CDN
+   2) 颜色 / 间距 / 动效：规范 §9 原样落地，token 名一个字不改
+   3) 补充：字号 / 行高 / 中英混排数据栈 / 半透明填充（规范 §1、§2.2 的派生量）
+   组件里禁止再散落硬编码色值，一律写 var(--token)
+   ================================================================== */
+
+/* ------------------------------------------------------------------
+   1. 字体（规范 §2.1）
+   ------------------------------------------------------------------
+   中文：HarmonyOS Sans SC 400 / 700（本机 C:\Windows\Fonts 复制到 public/fonts）
+   数字与编号：Inter 400 / 500 / 600（woff2，latin 子集）
+   两者都放在 public/fonts 下随应用一起发布，断网演示同样生效。
+   ------------------------------------------------------------------ */
+
+@font-face {
+  font-family: "HarmonyOS Sans SC";
+  src: url("/fonts/HarmonyOS_Sans_SC_400.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "HarmonyOS Sans SC";
+  src: url("/fonts/HarmonyOS_Sans_SC_700.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Inter：只取 latin 子集（数字 / 编号 / 坐标 / 百分比），中文继续走 HarmonyOS */
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/inter-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF,
+    U+FFFD;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/inter-latin-500-normal.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF,
+    U+FFFD;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/inter-latin-600-normal.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF,
+    U+FFFD;
+}
+
+/* ------------------------------------------------------------------
+   2. 规范 §9 原样落地
+   ------------------------------------------------------------------ */
+
+:root {
+  /* 背景（§1.1） */
+  --bg-page: #030812;
+  --bg-workspace: #060d18;
+  --bg-panel: #091321;
+  --bg-panel-hover: #0c1929;
+  --bg-emphasis: #102037;
+
+  /* 品牌主色与光效色（§1.2）—— 唯一 UI 主色 + 唯一科技光效色 */
+  --primary: #4ea8ff;
+  --primary-hover: #69b7ff;
+  --glow-cyan: #5de4ff;
+
+  /* 文字（§1.4） */
+  --text-primary: #eaf3ff;
+  --text-secondary: #aabbd0;
+  --text-tertiary: #70849c;
+  --text-disabled: #465a70;
+
+  /* 状态色（§1.3）—— 只表达业务语义 */
+  --success: #39d5a3;
+  --warning: #f2b84b;
+  --danger: #ff5c70;
+  --info: #4ea8ff;
+
+  /* 边框（§4.1）—— 低对比，普通 Panel 不发光 */
+  --border-subtle: rgba(78, 168, 255, 0.12);
+  --border-default: rgba(78, 168, 255, 0.18);
+  --border-hover: rgba(78, 168, 255, 0.32);
+  --border-active: rgba(78, 168, 255, 0.55);
+
+  /* 字体（§2.1） */
+  --font-ui: "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-data: "Inter", "DIN Alternate", sans-serif;
+
+  /* 间距（§3.1：4 / 8 / 12 / 16 / 20 / 24 / 32 / 40） */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* 动效（§6.2） */
+  --motion-fast: 180ms;
+  --motion-normal: 260ms;
+  --motion-page: 560ms;
+}
+
+/* ------------------------------------------------------------------
+   3. 补充 Token
+   ------------------------------------------------------------------
+   3.1  字号 / 行高（规范 §2.2，1920×1080 基准；一页最多 5 个明显层级）
+   3.2  中英混排的数据字体栈：Inter 没有中文字形，中文回落 HarmonyOS，
+        避免 KV 值、点位名这类「中英混排」文本掉到系统默认字体
+   3.3  半透明填充 / 遮罩：规范 §1.1、§4.1 的 alpha 派生量，把原先散落在
+        各页面的 rgba() 收敛成 6 个档位，全平台只有这一套
+   ------------------------------------------------------------------ */
+
+:root {
+  /* 3.1 字号 */
+  --fs-logo: 28px;
+  --fs-page: 22px;
+  --fs-panel: 16px;
+  --fs-sub: 14px;
+  --fs-body: 13px;
+  --fs-table: 12.5px;
+  --fs-aux: 11px;
+  --fs-kpi: 30px;
+
+  /* 3.1 KPI 大数字（§2.2 26–32px）。取 28 与 Logo 同级，
+         这样一个页面渲染出来的字号层级不会超过 5 个 */
+  --fs-num: 28px;
+  --lh-num: 34px;
+
+  /* 3.1 行高 */
+  --lh-logo: 34px;
+  --lh-page: 30px;
+  --lh-panel: 24px;
+  --lh-sub: 22px;
+  --lh-body: 22px;
+  --lh-table: 20px;
+  --lh-aux: 18px;
+  --lh-kpi: 36px;
+
+  /* 3.1 间距补齐 40（§3.1 序列的最后一级） */
+  --space-10: 40px;
+
+  /* 3.1 文字强调（§1.4 Text Accent，允许极少量使用） */
+  --text-accent: #70c4ff;
+
+  /* 3.1 标题文字（§4.2 Panel 标题色 #DDEEFF；页面标题同色） */
+  --text-title: #ddeeff;
+
+  /* 3.2 中英混排数据栈 */
+  --font-data-mixed: "Inter", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+
+  /* 3.3 主色填充档位（选中、hover、次级按钮） */
+  --fill-weak: rgba(78, 168, 255, 0.06);
+  --fill-soft: rgba(78, 168, 255, 0.1);
+  --fill-strong: rgba(78, 168, 255, 0.16);
+  --fill-active: rgba(78, 168, 255, 0.26);
+
+  /* 3.3 主按钮（规范 §4.5：背景 #1C67B5，文字 #F4FAFF） */
+  --primary-strong: #1c67b5;
+  --primary-strong-hover: #2079d4;
+  --on-primary: #f4faff;
+
+  /* 3.3 中性遮罩 / 面板底（替代原先十几种深蓝 rgba） */
+  --overlay-scrim: rgba(3, 8, 18, 0.72);
+  --overlay-deep: rgba(6, 13, 24, 0.86);
+  --overlay-solid: rgba(6, 13, 24, 0.96);
+
+  /* 3.3 面板底：规范 §4.1 的 rgba(9,19,33,.86) */
+  --panel-surface: rgba(9, 19, 33, 0.86);
+  --panel-surface-2: rgba(9, 19, 33, 0.96);
+
+  /* 3.3 图表（§5.1） */
+  --chart-grid: rgba(130, 180, 230, 0.08);
+  --chart-axis-text: #647990;
+  --chart-tooltip-bg: #0b1726;
+  --chart-tooltip-border: rgba(78, 168, 255, 0.25);
+
+  /* 3.3 地图（§5.2）—— 只在地图与扫描光效里使用 */
+  --map-body: #526b80;
+  --map-outline: #63cbff;
+}
