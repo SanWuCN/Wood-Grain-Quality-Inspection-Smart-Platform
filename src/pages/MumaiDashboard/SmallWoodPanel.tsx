@@ -42,6 +42,9 @@ import {
 } from "./seed/scenario";
 import { clockStamp, fmtNum, runEvaluation } from "./lib";
 import type { XiaomuIntent } from "./seed/scenario";
+// 经过校准的意图匹配器与项目槽位：评审 F05 要求「先解析项目与时间，再检索；
+// 无匹配拒绝执行」，所以匹配不再由本页面自己按字符重叠猜，统一走 agent/matcher。
+import { PROJECT_SLOT, understand } from "./agent/matcher";
 
 /** PRD 4.2：意图目录没有匹配项时的固定回复，不调用大模型猜测 */
 const NO_HIT_REPLY = "可查询巡检资料、查看构件或启动当前业务流程";
@@ -196,20 +199,34 @@ export default function SmallWoodPanel() {
     [],
   );
 
-  /** 命中意图目录：关键词包含匹配，命中不了就明说，不乱答 */
-  const matchIntent = useCallback((text: string): XiaomuIntent | null => {
+  /**
+   * 命中意图目录。
+   *
+   * 原来这里是一段**按字符重叠数打分**的匹配：把意图示例拆成单字，
+   * 问句里出现过哪个字就加一分，分最高的胜出。评审 F05 的现象
+   * 「对无关问题『火星上的菠萝产量是多少』返回历史场景」就是这么来的 ——
+   * 任何一句中文都能和某条示例共享几个常用字，「命中任意一个字就执行」。
+   *
+   * 现在换成 agent/matcher.ts 里那个经过校准的匹配器：
+   *   - 白名单意图 + bigram 覆盖率 × 单条示例余弦，低置信一律回 Fallback
+   *   - 返回的 intent.id 与 XIAOMU_INTENTS 的 intentId 是同一套命名，直接对上
+   *   - 项目槽位单独判一次：问的是别的寺庙就直接说没有，不套示例寺的数字
+   */
+  const decide = useCallback((text: string) => {
     const cleaned = text.trim();
-    if (!cleaned) return null;
-    let best: { intent: XiaomuIntent; hit: number } | null = null;
-    for (const intent of XIAOMU_INTENTS) {
-      const words = Array.from(new Set(Array.from(intent.utterance))).filter((ch) =>
-        /[\u4e00-\u9fa5A-Za-z0-9]/.test(ch),
-      );
-      let hit = 0;
-      for (const word of words) if (cleaned.includes(word)) hit += 1;
-      if (hit > 0 && (!best || hit > best.hit)) best = { intent, hit };
+    if (!cleaned) return { kind: "empty" as const };
+
+    const match = understand(cleaned);
+    const project = match.entities.project;
+    if (project && project !== PROJECT_SLOT.current) {
+      return { kind: "other-project" as const, project };
     }
-    return best?.intent ?? null;
+    if (match.level === "fallback" || !match.intent) {
+      return { kind: "no-hit" as const, score: match.confidence };
+    }
+    const intent = XIAOMU_INTENTS.find((item) => item.intentId === match.intent?.id) ?? null;
+    // 匹配器认得、但这个面板没有对应话术的意图，同样按「没听懂」处理，不硬凑
+    return intent ? { kind: "hit" as const, intent } : { kind: "no-hit" as const, score: match.confidence };
   }, []);
 
   const ask = useCallback(
@@ -217,10 +234,15 @@ export default function SmallWoodPanel() {
       const cleaned = text.trim();
       if (!cleaned) return;
       const at = clockStamp();
-      const intent = matchIntent(cleaned);
+      const decision = decide(cleaned);
       setInput("");
 
-      if (!intent) {
+      if (decision.kind !== "hit") {
+        const reply =
+          decision.kind === "other-project"
+            ? `本资料库只索引了${PROJECT_SLOT.current}的资料，没有${decision.project}的记录。` +
+              `可以换个说法问${PROJECT_SLOT.current}，或者先把该项目的历史报告导入知识库。`
+            : NO_HIT_REPLY;
         setTurns((list) => [
           ...list,
           { kind: "user", id: nextTurnId(), at, text: cleaned },
@@ -229,21 +251,23 @@ export default function SmallWoodPanel() {
             id: nextTurnId(),
             at: clockStamp(),
             intent: {
-              intentId: "no_hit",
+              intentId: decision.kind === "other-project" ? "other_project" : "no_hit",
               utterance: cleaned,
-              tools: ["search"],
-              answerTemplate: NO_HIT_REPLY,
+              tools: [],
+              answerTemplate: reply,
               facts: [],
               voice: "—",
             },
-            steps: [{ label: "查询资料", state: "done" }],
+            // 没命中就不执行任何工具：步骤列表留空，不假装查过
+            steps: [],
             facts: [],
-            sources: searchDocs(cleaned),
+            sources: decision.kind === "no-hit" ? searchDocs(cleaned) : [],
           },
         ]);
         return;
       }
 
+      const intent = decision.intent;
       const facts = factsFor(intent);
       const steps = intent.tools.map((label, index) => ({
         label,
@@ -285,7 +309,7 @@ export default function SmallWoodPanel() {
         timers.current.push(timer);
       });
     },
-    [matchIntent],
+    [decide],
   );
 
   // 页面通过 askAssistant 调起的提问

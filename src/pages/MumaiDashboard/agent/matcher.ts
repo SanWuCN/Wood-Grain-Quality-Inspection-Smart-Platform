@@ -327,6 +327,32 @@ function numberEntity(normalized: string): string | undefined {
 }
 
 /** 抽取全部槽位（CLAUDE 约定：函数名与字段名保持一致，界面直接显示 entities 表） */
+/**
+ * 项目槽位。
+ *
+ * 评审 F05：「询问寒山寺仍回答示例寺的 6 处风险」—— 平台只索引了示例寺的资料，
+ * 但没有任何地方表达「这句问的是哪个项目」，于是查询照常执行、答案照常来自示例寺。
+ * 这里把项目名单独抽出来，交给调用方在做任何工具动作之前判一次：
+ * 问的是别的项目就直接说「本资料库没有」，而不是拿示例寺的数字顶上。
+ *
+ * `示例寺` 与别名进 sameAsCurrent；其余登记过的寺庙名一律视为**别的项目**。
+ * 表里没有的名字（比如随口编的一个寺）不算项目槽位 —— 那属于「听不懂」，
+ * 由 Fallback 去处理，不要在这里假装认出来了。
+ */
+export const PROJECT_SLOT = {
+  current: "示例寺",
+  aliases: ["示例寺", "本寺", "这个寺", "本项目的寺"],
+  others: ["寒山寺", "灵隐寺", "少林寺", "白马寺", "悬空寺", "南禅寺", "佛光寺"],
+} as const;
+
+export function projectEntity(text: string): string | null {
+  if (PROJECT_SLOT.others.some((name) => text.includes(name))) {
+    return PROJECT_SLOT.others.find((name) => text.includes(name)) ?? null;
+  }
+  if (PROJECT_SLOT.aliases.some((name) => text.includes(name))) return PROJECT_SLOT.current;
+  return null;
+}
+
 export function extractEntities(raw: string): EntityBag {
   const text = normalize(raw);
   const pillar = pillarEntity(text);
@@ -340,6 +366,7 @@ export function extractEntities(raw: string): EntityBag {
     scene: sceneEntity(text),
     map: mapEntity(text),
     speed: numberEntity(text),
+    ...(projectEntity(text) ? { project: projectEntity(text) as string } : {}),
     ...page,
   };
   const route = bag.route ?? "";
