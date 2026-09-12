@@ -1844,79 +1844,7 @@ export type XiaomuIntent = {
   voice: string;
 };
 
-export const XIAOMU_INTENTS: XiaomuIntent[] = [
-  {
-    intentId: "history_summary", utterance: "查今年五月示例寺巡检",
-    tools: ["检索报告", "查询风险状态"],
-    answerTemplate: "共 {total} 处风险，施工反馈完成 {reportedDone} 处，验收关闭 {closed} 处，尚未关闭 {open} 处。",
-    facts: ["total", "reportedDone", "closed", "open"], voice: "AI语音1",
-  },
-  {
-    intentId: "open_history_scene", utterance: "打开当时的高斯场景",
-    tools: ["检索报告", "打开场景"],
-    answerTemplate: "已定位历史场景 {sceneId} 与书签 {bookmark}；场景不存在时仅说明预览不可用，保留文字结果。",
-    facts: ["sceneId", "bookmark"], voice: "AI语音2",
-  },
-  {
-    intentId: "compare_columns", utterance: "比较四根木柱",
-    tools: ["读取图像", "视觉分析", "结果汇总"],
-    answerTemplate: "当前 Z04 视角可见较明显的表面缺损和孔洞状疑点，建议优先复核 Z04 下部测区。图像可以提示外观异常，不能确认内部是否存在空洞。",
-    facts: ["componentId", "imageIds"], voice: "AI语音3",
-  },
-  {
-    intentId: "anomaly_summary", utterance: "汇总异常并生成任务",
-    tools: ["读取异常记录", "建立补采检查清单"],
-    answerTemplate: "建议核对材种来源与标定范围，补充有来源的参考样本，检查数据质量，并验证候选模型。",
-    facts: ["anomalyId", "nextActions"], voice: "AI语音4",
-  },
-  {
-    intentId: "clean_dataset", utterance: "启动清洗并列出待审核",
-    tools: ["执行清洗 job", "返回审核清单"],
-    answerTemplate: "清洗完成，待审核记录已列出，数据集已按物理样本分组。",
-    facts: ["cleanSteps", "reviewCount"], voice: "AI语音5",
-  },
-  {
-    intentId: "compare_models", utterance: "对比新旧模型",
-    tools: ["读取同一测试集预测", "计算指标"],
-    answerTemplate: "验证对照已打开。该归档版本通过离线验证，可以进入设备部署检查。",
-    facts: ["metrics", "acceptance"], voice: "AI语音6",
-  },
-  {
-    intentId: "run_fusion", utterance: "分析本批次并融合结果",
-    tools: ["启动预置分析任务", "生成 fusion_record"],
-    answerTemplate: "分析完成，图像标注与雷达结果已关联到 Z04 测区，融合视图已生成。",
-    facts: ["fusionRecordId", "outputs"], voice: "AI语音7",
-  },
-  {
-    intentId: "draft_workorder", utterance: "生成复核工单",
-    tools: ["按模板建草稿"],
-    answerTemplate: "工单草稿已生成。Z04 下部已列为重点复核项，检测图像和雷达分析已附上，处理建议待专业审核。",
-    facts: ["orderId", "priority", "attachments"], voice: "AI语音8",
-  },
-  {
-    intentId: "unresolved_followup", utterance: "还有几个没处理完",
-    tools: ["查未关闭项及下一步"],
-    answerTemplate: "尚未关闭 {open} 处：{items}",
-    facts: ["open", "items"], voice: "AI语音9",
-  },
-  {
-    intentId: "deployment_check", utterance: "检查是否可以部署",
-    tools: ["查审核与兼容条件"],
-    answerTemplate: "审核 {reviewState}；兼容性检查 {compatPass} 项通过、{compatBlock} 项阻断。",
-    facts: ["reviewState", "compatPass", "compatBlock"], voice: "AI语音10",
-  },
-];
-
 /** 小木工具卡片（PRD 4.1：内容是实际调用状态） */
-export const XIAOMU_TOOLS = [
-  { key: "search", label: "查询资料", detail: "本地 TF-IDF 索引 idx-12", state: "就绪" },
-  { key: "order", label: "读取工单状态", detail: "SH-2026-0901 · 处理中", state: "就绪" },
-  { key: "scene", label: "打开场景", detail: "scene-SH-0901 · 已授权", state: "就绪" },
-  { key: "robot", label: "读取巡检任务", detail: "MSN-2026-0911-02 · 执行中", state: "就绪" },
-  { key: "train", label: "训练演示任务", detail: "EXP-2026-0911 · 模拟标志", state: "模拟" },
-  { key: "fusion", label: "启动融合分析", detail: "FUSION-03 · 规则融合", state: "就绪" },
-];
-
 /* ------------------------------------------------------------------ *
  * 18. 总览待办与事件
  * ------------------------------------------------------------------ */

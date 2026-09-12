@@ -20,7 +20,7 @@
 
 import { clockStamp } from "../lib";
 import { CURRENT_RISKS, KNOWLEDGE_META, WAYPOINTS } from "../seed/scenario";
-import { evaluateFacts, factToneOf, type FactContext, type LiveSnapshot } from "./facts";
+import { evaluateFacts, factToneOf, type FactContext, type FactRow, type LiveSnapshot } from "./facts";
 import {
   FALLBACK_HINT,
   FALLBACK_TEXT,
@@ -108,6 +108,23 @@ function pickTemplate(intent: Intent): string {
   if (alternatives.length === 0) return intent.response.text;
   const pool = [intent.response.text, ...alternatives];
   return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/**
+ * 组装一条意图回复 —— **文字入口与语音入口共用这一个入口**（评审 §3.8）。
+ *
+ * 面板原来自己有一张 25 个键的事实表和一套 `renderAnswer`，与 agent 的
+ * `facts.ts`（99 个键）各算各的：同一个问题在两个入口能问出不同数字。
+ * 现在两边都从这里拿模板与事实，模板占位符取不到值时返回 `missing`，
+ * 由调用方降级成「没听懂」，不猜数字（PRD 4.2）。
+ */
+export function composeReply(
+  intent: Intent,
+  entities: EntityBag,
+  runtime: Runtime,
+): { text: string; rows: FactRow[]; missing: string[] } {
+  const factSet = evaluateFacts(intent, factContext(runtime, entities, pickTemplate(intent)));
+  return { text: factSet.text, rows: factSet.rows, missing: factSet.missing };
 }
 
 function botTurnBase(patch: Partial<BotTurn> & { text: string }): BotTurn {

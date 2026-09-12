@@ -14,7 +14,6 @@
  * 两者是同一套东西，这里以方案的大写枚举为准（IntentType），中文名见 TYPE_LABEL。
  */
 
-import { XIAOMU_INTENTS } from "../seed/scenario";
 import { indexBy } from "./lang";
 
 /** 语义路由的五种出口（技术方案 §18） */
@@ -798,20 +797,13 @@ export function intentById(id: string | null | undefined): Intent | null {
 }
 
 /**
- * seed 里的语音包标签（PRD 4.2 的 voice 列）。
- * 老意图复用 seed 已有的「AI语音1..10」，新意图沿用同一条语音包命名规则。
- * 这样界面上显示的语音包名仍然只有一个来源（seed/scenario.ts）。
+ * 语音包标签（PRD 4.2 的 voice 列）。
+ *
+ * 原来这里要去 seed 的 `XIAOMU_INTENTS` 里查是否命中、命中就用它的 `voice`，
+ * 没命中再按「seed 条数 + 序号」编一个 —— 那是**两套目录之间的桥**。
+ * 目录合并之后只剩 `INTENTS` 一份，序号直接由它自己的顺序给出。
  */
 export function voicePackOf(intentId: string): string {
-  const seedIndex = XIAOMU_INTENTS.findIndex((item) => item.intentId === intentId);
-  if (seedIndex >= 0) return XIAOMU_INTENTS[seedIndex].voice;
-  const fallbackIndex = INTENTS.filter((item) => !XIAOMU_INTENTS.some((s) => s.intentId === item.id)).findIndex(
-    (item) => item.id === intentId,
-  );
-  return `AI语音${XIAOMU_INTENTS.length + fallbackIndex + 1}`;
-}
-
-/** 与 seed 意图目录的对应关系，用于向 PRD 4.2 的 14 条对照（演示控制台与自检用） */
-export function seedIntentOf(intentId: string) {
-  return XIAOMU_INTENTS.find((item) => item.intentId === intentId) ?? null;
+  const index = INTENTS.findIndex((item) => item.id === intentId);
+  return index >= 0 ? `AI语音${index + 1}` : "AI语音—";
 }

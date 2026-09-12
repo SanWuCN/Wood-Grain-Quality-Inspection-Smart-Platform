@@ -3,7 +3,7 @@
  *
  * PRD 2.2：小木作为右侧可展开面板，另提供大屏对话模式。
  * PRD 4.1：不部署大模型的主链路 —— 意图命中本地工具目录。
- * PRD 4.2：意图目录（seed 的 XIAOMU_INTENTS）。
+ * PRD 4.2：意图目录（agent/intents.ts 的 INTENTS，文字与语音共用这一份）。
  * PRD 5.1：资料与业务状态分开读取 —— 回答里「状态」来自结构化数据，
  *          「解释」来自资料检索，两类来源在界面上分开显示。
  * PRD 15：工具过程用短步骤卡片（动作 / 对象 / 状态 / 结果入口），不显示虚构长篇推理。
@@ -20,33 +20,49 @@ import { Icon } from "./icons";
 import { SourceTag, StateBlock, StatusChip } from "./ui";
 import AgentHost from "./agent/AgentHost";
 import { openAgent } from "./agent";
-import { INTENT_COUNT } from "./agent/intents";
+import { INTENTS, INTENT_COUNT } from "./agent/intents";
+import type { Intent } from "./agent/intents";
 import {
-  ANOMALY_EVENTS,
-  CLEAN_STEPS,
-  COMPONENTS,
-  CURRENT_RISKS,
-  DATASET,
-  DRAFT_ORDER,
-  EXPERIMENT,
-  FUSION_RECORD,
-  HISTORY_RISKS,
-  HISTORY_STATS,
-  HOTSPOTS,
   KNOWLEDGE_DOCS,
   KNOWLEDGE_META,
-  REVISIT_PLAN,
-  UPDATE_PACKAGE,
-  XIAOMU_INTENTS,
-  XIAOMU_TOOLS,
 } from "./seed/scenario";
-import { clockStamp, fmtNum, runEvaluation } from "./lib";
+import { clockStamp } from "./lib";
 import type { XiaomuIntent } from "./seed/scenario";
+
+/**
+ * 小木的意图目录只有**一套**：`agent/intents.ts` 的 `INTENTS`。
+ *
+ * 评审 §3.8：「所有输入进入同一个 SmallWoodService」—— 执行器已经统一，
+ * 目录原来还是两套（本页面自己的 `XIAOMU_INTENTS` 10 条、agent 28 条），
+ * 同一个问题在文字入口和语音入口能问出不同结果。
+ * 现在文字入口把 agent 的意图**映射**成本面板的渲染形状（下面 `toPanelIntent`），
+ * 数据源只剩 agent 那一份。
+ */
+function toPanelIntent(source: Intent): XiaomuIntent {
+  /*
+   * 工具芯片显示 agent 工具自己的 label（`TOOL_BY_NAME`），不是目录里的文案。
+   * 意图没有工具（纯查询）时不显示芯片。
+   */
+  const toolNames = source.action
+    ? [source.action.tool]
+    : (source.plan?.steps.map((step) => step.tool) ?? []);
+  return {
+    intentId: source.id,
+    // 快捷按钮与「示例说法」用 agent 目录的第一条示例
+    utterance: source.examples[0] ?? source.name,
+    tools: toolNames.map((name) => TOOL_BY_NAME[name]?.label ?? name),
+    answerTemplate: source.response.text,
+    facts: source.response.facts,
+    // 有预录音频就放录音，否则走浏览器合成 —— 这是操作员能感知到的差别
+    voice: source.response.audio ? "预录音频" : "合成语音",
+  };
+}
+
 // 经过校准的意图匹配器与项目槽位：评审 F05 要求「先解析项目与时间，再检索；
 // 无匹配拒绝执行」，所以匹配不再由本页面自己按字符重叠猜，统一走 agent/matcher。
 import { PROJECT_SLOT, understand } from "./agent/matcher";
 import { TOOL_BY_NAME, resolveArgs } from "./agent/tools";
-import { runTool, type Runtime } from "./agent/executor";
+import { composeReply, runTool, type Runtime } from "./agent/executor";
 
 /** PRD 4.2：意图目录没有匹配项时的固定回复，不调用大模型猜测 */
 const NO_HIT_REPLY = "可查询巡检资料、查看构件或启动当前业务流程";
@@ -56,6 +72,8 @@ interface BotTurn {
   id: number;
   at: string;
   intent: XiaomuIntent;
+  /** 回复正文。由 agent 的 composeReply 组装，与语音控制台同一份（评审 §3.8） */
+  reply: string;
   /** 工具步骤的推进状态 */
   steps: { label: string; state: "done" | "running" | "wait" }[];
   /** 结构化业务状态（facts 拼接结果） */
@@ -81,80 +99,9 @@ const nextTurnId = () => (turnSeq += 1);
  * 全部取种子与 lib 的实时计算结果：意图模板里出现过的键都必须在这里登记，
  * 否则回答会渲染成「未登记」。
  */
-function factsFor(intent: XiaomuIntent): { k: string; v: string }[] {
-  /** 本轮重点构件：风险清单的首个构件 */
-  const focusComponentId = CURRENT_RISKS[0]?.componentId ?? COMPONENTS[0].id;
-  /** 「当时」指历史：按构件取五月的风险记录，用于关联历史 scene_id 与柱底书签（PRD 5.3） */
-  const historyRisk =
-    HISTORY_RISKS.find((item) => item.title.startsWith(focusComponentId)) ?? HISTORY_RISKS[0];
-  const openRisks = HISTORY_RISKS.filter((item) => !item.closed);
-  const anomaly = ANOMALY_EVENTS[0];
-  /**
-   * 下一步动作。
-   *
-   * 原来取「四项检查」里那几条待复核 / 超限 / 不适用记录的结论，但那张检查单
-   * 已经改造成采集前的设备启动检查，事后排查改成按事件记录了。
-   * 现在从异常事件本身取：已结案用结论；未结案则列出没通过的那几条证据 —— 
-   * 「哪一条还没过」就是下一步要处理的事。
-   */
-  const pendingChecks = anomaly
-    ? [...anomaly.deviceEvidence, ...anomaly.modelEvidence].filter((row) =>
-        ["待复核", "超限", "不适用", "部分接收"].includes(row.result),
-      )
-    : [];
-  const evaluation = runEvaluation(EXPERIMENT);
-  const reviewPassed = DATASET.reviewAssign.filter((item) => item.state === "已通过").length;
-  const compatPass = UPDATE_PACKAGE.compatibility.filter((item) => item.pass).length;
-  const compatBlock = UPDATE_PACKAGE.compatibility.filter((item) => !item.pass).length;
-  const acceptanceFailed = EXPERIMENT.acceptance.filter((item) => !item.pass);
-  const cleanInput = CLEAN_STEPS[0]?.input ?? 0;
-  const cleanKept = CLEAN_STEPS[CLEAN_STEPS.length - 1]?.kept ?? 0;
-  const reviewCount = CLEAN_STEPS.reduce((sum, step) => sum + step.review, 0);
-
-  const table: Record<string, string> = {
-    // 历史汇总与未关闭项（PRD 5.3 / A01 / A02）
-    total: String(HISTORY_STATS.total),
-    reportedDone: String(HISTORY_STATS.reportedDone),
-    closed: String(HISTORY_STATS.closed),
-    open: String(HISTORY_STATS.open),
-    items: openRisks.map((item) => `${item.id} ${item.next}`).join("；"),
-    // 本次查询到的对象
-    componentId: focusComponentId,
-    imageIds: HOTSPOTS.map((item) => item.image.name).join(" / "),
-    sceneId: historyRisk.sceneId,
-    bookmark: historyRisk.bookmark,
-    // 异常排查
-    anomalyId: anomaly.id,
-    nextActions: anomaly.conclusion ?? pendingChecks.map((row) => row.text).join("；"),
-    // 清洗与数据集
-    cleanSteps: `${CLEAN_STEPS.length} 步（输入 ${cleanInput} → 保留 ${cleanKept}）`,
-    reviewCount: `${reviewCount} 条`,
-    reviewState: `${reviewPassed}/${DATASET.reviewAssign.length} 已通过`,
-    // 训练验证与更新交付
-    metrics: `精确率 ${fmtNum(evaluation.overall.old.precision)} → ${fmtNum(evaluation.overall.next.precision)}；召回率 ${fmtNum(evaluation.overall.old.recall)} → ${fmtNum(evaluation.overall.next.recall)}；F1 ${fmtNum(evaluation.overall.old.f1)} → ${fmtNum(evaluation.overall.next.f1)}`,
-    acceptance: `${EXPERIMENT.acceptance.length - acceptanceFailed.length}/${EXPERIMENT.acceptance.length} 项通过${acceptanceFailed.length ? `（未通过：${acceptanceFailed.map((item) => item.label).join("、")}）` : ""}`,
-    compatPass: String(compatPass),
-    compatBlock: String(compatBlock),
-    // 融合结果与复核工单草稿
-    fusionRecordId: `${FUSION_RECORD.recordId}（规则 ${FUSION_RECORD.ruleVersion}）`,
-    outputs: FUSION_RECORD.outputs.map((item) => `${item.riskId} ${item.priority}`).join("；"),
-    orderId: DRAFT_ORDER.id,
-    priority: DRAFT_ORDER.level,
-    attachments: `${DRAFT_ORDER.attachments.length} 项：${DRAFT_ORDER.attachments.map((item) => item.name).join("、")}`,
-    // 复巡计划
-    planId: REVISIT_PLAN.id,
-    status: REVISIT_PLAN.dispatched ? "已下发" : "未下发",
-  };
-  return intent.facts.map((key) => ({ k: key, v: table[key] ?? "—" }));
-}
+/** 事实表：值全部来自种子，键由调用方给出（agent 意图的 response.facts） */
 
 /** 把 {key} 占位符替换成事实值；缺值时显式说明，不编造 */
-function renderAnswer(intent: XiaomuIntent, facts: { k: string; v: string }[]) {
-  return intent.answerTemplate.replace(/\{(\w+)\}/g, (_, key: string) => {
-    const hit = facts.find((item) => item.k === key);
-    return hit ? hit.v : "未登记";
-  });
-}
 
 /** 资料检索：本地关键词命中（PRD 5.2 首版检索），返回 Top K 片段位置 */
 function searchDocs(text: string, topK = KNOWLEDGE_META.topK) {
@@ -198,11 +145,7 @@ export default function SmallWoodPanel() {
   const timers = useRef<number[]>([]);
 
   const toolLabel = useCallback(
-    (key: string) => XIAOMU_TOOLS.find((tool) => tool.key === key)?.label ?? key,
-    [],
-  );
-  const toolState = useCallback(
-    (key: string) => XIAOMU_TOOLS.find((tool) => tool.key === key)?.state ?? "就绪",
+    (key: string) => key,
     [],
   );
 
@@ -216,7 +159,7 @@ export default function SmallWoodPanel() {
    *
    * 现在换成 agent/matcher.ts 里那个经过校准的匹配器：
    *   - 白名单意图 + bigram 覆盖率 × 单条示例余弦，低置信一律回 Fallback
-   *   - 返回的 intent.id 与 XIAOMU_INTENTS 的 intentId 是同一套命名，直接对上
+   *   - 返回的 intent.id 与 INTENTS 的 id 是同一套命名，直接对上
    *   - 项目槽位单独判一次：问的是别的寺庙就直接说没有，不套示例寺的数字
    */
   const decide = useCallback((text: string) => {
@@ -231,11 +174,13 @@ export default function SmallWoodPanel() {
     if (match.level === "fallback" || !match.intent) {
       return { kind: "no-hit" as const, score: match.confidence };
     }
-    const intent = XIAOMU_INTENTS.find((item) => item.intentId === match.intent?.id) ?? null;
+    // 目录只有 agent 那一份：命中即映射成本面板的渲染形状，不再有第二张白名单
+    const source = INTENTS.find((item) => item.id === match.intent?.id) ?? null;
+    const intent = source ? toPanelIntent(source) : null;
     // 匹配器认得、但这个面板没有对应话术的意图，同样按「没听懂」处理，不硬凑。
     // 命中时把整份 MatchResult 一起带出去：工具执行要用它的 entities 解槽位。
-    return intent
-      ? { kind: "hit" as const, intent, match, action: match.intent.action }
+    return intent && source
+      ? { kind: "hit" as const, intent, source, match, action: match.intent.action }
       : { kind: "no-hit" as const, score: match.confidence };
   }, []);
 
@@ -290,6 +235,7 @@ export default function SmallWoodPanel() {
               voice: "—",
             },
             // 没命中就不执行任何工具：步骤列表留空，不假装查过
+            reply,
             steps: [],
             facts: [],
             sources: decision.kind === "no-hit" ? searchDocs(cleaned) : [],
@@ -299,7 +245,15 @@ export default function SmallWoodPanel() {
       }
 
       const intent = decision.intent;
-      const facts = factsFor(intent);
+      /*
+       * 事实与回复文本由 agent 组装（`composeReply`），与语音控制台同一份 ——
+       * 面板原来自己有一张 25 个键的事实表，agent 有 99 个，同一个问题两个入口
+       * 能问出不同数字。占位符取不到值时降级成「没听懂」，不猜数字（PRD 4.2）。
+       */
+      const reply = decision.source
+        ? composeReply(decision.source, decision.match.entities, runtime)
+        : { text: NO_HIT_REPLY, rows: [], missing: [] };
+      const facts = reply.missing.length ? [] : reply.rows.map((row) => ({ k: row.key, v: row.value }));
       const botId = nextTurnId();
       /*
        * 有真实工具时，步骤就写**那个工具**，不再放意图目录里的文案标签。
@@ -324,6 +278,7 @@ export default function SmallWoodPanel() {
           id: botId,
           at: clockStamp(),
           intent,
+          reply: facts.length ? reply.text : NO_HIT_REPLY,
           steps,
           facts,
           sources: searchDocs(intent.utterance),
@@ -373,10 +328,7 @@ export default function SmallWoodPanel() {
             turn.kind === "bot" && turn.id === botId
               ? {
                   ...turn,
-                  intent: {
-                    ...turn.intent,
-                    answerTemplate: `「${tool.label}」属于需要二次确认的动作（风险等级 ${tool.risk}/4），已在语音控制台打开待确认；确认之前不会执行任何动作。`,
-                  },
+                  reply: `「${tool.label}」属于需要二次确认的动作（风险等级 ${tool.risk}/4），已在语音控制台打开待确认；确认之前不会执行任何动作。`,
                 }
               : turn,
           ),
@@ -395,9 +347,7 @@ export default function SmallWoodPanel() {
                     steps: turn.steps.map((step) => ({ ...step, state: "done" as const })),
                     // 失败时把工具的话说回来 —— 步骤状态只有 running/done/wait，
                     // 绿色勾配上「没执行成功」的原文比一个假勾诚实
-                    intent: outcome.ok
-                      ? turn.intent
-                      : { ...turn.intent, answerTemplate: `没有执行成功：${outcome.summary}` },
+                    reply: outcome.ok ? turn.reply : `没有执行成功：${outcome.summary}`,
                   }
                 : turn,
             ),
@@ -425,7 +375,8 @@ export default function SmallWoodPanel() {
     [],
   );
 
-  const quick = useMemo(() => XIAOMU_INTENTS.slice(0, 4), []);
+  /** 快捷问法取自 agent 目录的前四条，不再是另一份手写清单 */
+  const quick = useMemo(() => INTENTS.slice(0, 4).map(toPanelIntent), []);
 
   return (
     <aside className="xm" aria-label="小木助手">
@@ -437,7 +388,7 @@ export default function SmallWoodPanel() {
           <span>
             <b>小木助手</b>
             <small>
-              意图目录 {INTENT_COUNT} 条 · 工具 {XIAOMU_TOOLS.length} 个 · 不调用大模型
+              意图目录 {INTENT_COUNT} 条 · 工具 {Object.keys(TOOL_BY_NAME).length} 个 · 不调用大模型
             </small>
           </span>
         </div>
@@ -488,7 +439,7 @@ export default function SmallWoodPanel() {
                   <span key={key} className="xm__tool">
                     <Icon name="sliders" />
                     {toolLabel(key)}
-                    <em>{toolState(key)}</em>
+                    <em>就绪</em>
                   </span>
                 ))}
                 {turn.intent.voice !== "—" ? (
@@ -505,7 +456,7 @@ export default function SmallWoodPanel() {
                 ))}
               </ol>
 
-              <p className="xm__reply">{renderAnswer(turn.intent, turn.facts)}</p>
+              <p className="xm__reply">{turn.reply}</p>
 
               {turn.facts.length ? (
                 <div className="xm__facts">
