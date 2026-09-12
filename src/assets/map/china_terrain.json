@@ -1,0 +1,28 @@
+{
+  "key": "china",
+  "source": "Mapzen Terrain Tiles (terrarium) via AWS Open Data",
+  "zoom": 5,
+  "width": 1402,
+  "height": 1362,
+  "bounds": {
+    "west": 73.502355,
+    "east": 135.09567,
+    "south": 3.823583,
+    "north": 53.563269
+  },
+  "elevation": {
+    "rawMin": -9788,
+    "rawMax": 7188,
+    "lowCut": -150,
+    "highCut": 6800
+  },
+  "tiles": {
+    "total": 42,
+    "ok": 42,
+    "minX": 22,
+    "maxX": 28,
+    "minY": 10,
+    "maxY": 15
+  },
+  "generatedAt": "2026-09-11T17:49:23.444Z"
+}

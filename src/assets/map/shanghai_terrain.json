@@ -1,0 +1,28 @@
+{
+  "key": "shanghai",
+  "source": "Mapzen Terrain Tiles (terrarium) via AWS Open Data",
+  "zoom": 10,
+  "width": 922,
+  "height": 1020,
+  "bounds": {
+    "west": 120.856804,
+    "east": 122.122684,
+    "south": 30.675593,
+    "north": 31.872716
+  },
+  "elevation": {
+    "rawMin": -95,
+    "rawMax": 104,
+    "lowCut": -5,
+    "highCut": 104
+  },
+  "tiles": {
+    "total": 25,
+    "ok": 25,
+    "minX": 855,
+    "maxX": 859,
+    "minY": 416,
+    "maxY": 420
+  },
+  "generatedAt": "2026-09-11T17:10:42.896Z"
+}
