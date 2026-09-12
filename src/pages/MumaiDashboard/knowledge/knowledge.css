@@ -55,10 +55,19 @@
   min-width: 0;
 }
 
-/* 中列压到 496px：六步 208 + 日志 96 + 标题与内边距；超出的部分各自内部滚动 */
+/*
+   中列与左右列给一个**下限**，不再是硬高度。
+
+   原来写的是 `height: 466px`：v1.0 的 11–13px 字号下刚好装得下，
+   字号按 v1.1 提到 16px 正文 / 13px 辅助之后，六步流水线加终端日志的内容
+   超过 466px，而 `overflow: hidden` 会把超出的部分直接吃掉（实测少 240px）。
+   改成 min-height 之后内容撑开、由 `.kb-body` 这一条滚动区统一滚，
+   与评审 U01「知识库上半屏右侧大面积空置、重要内容被挤到下方」的方向一致 ——
+   本轮的完整重排（检索工作区）留到下一轮，这里先把「看不见」变成「看得到」。
+*/
 .kb-main > .tech-panel,
 .kb-main > .kb-run {
-  height: 466px;
+  min-height: 466px;
   min-width: 0;
   overflow: hidden;
 }
@@ -120,7 +129,7 @@
 }
 
 .kb-side > .tech-panel {
-  height: 322px;
+  min-height: 322px;
   min-width: 0;
   overflow: hidden;
 }
@@ -1124,7 +1133,7 @@
 }
 
 .kb-bottom > .tech-panel {
-  height: 150px;
+  min-height: 150px;
   min-width: 0;
   overflow: hidden;
 }
@@ -1250,15 +1259,15 @@
 @media (max-height: 940px) {
   .kb-main > .tech-panel,
   .kb-main > .kb-run {
-    height: 428px;
+    min-height: 428px;
   }
 
   .kb-side > .tech-panel {
-    height: 296px;
+    min-height: 296px;
   }
 
   .kb-bottom > .tech-panel {
-    height: 138px;
+    min-height: 138px;
   }
 
   .kb-steps {
@@ -1273,11 +1282,11 @@
 @media (max-height: 780px) {
   .kb-main > .tech-panel,
   .kb-main > .kb-run {
-    height: 392px;
+    min-height: 392px;
   }
 
   .kb-side > .tech-panel {
-    height: 264px;
+    min-height: 264px;
   }
 
   .kb-chart {
@@ -1293,7 +1302,7 @@
   }
 
   .kb-bottom > .tech-panel {
-    height: 128px;
+    min-height: 128px;
   }
 
   .kb-steps {

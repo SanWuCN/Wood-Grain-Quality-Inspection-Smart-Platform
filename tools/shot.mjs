@@ -411,7 +411,53 @@ const probe = await evaluate(`(() => {
   });
   const c = document.querySelector('canvas');
   out.push('canvas ' + (c ? [c.clientWidth, c.clientHeight].join('x') : 'none'));
-  out.push('gl: ' + JSON.stringify(window.__gl));
+
+  /*
+   * 溢出与裁切探针。
+   *
+   * 放大字号之后最需要回答的问题是「有没有内容被切掉」—— 光看截图很难发现
+   * 一个 322px 面板里第 6 行被 overflow:hidden 吃掉。所以分两类报：
+   *   clipped = overflow:hidden 且 scrollHeight 明显大于 clientHeight（内容**看不见**，是缺陷）
+   *   scrolled = overflow:auto/scroll 且可滚动（内部滚动，多数是设计如此，仅作参考）
+   * 文本内容超过 2px 才算，避免亚像素抖动误报。
+   */
+  const clipped = [], scrolled = [];
+  // SVG 内部图形（地图标注、图表描边）天生会画到容器外，不算布局缺陷，跳过
+  const SVG_TAGS = new Set(['svg', 'path', 'g', 'text', 'circle', 'line', 'rect', 'polygon', 'polyline', 'defs', 'use']);
+  /*
+   * 外壳容器不参与判定：.page / .ov 都是 position:absolute; inset:0，
+   * 它们的 scrollHeight 会把绝对定位的地图画布也算进去，于是外壳永远「溢出」，
+   * 但用户什么都看不到被切。真正有意义的是面板与滚动区，那才是会吃掉内容的地方。
+   */
+  const SKIP_CLASSES = new Set(['appshell', 'appshell__stage']);
+  for (const el of document.querySelectorAll('body *')) {
+    if (SVG_TAGS.has(el.tagName.toLowerCase())) continue;
+    if (typeof el.className === 'string' && SKIP_CLASSES.has(el.className.split(' ')[0])) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8) continue;
+    const cs = getComputedStyle(el);
+    const dy = el.scrollHeight - el.clientHeight;
+    const dx = el.scrollWidth - el.clientWidth;
+    if (dy <= 2 && dx <= 2) continue;
+    const tag = (el.className && typeof el.className === 'string' ? el.className.split(' ')[0] : el.tagName);
+    // 单行省略号是**有意**的截断：横向溢出正是它要的效果，不算缺陷
+    const ellipsis = cs.textOverflow === 'ellipsis' && cs.whiteSpace === 'nowrap' && dy <= 2;
+    if (ellipsis) continue;
+    const entry = tag + '(y+' + dy + ',x+' + dx + ')';
+    /*
+     * 按**轴**判断，不按元素整体判断。
+     * 「overflow:hidden 打底 + overflow-y:auto」是很常见的写法（dashboard.css 的
+     * .tech-panel__body 加各页的一行覆盖），这时 overflowX 仍然是 hidden，
+     * 但纵向内容是可以滚出来的 —— 按元素整体判会把它误报成「内容被吃掉」。
+     */
+    const lost = dy > 2 ? cs.overflowY === 'hidden' : cs.overflowX === 'hidden';
+    if (lost) clipped.push(entry);
+    else scrolled.push(entry);
+  }
+  out.push('clipped: ' + (clipped.length ? clipped.length + ' -> ' + clipped.slice(0, 8).join(' ') : 'none'));
+  out.push('scrolled: ' + (scrolled.length ? scrolled.length + ' -> ' + scrolled.slice(0, 8).join(' ') : 'none'));
+  out.push('overflow: ' + (clipped.length ? 'clipped' : scrolled.length ? 'scrolled' : 'none'));
+
   // 最终落在哪个路由：没有会话时 RequireLogin 会把人送到 #/login，
   // 截图看起来「有字有边框」、探针也照样出数，只有这一行能一眼看出截错了页
   out.push('hash: ' + window.location.hash);

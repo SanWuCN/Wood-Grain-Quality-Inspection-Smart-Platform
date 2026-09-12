@@ -426,7 +426,11 @@ function TodoEventPanel() {
         {todos.map((item) => (
           <li key={item.id} className={`is-${item.level}`}>
             <span className="ov-todo__text">
-              {item.id} · {item.text}
+              {/* 待办正文单独包一层：flex 里的裸文本节点是匿名 flex item，
+                  给不了 min-width/省略号，窄屏（1366）下会被硬切掉半行 */}
+              <b>
+                {item.id} · {item.text}
+              </b>
               <i>
                 {item.owner} · {item.due.slice(5)}
               </i>

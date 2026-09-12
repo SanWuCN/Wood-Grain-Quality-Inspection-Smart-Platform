@@ -1522,6 +1522,15 @@
   white-space: nowrap;
 }
 
+/* 正文让它自己省略，右侧的负责人与日期始终看得见 */
+.ov-todo__text > b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+}
+
 .ov-todo__text i {
   flex: 0 0 auto;
   margin-left: auto;
@@ -1639,6 +1648,33 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+/*
+   滚动列里的面板必须按内容高度排，不能参与压缩。
+
+   `.tech-panel` 带 `min-height: 0`（dashboard.css 为了让它能在固定高度的
+   区域里被压扁），于是放进 flex 列里时它会被压到比内容还矮，
+   面板主体的 `overflow: hidden` 再把多出来的部分**悄悄吃掉** ——
+   实测工单详情的内容有 610px 高，却被压进 155px 的 body 里，
+   界面上看不出任何异常，只是少了几行。
+
+   改法不是让每个面板自己滚动（那会变成一层套一层的滚动条），
+   而是让它们撑开、由外层这一条滚动区统一滚 —— v1.1 §4.3 要的
+   「每页默认一个主内容滚动区」正是这个意思。
+
+   建图侧栏、孪生侧栏、知识库三列用的是同一套结构，所以一并处理。
+*/
+.orders-main > .tech-panel,
+.orders-main > .orders-two > .tech-panel,
+.map-side > .tech-panel,
+.twin-side > .tech-panel,
+.kb-run > .tech-panel,
+.kb-side > .tech-panel,
+.kb-main > .tech-panel,
+.kb-main > .kb-run {
+  flex: 0 0 auto;
+  min-height: auto;
 }
 
 .orders-two {
