@@ -11,10 +11,12 @@
  */
 
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router";
 import { useMumai } from "../context";
 import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
 import { Btn, PermNote, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
+import { Icon } from "../icons";
 import RvizView from "./RvizView";
 import {
   DEVICES,
@@ -22,6 +24,7 @@ import {
   MAP_VERSIONS,
   WAYPOINTS,
 } from "../seed/scenario";
+import { CHINA_SITES, SHANGHAI_SITES, waypointsForSite, siteRegion } from "../seed/sites";
 
 /**
  * RViz 画面配置。
@@ -51,6 +54,33 @@ export default function Mapping() {
   const [versionId, setVersionId] = useState(MAP_VERSIONS[0]?.id ?? "");
   const [compare, setCompare] = useState(true);
   const [showLaser, setShowLaser] = useState(true);
+
+  /**
+   * `?site=` —— 从地图点位点进来时定位到这一轮要看的航点。
+   *
+   * 地图上的「有任务的点位」（如示例寺）点击后跳到 `/mapping?site=sh`，
+   * 但本页原先完全没读这个参数，跳过来和直接打开没有区别 ——
+   * 用户看不到「我点的是哪个点位、它的航点在哪」。
+   *
+   * 两种地图态（全国 / 上海）里同 id 的点位是两条记录，所以要合并查找。
+   */
+  const [params, setParams] = useSearchParams();
+  const siteId = params.get("site");
+
+  const site = useMemo(() => {
+    if (!siteId) return null;
+    return [...CHINA_SITES, ...SHANGHAI_SITES].find((item) => item.id === siteId) ?? null;
+  }, [siteId]);
+
+  /** 该点位这一轮的构件观察点；没有任务时是空数组，不编数据顶上 */
+  const highlighted = useMemo(() => (site ? waypointsForSite(site) : []), [site]);
+  const highlightedIds = useMemo(() => new Set(highlighted.map((item) => item.id)), [highlighted]);
+
+  const clearSite = () => {
+    const next = new URLSearchParams(params);
+    next.delete("site");
+    setParams(next, { replace: true });
+  };
 
   const version = useMemo(
     () => MAP_VERSIONS.find((item) => item.id === versionId) ?? MAP_VERSIONS[0],
@@ -161,7 +191,35 @@ export default function Mapping() {
             </>
           }
           className="map-view">
-          <RvizView stream={RVIZ_STREAM} showActualPath={compare} showLaser={showLaser} />
+          {/*
+            来自地图点位的上下文条。放在图上方而不是列表里 ——
+            用户是从地图点进来的，「我现在看的是哪个点位」要在第一眼的位置。
+            没有 `?site=` 时不占位置。
+          */}
+          {site ? (
+            <div className="map-site">
+              <Icon name="pin" />
+              <b>{site.name}</b>
+              <span className="map-site__region">{siteRegion(site)}</span>
+              {highlighted.length > 0 ? (
+                <span className="map-site__hint">
+                  本轮 {highlighted.length} 个构件观察点已标出：
+                  {highlighted.map((item) => item.id).join(" / ")}
+                </span>
+              ) : (
+                <span className="map-site__hint">该点位没有本轮巡检航点</span>
+              )}
+              <button type="button" className="map-site__clear" onClick={clearSite}>
+                清除
+              </button>
+            </div>
+          ) : null}
+          <RvizView
+            stream={RVIZ_STREAM}
+            showActualPath={compare}
+            showLaser={showLaser}
+            highlightIds={[...highlightedIds]}
+          />
         </Panel>
 
         <div className="map-side">
@@ -231,17 +289,25 @@ export default function Mapping() {
               </div>
             </dl>
 
-            <h4 className="sub">点位序列</h4>
+            <h4 className="sub">
+              点位序列
+              {highlighted.length > 0 ? (
+                <span className="muted">{site?.name} · {highlighted.length} 个</span>
+              ) : null}
+            </h4>
             <ol className="waypoint-list">
-              {WAYPOINTS.map((point) => (
-                <li
-                  key={point.id}
-                  className={`is-${point.state === "当前目标" ? "current" : point.state === "已到达" ? "done" : "todo"}`}>
-                  <b>{point.id}</b>
-                  <span>{point.label}</span>
-                  <em>{point.state}</em>
-                </li>
-              ))}
+              {WAYPOINTS.map((point) => {
+                const isHighlighted = highlightedIds.has(point.id);
+                return (
+                  <li
+                    key={point.id}
+                    className={`is-${point.state === "当前目标" ? "current" : point.state === "已到达" ? "done" : "todo"}${isHighlighted ? " is-highlighted" : ""}`}>
+                    <b>{point.id}</b>
+                    <span>{point.label}</span>
+                    <em>{isHighlighted ? "本次点位" : point.state}</em>
+                  </li>
+                );
+              })}
             </ol>
 
             <h4 className="sub">执行步骤</h4>

@@ -23,7 +23,7 @@
  */
 
 import { HISTORIC_ORDERS, MISSION, WORK_ORDER } from "./scenario";
-import type { Order } from "./types";
+import type { Order, Waypoint } from "./types";
 
 /** 点位状态（地图点位图例与颜色映射的唯一来源，见 `map/status.ts`） */
 export type SiteStatus = "collected" | "inspected" | "risk" | "workorder";
@@ -488,9 +488,22 @@ export function siteCoordinateText(site: Site): string {
   return `北纬 ${lat.toFixed(4)}°，东经 ${lng.toFixed(4)}°`;
 }
 
-/** 任务的航点里是否真的有这个点位的构件（用于 /mapping 定位到具体航点） */
-export function waypointForSite(site: Site): { id: string; label: string } | null {
-  if (!site.missionId) return null;
-  const hit = MISSION.waypoints.find((point) => point.componentId !== null);
-  return hit ? { id: hit.id, label: hit.label } : null;
+/**
+ * 点位 → 本轮任务的航点（用于 `/mapping?site=` 定位并高亮）。
+ *
+ * 返回**该点位这一轮要看的构件观察点**，即任务航点里带 `componentId` 的那几个。
+ * 示例寺返回 P2–P5（Z01–Z04 四个观察点），不含 P1 起点与 P6 东侧回廊 ——
+ * 后两个是通行航点，不是「这个点位要看的东西」，一起高亮等于没高亮。
+ *
+ * 原来这里写的是 `MISSION.waypoints.find((point) => point.componentId !== null)`，
+ * 即**忽略传入的点位**、永远返回第一个带构件的航点（P2），而且只返回一个。
+ * 那个函数从来没有被调用过，所以这个错误一直没暴露 —— `/mapping` 侧压根没读
+ * `?site=` 参数。现在两边一起补上。
+ *
+ * 点位没有 `missionId`（只勘察过、没排任务）时返回空数组：
+ * 「这个点位没有本轮航点」是一个正常结果，不编一个最近的点位顶上。
+ */
+export function waypointsForSite(site: Site): Waypoint[] {
+  if (!site.missionId) return [];
+  return MISSION.waypoints.filter((point) => point.componentId !== null);
 }

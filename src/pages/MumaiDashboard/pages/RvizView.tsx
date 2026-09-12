@@ -50,15 +50,24 @@ export interface RvizViewProps {
   /** 是否显示激光扫描点 */
   showLaser?: boolean;
   height?: number;
+  /**
+   * 要高亮的航点 id（来自 `/mapping?site=` 的点位上下文）。
+   * 只在**内置渲染**路径下生效 —— 静态图是一张 RViz 截图，
+   * 它的栅格原点与比例尺未知，拿格子坐标往上叠点会错位，
+   * 所以宁可只标列表，也不在图上画一个位置不对的圈。
+   */
+  highlightIds?: string[];
 }
 
 /** 内置演示渲染：把占据栅格画成 RViz 的观感 */
 function DemoRvizCanvas({
   showActualPath,
   showLaser,
+  highlightIds,
 }: {
   showActualPath: boolean;
   showLaser: boolean;
+  highlightIds: string[];
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -173,6 +182,16 @@ function DemoRvizCanvas({
       const px = point.cell[0] * cellPx + cellPx / 2;
       const py = point.cell[1] * cellPx + cellPx / 2;
       const active = point.state === "当前目标";
+      const marked = highlightIds.includes(point.id);
+      // 被点位上下文点名的航点加一圈实心外环（与「当前目标」的呼吸圈区分开，
+      // 那个跟着任务状态走，这个跟着「你在看哪个点位」走，是两件事）
+      if (marked) {
+        ctx.beginPath();
+        ctx.arc(px, py, 13, 0, Math.PI * 2);
+        ctx.strokeStyle = "#ffd166";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
       ctx.save();
       ctx.translate(px, py);
       ctx.beginPath();
@@ -220,7 +239,7 @@ function DemoRvizCanvas({
     const meterPx = meterCells * cellPx;
     ctx.fillRect(14, height - 22, meterPx, 3);
     ctx.fillText("1 m", 14, height - 28);
-  }, [geometry, showActualPath, showLaser]);
+  }, [geometry, showActualPath, showLaser, highlightIds]);
 
   return (
     <canvas
@@ -237,6 +256,7 @@ export default function RvizView({
   stream,
   showActualPath = true,
   showLaser = true,
+  highlightIds = [],
 }: RvizViewProps) {
   const [live, setLive] = useState(false);
   const hasStream = Boolean(stream?.url);
@@ -256,7 +276,11 @@ export default function RvizView({
         ) : hasImage && stream?.image ? (
           <img className="rviz__stream" src={stream.image} alt="RViz 建图界面" />
         ) : (
-          <DemoRvizCanvas showActualPath={showActualPath} showLaser={showLaser} />
+          <DemoRvizCanvas
+            showActualPath={showActualPath}
+            showLaser={showLaser}
+            highlightIds={highlightIds}
+          />
         )}
       </div>
 

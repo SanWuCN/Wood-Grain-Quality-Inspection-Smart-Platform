@@ -2190,6 +2190,71 @@
   border-left-color: var(--ma-ok);
 }
 
+/*
+ * 被点位上下文点名的航点（`/mapping?site=`）。
+ *
+ * 与 `.is-current`（任务当前目标）用**不同的颜色和位置**区分：
+ * 当前目标是绿色的左边框（跟着任务状态走），本次点位是琥珀色的整行底色
+ * （跟着「你在看哪个点位」走）。两者可能同时成立，所以要能叠加而不是互斥。
+ */
+.waypoint-list li.is-highlighted {
+  background: var(--fill-soft);
+  box-shadow: inset 3px 0 0 0 var(--ma-warn);
+}
+
+.waypoint-list li.is-highlighted em {
+  color: var(--ma-warn);
+}
+
+/* ---- 建图视图上方的点位上下文条 ---- */
+
+.map-site {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--ma-warn);
+  background: var(--fill-weak);
+  font-size: var(--fs-aux);
+}
+
+.map-site svg {
+  width: 13px;
+  height: 13px;
+  color: var(--ma-warn);
+}
+
+.map-site b {
+  color: var(--text-primary);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.map-site__region {
+  color: var(--ma-text-3);
+}
+
+.map-site__hint {
+  color: var(--ma-text-2);
+}
+
+/* 清除入口贴右，弱化成文字链接 —— 它是次要动作，不该和点位名抢注意力 */
+.map-site__clear {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font-size: var(--fs-aux);
+  cursor: pointer;
+}
+
+.map-site__clear:hover {
+  color: var(--text-primary);
+}
+
 .waypoint-list b,
 .mission-steps b {
   color: var(--ma-glow);
