@@ -373,6 +373,59 @@ node tools/shot.mjs --url "http://localhost:5173/#/knowledge" --out tmp-shot/kb.
 
 ---
 
+## 8. 再下一轮：共享服务 + 评审 P0 业务闭环（`b98c515`）
+
+这一轮按《木脉智检平台评审与修改建议》§5「第一批」做开发侧：**统一会话、配置、文件与
+事件服务**，跑通沈发布 → 饶接收 → 史查看。逐条依据、验证与遗留都写在 `b98c515` 的提交
+正文里，这里只留接手必需的几条。
+
+### 8.1 最重要的一条：后端不是 FastAPI
+
+PRD §5.1 写的是 FastAPI＋SQLite＋WebSocket，但**这台机器 pip 连不上 PyPI**
+（SSL 直接断），FastAPI 装不上、跑不起来、更没法验证。npm 是通的，Node 24 自带
+`node:sqlite`，所以后端改用 Node 实现，**API 路径、请求体、错误码与 PRD §12 逐条对齐**，
+只换实现语言。若日后要回到 FastAPI，`server/api/http.mjs` 的路由表就是接口清单。
+
+### 8.2 跑起来
+
+```bash
+pnpm run preflight      # 先体检：运行时 / SQLite / 会话 / 演示包 / 素材 / 端口
+pnpm run server         # 共享服务，8000（四端要连的是「提供页面的那台机器」）
+pnpm run dev            # 页面，5173；/api 与 /ws 由 Vite 代理到 8000
+```
+
+`start-demo.cmd` 已改成把共享服务另开一个窗口再起 Vite。内网演示用
+`pnpm run build` + `pnpm run server:static`（单进程同时提供页面与接口，
+前端不用改任何地址 —— 请求都是同源相对路径）。
+
+`server/data/` 与 `server/assets/` 已进 .gitignore：那是**运行期状态**，
+入库会把「本机演示到哪一步」带进仓库，换台机器反而对不上。
+
+### 8.3 这一轮实测出来的两个坑
+
+1. **导航式下载带不上 `Authorization` 头。** `<a href="/api/files/…/download">` 点了没反应：
+   href 正确，但请求被 401 拒 —— 浏览器导航不发送自定义头。改成 `fetch` 取字节 +
+   `URL.createObjectURL` 保存，文件名从 `Content-Disposition` 的 `filename*` 解析。
+   **以后任何「点了下载没反应」先查这一条。**
+2. **快照的排序方向会被前端当成业务语义。** 服务端 `ORDER BY updated_at`
+   （默认升序）时，前端把**最老**的那条当「当前版本」—— 发布了 CFG-03，页面还显示
+   CFG-02。前端一律把每种实体的第一条当当前版本，所以排序必须是 `DESC`。
+   同一个文件里还有第二个坑：选择器写 `state.entities[kind] ?? []`，每次返回新数组，
+   React 判定快照一直在变，抛 “getSnapshot should be cached” 并无限重渲染 ——
+   空列表必须复用同一个冻结常量。
+
+### 8.4 还没做
+
+- **F06 孪生场景的检查/发布还没接服务端**（`Twin.tsx` 本轮未动）。
+- F05 小木项目槽位与未知意图、F09 取用记录的操作者与 `elapsedMs` 口径、
+  F11 归档按真实字节校验、F12 排练控制台、F13 展示窗口 viewType。
+- **v1.1 的正文字号与知识库首屏重排整轮未动**：现在全站正文仍是 11–13px，
+  三维关系链的 HUD / 图例 / 读数用的也是 11px 辅助字号。
+- 融合规则 UI 仍读 `seed/scenario.ts` 的 `FUSION_RULES`（3 条），没有走重写后的
+  `fuseByRule`，所以「待补充 / 本次未提示异常」两行在界面上还看不到。
+
+---
+
 ## 6. 提交约定
 
 ```bash
