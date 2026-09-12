@@ -106,6 +106,8 @@ export default function Orders() {
   const [createOpen, setCreateOpen] = useState(false);
   /** 操作记录弹窗：历史记录下沉，一级页面只留最近一条 */
   const [logOpen, setLogOpen] = useState(false);
+  /** 环境读数录入弹窗：六个输入框不在一级页面上 */
+  const [envOpen, setEnvOpen] = useState(false);
   /**
    * 工单号由**已有列表 + 草稿单**一起推导，弹窗不自己编。
    *
@@ -410,57 +412,46 @@ export default function Orders() {
                 />
               )}
 
-              <div className="env-grid">
-                <label className={errorFor("airTempC") ? "is-bad" : undefined}>
-                  <span>温度（{draftEnv.instrumentRange.unit}）</span>
-                  <input
-                    type="number"
-                    value={draftEnv.airTempC}
-                    onChange={(event) => patch({ airTempC: Number(event.target.value) })}
-                  />
-                  {errorFor("airTempC") ? <em className="env-field-error">{errorFor("airTempC")}</em> : null}
-                </label>
-                <label className={errorFor("relativeHumidityPct") ? "is-bad" : undefined}>
-                  <span>相对湿度（%）</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={draftEnv.relativeHumidityPct}
-                    onChange={(event) => patch({ relativeHumidityPct: Number(event.target.value) })}
-                  />
-                  {errorFor("relativeHumidityPct") ? (
-                    <em className="env-field-error">{errorFor("relativeHumidityPct")}</em>
-                  ) : (
-                    <em className="env-field-range">有效范围 0–100</em>
-                  )}
-                </label>
-                <label className={errorFor("windSpeedMs") ? "is-bad" : undefined}>
-                  <span>风速（m/s）</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={draftEnv.windSpeedMs}
-                    onChange={(event) => patch({ windSpeedMs: Number(event.target.value) })}
-                  />
-                  {errorFor("windSpeedMs") ? <em className="env-field-error">{errorFor("windSpeedMs")}</em> : null}
-                </label>
-                <label className={errorFor("instrumentId") ? "is-bad" : undefined}>
-                  <span>仪表编号</span>
-                  <input value={draftEnv.instrumentId} onChange={(event) => patch({ instrumentId: event.target.value })} />
-                  {errorFor("instrumentId") ? <em className="env-field-error">{errorFor("instrumentId")}</em> : null}
-                </label>
-                <label>
-                  <span>测量位置</span>
-                  <input value={draftEnv.position} onChange={(event) => patch({ position: event.target.value })} />
-                </label>
-                <label>
-                  <span>测量时间</span>
-                  <input value={draftEnv.measuredAt} onChange={(event) => patch({ measuredAt: event.target.value })} />
-                </label>
-              </div>
+              {/*
+                一级页面只留**当前生效的读数与状态**：三个值 + 仪表位置。
+                六个输入框下沉到「录入环境读数」弹窗 —— 用户的要求是
+                「一级页面不要为了一个操作动态堆出大量表单」。
+              */}
+              <ul className="env-readout">
+                <li>
+                  <small>温度</small>
+                  <b>
+                    {draftEnv.airTempC}
+                    <em>{draftEnv.instrumentRange.unit}</em>
+                  </b>
+                </li>
+                <li>
+                  <small>相对湿度</small>
+                  <b>
+                    {draftEnv.relativeHumidityPct}
+                    <em>%</em>
+                  </b>
+                </li>
+                <li>
+                  <small>风速</small>
+                  <b>
+                    {draftEnv.windSpeedMs}
+                    <em>m/s</em>
+                  </b>
+                </li>
+                <li>
+                  <small>仪表 / 位置</small>
+                  <b className="env-readout__text">
+                    {draftEnv.instrumentId}
+                    <em>{draftEnv.position}</em>
+                  </b>
+                </li>
+              </ul>
 
               <div className="env-actions">
+                <Btn onClick={() => setEnvOpen(true)} title="填写温度 / 湿度 / 风速与仪表信息">
+                  录入读数
+                </Btn>
                 {/* PRD 3.1 / 12：校验由经理运行；PRD 2.1：饶接收配置并返回 ack */}
                 <Btn
                   tone="primary"
@@ -660,6 +651,77 @@ export default function Orders() {
         建单表单在二级弹窗里。一级页面只有一个「生成工单」按钮 ——
         用户的要求是重要操作先弹确认/配置窗口，不要为一次操作在页面上堆表单。
       */}
+      {/*
+        环境读数录入弹窗：六个输入框、范围提示与字段级错误都在这里。
+        校验与发布仍在上面的一级面板上（那是主要操作，不该藏进弹窗）。
+      */}
+      {envOpen ? (
+        <Modal
+          title="录入环境读数"
+          subtitle={`仪表 ${draftEnv.instrumentId} · ${draftEnv.measuredAt}`}
+          onClose={() => setEnvOpen(false)}
+          footer={
+            <>
+              <span className="muted">
+                {HH_PRIOR.note} · 方法版本 {HH_PRIOR.functionVersion}；风速{HH_PRIOR.windExcluded ? "不" : ""}代入 HH
+                {envEntity?.data.emcPct != null ? ` · 当前平衡含水率估计 ${envEntity.data.emcPct}%` : ""}
+              </span>
+              <Btn tone="primary" onClick={() => setEnvOpen(false)}>
+                完成录入
+              </Btn>
+            </>
+          }>
+              <div className="env-grid">
+                <label className={errorFor("airTempC") ? "is-bad" : undefined}>
+                  <span>温度（{draftEnv.instrumentRange.unit}）</span>
+                  <input
+                    type="number"
+                    value={draftEnv.airTempC}
+                    onChange={(event) => patch({ airTempC: Number(event.target.value) })}
+                  />
+                  {errorFor("airTempC") ? <em className="env-field-error">{errorFor("airTempC")}</em> : null}
+                </label>
+                <label className={errorFor("relativeHumidityPct") ? "is-bad" : undefined}>
+                  <span>相对湿度（%）</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={draftEnv.relativeHumidityPct}
+                    onChange={(event) => patch({ relativeHumidityPct: Number(event.target.value) })}
+                  />
+                  {errorFor("relativeHumidityPct") ? (
+                    <em className="env-field-error">{errorFor("relativeHumidityPct")}</em>
+                  ) : (
+                    <em className="env-field-range">有效范围 0–100</em>
+                  )}
+                </label>
+                <label className={errorFor("windSpeedMs") ? "is-bad" : undefined}>
+                  <span>风速（m/s）</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={draftEnv.windSpeedMs}
+                    onChange={(event) => patch({ windSpeedMs: Number(event.target.value) })}
+                  />
+                  {errorFor("windSpeedMs") ? <em className="env-field-error">{errorFor("windSpeedMs")}</em> : null}
+                </label>
+                <label className={errorFor("instrumentId") ? "is-bad" : undefined}>
+                  <span>仪表编号</span>
+                  <input value={draftEnv.instrumentId} onChange={(event) => patch({ instrumentId: event.target.value })} />
+                  {errorFor("instrumentId") ? <em className="env-field-error">{errorFor("instrumentId")}</em> : null}
+                </label>
+                <label>
+                  <span>测量位置</span>
+                  <input value={draftEnv.position} onChange={(event) => patch({ position: event.target.value })} />
+                </label>
+                <label>
+                  <span>测量时间</span>
+                  <input value={draftEnv.measuredAt} onChange={(event) => patch({ measuredAt: event.target.value })} />
+                </label>
+              </div>
+        </Modal>
+      ) : null}
       {createOpen ? (
         <WorkOrderCreateModal
           nextId={nextOrderId}

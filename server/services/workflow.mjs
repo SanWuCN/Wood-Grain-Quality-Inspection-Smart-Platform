@@ -80,23 +80,41 @@ export function validateEnvironment(inputs) {
 }
 
 /**
- * Hailwood-Horrobin 平衡含水率估计。
+ * Hailwood-Horrobin（Simpson 式）平衡含水率估计。
  *
  * 只作环境先验：现场木柱未必已经平衡（知识库 method_env_compensation.md 的原话），
  * 所以这里返回的 EMC 必须与「实测含水率」分开显示，不能被当成检测结论。
+ *
+ * **分母写错过一次，会把结果算成负数**（26.4℃/78% 得 −15.2%）。
+ * 原来的写法是 `(1 - kh) * (1 - kh + k1 * kh) - k1 * k2 * kh * kh`，
+ * 展开后多出 `-2kh + kh²` 两项，`k1 * k2 * kh²` 在常见温湿度下会超过它，
+ * 分母变负、第二项整体翻号 —— 平衡含水率不可能小于 0，页面上却照显不误。
+ *
+ * 正确形式（用木材学公认的两个参考点校过）：
+ *
+ *   EMC = (1800 / W) · [ Kh/(1 − Kh) + (K₁Kh + 2K₁K₂K²h²) / (1 + K₁Kh + K₁K₂K²h²) ]
+ *
+ *   20 ℃ / 65 % → 12.00 %（文献常引的基准点）
+ *   26.4 ℃ / 78 % → 15.08 %
+ *
+ * T 用华氏度。改这里请重跑 npm run test:emc。
  */
 export function estimateEmc(tempC, rhPct) {
-  const t = Number(tempC);
+  const tC = Number(tempC);
   const h = Number(rhPct) / 100;
-  if (!Number.isFinite(t) || !Number.isFinite(h) || h <= 0 || h >= 1) return null;
+  if (!Number.isFinite(tC) || !Number.isFinite(h) || h <= 0 || h >= 1) return null;
+  const t = tC * 1.8 + 32;
   const k = 0.791 + 0.000463 * t - 0.000000844 * t * t;
   const k1 = 6.34 + 0.000775 * t - 0.0000935 * t * t;
-  const k2 = 1.09 + 0.0284 * t - 0.00009 * t * t;
+  const k2 = 1.09 + 0.0284 * t - 0.0000904 * t * t;
   const w = 330 + 0.452 * t + 0.00415 * t * t;
   const kh = k * h;
-  const denom = (1 - kh) * (1 - kh + k1 * kh) - k1 * k2 * kh * kh;
-  if (denom === 0) return null;
-  const emc = (1800 / w) * ((kh / (1 - kh)) + (k1 * kh + 2 * k1 * k2 * kh * kh) / denom);
+  const k1kh = k1 * kh;
+  const k1k2kh2 = k1 * k2 * kh * kh;
+  const denom = 1 + k1kh + k1k2kh2;
+  if (!Number.isFinite(denom) || denom === 0) return null;
+  const emc = (1800 / w) * (kh / (1 - kh) + (k1kh + 2 * k1k2kh2) / denom);
+  if (!Number.isFinite(emc)) return null;
   return Number(emc.toFixed(3));
 }
 

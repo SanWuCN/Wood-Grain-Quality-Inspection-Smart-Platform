@@ -8,6 +8,7 @@
     "server": "node server/index.mjs",
     "server:static": "node server/index.mjs --static dist",
     "preflight": "node tools/preflight.mjs",
+    "test:emc": "node tools/test-emc.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
