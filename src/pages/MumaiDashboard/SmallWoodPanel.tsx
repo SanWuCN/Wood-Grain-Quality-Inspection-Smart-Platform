@@ -320,7 +320,7 @@ export default function SmallWoodPanel() {
             type="button"
             className="xm__voice-open"
             onClick={() => openAgent()}
-            title="打开语音智能体（实时字幕 / 意图识别 / 工具执行 / 多步任务）">
+            title="小木">
             <Icon name="wave" />
             语音
           </button>

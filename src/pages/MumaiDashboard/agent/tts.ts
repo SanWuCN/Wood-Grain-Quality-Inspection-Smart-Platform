@@ -12,6 +12,9 @@
  *
  * 同时提供方案 §7 的 Barge-in 所需能力：stop() 立即掐断当前播报，
  * 并把「是否正在播报」暴露给 VAD，用于「用户开口 → 停止播报 → 开新一轮识别」。
+ *
+ * 另外把播报状态的**每一次翻转**通过可选的 onSpeakingChange 播出去：
+ * 输入侧据此在播报期间暂停聆听，从根上切断「AI 听见自己 → 又识别成用户输入」的自听回环。
  */
 
 export type TtsStatus = {
@@ -84,6 +87,21 @@ export class VoiceOutput {
   private speaking = false;
   private current: HTMLAudioElement | null = null;
   private onStateChange: (status: TtsStatus) => void;
+  /**
+   * 播报「代次」。cancel() / stop() 会让在途的 utterance / audio 回调**迟到**触发，
+   * 迟到回调若照样翻转状态，就会出现「新一段刚开始播、状态却被上一段改回未播报」——
+   * 麦克风提前恢复聆听，又把小木自己的声音收进来。回调只在代次匹配时生效。
+   */
+  private generation = 0;
+
+  /**
+   * 播报状态变化的旁路回调（可选）。
+   *
+   * VoiceConsole 用它把小木的「开口 / 说完」翻译成「暂停聆听 / 恢复聆听」，
+   * 这是自听回环（AI 的声音被麦克风重新采集 → 又被识别成用户输入 → 再回一句）
+   * 的根治手段。可选是刻意的：不接线时 VoiceOutput 的行为与以前完全一致。
+   */
+  onSpeakingChange?: (speaking: boolean) => void;
 
   constructor(onStateChange: (status: TtsStatus) => void = () => undefined) {
     this.onStateChange = onStateChange;
@@ -111,9 +129,42 @@ export class VoiceOutput {
     this.onStateChange(this.status);
   }
 
+  /**
+   * `speaking` 的**唯一**写入点。
+   *
+   * 之所以收敛成一个方法：开始播报 / 自然结束 / 被 stop() 打断 / setMuted(true) 触发停止 /
+   * replay / 播放失败，每一处都要翻转它。只要漏掉一个分支，状态就会卡住 ——
+   * 卡在 true 表现为「麦克风再也不恢复」，卡在 false 表现为「播报期间照样收音」（自听回环复发）。
+   * 收敛在这里，翻转与通知（onStateChange + onSpeakingChange）就永远不会脱节。
+   */
+  private setSpeaking(next: boolean) {
+    if (this.speaking === next) return;
+    this.speaking = next;
+    this.emit();
+    try {
+      this.onSpeakingChange?.(next);
+    } catch {
+      // 旁路回调：它抛错不能影响播报本身，也不该冒泡进 React 的渲染流程
+    }
+  }
+
+  /** 收掉当前 <audio>（换一段播报时用）：只清资源，不动 speaking 状态 */
+  private silenceCurrent() {
+    if (!this.current) return;
+    try {
+      this.current.pause();
+      this.current.src = "";
+    } catch {
+      /* 忽略 */
+    }
+    this.current = null;
+  }
+
   /** 播报一段文本；优先播放预录音频（若存在），否则用 speechSynthesis */
   async speak(text: string, audioUrl?: string): Promise<void> {
     if (this.muted || !text) return;
+    // 新一段接替旧一段：先把还在响的 <audio> 收掉，避免两段声音叠在一起
+    this.silenceCurrent();
     if (audioUrl && (await probeAudio(audioUrl))) {
       const played = await this.playAudio(audioUrl);
       if (played) return;
@@ -125,13 +176,16 @@ export class VoiceOutput {
     return new Promise<boolean>((resolve) => {
       try {
         const audio = new Audio(url);
+        this.generation += 1;
+        const token = this.generation;
         this.current = audio;
-        this.speaking = true;
-        this.emit();
+        this.setSpeaking(true);
         const finish = (ok: boolean) => {
-          this.speaking = false;
-          this.current = null;
-          this.emit();
+          // 迟到的回调（被 stop()/换段之后才触发）不许改状态：代次不匹配就只兑现 Promise
+          if (token === this.generation) {
+            if (this.current === audio) this.current = null;
+            this.setSpeaking(false);
+          }
           resolve(ok);
         };
         audio.onended = () => finish(true);
@@ -146,9 +200,9 @@ export class VoiceOutput {
   private speakWithSynthesis(text: string) {
     const synth = synthesis();
     if (!synth) {
-      // 静默降级：字幕继续显示，不抛错（PRD 17）
-      this.speaking = false;
-      this.emit();
+      // 静默降级：字幕继续显示，不抛错（PRD 17）。
+      // 也要走 setSpeaking(false)：万一上一段留下了 true，麦克风必须能恢复。
+      this.setSpeaking(false);
       return;
     }
     try {
@@ -159,47 +213,44 @@ export class VoiceOutput {
       utterance.pitch = 1;
       const voice = pickVoice(synth);
       if (voice) utterance.voice = voice;
-      utterance.onend = () => {
-        this.speaking = false;
-        this.emit();
+      this.generation += 1;
+      const token = this.generation;
+      const finish = () => {
+        // cancel() / stop() 之后旧 utterance 的 end / error 事件可能迟到，
+        // 代次不匹配就丢弃（否则它会把新一段的 speaking 提前压回 false）
+        if (token !== this.generation) return;
+        this.setSpeaking(false);
       };
-      utterance.onerror = () => {
-        this.speaking = false;
-        this.emit();
-      };
-      this.speaking = true;
-      this.emit();
+      utterance.onend = finish;
+      utterance.onerror = finish;
+      this.setSpeaking(true);
       synth.speak(utterance);
     } catch {
-      this.speaking = false;
-      this.emit();
+      this.setSpeaking(false);
     }
   }
 
   /** Barge-in（§7）：立即停止播报 */
   stop() {
+    // 先让在途回调失效，再做真正的停止：cancel()/pause() 会让它们的
+    // onend/onerror 迟到触发，代次一变就不会再把状态改回来
+    this.generation += 1;
     const synth = synthesis();
     try {
       synth?.cancel();
     } catch {
       /* 忽略 */
     }
-    if (this.current) {
-      try {
-        this.current.pause();
-        this.current.src = "";
-      } catch {
-        /* 忽略 */
-      }
-      this.current = null;
-    }
-    if (this.speaking) {
-      this.speaking = false;
-      this.emit();
-    }
+    this.silenceCurrent();
+    // 幂等：本来就没在播报时不会重复通知（setSpeaking 内部挡掉了同值写入）
+    this.setSpeaking(false);
   }
 
-  /** 重播上一段（PRD 4.3 要求提供重播） */
+  /**
+   * 重播上一段（PRD 4.3 要求提供重播）。
+   * speaking 的翻转全部由 speak() 内部完成，这里不需要（也不应该）自己再写一次 ——
+   * 重播期间同样要暂停聆听，否则重播的声音会被麦克风收进去。
+   */
   async replay(text: string, audioUrl?: string): Promise<void> {
     const wasMuted = this.muted;
     this.muted = false;

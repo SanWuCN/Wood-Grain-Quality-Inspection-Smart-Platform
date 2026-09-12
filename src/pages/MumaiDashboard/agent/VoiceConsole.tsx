@@ -82,6 +82,13 @@ const RISK_LABEL: Record<number, string> = {
   4: "危险操作",
 };
 
+/**
+ * Barge-in 提示文案（§7）。
+ * 抽成常量是为了让「播报中检测到用户开口」和「播报期间靠电平判定出的打断」
+ * 说同一句话，避免两处措辞慢慢漂移。
+ */
+const BARGE_IN_NOTE = "检测到你开始说话，已停止当前播报并开始新一轮识别（Barge-in）";
+
 function useAgentState() {
   return useSyncExternalStore(subscribeAgent, getAgentState, getAgentState);
 }
@@ -204,7 +211,7 @@ function BotBubble({ turn, onReplay, tts }: { turn: BotTurn; onReplay: (turn: Bo
         <span className="vc-bubble__conf" title="技术方案 §15 的 Top1 相似度">
           置信度 {turn.confidence.toFixed(3)}
         </span>
-        <span className="vc-bubble__voice" title="seed/scenario.ts 的语音包列">
+        <span className="vc-bubble__voice" title="语音包">
           {turn.voice}
         </span>
       </div>
@@ -317,9 +324,28 @@ export default function VoiceConsole() {
   /* ---------- 语音输出 ---------- */
   useEffect(() => {
     const output = new VoiceOutput(setTtsStatus);
+    /**
+     * 自听回环治理（本次修复的核心接线）：
+     * speechSynthesis / <audio> 的声音会从扬声器漏回麦克风，识别器会把小木自己的话
+     * 当成用户输入，于是来回自我对话停不下来。所以播报一开始就让输入侧暂停聆听
+     * （VoiceInput.suspend 会 abort 掉在途识别），说完 / 被打断 / 被静音后再恢复。
+     *
+     * 这里只做转发，不需要自己记状态：VoiceOutput 保证每次翻转都通知一次，
+     * VoiceInput 的 suspend/resume 自己保证幂等。
+     */
+    output.onSpeakingChange = (speaking) => {
+      if (speaking) inputAsrRef.current?.suspend();
+      else inputAsrRef.current?.resume();
+    };
     outputRef.current = output;
     setTtsStatus(output.status);
-    return () => output.stop();
+    return () => {
+      // 先摘回调再 stop()：卸载（含 StrictMode 的复挂）时 stop() 会触发
+      // onSpeakingChange(false)，那一刻输入侧正在拆，不需要它再去恢复聆听
+      output.onSpeakingChange = undefined;
+      output.stop();
+      outputRef.current = null;
+    };
   }, []);
 
   /* ---------- 语音输入 + VAD + Barge-in ---------- */
@@ -329,10 +355,13 @@ export default function VoiceConsole() {
       onPartial: (text, final) => setAgent({ partial: final ? "" : text, agentState: final ? "RECOGNIZING" : "LISTENING" }),
       onLevel: (level) => setAgent({ level }),
       onSpeechStart: () => {
-        // §7 Barge-in：播报中检测到用户开口，立即停止播报并开新一轮
+        // §7 Barge-in：播报中检测到用户开口，立即停止播报并开新一轮。
+        // 注意播报期间识别是暂停的（见上面的 onSpeakingChange），所以真正在播报中
+        // 触发打断的是下面的 onBargeIn；这里的判断保留下来作为兜底，
+        // 覆盖「识别还活着、但播报已经开始」的那一瞬。
         if (outputRef.current?.status.speaking) {
           outputRef.current.stop();
-          setBanner("检测到你开始说话，已停止当前播报并开始新一轮识别（Barge-in）");
+          setBanner(BARGE_IN_NOTE);
         }
       },
       onSpeechEnd: () => setAgent({ agentState: "RECOGNIZING", stateNote: "检测到静音，正在收尾识别" }),
@@ -346,10 +375,23 @@ export default function VoiceConsole() {
         setAgent({ agentState: "IDLE", stateNote: "麦克风不可用，使用演示语句或文本输入", asrNote: text, micActive: false });
       },
       onError: (text) => setBanner(text),
-      onBargeIn: () => outputRef.current?.stop(),
+      onBargeIn: () => {
+        // 播报期间的打断：此时识别已经停了（不让小木听见自己），VoiceInput 靠
+        // 「一路只测音量的检测」判断用户插话 —— 连续超阈值且高于播报本底才算数。
+        // stop() 会翻转 speaking → onSpeakingChange(false) → 输入侧自动 resume()，
+        // 于是打断之后立刻进入新一轮识别，§7 的链路是闭环的。
+        if (!outputRef.current?.status.speaking) return;
+        outputRef.current.stop();
+        setBanner(BARGE_IN_NOTE);
+      },
     });
     inputAsrRef.current = input$;
-    return () => input$.dispose();
+    return () => {
+      // 先置空再 dispose：卸载期间若还有 onSpeakingChange 之类的回调迟到，
+      // 它们拿到的就是 null，而不是一个已经拆掉的 VoiceInput
+      inputAsrRef.current = null;
+      input$.dispose();
+    };
   }, []);
 
   /* ---------- 全局事件：外部通过 mumai:agent-open 打开控制台 ---------- */
@@ -420,6 +462,10 @@ export default function VoiceConsole() {
         return;
       }
       setBanner("");
+      // 用户主动按「按住说话」= 最明确的打断意图：先把播报掐掉。
+      // 顺序很重要 —— stop() → speaking=false → onSpeakingChange(false) → resume()，
+      // 聆听先恢复，随后 startMic 才能把识别干净地拉起来（否则会被 suspend 守卫挡掉）。
+      outputRef.current?.stop();
       const granted = await input$.startMic();
       setAgent({
         micActive: granted,
