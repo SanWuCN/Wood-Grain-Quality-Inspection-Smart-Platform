@@ -306,6 +306,23 @@ export const api = {
     }>("/api/environments/validate", { method: "POST", body: JSON.stringify({ inputs }) });
   },
 
+  /**
+   * 投屏（PRD §12 的 `POST /api/projection`）。
+   *
+   * 不走命令总线：PRD 把投屏单列成一个接口，而且它的前置条件不是实体 revision
+   * 而是「持有人」——`hold: true` 表示显式接管（换人时要有这个动作），
+   * 否则非持有人会被服务端用 409 NOT_HOLDER 拒掉。
+   */
+  setProjection(
+    sessionId: string,
+    body: { viewType: string; focusIds: string[]; hold?: boolean },
+  ) {
+    return request<{ holderId: string; viewType: string; focusIds: string[]; eventSeq: number }>(
+      "/api/projection",
+      { method: "POST", body: JSON.stringify({ sessionId, ...body }) },
+    );
+  },
+
   fileMeta(fileId: string) {
     return request<{ fileId: string; name: string; size: number; sha256: string; mediaType: string }>(
       `/api/files/${encodeURIComponent(fileId)}`,

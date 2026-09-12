@@ -30,7 +30,7 @@ import Header from "./Header";
 import SmallWoodPanel from "./SmallWoodPanel";
 import { Icon } from "./icons";
 import { useMumai } from "./context";
-import { writeFocus } from "./focus";
+import { holderLabel, VIEW_LABEL, viewTypeForPath, writeFocus } from "./focus";
 import { useShellEntrance } from "./entrance";
 import { useConfigStore } from "./mapDemo/stores";
 import { COMPONENTS, CURRENT_RISKS, DEVICES, SCAN_BATCHES } from "./seed/scenario";
@@ -116,6 +116,7 @@ export default function Shell() {
     channels,
     toasts,
     dismissToast,
+    toast,
     events,
     sessionId,
     currentOrder,
@@ -171,19 +172,52 @@ export default function Shell() {
     [activeKey, permittedNav],
   );
 
-  // PRD 2.2：投放时把当前焦点（工单 / 构件 / 批次）与控制权持有人写进共享焦点，
-  // 大屏窗口 /present 读同一份状态，不再各存一套。
-  const openPresent = useCallback(() => {
+  /**
+   * 「投到展示窗口」（PRD 2.2 / 评审 F13）。
+   *
+   * 投出去的是**当前这一页对应的展示视图 + 焦点对象**，不再只是一张静态总览：
+   * 在孪生页投放就看场景，在训练页投放就看曲线。写入走服务端命令，
+   * 于是别的电脑上开着的 /present 也会跟着切 —— 评审要的正是这一点
+   * （localStorage 只能在同一台浏览器内传）。
+   *
+   * 非持有人切换会被服务端 409 拒绝：这时如实告诉用户「当前由谁持有」，
+   * 不打开一个假装投放成功的大屏。
+   */
+  const openPresent = useCallback(async () => {
     const search = new URLSearchParams(location.search);
-    writeFocus({
+    const payload = {
       holderId: accountId,
+      viewType: viewTypeForPath(location.pathname),
       orderId: search.get("order") ?? currentOrder.id,
-      componentId:
-        search.get("component") ?? CURRENT_RISKS[0]?.componentId ?? COMPONENTS[0].id,
+      componentId: search.get("component") ?? CURRENT_RISKS[0]?.componentId ?? COMPONENTS[0].id,
       batchId: search.get("batch") ?? SCAN_BATCHES[0]?.batchId ?? "",
-    });
+      sceneId: search.get("scene"),
+    };
+
+    let result = await writeFocus(payload);
+    if (!result.ok && result.holderId && result.holderId !== accountId) {
+      /*
+       * 控制权在别人手上：PRD §2.2 要求「换人时显式交接」，不能悄悄抢过来。
+       * 第一次点只是被告知「现在是谁」，再点一次才真的接管 —— 这样台上不会因为
+       * 误触就把别人的画面切走。接管动作本身由服务端记录在事件流里。
+       */
+      const confirmed = window.confirm(
+        `${holderLabel(result.holderId)} 正在投屏。接管后对方的大屏画面会被你切走，确认接管？`,
+      );
+      if (!confirmed) {
+        toast(`投屏由 ${holderLabel(result.holderId)} 持有，未接管`, "warn");
+        return;
+      }
+      result = await writeFocus({ ...payload, hold: true });
+    }
+
+    if (!result.ok) {
+      toast(result.message, "danger");
+      return;
+    }
+    toast(`已投放：${VIEW_LABEL[result.focus.viewType]}`, "ok");
     window.open("#/present", "_blank", "noopener");
-  }, [accountId, currentOrder, location.search]);
+  }, [accountId, currentOrder, location.pathname, location.search, toast]);
 
   // 已登录状态下不再提供角色切换：账号只能从登录页进入，避免在顶栏绕过角色限制
   const handleLogout = useCallback(() => {

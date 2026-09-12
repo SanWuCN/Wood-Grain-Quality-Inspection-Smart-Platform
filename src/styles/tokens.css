@@ -87,6 +87,13 @@
   --text-primary: #eaf3ff;
   --text-secondary: #aabbd0;
   --text-tertiary: #70849c;
+  /*
+    v1.1 §2.1 把这一档改名为 TEXT-MUTED 并把色值提到 #91a5bc
+    （用途不变：辅助信息、时间与图表轴文字）。两个名字先并存：
+    v1.0 的页面仍用 --text-tertiary，新写的展示窗口用 --text-muted，
+    全站换名与换值放同一轮做，避免这一轮同时动到九个页面的对比度。
+  */
+  --text-muted: #91a5bc;
   --text-disabled: #465a70;
 
   /* 状态色（§1.3）—— 只表达业务语义 */
@@ -153,6 +160,8 @@
   --fs-table: 14px;
   --fs-aux: 13px;
   --fs-kpi: 30px;
+  /* v1.1 §3.3 展示窗口正文（18–24px 起），投屏专用，不参与操作页面的层级 */
+  --font-present: 24px;
 
   /* 3.1 KPI 大数字（v1.1：关键数值 28–40px） */
   --fs-num: 30px;

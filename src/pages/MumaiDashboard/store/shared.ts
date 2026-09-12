@@ -137,7 +137,10 @@ export const useSharedStore = create<SharedState>()((set, get) => ({
   },
 
   async setProjection(viewType, focusIds = [], hold = false) {
-    await get().send({ action: "projection.set", payload: { viewType, focusIds, hold } });
+    // 走 PRD §12 单列的 /api/projection，不走命令总线：投屏的前置条件是「持有人」
+    // 而不是实体 revision，而且换人要有显式的接管动作（hold）。
+    await api.setProjection(get().sessionId, { viewType, focusIds, hold });
+    await get().refresh();
   },
 
   reset() {
