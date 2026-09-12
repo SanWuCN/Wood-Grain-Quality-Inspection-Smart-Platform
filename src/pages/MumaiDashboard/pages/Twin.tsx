@@ -18,8 +18,9 @@ import { OrbitControls } from "@react-three/drei";
 import { useSearchParams } from "react-router";
 import { DoubleSide, type Group } from "three";
 import { useMumai } from "../context";
+import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
-import { Btn, SourceTag, StateBlock, StatusChip, Toolbar, WaveChart } from "../ui";
+import { Btn, PermNote, SourceTag, StateBlock, StatusChip, Toolbar, WaveChart } from "../ui";
 import {
   COMPONENTS,
   CURRENT_RISKS,
@@ -272,7 +273,7 @@ function TwinScene({
 export default function Twin() {
   const [params, setParams] = useSearchParams();
   const selected = params.get("component") ?? "Z04";
-  const { componentById, domainPending, toast, pushEvent } = useMumai();
+  const { componentById, domainPending, toast, pushEvent, can } = useMumai();
 
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     labels: true,
@@ -411,6 +412,12 @@ export default function Twin() {
             </ul>
             <Btn
               tone="primary"
+              disabled={!can("scene:publish")}
+              title={
+                can("scene:publish")
+                  ? "检查该场景并发布版本，通知各客户端"
+                  : permissionHint("scene:publish")
+              }
               onClick={() => {
                 toast(`场景 ${scene.id} 已发布，各客户端收到通知`, "ok");
                 pushEvent(`发布场景 ${scene.id}`, "ok");
@@ -418,6 +425,7 @@ export default function Twin() {
               检查并发布
             </Btn>
           </Panel>
+          <PermNote permissions={["scene:publish"]} />
 
           <Panel
             title={`热点详情 · ${component?.id ?? selected}`}

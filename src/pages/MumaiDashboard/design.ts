@@ -80,13 +80,28 @@ export const HEADER_HEIGHT = 85;
 /** 顶栏 SVG 基准尺寸 */
 export const HEADER_VIEWBOX = "0 0 1920 85";
 
-/** 四人账号（PRD 2.1） */
+/**
+ * 四人账号（PRD 2.1「四个账号」表）
+ *
+ *   id       账号标识（内部用，等于姓氏拼音）
+ *   name     界面显示名。剧本只给出「沈 / 史 / 饶 / 马」的姓氏，
+ *            唯一的全名出现在第二章 S19（沈：马昱天配合记录补扫位置），
+ *            因此只有马带全名，其余三位保持剧本口径的姓氏。
+ *   login    账号名 = 姓名拼音（登录页用）。马取剧本全名「马昱天」的
+ *            全拼 mayutian，同时 auth.ts 里保留 ma 作为兜底输入。
+ *   page     默认工作区路由（PRD 2.1 默认工作区一列）
+ *
+ * 密码统一 123456，凭据与校验逻辑在 auth.ts，不写在这里。
+ */
 export const ACCOUNTS = [
-  { id: "shen", name: "沈", role: "项目经理", workspace: "工单与审核", page: "/orders" },
-  { id: "shi", name: "史", role: "人工智能架构师", workspace: "平台总览", page: "/" },
-  { id: "rao", name: "饶", role: "全栈开发工程师", workspace: "采集与交付", page: "/adapt" },
-  { id: "ma", name: "马", role: "具身智能工程师", workspace: "建图巡检", page: "/mapping" },
-] as const;
+  { id: "shen", login: "shen", name: "沈", role: "项目经理", workspace: "工单与审核", page: "/orders" },
+  { id: "shi", login: "shi", name: "史", role: "人工智能架构师", workspace: "平台总览", page: "/" },
+  { id: "rao", login: "rao", name: "饶", role: "全栈开发工程师", workspace: "采集与交付", page: "/adapt" },
+  { id: "ma", login: "mayutian", name: "马昱天", role: "具身智能工程师", workspace: "建图巡检", page: "/mapping" },
+];
+
+/** 账号类型（auth.ts 与顶栏 / 登录页共用） */
+export type Account = (typeof ACCOUNTS)[number];
 
 /** 一级导航（PRD 2.2：控制在八项） */
 export const NAV_ITEMS = [
@@ -94,10 +109,10 @@ export const NAV_ITEMS = [
   { key: "orders", label: "工单档案", path: "/orders" },
   { key: "mapping", label: "建图巡检", path: "/mapping" },
   { key: "twin", label: "数字孪生", path: "/twin" },
-  { key: "adapt", label: "检测适配", path: "/adapt" },
+  { key: "hardware", label: "硬件详情", path: "/hardware" },
+  { key: "firmware", label: "固件及模型", path: "/firmware" },
   { key: "knowledge", label: "知识库", path: "/knowledge" },
   { key: "archive", label: "报告归档", path: "/archive" },
-  { key: "console", label: "演示控制", path: "/console" },
 ] as const;
 
 /** 检测适配下的六个页签（PRD 2.2） */

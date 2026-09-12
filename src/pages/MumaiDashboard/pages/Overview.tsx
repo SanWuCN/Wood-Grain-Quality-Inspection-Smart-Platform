@@ -26,22 +26,31 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
+import styled from "styled-components";
 import { useDashboardStore, requestMapMode } from "../map/store";
 import Map from "../mapDemo";
 import { Panel } from "../Panel";
 import { Icon } from "../icons";
-import { SourceTag, StateBlock, StatusChip } from "../ui";
+import { StatusChip } from "../ui";
 import { useMumai } from "../context";
-import { STATUS_COLOR } from "../map/status";
+import { STATUS_ACTION, STATUS_COLOR, STATUS_TEXT } from "../map/status";
+import SiteDetailCard from "../map/SiteDetailCard";
 import {
-  COMPONENTS,
+  CHINA_PROVINCE_COUNT,
+  CHINA_SITES,
+  SHANGHAI_SITES,
+  statusesOf,
+  summariseSites,
+} from "../seed/sites";
+import {
+
   CURRENT_RISKS,
   DEVICES,
   HISTORIC_ORDERS,
   HISTORY_STATS,
   MISSION,
   RECENT_EVENTS,
-  SCENES,
+
   TODO_ITEMS,
   WORK_ORDER,
 } from "../seed/scenario";
@@ -58,6 +67,19 @@ import {
 
 /** 首页工单列表：本轮工单 + 历史工单，共 6 条（设计稿「工单列表」） */
 const OVERVIEW_ORDERS = [WORK_ORDER, ...HISTORIC_ORDERS];
+
+/**
+ * 图例里的计数。`pages.css` 已有 `.ov__actions .legend i`（色点）的样式，
+ * 这里只补「状态名 + 数量」的排版 —— 不新增全局 CSS 文件，
+ * 避免与并行任务改动的 `pages.css` / `tokens.css` 冲突。
+ */
+const Legend = styled.div`
+  span b {
+    font-family: var(--font-data);
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+`;
 
 /** 地图通道版本号：以任务实际下发的地图版本为准，不用 MAP_VERSIONS[0] */
 const MISSION_MAP_VERSION = MISSION.mapVersion;
@@ -88,206 +110,141 @@ function MoreButton({
  * ------------------------------------------------------------------ */
 
 /** 三角色通道一行（PRD 3.1：地图 / 场景 / 手持采集三个通道） */
-function SitePanel({
-  stageLabel,
-  orderId,
-  sourceMode,
-  domainPending,
-}: {
-  stageLabel: string;
-  orderId: string;
-  sourceMode: string;
-  domainPending: boolean;
-}) {
-  /** 通道版本/批次号属于第三层辅助数据，默认收起 */
-  const [detailOpen, setDetailOpen] = useState(false);
+/**
+ * 全国巡检态势
+ *
+ * 首页左栏第一块，回答「这轮覆盖了多少地方、做到哪一步」。
+ * 数字全部由 seed/sites 现算，不写死。
+ */
+function SituationPanel() {
+  const summary = useMemo(() => summariseSites(CHINA_SITES), []);
+  const done = summary.byStatus.inspected + summary.byStatus.workorder;
+  const rate = Math.round((done / Math.max(1, summary.total)) * 100);
 
-  const channels = useMemo(() => {
-    const scene = SCENES.find((item) => item.round === "本轮") ?? SCENES[0];
-    return [
-      {
-        key: "map",
-        label: "地图",
-        value: `${MISSION_MAP_VERSION} · ${DEVICES.demoCart.mode === "replay" ? "回放" : "实时"}`,
-        tone: "info" as const,
-        state: "在线",
-      },
-      {
-        key: "scene",
-        label: "场景",
-        value: `${scene?.version ?? "—"} · ${scene?.published ?? "待检查"}`,
-        tone: "warn" as const,
-        state: scene?.published ?? "待检查",
-      },
-      {
-        key: "handheld",
-        label: "手持采集",
-        value: `${DEVICES.scanner.name.replace("手持毫米波 ", "")} · ${DEVICES.scanner.id}`,
-        tone: "ok" as const,
-        state: "已接收",
-      },
-    ];
-  }, []);
+  const order = ["inspected", "workorder", "risk", "collected"] as const;
 
   return (
     <Panel
-      title="场地概览 · 示例寺"
-      className="ov__panel ov__panel--site"
-      extra={<SourceTag label={`${sourceMode === "replay" ? "演示回放" : sourceMode} · session-A`} />}>
-      {/* 第一层：当前对象/任务。工单状态与风险等级属于右栏工单表，不在这里重复 */}
-      <div className="ov-meta">
-        <strong>
-          {stageLabel}
-          <small>当前阶段</small>
-        </strong>
-        <strong>
-          {orderId}
-          <small>本轮工单</small>
-        </strong>
+      title="巡检态势"
+      extra={<span className="muted">全国 {CHINA_PROVINCE_COUNT} 个省级区域</span>}
+      className="ov__panel">
+      <div className="ov-tally">
+        <div>
+          <strong>{CHINA_PROVINCE_COUNT}</strong>
+          <span>已覆盖省份</span>
+        </div>
+        <div>
+          <strong>{summary.total}</strong>
+          <span>古建点位</span>
+        </div>
+        <div>
+          <strong>{done}</strong>
+          <span>完成巡检</span>
+        </div>
+        <div>
+          <strong>
+            {rate}
+            <em>%</em>
+          </strong>
+          <span>完成率</span>
+        </div>
       </div>
 
-      <h4 className="ov-sec">
-        数据通道
-        <MoreButton open={detailOpen} moreText="详情" onClick={() => setDetailOpen((v) => !v)} />
-      </h4>
-      {/* 第二层：三条通道各自的连接状态（状态点 + 状态词） */}
-      <ul className="ov-channels">
-        {channels.map((item) => (
-          <li key={item.key} className="ov-channel">
-            <span className="ov-channel__label">
-              <i
-                style={{
-                  background:
-                    STATUS_COLOR[item.key === "map" ? "collected" : item.key === "scene" ? "workorder" : "inspected"],
-                }}
-              />
-              {item.label}
-            </span>
-            {/* 第三层：版本 / 批次号，展开后才出现 */}
-            {detailOpen ? <b>{item.value}</b> : null}
-            <StatusChip text={item.state} tone={item.tone} />
+      <ul className="ov-tally__bar">
+        {order.map((key) => (
+          <li key={key}>
+            <i style={{ background: STATUS_COLOR[key] }} />
+            <span>{STATUS_TEXT[key]}</span>
+            <b>{summary.byStatus[key]}</b>
           </li>
         ))}
       </ul>
 
-      {domainPending ? (
-        <StateBlock
-          kind="partial"
-          title="适用域待核验"
-          hint="该批次已冻结诊断输出，等待专业复核；页面不输出病害结论。"
-        />
-      ) : null}
+      <p className="ov-tally__foot">
+        本轮任务 {WORK_ORDER.id} · {WORK_ORDER.site}
+      </p>
     </Panel>
   );
 }
 
-/* ------------------------------------------------------------------ *
- * 左栏 · 面板二：四柱构件状态（未检测一律「未采集」）
- * ------------------------------------------------------------------ */
+/**
+ * 设备状态
+ *
+ * 硬件侧一眼可见：三台设备各自的数据来源与状态，加四路通道的更新时间。
+ * 不在这里给检测结论 —— 设备状态与结果判定是两条线（PRD 3.2）。
+ */
+function DevicePanel() {
+  const { channels } = useMumai();
 
-function ComponentPanel() {
-  const [componentId, setComponentId] = useState(COMPONENTS[COMPONENTS.length - 1]?.id ?? "Z04");
-  /** 显式点过的风险；为空时取该构件得分最高的一条 */
-  const [pickedRiskId, setPickedRiskId] = useState<string | null>(null);
-  const [noteOpen, setNoteOpen] = useState(false);
+  const devices = [
+    { ...DEVICES.scanner, source: "模拟采集", tone: "warn" as const },
+    { ...DEVICES.demoCart, source: "回放", tone: "info" as const },
+    { ...DEVICES.realCart, source: "只读监视", tone: "muted" as const },
+  ];
 
-  const risks = useMemo(() => CURRENT_RISKS.filter((item) => item.componentId === componentId), [componentId]);
-
-  const activeRisk = useMemo(
-    () =>
-      risks.find((item) => item.id === pickedRiskId) ??
-      risks.reduce<(typeof risks)[number] | null>((best, item) => (best === null || item.score > best.score ? item : best), null),
-    [risks, pickedRiskId],
-  );
-
-  const pickComponent = useCallback((id: string) => {
-    setComponentId(id);
-    setPickedRiskId(null);
-    setNoteOpen(false);
-  }, []);
+  const channelTone = (state: string) =>
+    state === "online" ? ("ok" as const) : state === "stale" ? ("warn" as const) : ("danger" as const);
+  const channelText = (state: string) =>
+    state === "online" ? "正常" : state === "stale" ? "延迟" : "断开";
 
   return (
     <Panel
-      title="四柱构件状态"
-      className="ov__panel ov__panel--comp"
-      extra={<StatusChip text={risks.length > 0 ? "已标记" : "未标记"} tone={risks.length > 0 ? "warn" : "muted"} />}>
-      {/* 第一层 + 第二层：柱号（含部位）与采集状态；卡片本身就是选中入口，
-          不再另起一排 Z01–Z04 切换按钮 */}
-      <ul className="ov-components">
-        {COMPONENTS.map((component) => (
-          <li key={component.id}>
-            <button
-              type="button"
-              className={component.id === componentId ? "is-active" : ""}
-              onClick={() => pickComponent(component.id)}>
-              <b>
-                {component.id}
-                <i>{component.part}</i>
-              </b>
-              {component.radarScore === null ? (
-                <StatusChip text="未采集" tone="muted" />
-              ) : (
-                <StatusChip text={`回波 ${component.radarScore.toFixed(2)}`} tone="warn" />
-              )}
-            </button>
+      title="设备状态"
+      extra={<span className="muted">{MISSION.mapVersion}</span>}
+      className="ov__panel">
+      <ul className="ov-devices">
+        {devices.map((device) => (
+          <li key={device.id}>
+            <div className="ov-devices__id">
+              <b>{device.name}</b>
+              <em>{device.id}</em>
+            </div>
+            <StatusChip text={device.source} tone={device.tone} dot />
           </li>
         ))}
       </ul>
 
-      <h4 className="ov-sec">
-        当前风险
-        <span>{risks.length > 0 ? `${risks.length} 条待复核` : "未精扫不判定"}</span>
-      </h4>
-
-      {risks.length > 0 ? (
-        /* 第三层：分数 + 它是什么，一行一条；点一行看该条的处置建议 */
-        <ul className="ov-risks">
-          {risks.map((risk) => (
-            <li key={risk.id} className={risk.id === activeRisk?.id ? "is-active" : ""}>
-              <button
-                type="button"
-                onClick={() => {
-                  setPickedRiskId(risk.id);
-                  setNoteOpen(false);
-                }}>
-                <b className={risk.score >= 0.8 ? "is-danger" : ""}>
-                  {risk.score.toFixed(2)}
-                  <i>{risk.label}</i>
-                </b>
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <StateBlock kind="empty" title="该构件暂无本轮风险" hint="未精扫部分不写成内部正常。" />
-      )}
-
-      {activeRisk ? (
-        <div className="ov-rec">
-          <h4 className="ov-sec">
-            处置建议
-            <MoreButton open={noteOpen} moreText="展开" onClick={() => setNoteOpen((v) => !v)} />
-          </h4>
-          <p className={noteOpen ? "ov-note is-open" : "ov-note"}>{activeRisk.recommendation}</p>
-        </div>
-      ) : null}
+      <ul className="ov-channels">
+        {channels.map((channel) => (
+          <li key={channel.key}>
+            <span>{channel.label}</span>
+            <StatusChip
+              text={channelText(channel.state)}
+              tone={channelTone(channel.state)}
+              dot
+            />
+            <em>{channel.updatedAt}</em>
+          </li>
+        ))}
+      </ul>
     </Panel>
   );
 }
 
-/* ------------------------------------------------------------------ *
- * 右栏 · 面板一：风险与工单
- * ------------------------------------------------------------------ */
 
 function RiskOrderPanel() {
   const navigate = useNavigate();
-  const [selectedId, setSelectedId] = useState(WORK_ORDER.id);
+  /**
+   * 工单选中态放在 `map/store` 而不是这里的 `useState`：
+   * 地图点位与右栏工单必须互相联动（选中工单 → 地图高亮点位；点击点位 →
+   * 右栏这条变选中）。两处各自 `useState` 会绕成环，收敛到 store 才是单一来源。
+   */
+  const selectedOrderId = useDashboardStore((state) => state.selectedOrderId);
+  const selectOrder = useDashboardStore((state) => state.selectOrder);
+  const selectedSiteId = useDashboardStore((state) => state.selectedSiteId);
   /** 工单表默认 4 行，其余收进「更多」 */
   const [listOpen, setListOpen] = useState(false);
   /** 当前工单卡默认只给一行摘要，点位/区县/发现时间收进「详情」 */
   const [detailOpen, setDetailOpen] = useState(false);
 
-  const selected = OVERVIEW_ORDERS.find((item) => item.id === selectedId) ?? WORK_ORDER;
+  const selected =
+    OVERVIEW_ORDERS.find((item) => item.id === selectedOrderId) ?? WORK_ORDER;
+
+  /** 地图上处于选中态的点位（只用于给工单卡补一行「地图点位」） */
+  const selectedSite = useMemo(() => {
+    if (!selectedSiteId) return null;
+    return [...CHINA_SITES, ...SHANGHAI_SITES].find((site) => site.id === selectedSiteId) ?? null;
+  }, [selectedSiteId]);
 
   /** 计数按种子工单真实统计，不写死数字 */
   const counts = useMemo(
@@ -302,9 +259,9 @@ function RiskOrderPanel() {
   const rows = useMemo(() => {
     if (listOpen) return OVERVIEW_ORDERS;
     const preview = OVERVIEW_ORDERS.slice(0, ORDER_PREVIEW_ROWS);
-    if (preview.some((order) => order.id === selectedId)) return preview;
-    return OVERVIEW_ORDERS.filter((order, index) => index < ORDER_PREVIEW_ROWS - 1 || order.id === selectedId);
-  }, [listOpen, selectedId]);
+    if (preview.some((order) => order.id === selected.id)) return preview;
+    return OVERVIEW_ORDERS.filter((order, index) => index < ORDER_PREVIEW_ROWS - 1 || order.id === selected.id);
+  }, [listOpen, selected]);
 
   /** 问题类型取该工单来源风险里优先级最高的一条，没有来源风险时退回检测范围 */
   const issueType = useMemo(() => {
@@ -363,7 +320,7 @@ function RiskOrderPanel() {
               key={order.id}
               type="button"
               className={order.id === selected.id ? "is-active" : ""}
-              onClick={() => setSelectedId(order.id)}>
+              onClick={() => selectOrder(order.id)}>
               <span className="ov-orders__id">
                 {order.id}
                 <i>{order.site}</i>
@@ -400,11 +357,19 @@ function RiskOrderPanel() {
             </div>
             <div>
               <dt>区县</dt>
-              <dd>{selected.district}</dd>
+              <dd>{selectedSite ? selectedSite.district ?? selectedSite.province ?? selected.district : selected.district}</dd>
             </div>
             <div>
               <dt>发现时间</dt>
               <dd>{selected.discoveredAt}</dd>
+            </div>
+            <div>
+              <dt>地图点位</dt>
+              <dd>
+                {selectedSite
+                  ? `${selectedSite.name} · ${STATUS_TEXT[selectedSite.status]}（地图上已高亮）`
+                  : "该工单未关联地图点位"}
+              </dd>
             </div>
           </dl>
         ) : null}
@@ -497,10 +462,20 @@ function TodoEventPanel() {
 export default function Overview() {
   const mode = useDashboardStore((state) => state.mode);
   const transitioning = useDashboardStore((state) => state.transitioning);
-  const { currentOrder, stageLabel, domainPending, toast } = useMumai();
+  const { currentOrder, toast } = useMumai();
 
   const enterShanghai = useCallback(() => requestMapMode("shanghai"), []);
   const returnChina = useCallback(() => requestMapMode("china"), []);
+
+  /**
+   * 图例与点位一一对应：
+   *   ① 状态取自种子（`seed/sites.ts`），不再在页面里写一份状态名单；
+   *   ② 只列当前地图上**真的有点位**的状态，图例里不会出现点了没有的颜色；
+   *   ③ 顺带给出模式下的点位总数与分布，图例同时就是一句态势说明。
+   */
+  const sites = mode === "shanghai" ? SHANGHAI_SITES : CHINA_SITES;
+  const legendStatuses = useMemo(() => statusesOf(sites), [sites]);
+  const siteStats = useMemo(() => summariseSites(sites), [sites]);
 
   return (
     <div className="ov">
@@ -510,15 +485,14 @@ export default function Overview() {
       </div>
       <div className="ov__vignette" />
 
-      {/* 左栏：场地概览（含三通道）+ 四柱构件状态 */}
+      {/* 点位详情浮层：只有勘察 / 检测记录的点位被点开时出现，
+          不跳页、不遮地图（关闭靠点空白处或右上角 ✕） */}
+      <SiteDetailCard />
+
+      {/* 左栏：巡检态势 + 设备状态（硬件侧的设备与四路通道） */}
       <div className="ov__side ov__side--left">
-        <SitePanel
-          stageLabel={stageLabel}
-          orderId={currentOrder.id}
-          sourceMode={currentOrder.sourceMode}
-          domainPending={domainPending}
-        />
-        <ComponentPanel />
+        <SituationPanel />
+        <DevicePanel />
       </div>
 
       {/* 右栏：风险与工单 + 待办与最近事件 */}
@@ -540,21 +514,20 @@ export default function Overview() {
       </div>
 
       <div className="ov__actions">
-        <div className="legend">
-          {(
-            [
-              ["collected", "已采集"],
-              ["inspected", "已巡检"],
-              ["risk", "风险点"],
-              ["workorder", "工单点"],
-            ] as const
-          ).map(([key, label]) => (
-            <span key={key}>
-              <i style={{ background: STATUS_COLOR[key] }} />
-              {label}
+        <Legend
+          className="legend"
+          title={`${mode === "shanghai" ? "上海市" : "全国"}勘察检测点位 ${siteStats.total} 处`}>
+          <span>
+            勘察检测点位 <b>{siteStats.total}</b>
+          </span>
+          {legendStatuses.map((status) => (
+            <span key={status} title={STATUS_ACTION[status]}>
+              <i style={{ background: STATUS_COLOR[status] }} />
+              {STATUS_TEXT[status]}
+              <b>{siteStats.byStatus[status]}</b>
             </span>
           ))}
-        </div>
+        </Legend>
         <button
           type="button"
           className="btn btn--primary"
@@ -574,7 +547,7 @@ export default function Overview() {
       </div>
 
       <div className="ov__hint">
-        <Icon name="pin" /> 拖拽旋转 · 滚轮缩放 · 点击上海轮廓下钻
+        <Icon name="pin" /> 拖拽旋转 · 滚轮缩放 · 点击点位看工单 / 勘察记录
       </div>
 
       <footer className="ov__foot">

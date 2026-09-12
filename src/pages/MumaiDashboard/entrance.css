@@ -1,0 +1,71 @@
+/**
+ * 入场动画的「初始隐藏态」。
+ *
+ * 为什么必须用 CSS 而不是 JS：
+ *   原来负责隐藏的 layout effect 在 Shell 挂载时就执行了，但那一刻路由页面
+ *   （懒加载 + Suspense）还没挂载 —— 没有元素可隐藏。于是左右面板会先以
+ *   **最终位置**绘制一帧，等 mapPlayComplete（t≈2.5s）后才被 gsap 的 fromTo
+ *   拽到屏幕外重新滑入。观感就是「窗口先到位、然后又重新播一遍动画」。
+ *
+ *   把初始态写进 CSS 挂在 body 的 is-entering 上，从**首次绘制**就生效，
+ *   不管页面什么时候挂载都不会漏。gsap 播放时先写入内联样式（内联优先于类），
+ *   再摘掉 is-entering，因此不会出现跳变。
+ *
+ * 注意：.ov__crumb / .ov__actions 自带的居中 transform 必须保留，
+ * 所以它们用 translate(-50%, …) 而不是纯位移。
+ */
+
+body.is-entering .appshell__header {
+  opacity: 0;
+  transform: translateY(-100%);
+}
+
+body.is-entering .ov__side--left > .ov__panel {
+  opacity: 0;
+  transform: translateX(-100%);
+}
+
+body.is-entering .ov__side--right > .ov__panel {
+  opacity: 0;
+  transform: translateX(100%);
+}
+
+/* 非总览页：内容区根节点做轻量上浮 */
+body.is-entering .appshell__stage > * {
+  opacity: 0;
+  transform: translateY(18px);
+}
+
+/* 总览页的地图容器要始终可见，不能被上面那条一起隐藏掉 */
+body.is-entering .appshell__stage > .ov .ov__map,
+body.is-entering .appshell__stage > .ov .ov__vignette {
+  opacity: 1;
+  transform: none;
+}
+
+body.is-entering .ov__crumb,
+body.is-entering .ov__actions {
+  opacity: 0;
+  transform: translate(-50%, 14px);
+}
+
+body.is-entering .ov__hint,
+body.is-entering .ov__foot {
+  opacity: 0;
+  transform: translateY(14px);
+}
+
+body.is-entering .appshell__ticker {
+  opacity: 0;
+  transform: translateY(100%);
+}
+
+body.is-entering .appshell__fab {
+  opacity: 0;
+  transform: translateY(16px) scale(0.6);
+}
+
+body.is-entering .appshell__login {
+  opacity: 0;
+  transform: translateY(22px);
+}

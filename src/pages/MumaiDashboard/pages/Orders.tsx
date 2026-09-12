@@ -13,9 +13,10 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useMumai } from "../context";
+import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
 import { Icon } from "../icons";
-import { Btn, DataTable, KV, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
+import { Btn, DataTable, KV, PermNote, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
 import {
   CONFIG_DIFF,
   ENV_HISTORY,
@@ -77,6 +78,7 @@ export default function Orders() {
     confirmDraftOrder,
     toast,
     pushEvent,
+    can,
   } = useMumai();
 
   const [params, setParams] = useSearchParams();
@@ -107,8 +109,11 @@ export default function Orders() {
             <span>历史工单与当前工单分列表显示；暂停保留所有已生成记录</span>
           </>
         }>
+        {/* PRD 2.1：工单审核（确认草稿、暂停、归档）属于项目经理的职责 */}
         <Btn
           tone="primary"
+          disabled={!can("order:review")}
+          title={can("order:review") ? "确认后进入待复核" : permissionHint("order:review")}
           onClick={() => {
             confirmDraftOrder();
             toast(`草稿工单 ${draftOrder.id} 已提交复核`, "ok");
@@ -117,6 +122,8 @@ export default function Orders() {
           确认草稿工单
         </Btn>
         <Btn
+          disabled={!can("order:review")}
+          title={can("order:review") ? "暂停保留全部已生成记录" : permissionHint("order:review")}
           onClick={() => {
             setOrderStatus(selected.id, "处理中" as OrderStatus);
             toast("已暂停，所有已生成记录保留", "warn");
@@ -125,6 +132,8 @@ export default function Orders() {
           暂停
         </Btn>
         <Btn
+          disabled={!can("order:review")}
+          title={can("order:review") ? "归档工单" : permissionHint("order:review")}
           onClick={() => {
             setOrderStatus(selected.id, "已关闭" as OrderStatus);
             toast("工单已归档", "ok");
@@ -132,6 +141,7 @@ export default function Orders() {
           }}>
           归档
         </Btn>
+        {can("order:review") ? null : <small className="muted">{permissionHint("order:review")}</small>}
       </Toolbar>
 
       <div className="orders-layout">
@@ -291,8 +301,11 @@ export default function Orders() {
               </div>
 
               <div className="env-actions">
+                {/* PRD 3.1 / 12：校验由经理运行；PRD 2.1：饶接收配置并返回 ack */}
                 <Btn
                   tone="primary"
+                  disabled={!can("env:validate")}
+                  title={can("env:validate") ? "运行环境校验并生成配置版本" : permissionHint("env:validate")}
                   onClick={() => {
                     setRan(true);
                     if (allOk) {
@@ -307,6 +320,8 @@ export default function Orders() {
                   运行校验
                 </Btn>
                 <Btn
+                  disabled={!can("env:ack")}
+                  title={can("env:ack") ? "设备代理返回 ack" : permissionHint("env:ack")}
                   onClick={() => {
                     setDeviceAck(true);
                     toast("设备代理已返回 ack", "ok");
@@ -314,6 +329,9 @@ export default function Orders() {
                   }}>
                   全栈接收并返回 ack
                 </Btn>
+                {can("env:validate") && can("env:ack") ? null : (
+                  <PermNote permissions={["env:validate", "env:ack"]} />
+                )}
               </div>
 
               {ran ? (

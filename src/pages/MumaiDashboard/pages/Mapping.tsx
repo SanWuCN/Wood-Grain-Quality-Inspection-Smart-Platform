@@ -12,14 +12,14 @@
 
 import { useMemo, useState } from "react";
 import { useMumai } from "../context";
+import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
-import { Btn, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
+import { Btn, PermNote, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
 import RvizView from "./RvizView";
 import {
   DEVICES,
   FORBIDDEN_ZONES,
   MAP_VERSIONS,
-  PLANNED_PATH,
   WAYPOINTS,
 } from "../seed/scenario";
 
@@ -46,7 +46,7 @@ const RVIZ_STREAM = {
 const CELL_HINT = "10 cm / 格";
 
 export default function Mapping() {
-  const { mission, patchMission, channels, toast, pushEvent, deviceSource, setDeviceSource } =
+  const { mission, patchMission, channels, toast, pushEvent, deviceSource, setDeviceSource, can } =
     useMumai();
   const [versionId, setVersionId] = useState(MAP_VERSIONS[0]?.id ?? "");
   const [compare, setCompare] = useState(true);
@@ -119,9 +119,11 @@ export default function Mapping() {
         <Btn onClick={() => { patchMission({ state: "已预览" }); toast("路线预览已生成", "info"); }}>
           路线预览
         </Btn>
+        {/* PRD 2.1 / S11：任务下发与监视由具身智能工程师与架构师负责 */}
         <Btn
           tone="primary"
-          disabled={running}
+          disabled={running || !can("mission:dispatch")}
+          title={can("mission:dispatch") ? "下发巡检任务，等待机器人确认" : permissionHint("mission:dispatch")}
           onClick={() => {
             patchMission({ state: "等待机器人确认" });
             pushEvent("巡检任务已下发，等待机器人确认", "info");
@@ -133,17 +135,25 @@ export default function Mapping() {
           }}>
           任务下发
         </Btn>
-        <Btn onClick={() => { patchMission({ state: "已暂停" }); pushEvent("巡检任务暂停", "warn"); }}>
+        <Btn
+          disabled={!can("mission:dispatch")}
+          title={can("mission:dispatch") ? "暂停任务" : permissionHint("mission:dispatch")}
+          onClick={() => { patchMission({ state: "已暂停" }); pushEvent("巡检任务暂停", "warn"); }}>
           暂停
         </Btn>
-        <Btn tone="danger" onClick={() => { patchMission({ state: "已取消" }); pushEvent("巡检任务取消", "danger"); }}>
+        <Btn
+          tone="danger"
+          disabled={!can("mission:dispatch")}
+          title={can("mission:dispatch") ? "取消任务并记录反馈" : permissionHint("mission:dispatch")}
+          onClick={() => { patchMission({ state: "已取消" }); pushEvent("巡检任务取消", "danger"); }}>
           取消
         </Btn>
+        <PermNote permissions={["mission:dispatch"]} />
       </Toolbar>
 
       <div className="map-layout">
         <Panel
-          title="建图视图 · RViz"
+          title="建图视图"
           extra={
             <>
               <StatusChip text={version?.state ?? "—"} tone="info" />
@@ -171,7 +181,7 @@ export default function Mapping() {
             </div>
           </Panel>
 
-          <Panel title="通信状态 · 四路独立">
+          <Panel title="通信状态">
             <ul className="channel-list">
               {channels.map((channel) => (
                 <li key={channel.key} className={`is-${channel.state}`}>
@@ -278,10 +288,6 @@ export default function Mapping() {
               ))}
             </div>
 
-            <p className="note">
-              平台计划路径 {PLANNED_PATH.length} 个路径点；机器人与平台路径分别着色，
-              用于对照实际执行偏差。
-            </p>
           </Panel>
         </div>
       </div>

@@ -82,7 +82,7 @@ export default function Archive() {
         <Btn tone="primary" disabled={running} onClick={() => void runCheck()}>
           {running ? "校验中…" : "运行交付文件校验"}
         </Btn>
-        <Btn disabled={!check} onClick={downloadReport} title="下载 runArchiveCheck 生成的 HTML 校验报告">
+        <Btn disabled={!check} onClick={downloadReport} title="下载校验报告">
           下载校验报告
         </Btn>
         <Btn
@@ -204,7 +204,7 @@ export default function Archive() {
               <StateBlock
                 kind="empty"
                 title="尚未运行校验"
-                hint="点击「运行交付文件校验」，程序会逐项检查存在性并用 SHA-256 比对摘要。"
+                hint="尚未执行校验。"
               />
             )}
           </Panel>
@@ -240,10 +240,6 @@ export default function Archive() {
                 <dd>{UPDATE_PACKAGE.sizeText}</dd>
               </div>
             </dl>
-            <p className="note">
-              归档包按清单下载；完整性报告输出 HTML 打印版，可下载后打印或另存为 PDF。摘要计算绑定文件大小与更新时间，
-              缓存失效后重新计算。
-            </p>
           </Panel>
         </div>
       </div>

@@ -2,7 +2,7 @@
  * CDP 截图 / 控制台检查工具（临时验证脚本，验收后删除）
  *
  * 用法：
- *   node tools/shot.mjs --url http://localhost:5199/ --out tmp-shot/ov-china.png --wait 7000
+ *   node tools/shot.mjs --url http://localhost:5173/ --out tmp-shot/ov-china.png --wait 7000
  *   node tools/shot.mjs --url ... --eval "window.dispatchEvent(new CustomEvent('mumai:request-mode',{detail:'shanghai'}))" --wait 4000
  *   node tools/shot.mjs --url ... --drag 160,0
  */
@@ -18,7 +18,7 @@ function arg(name, fallback = undefined) {
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 }
 
-const url = arg("url", "http://localhost:5199/");
+const url = arg("url", "http://localhost:5173/");
 const out = resolve(arg("out", "tmp-shot/shot.png"));
 const wait = Number(arg("wait", "7000"));
 const width = Number(arg("w", "1920"));
@@ -26,6 +26,14 @@ const height = Number(arg("h", "1080"));
 const evalExpr = arg("eval", "");
 const evalAfter = arg("evalAfter", "");
 const drag = arg("drag", "");
+/**
+ * --init "<js>"：在目标页面的**所有脚本之前**执行。
+ * 登录改版后 / 受 RequireLogin 保护，未登录会被重定向到 #/login，
+ * 截图前必须先把会话写进 localStorage，而普通 --eval 跑在页面加载之后，
+ * 那时重定向已经发生。用法：
+ *   --init "localStorage.setItem('mumai.session', JSON.stringify({accountId:'shen',login:'shen',at:''}))"
+ */
+const initScript = arg("init", "");
 const port = 9222 + Math.floor(Math.random() * 400);
 
 mkdirSync(dirname(out), { recursive: true });
@@ -154,6 +162,9 @@ await send("Emulation.setDeviceMetricsOverride", {
   deviceScaleFactor: 1,
   mobile: false,
 });
+if (initScript) {
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: initScript });
+}
 await send("Page.navigate", { url });
 
 await sleep(wait);
@@ -220,7 +231,40 @@ if (evalAfter) {
   await sleep(Number(arg("evalAfterWait", "1200")));
 }
 
-const shot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+/**
+ * --wheel <deltaY[,x,y]>：滚轮缩放地图（OrbitControls 认 wheel 事件）。
+ * 负值拉近。用来在截图里放大局部，确认点位分布与标签是否重叠。
+ */
+const wheel = arg("wheel", "");
+if (wheel) {
+  const [deltaY, wx = String(width / 2), wy = String(height / 2)] = wheel.split(",").map(Number);
+  const count = Number(arg("wheelCount", "6"));
+  for (let i = 0; i < count; i++) {
+    await send("Input.dispatchMouseEvent", {
+      type: "mouseWheel",
+      x: wx,
+      y: wy,
+      deltaX: 0,
+      deltaY,
+      button: "none",
+      buttons: 0,
+    });
+    await sleep(90);
+  }
+  await sleep(Number(arg("wheelWait", "2600")));
+}
+
+/**
+ * --clip x,y,w,h：只截取这一块（CSS 像素），用来在 1920 宽的图里放大局部
+ * 检查点位与标签是否重叠 —— 预览会把整图缩到 1066 宽，细节会被抹掉。
+ */
+const clip = arg("clip", "");
+const shotParams = { format: "png", captureBeyondViewport: false };
+if (clip) {
+  const [cx, cy, cw, ch] = clip.split(",").map(Number);
+  shotParams.clip = { x: cx, y: cy, width: cw, height: ch, scale: 1 };
+}
+const shot = await send("Page.captureScreenshot", shotParams);
 writeFileSync(out, Buffer.from(shot.data, "base64"));
 
 /**

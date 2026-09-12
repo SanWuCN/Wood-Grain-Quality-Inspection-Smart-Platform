@@ -29,10 +29,12 @@ if errorlevel 1 (
 
 :start_server
 echo.
-echo 木脉智检正在启动，请在浏览器打开 http://localhost:5173
+echo 木脉智检正在启动，浏览器请打开 http://localhost:5173
+echo （端口固定在 vite.config.ts 的 server.port，如果这里提示被占用，
+echo   请先关掉已经在跑的旧窗口；下方 Vite 输出的 Local 地址才是准的）
 echo 关闭本窗口即可停止服务。
 echo.
-call "%MUMAI_PNPM%" dev --host 0.0.0.0
+call "%MUMAI_PNPM%" dev
 
 if errorlevel 1 (
   echo.

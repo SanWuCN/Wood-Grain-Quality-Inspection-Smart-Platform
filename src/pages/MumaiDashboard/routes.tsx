@@ -11,29 +11,38 @@
 import { lazy } from "react";
 import { Route, Routes } from "react-router";
 import AppShell from "./AppShell";
+import { Login, RequireLogin } from "./pages/Login";
 
 const Overview = lazy(() => import("./pages/Overview"));
 const Orders = lazy(() => import("./pages/Orders"));
 const Mapping = lazy(() => import("./pages/Mapping"));
 const Twin = lazy(() => import("./pages/Twin"));
-const Adapt = lazy(() => import("./pages/Adapt"));
+const Hardware = lazy(() => import("./pages/Hardware"));
+const Firmware = lazy(() => import("./pages/Firmware"));
 const Knowledge = lazy(() => import("./pages/Knowledge"));
 const Archive = lazy(() => import("./pages/Archive"));
-const Console = lazy(() => import("./pages/Console"));
 const Present = lazy(() => import("./pages/Present"));
 
 export default function RoutesTree() {
   return (
     <Routes>
-      <Route element={<AppShell />}>
+      {/* 登录页在外壳之外：没有会话时先登录，不进 AppShell */}
+      <Route path="/login" element={<Login />} />
+      {/* 其余全部路由都要先有会话；未登录跳 /login（PRD 2.1 固定账号快捷登录） */}
+      <Route
+        element={
+          <RequireLogin>
+            <AppShell />
+          </RequireLogin>
+        }>
         <Route path="/" element={<Overview />} />
         <Route path="/orders" element={<Orders />} />
         <Route path="/mapping" element={<Mapping />} />
         <Route path="/twin" element={<Twin />} />
-        <Route path="/adapt" element={<Adapt />} />
+        <Route path="/hardware" element={<Hardware />} />
+        <Route path="/firmware" element={<Firmware />} />
         <Route path="/knowledge" element={<Knowledge />} />
         <Route path="/archive" element={<Archive />} />
-        <Route path="/console" element={<Console />} />
         <Route path="/present" element={<Present />} />
       </Route>
     </Routes>

@@ -12,6 +12,8 @@
 
 import type { ReactNode } from "react";
 import { CHART, COLORS } from "./design";
+import { permissionHint, type Permission } from "./auth";
+import { useMumai } from "./context";
 import { fmtNum } from "./lib";
 import type { Metrics, Tone } from "./lib";
 
@@ -77,7 +79,7 @@ export function StatusChip({
 
 export function SourceTag({ label = "演示回放" }: { label?: string }) {
   return (
-    <span className="source-tag" title="数据来源标识（PRD 1.2 source_mode）">
+    <span className="source-tag" title="数据来源">
       <i />
       {label}
     </span>
@@ -175,6 +177,24 @@ export function Btn({
       {children}
     </button>
   );
+}
+
+/* ------------------------------------------------------------------ *
+ * 权限说明（PRD 2.1）：按钮置灰后，在同一行用中性小字说明原因，
+ * 不让用户只看到「点不动」，也不写感叹号。
+ * ------------------------------------------------------------------ */
+
+/**
+ * 列出当前角色缺少的权限说明；全部具备时返回 null。
+ *
+ * 例如 `<PermNote permissions={["env:validate", "env:ack"]} />`：
+ * 项目经理只会看到「当前角色无「环境配置接收并返回 ack」权限」。
+ */
+export function PermNote({ permissions }: { permissions: Permission[] }) {
+  const { can } = useMumai();
+  const denied = permissions.filter((permission) => !can(permission));
+  if (denied.length === 0) return null;
+  return <small className="muted">{denied.map((item) => permissionHint(item)).join("；")}</small>;
 }
 
 /* ------------------------------------------------------------------ *

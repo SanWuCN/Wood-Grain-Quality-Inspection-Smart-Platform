@@ -8,11 +8,23 @@
  *   需要浮层的页面自己在内容区里用 absolute 定位。
  *
  * PRD 15：所有页有加载 / 空数据 / 错误 / 断线状态。
+ *
+ * 本文件另外负责三件与角色权限有关的事（PRD 2.1 / 2.2）：
+ *   1) 一级导航按当前角色的权限过滤后再渲染
+ *   2) 直接输入无权限的 URL 时拦截内容区，给中性提示并给一个能回去的按钮
+ *   3) 顶栏右上角显示当前账号与角色，并提供退出登录
  */
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import { ACCOUNTS, HEADER_HEIGHT, NAV_ITEMS } from "./design";
+import {
+  allowsPath,
+  navFor,
+  PERMISSION_LABEL,
+  ROUTE_PERMISSION,
+  workspacePath,
+} from "./auth";
 import Header from "./Header";
 import SmallWoodPanel from "./SmallWoodPanel";
 import { Icon } from "./icons";
@@ -24,21 +36,52 @@ import { COMPONENTS, CURRENT_RISKS, DEVICES, SCAN_BATCHES } from "./seed/scenari
 import "./appshell.css";
 import "./pages.css";
 
+/** 无权限提示：说明原因 + 一个能回到本角色工作区的按钮，不白屏、不报错 */
+function PermissionNotice({ pathname }: { pathname: string }) {
+  const navigate = useNavigate();
+  const { accountId } = useMumai();
+  const account = ACCOUNTS.find((item) => item.id === accountId) ?? ACCOUNTS[0];
+  const required = ROUTE_PERMISSION[pathname] ?? [];
+  const nav = NAV_ITEMS.find((item) => item.path === pathname);
+
+  return (
+    <div className="appshell__denied">
+      <div className="appshell__denied-box">
+        <span className="appshell__denied-dot" />
+        <strong>当前角色无此页面权限</strong>
+        <em>
+          {account.name} · {account.role}
+          {nav ? `，不包含「${nav.label}」` : ""}。该页面需要
+          {required.length > 0
+            ? required.map((item) => `「${PERMISSION_LABEL[item]}」`).join(" 或 ")
+            : "独立管理权限"}
+          ，请使用具备该权限的账号，或回到本角色的默认工作区。
+        </em>
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => navigate(workspacePath(account.id), { replace: true })}>
+          回到{account.workspace}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Shell() {
   const location = useLocation();
   const navigate = useNavigate();
   const {
     accountId,
-    setAccountId,
     assistantOpen,
     setAssistantOpen,
     channels,
     toasts,
     dismissToast,
-    resetDemo,
     events,
     sessionId,
     currentOrder,
+    logout,
   } = useMumai();
 
   const [booting, setBooting] = useState(true);
@@ -69,6 +112,27 @@ export default function Shell() {
     [accountId],
   );
 
+  /* ---- PRD 2.2：导航按角色过滤 ---- */
+
+  const permittedNav = useMemo(() => navFor(accountId), [accountId]);
+
+  // 本角色能进的最后一个页面：无权限时优先回到它
+  const lastAllowed = useRef<string>(account.page);
+  useEffect(() => {
+    if (allowsPath(accountId, location.pathname)) lastAllowed.current = location.pathname;
+  }, [accountId, location.pathname]);
+
+  const allowed = allowsPath(accountId, location.pathname);
+
+  const activeKey = useMemo(
+    () => permittedNav.find((item) => item.path === location.pathname)?.key ?? permittedNav[0]?.key ?? "overview",
+    [location.pathname, permittedNav],
+  );
+  const activeNavLabel = useMemo(
+    () => permittedNav.find((item) => item.key === activeKey)?.label ?? permittedNav[0]?.label ?? "任务总览",
+    [activeKey, permittedNav],
+  );
+
   // PRD 2.2：投放时把当前焦点（工单 / 构件 / 批次）与控制权持有人写进共享焦点，
   // 大屏窗口 /present 读同一份状态，不再各存一套。
   const openPresent = useCallback(() => {
@@ -83,14 +147,11 @@ export default function Shell() {
     window.open("#/present", "_blank", "noopener");
   }, [accountId, currentOrder, location.search]);
 
-  const activeKey = useMemo(
-    () => NAV_ITEMS.find((item) => item.path === location.pathname)?.key ?? "overview",
-    [location.pathname],
-  );
-  const activeNavLabel = useMemo(
-    () => NAV_ITEMS.find((item) => item.key === activeKey)?.label ?? "任务总览",
-    [activeKey],
-  );
+  // 已登录状态下不再提供角色切换：账号只能从登录页进入，避免在顶栏绕过角色限制
+  const handleLogout = useCallback(() => {
+    logout();
+    navigate("/login", { replace: true });
+  }, [logout, navigate]);
 
   /**
    * 入场动画（对齐 Demo2）。
@@ -102,22 +163,12 @@ export default function Shell() {
   const isOverview = location.pathname === "/";
   useShellEntrance(!booting && (isOverview ? mapPlayComplete : true), location.pathname);
 
-  const handleAccountChange = useCallback(
-    (id: string) => {
-      setAccountId(id);
-      const next = ACCOUNTS.find((item) => item.id === id);
-      // 切换账号后进入该账号默认工作区
-      if (next) navigate(next.page);
-    },
-    [navigate, setAccountId],
-  );
-
   const handleNav = useCallback(
     (label: string) => {
-      const item = NAV_ITEMS.find((entry) => entry.label === label);
+      const item = permittedNav.find((entry) => entry.label === label);
       if (item) navigate(item.path);
     },
-    [navigate],
+    [navigate, permittedNav],
   );
 
   // 大屏展示窗口：presentation 角色，纯展示、无外壳
@@ -137,13 +188,16 @@ export default function Shell() {
     <div className="appshell" style={{ ["--appshell-header" as string]: `${HEADER_HEIGHT}px` }}>
       <Header
         channels={channels}
-        navItems={NAV_ITEMS}
+        navItems={permittedNav}
         activeNav={activeNavLabel}
         onNav={handleNav}
         accountId={accountId}
-        onAccountChange={handleAccountChange}
+        onLogout={handleLogout}
         onPresent={openPresent}
-        onOpenDevices={() => navigate("/mapping")}
+        onOpenDevices={() => {
+          if (allowsPath(accountId, "/mapping")) navigate("/mapping");
+          else navigate(lastAllowed.current);
+        }}
         extra={<span className="appshell__source">{DEVICES.scanner.name} · 模拟采集</span>}
       />
 
@@ -156,7 +210,10 @@ export default function Shell() {
           而规范 §6.2 要求开场动画落在 2.4–3.2s。
           改成浮层只做覆盖、不阻塞挂载之后，镜头从 t≈0 就开始推，整段回到 Demo2 的节奏。
         */}
-        {online ? (
+        {!online ? null : !allowed ? (
+          // 路由守卫：无权限的路由不渲染页面内容，给提示 + 回默认工作区
+          <PermissionNotice pathname={location.pathname} />
+        ) : (
           <Suspense
             fallback={
               <div className="appshell__boot">
@@ -168,7 +225,7 @@ export default function Shell() {
             }>
             <Outlet />
           </Suspense>
-        ) : null}
+        )}
 
         {booting ? (
           <div className="appshell__boot">
@@ -215,14 +272,9 @@ export default function Shell() {
           <i />
           {account.name} · {account.role}
         </span>
-        <em>默认工作区：{account.workspace}</em>
-        <button
-          type="button"
-          className="btn btn--ghost"
-          onClick={resetDemo}
-          title="装载阶段快照（演示控制）">
-          装载快照
-        </button>
+        <em>
+          账号 {account.login} · 默认工作区：{account.workspace} · 可见导航 {permittedNav.length}/8
+        </em>
       </div>
 
       <div className="appshell__toasts" role="status" aria-live="polite">

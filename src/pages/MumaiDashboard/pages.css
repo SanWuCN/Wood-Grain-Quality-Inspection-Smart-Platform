@@ -3530,3 +3530,326 @@
     animation: none;
   }
 }
+
+/* ------------------------------------------------------------------
+   顶栏 · 当前账号与退出登录（PRD 2.2：设备状态与个人账号放在顶部）
+   ------------------------------------------------------------------
+   样式落在本文件而不是 appshell.css，与上面 .appshell__present 的
+   覆盖规则同级（0,2,0），因此 !important 的量级一致。
+   账号只能从登录页进入，这里只显示当前角色，不提供角色下拉。
+   ------------------------------------------------------------------ */
+.appshell__header--native .appshell__logout {
+  border: 1px solid var(--border-hover) !important;
+  background: var(--fill-soft) !important;
+  color: var(--text-primary) !important;
+}
+
+.appshell__header--native .appshell__logout:hover {
+  border-color: var(--border-active) !important;
+  background: var(--fill-strong) !important;
+}
+
+.appshell__header--native .appshell__logout b {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.appshell__header--native .appshell__logout small {
+  font-size: var(--fs-aux);
+  color: var(--text-tertiary);
+}
+
+.appshell__header--native .appshell__logout em {
+  padding-left: var(--space-2);
+  border-left: 1px solid var(--border-subtle);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  color: var(--text-accent);
+}
+
+/* ------------------------------------------------------------------
+   路由守卫提示（无此页面权限）
+   ------------------------------------------------------------------
+   不白屏、不报错：一个普通面板 + 中性说明 + 回默认工作区的按钮。
+   普通面板不发光（规范 §4.1）。
+   ------------------------------------------------------------------ */
+.appshell__denied {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--space-8);
+}
+
+.appshell__denied-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: min(560px, 100%);
+  padding: var(--space-6) var(--space-8);
+  border: 1px solid var(--border-subtle);
+  background: var(--panel-surface);
+  text-align: left;
+}
+
+.appshell__denied-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--warning);
+}
+
+.appshell__denied-box strong {
+  font-size: var(--fs-panel);
+  font-weight: 600;
+  line-height: var(--lh-panel);
+  color: var(--text-title);
+}
+
+.appshell__denied-box em {
+  font-size: var(--fs-body);
+  font-style: normal;
+  line-height: var(--lh-body);
+  color: var(--text-tertiary);
+}
+
+.appshell__denied-box .btn {
+  margin-top: var(--space-2);
+}
+
+/* ------------------------------------------------------------------
+   硬件详情（/hardware）与固件及模型（/firmware）
+   由原「检测适配」页拆出的两个页面。布局沿用 .adapt-grid 的双列自适应，
+   所以两块新内容与原有页签并排时不会跳格。
+   ------------------------------------------------------------------ */
+
+.hw-monitor,
+.fw-config {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: var(--space-4);
+  align-content: start;
+}
+
+.hw-panel,
+.fw-panel {
+  min-width: 0;
+}
+
+/* 四个版本读数一行铺开，窄屏自动折行 */
+.hw-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+/* 三路接收：状态点 + 计数 + 冻结标记，一行读下来 */
+.hw-receive {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hw-receive em {
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-style: normal;
+}
+
+.hw-frozen {
+  color: var(--ma-warn);
+  font-weight: 400;
+  font-size: var(--fs-aux);
+}
+
+/* ---- 版本配置矩阵 ---- */
+
+.fw-group + .fw-group {
+  margin-top: var(--space-5);
+}
+
+.fw-group__title {
+  margin: 0 0 var(--space-3);
+  color: var(--ma-text-2);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.fw-versions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 用留白和左侧细线区分条目，不再给每项套一层亮边框（规范 §4.3） */
+.fw-versions > li {
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--border-subtle);
+}
+
+.fw-versions > li.is-dirty {
+  border-left-color: var(--ma-warn);
+}
+
+.fw-versions__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fw-versions__label {
+  color: var(--ma-text-2);
+  font-size: var(--fs-body);
+}
+
+.fw-versions__value {
+  color: var(--ma-text-1);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  letter-spacing: 0.02em;
+}
+
+.fw-versions__target,
+.fw-versions__note,
+.fw-versions__locked {
+  margin: 2px 0 0;
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  line-height: 1.6;
+}
+
+.fw-versions__locked {
+  color: var(--ma-text-3);
+  opacity: 0.75;
+}
+
+.fw-versions__pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.fw-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+/* ------------------------------------------------------------------
+   总览页 · 巡检态势 / 设备状态（原「场地概览」「四柱构件状态」已下线）
+   ------------------------------------------------------------------ */
+
+/* 四个 KPI 一行铺开，靠字号与留白分层，不套亮边框卡片（规范 §4.3） */
+.ov-tally {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.ov-tally > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ov-tally strong {
+  color: var(--ma-text-1);
+  font-family: var(--font-data);
+  font-size: var(--fs-kpi);
+  font-weight: 600;
+  line-height: 1.05;
+}
+
+.ov-tally strong em {
+  font-size: var(--fs-sub);
+  font-style: normal;
+  margin-left: 1px;
+}
+
+.ov-tally span {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  white-space: nowrap;
+}
+
+.ov-tally__bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ov-tally__bar li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-aux);
+  color: var(--ma-text-3);
+}
+
+.ov-tally__bar i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.ov-tally__bar b {
+  color: var(--ma-text-2);
+  font-family: var(--font-data);
+  font-weight: 500;
+}
+
+.ov-tally__foot {
+  margin: var(--space-3) 0 0;
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+/* 设备列表：左侧名称 + 编号，右侧状态；两行之间用留白分隔 */
+.ov-devices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.ov-devices li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.ov-devices__id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ov-devices__id b {
+  color: var(--ma-text-2);
+  font-size: var(--fs-body);
+  font-weight: 500;
+}
+
+.ov-devices__id em {
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+  font-style: normal;
+}

@@ -40,7 +40,7 @@ const width = arg("w", "1920");
 const height = arg("h", "1080");
 const only = arg("routes", "");
 const wait = arg("wait", "8000");
-const base = arg("base", "http://localhost:5199");
+const base = arg("base", "http://localhost:5173");
 const routes = only
   ? ALL_ROUTES.filter(([path]) => only.split(",").includes(path))
   : ALL_ROUTES;

@@ -19,6 +19,7 @@
 
 import { useEffect, useLayoutEffect, useState } from "react";
 import { gsap } from "gsap";
+import "./entrance.css";
 
 /** Demo2 的原值，不要随手改：改了这个，整段开场节奏就和 demo_2 对不上了 */
 const DUR_HEADER = 0.6;
@@ -152,6 +153,7 @@ export function useShellEntrance(ready: boolean, routeKey: string, fallbackMs = 
    */
   useEffect(() => {
     const hard = window.setTimeout(() => {
+      document.body.classList.remove("is-entering");
       for (const step of collect()) {
         gsap.set(step.el, { clearProps: "transform,opacity" });
       }
@@ -159,9 +161,16 @@ export function useShellEntrance(ready: boolean, routeKey: string, fallbackMs = 
     return () => window.clearTimeout(hard);
   }, [routeKey, fallbackMs]);
 
-  // 先隐藏：必须在浏览器绘制之前完成，否则会看到面板「闪一下再飞进来」
+  /**
+   * 初始隐藏态。
+   *
+   * CSS 那份（entrance.css 里的 body.is-entering）负责**首次绘制**就隐藏，
+   * 因为页面是懒加载 + Suspense，Shell 挂载时它可能还没进 DOM；
+   * 这里的 gsap.set 作为补充，覆盖 CSS 选择器没涵盖到的元素。
+   */
   useLayoutEffect(() => {
     if (reduceMotion()) return;
+    document.body.classList.add("is-entering");
     const steps = collect();
     for (const step of steps) gsap.set(step.el, { opacity: 0, ...step.from });
     return () => {
@@ -177,7 +186,10 @@ export function useShellEntrance(ready: boolean, routeKey: string, fallbackMs = 
     const steps = collect();
     if (!steps.length) return;
 
+    const release = () => document.body.classList.remove("is-entering");
+
     if (reduceMotion()) {
+      release();
       for (const step of steps) {
         gsap.set(step.el, { opacity: 1, xPercent: 0, yPercent: 0, x: 0, y: 0 });
       }
@@ -206,6 +218,10 @@ export function useShellEntrance(ready: boolean, routeKey: string, fallbackMs = 
         step.delay,
       );
     }
+
+    // 时间线建立时 fromTo 已同步写入内联的起始值（内联优先于类），
+    // 此刻摘掉 is-entering 不会产生跳变。
+    release();
 
     return () => {
       tl.kill();
