@@ -45,6 +45,8 @@ import type { XiaomuIntent } from "./seed/scenario";
 // 经过校准的意图匹配器与项目槽位：评审 F05 要求「先解析项目与时间，再检索；
 // 无匹配拒绝执行」，所以匹配不再由本页面自己按字符重叠猜，统一走 agent/matcher。
 import { PROJECT_SLOT, understand } from "./agent/matcher";
+import { TOOL_BY_NAME, resolveArgs } from "./agent/tools";
+import { runTool, type Runtime } from "./agent/executor";
 
 /** PRD 4.2：意图目录没有匹配项时的固定回复，不调用大模型猜测 */
 const NO_HIT_REPLY = "可查询巡检资料、查看构件或启动当前业务流程";
@@ -183,6 +185,11 @@ export default function SmallWoodPanel() {
     componentById,
     domainPending,
     envRecord,
+    // 工具运行时要用会话上下文（阶段 / 账号 / 数据来源 / 通道摘要），与语音控制台同一份
+    stage,
+    accountLogin,
+    channels,
+    deviceSource,
   } = useMumai();
   const navigate = useNavigate();
   const [input, setInput] = useState("");
@@ -225,9 +232,33 @@ export default function SmallWoodPanel() {
       return { kind: "no-hit" as const, score: match.confidence };
     }
     const intent = XIAOMU_INTENTS.find((item) => item.intentId === match.intent?.id) ?? null;
-    // 匹配器认得、但这个面板没有对应话术的意图，同样按「没听懂」处理，不硬凑
-    return intent ? { kind: "hit" as const, intent } : { kind: "no-hit" as const, score: match.confidence };
+    // 匹配器认得、但这个面板没有对应话术的意图，同样按「没听懂」处理，不硬凑。
+    // 命中时把整份 MatchResult 一起带出去：工具执行要用它的 entities 解槽位。
+    return intent
+      ? { kind: "hit" as const, intent, match, action: match.intent.action }
+      : { kind: "no-hit" as const, score: match.confidence };
   }, []);
+
+  /**
+   * 小木的运行环境。与语音控制台注入的是同一个类型（agent/executor 的 Runtime），
+   * 工具执行因此走同一条路径 —— 这是评审 §3.8「两个入口共用一个执行器」的落点。
+   */
+  const runtime = useMemo<Runtime>(
+    () => ({
+      navigate: (to: string) => navigate(to),
+      session: {
+        stageKey: stage,
+        accountLabel: accountLogin,
+        sourceMode: deviceSource,
+        channelSummary: channels
+          .map((item) => `${item.label}${item.state === "online" ? "正常" : item.state === "stale" ? "延迟" : "离线"}`)
+          .join(" / "),
+      },
+      // 文字面板不播报：屏幕上已经把答案写出来了，再念一遍是噪音
+      speak: () => {},
+    }),
+    [accountLogin, channels, deviceSource, navigate, stage],
+  );
 
   const ask = useCallback(
     (text: string) => {
@@ -269,11 +300,21 @@ export default function SmallWoodPanel() {
 
       const intent = decision.intent;
       const facts = factsFor(intent);
-      const steps = intent.tools.map((label, index) => ({
-        label,
-        state: (index === 0 ? "running" : "wait") as "done" | "running" | "wait",
-      }));
       const botId = nextTurnId();
+      /*
+       * 有真实工具时，步骤就写**那个工具**，不再放意图目录里的文案标签。
+       *
+       * 目录里的 `tools: ["检索报告", "打开场景"]` 是给话术看的说法，原来被逐个
+       * 点亮成「就绪」—— 接上真实执行之后，屏幕上会同时出现「检索报告 就绪」
+       * 和一次页面跳转，两句话对不上。有工具就照工具写。
+       */
+      const realTool = decision.action ? TOOL_BY_NAME[decision.action.tool] : undefined;
+      const steps = realTool
+        ? [{ label: realTool.label, state: "running" as const }]
+        : intent.tools.map((label, index) => ({
+            label,
+            state: (index === 0 ? "running" : "wait") as "done" | "running" | "wait",
+          }));
 
       setTurns((list) => [
         ...list,
@@ -289,27 +330,82 @@ export default function SmallWoodPanel() {
         },
       ]);
 
-      // 工具步骤依次点亮（短步骤，不假装长时间推理）
-      intent.tools.forEach((_, index) => {
-        const timer = window.setTimeout(() => {
+      // 没有真实工具的意图才走这段动画（短步骤，不假装长时间推理）
+      if (!realTool) {
+        intent.tools.forEach((_, index) => {
+          const timer = window.setTimeout(() => {
+            setTurns((list) =>
+              list.map((turn) =>
+                turn.kind === "bot" && turn.id === botId
+                  ? {
+                      ...turn,
+                      steps: turn.steps.map((step, i) => ({
+                        ...step,
+                        state: i <= index ? "done" : i === index + 1 ? "running" : "wait",
+                      })),
+                    }
+                  : turn,
+              ),
+            );
+          }, 380 * (index + 1));
+          timers.current.push(timer);
+        });
+      }
+
+      /*
+       * 真正执行工具（评审 §3.8）。
+       *
+       * 原来上面那段只是把 `intent.tools` 里的**文案标签**逐个点亮成「就绪」——
+       * 说「打开场景 就绪」，页面纹丝不动。语音控制台走的是 agent 的
+       * planner/executor，文字入口走的是这段动画，这就是评审说的
+       * 「一套仅改聊天记录、另一套才改页面」。现在两边共用一个 `runTool`。
+       *
+       * 需要二次确认的工具**不在面板里执行**：确认层（§42）只挂在语音控制台上，
+       * 这里直接跑就等于绕过高危动作的确认。这类意图转交控制台，
+       * 面板如实说明「已转到语音控制台确认」，而不是假装执行了。
+       */
+      const action = decision.action;
+      const tool = action ? TOOL_BY_NAME[action.tool] : undefined;
+      if (tool && tool.requireConfirmation) {
+        openAgent(cleaned);
+        setTurns((list) =>
+          list.map((turn) =>
+            turn.kind === "bot" && turn.id === botId
+              ? {
+                  ...turn,
+                  intent: {
+                    ...turn.intent,
+                    answerTemplate: `「${tool.label}」属于需要二次确认的动作（风险等级 ${tool.risk}/4），已在语音控制台打开待确认；确认之前不会执行任何动作。`,
+                  },
+                }
+              : turn,
+          ),
+        );
+        return;
+      }
+
+      if (tool) {
+        const args = resolveArgs(action?.params, decision.match.entities);
+        void runTool(tool, args, runtime, decision.match.entities, false).then((outcome) => {
           setTurns((list) =>
             list.map((turn) =>
               turn.kind === "bot" && turn.id === botId
                 ? {
                     ...turn,
-                    steps: turn.steps.map((step, i) => ({
-                      ...step,
-                      state: i <= index ? "done" : i === index + 1 ? "running" : "wait",
-                    })),
+                    steps: turn.steps.map((step) => ({ ...step, state: "done" as const })),
+                    // 失败时把工具的话说回来 —— 步骤状态只有 running/done/wait，
+                    // 绿色勾配上「没执行成功」的原文比一个假勾诚实
+                    intent: outcome.ok
+                      ? turn.intent
+                      : { ...turn.intent, answerTemplate: `没有执行成功：${outcome.summary}` },
                   }
                 : turn,
             ),
           );
-        }, 380 * (index + 1));
-        timers.current.push(timer);
-      });
+        });
+      }
     },
-    [decide],
+    [decide, runtime],
   );
 
   // 页面通过 askAssistant 调起的提问
