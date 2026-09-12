@@ -296,6 +296,8 @@ function ConsolePanel({
   onPickJob,
   lines,
   running,
+  open,
+  onToggle,
   progress,
   meta,
   onRun,
@@ -312,6 +314,9 @@ function ConsolePanel({
   onPickJob: (key: JobKey) => void;
   lines: ConsoleLine[];
   running: boolean;
+  /** 日志是否展开（v1.1 §4.2：日志折叠）。折叠时只留表头与运行按钮 */
+  open: boolean;
+  onToggle: () => void;
   /** 0–100，播放进度 */
   progress: number;
   /** 右上角的两段元信息：任务号 / 节点与行数 */
@@ -340,6 +345,10 @@ function ConsolePanel({
         <span className="fw-console__actions">
           {counts.error > 0 ? <StatusChip text={`${counts.error} 条错误`} tone="danger" dot /> : null}
           {counts.warn > 0 ? <StatusChip text={`${counts.warn} 条告警`} tone="warn" dot /> : null}
+          {/* 日志折叠（v1.1 §4.2）：折叠时只收起日志体，运行按钮始终在 */}
+          <Btn tone="ghost" onClick={onToggle} title={open ? "收起日志" : `展开日志（${lines.length} 行）`}>
+            {open ? "收起日志" : `日志 ${lines.length} 行`}
+          </Btn>
           <Btn tone="ghost" disabled={running} onClick={onRun}>
             {running ? `运行中 ${progress}%` : "运行"}
           </Btn>
@@ -369,28 +378,35 @@ function ConsolePanel({
         ))}
       </div>
 
-      <div className="fw-console">
-        <div className="fw-console__bar">
-          <span>task {meta.task}</span>
-          <span className="muted">{meta.tail}</span>
-        </div>
-        <ol className="fw-console__body" ref={bodyRef}>
-          {lines.map((line, index) => (
-            <li key={`${line.at}-${index}`} className={`is-${line.level.toLowerCase()}`}>
-              <time>{line.at}</time>
-              <b>{line.level}</b>
-              <span>{line.text}</span>
-            </li>
-          ))}
-          {running ? <li className="fw-console__cursor" aria-hidden="true" /> : null}
-        </ol>
-        {/* 进度条钉在底部：脚本任务的节奏由 dwellMs 决定，看不出还剩多久会以为卡住了 */}
-        {running ? (
-          <div className="fw-console__progress">
-            <i style={{ width: `${progress}%` }} />
+      {open ? (
+        <div className="fw-console">
+          <div className="fw-console__bar">
+            <span>task {meta.task}</span>
+            <span className="muted">{meta.tail}</span>
           </div>
-        ) : null}
-      </div>
+          <ol className="fw-console__body" ref={bodyRef}>
+            {lines.map((line, index) => (
+              <li key={`${line.at}-${index}`} className={`is-${line.level.toLowerCase()}`}>
+                <time>{line.at}</time>
+                <b>{line.level}</b>
+                <span>{line.text}</span>
+              </li>
+            ))}
+            {running ? <li className="fw-console__cursor" aria-hidden="true" /> : null}
+          </ol>
+          {/* 进度条钉在底部：脚本任务的节奏由 dwellMs 决定，看不出还剩多久会以为卡住了 */}
+          {running ? (
+            <div className="fw-console__progress">
+              <i style={{ width: `${progress}%` }} />
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <p className="fw-console__folded">
+          日志已折叠（{lines.length} 行，{counts.error} 错误 / {counts.warn} 告警）。
+          运行或点「日志 {lines.length} 行」展开 —— 首屏留给曲线与结论。
+        </p>
+      )}
     </Panel>
   );
 }
@@ -523,7 +539,7 @@ function detectOverfit(val: number[]): { minEpoch: number; rise: number } | null
  * 曲线是这一页唯一的「过程」视图 —— 一条静态铺满的曲线看不出训练走到哪了，
  * 而「画到第 24 轮就早停了」本身就是结论的一部分。
  */
-function LossPanel({ experiment, drawn }: { experiment: Experiment; drawn: number }) {
+function LossPanel({ experiment, drawn, dominant = false }: { experiment: Experiment; drawn: number; /** 当前主视图：横跨整行 */ dominant?: boolean }) {
   const overfit = useMemo(
     () => detectOverfit(experiment.curveVal.points.map((point) => point.y)),
     [experiment],
@@ -555,7 +571,7 @@ function LossPanel({ experiment, drawn }: { experiment: Experiment; drawn: numbe
           )}
         </span>
       }
-      className="fw-panel fw-panel--loss">
+      className={`fw-panel ${dominant ? "fw-panel--wide" : "fw-panel--loss"}`}>
       <LineChart
         series={[
           {
@@ -950,7 +966,7 @@ function ImportModal({
  * ⑤ 独立测试集对比（沿用原有实现）
  * ------------------------------------------------------------------ */
 
-function ComparisonPanel({ experiment }: { experiment: Experiment }) {
+function ComparisonPanel({ experiment, dominant = false }: { experiment: Experiment; /** 当前主视图：横跨整行 */ dominant?: boolean }) {
   /** PRD 3.6 / 12：比较程序读归档预测表真算精确率 / 召回率 / F1，页面不再自己数 TP/FP */
   const evaluation = useMemo(() => runEvaluation(experiment), [experiment]);
   const fnDelta = evaluation.overall.next.fn - evaluation.overall.old.fn;
@@ -966,7 +982,7 @@ function ComparisonPanel({ experiment }: { experiment: Experiment }) {
           tone={evaluation.testSetConsistent ? "ok" : "danger"}
         />
       }
-      className="fw-panel fw-panel--wide">
+      className={`fw-panel ${dominant ? "fw-panel--wide" : "fw-panel--data"}`}>
       <div className="matrix-row">
         <ConfusionMatrix
           title={`${experiment.baselineVersion}（旧）`}
@@ -1088,6 +1104,17 @@ export function TrainingTab() {
   const [useFailed, setUseFailed] = useState(false);
   const experiment = useFailed ? FAILED_EXPERIMENT : EXPERIMENT;
 
+  /**
+   * 主视图：运行时看曲线，跑完看新旧对比。
+   *
+   * v1.1 §4.2 对这一页的要求是「运行时曲线为主，结束后对比为主；日志折叠」，
+   * PRD §4.2 说法一致。原来曲线与对比各占一块、谁也不是主角，日志还占着一整块。
+   * 现在两种视图各自让一个面板横跨整行成为主角，日志默认折叠。
+   */
+  const [view, setView] = useState<"curve" | "compare">("curve");
+  /** 日志是否展开：运行中自动展开，跑完收回去 */
+  const [logOpen, setLogOpen] = useState(false);
+
   /** 配置草稿：只存改动过的项，没改的跟着实验包走 */
   const [draft, setDraft] = useState<Record<string, number>>({});
   /** 已装载的日志行数。归档包默认整段铺满，不做「先隐藏再播放」 */
@@ -1167,6 +1194,9 @@ export function TrainingTab() {
     stopTimer();
     setVisible(0);
     setRunning(true);
+    // 开跑就切回曲线视图并展开日志：这时候要看的是训练过程本身
+    setView("curve");
+    setLogOpen(true);
     let index = 0;
     window.setTimeout(() => {
       timer.current = window.setInterval(() => {
@@ -1175,6 +1205,13 @@ export function TrainingTab() {
         if (index >= experiment.log.length) {
           stopTimer();
           setRunning(false);
+          /*
+           * 跑完自动切到新旧对比、把日志收起来。
+           * 评审 §3.6 要的是「完成后自动切到新旧模型对比」——
+           * 这一步不能靠用户自己想起去点页签。
+           */
+          setView("compare");
+          setLogOpen(false);
         }
       }, LINE_INTERVAL_MS);
     }, QUEUE_DELAY_MS);
@@ -1326,6 +1363,31 @@ export function TrainingTab() {
       因为它要放混淆矩阵、按材种回归、逐样本预测三张表。
     */
     <div className="fw-training">
+      <div className="fw-training__mode">
+        <span className="fw-training__mode-label">主视图</span>
+        <Btn
+          active={view === "curve"}
+          disabled={running && view !== "curve"}
+          onClick={() => setView("curve")}
+          title="训练过程的损失曲线">
+          训练曲线
+        </Btn>
+        <Btn
+          active={view === "compare"}
+          disabled={running}
+          onClick={() => setView("compare")}
+          title={running ? "训练进行中，跑完自动切到对比" : "同一测试集下的新旧模型对比"}>
+          新旧对比
+        </Btn>
+        <span className="fw-training__mode-note">
+          {running
+            ? "训练进行中：曲线为主，日志已展开"
+            : view === "compare"
+              ? `测试集 ${experiment.datasetVersion} · 与基线同一口径`
+              : "训练未运行：可先看上一轮的对比结果"}
+        </span>
+      </div>
+
       <ConfigPanel
         experiment={experiment}
         draft={draft}
@@ -1344,6 +1406,8 @@ export function TrainingTab() {
         onPickJob={setJob}
         lines={lines}
         running={running}
+        open={logOpen}
+        onToggle={() => setLogOpen((value) => !value)}
         progress={totalMs > 0 ? Math.round((plan.slice(0, step).reduce((a, b) => a + b.dwellMs, 0) / totalMs) * 100) : 100}
         meta={{
           task: `${jobs.find((item) => item.key === job)?.runId ?? ""} · ${
@@ -1356,11 +1420,14 @@ export function TrainingTab() {
 
       <NodePanel node={experiment.node} cursor={drawnEpochs} totalEpochs={totalEpochs} />
 
-      <LossPanel experiment={experiment} drawn={drawnEpochs} />
+      {/* 主视图：曲线或对比，谁在当前视图里谁横跨整行 */}
+      {view === "curve" ? (
+        <LossPanel experiment={experiment} drawn={drawnEpochs} dominant />
+      ) : (
+        <ComparisonPanel experiment={experiment} dominant />
+      )}
 
       <DataPanel packages={packages} onImport={() => setImportOpen(true)} />
-
-      <ComparisonPanel experiment={experiment} />
 
       <label className="twin-compare fw-training__switch">
         <input

@@ -4678,6 +4678,40 @@
   align-items: start;
 }
 
+/*
+   主视图切换（v1.1 §4.2：运行时曲线为主，结束后对比为主）。
+
+   原来曲线与对比各占一块、谁也不是主角，用户得自己在栅格里找「这一轮到底看什么」。
+   现在一次只让一个成为主角（横跨整行），切换条放在最上面说明当前在看什么。
+*/
+.fw-training__mode {
+  grid-column: span 12;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fw-training__mode-label {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.fw-training__mode-note {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+/* 日志折叠后的说明行：不留一块空白面板，也不藏掉「有多少行、几条错误」 */
+.fw-console__folded {
+  margin: 0;
+  padding: var(--space-2) 0 0;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+}
+
 .fw-panel--task {
   grid-column: span 4;
 }
