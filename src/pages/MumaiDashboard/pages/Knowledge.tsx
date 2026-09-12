@@ -226,6 +226,8 @@ export default function Knowledge() {
   const [mode, setMode] = useState<"incremental" | "rebuild">("incremental");
   /** 更新向量库的配置与进度在弹窗里，一级页面只留进度与入口 */
   const [updateOpen, setUpdateOpen] = useState(false);
+  /** 版本历史弹窗：历史记录 + 回滚（会改整库规模，属二级确认动作） */
+  const [versionsOpen, setVersionsOpen] = useState(false);
   const [phase, setPhase] = useState<{ step: UpdateStepKey | null; progress: number; done: boolean }>({
     step: null,
     progress: 0,
@@ -1643,54 +1645,35 @@ export default function Knowledge() {
 
         {/* ============ 历史：版本与资料清单 ============ */}
         <div className="kb-bottom">
+          {/*
+            版本历史是**历史记录**，用户明确要求下沉；而且它带着「回滚」这个
+            会改整库状态的动作 —— 按「重要操作先弹二级确认」也该进弹窗。
+            一级页面只留：当前是哪一版、总共几版、以及一个入口。
+          */}
           <Panel
             title="版本历史"
             extra={
-              <>
+              <span className="fw-console__actions">
                 <StatusChip text={`当前 ${kb.label}`} tone="info" />
-                <span className="kb-actions__hint">回滚只切前端状态</span>
-              </>
+                <Btn onClick={() => setVersionsOpen(true)}>查看 {versions.length} 个版本</Btn>
+              </span>
             }>
-            <div className="kb-versions kb-scroll">
-              {[...versions].reverse().map((version, reverseIndex) => {
-                const position = versions.length - 1 - reverseIndex;
-                return (
-                  <div
-                    key={`${version.label}-${version.at}-${position}`}
-                    className={`kb-versions__row ${position === versions.length - 1 ? "is-current" : ""}`}>
-                    <b>{version.label}</b>
-                    <div className="kb-versions__copy">
-                      <span>
-                        {version.at} ·{" "}
-                        {version.mode === "seed"
-                          ? "初始索引"
-                          : version.mode === "incremental"
-                            ? "增量更新"
-                            : version.mode === "rebuild"
-                              ? "全量重建"
-                              : "回滚"}{" "}
-                        · 条目 {version.docCount} / 分块 {version.chunkCount} / 向量 {formatCount(version.vectorCount)} 条
-                        · {KNOWLEDGE_PIPELINE.embeddingDims} 维
-                      </span>
-                      <em>
-                        新增 {version.added} · 变更 {version.changed} · 删除 {version.deleted} · {version.note}
-                      </em>
-                    </div>
-                    {position === versions.length - 1 ? (
-                      <StatusChip text="当前" tone="info" />
-                    ) : (
-                      <button
-                        type="button"
-                        className="kb-rollback"
-                        title={`把索引切回 ${version.label}（前端状态，不落盘）`}
-                        onClick={() => rollback(version)}>
-                        回滚到此版本
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            <ul className="kb-version-summary">
+              <li>
+                <small>当前版本</small>
+                <b>{kb.label}</b>
+              </li>
+              <li>
+                <small>历史版本</small>
+                <b>{versions.length}</b>
+              </li>
+              <li>
+                <small>最近一次更新</small>
+                <b className="kb-version-summary__when">
+                  {versions.length ? versions[versions.length - 1].at : "—"}
+                </b>
+              </li>
+            </ul>
             <p className="kb-actions__hint">{KB_DEMO_NOTES.rollback}</p>
           </Panel>
 
@@ -1723,6 +1706,70 @@ export default function Knowledge() {
           </Panel>
         </div>
       </div>
+
+      {/*
+        版本历史弹窗：完整版本链 + 回滚。回滚会改整库的分块与向量规模，
+        所以它在这里是**带说明的确认动作**，不是一级页面上的一个小按钮。
+      */}
+      {versionsOpen ? (
+        <Modal
+          wide
+          title="版本历史"
+          subtitle={`当前 ${kb.label} · 共 ${versions.length} 个版本`}
+          onClose={() => setVersionsOpen(false)}
+          footer={
+            <>
+              <span className="muted">{KB_DEMO_NOTES.rollback}</span>
+              <Btn tone="primary" onClick={() => setVersionsOpen(false)}>
+                关闭
+              </Btn>
+            </>
+          }>
+          <div className="kb-versions">
+            {[...versions].reverse().map((version, reverseIndex) => {
+              const position = versions.length - 1 - reverseIndex;
+              return (
+                <div
+                  key={`${version.label}-${version.at}-${position}`}
+                  className={`kb-versions__row ${position === versions.length - 1 ? "is-current" : ""}`}>
+                  <b>{version.label}</b>
+                  <div className="kb-versions__copy">
+                    <span>
+                      {version.at} ·{" "}
+                      {version.mode === "seed"
+                        ? "初始索引"
+                        : version.mode === "incremental"
+                          ? "增量更新"
+                          : version.mode === "rebuild"
+                            ? "全量重建"
+                            : "回滚"}{" "}
+                      · 条目 {version.docCount} / 分块 {version.chunkCount} / 向量 {formatCount(version.vectorCount)} 条
+                      · {KNOWLEDGE_PIPELINE.embeddingDims} 维
+                    </span>
+                    <em>
+                      新增 {version.added} · 变更 {version.changed} · 删除 {version.deleted} · {version.note}
+                    </em>
+                  </div>
+                  {position === versions.length - 1 ? (
+                    <StatusChip text="当前" tone="info" />
+                  ) : (
+                    <button
+                      type="button"
+                      className="kb-rollback"
+                      title={`把索引切回 ${version.label}（前端状态，不落盘）`}
+                      onClick={() => {
+                        rollback(version);
+                        setVersionsOpen(false);
+                      }}>
+                      回滚到此版本
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Modal>
+      ) : null}
 
       {graphExpanded && space.chunkCount ? (
         <Modal
