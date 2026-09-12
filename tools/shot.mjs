@@ -8,10 +8,50 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdirSync, openSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+/**
+ * 自动探测 Chrome / Chromium。
+ *
+ * 原来写死 Windows 路径，在 macOS 上会直接 ENOENT —— 而这个工具是全平台唯一的
+ * 视觉验收手段（截图 + 设计规范探针 + console 收集），必须跨平台可用。
+ * 顺序按「本机最可能装的位置」排，命中即用；也支持用 CHROME_PATH 环境变量覆盖。
+ */
+function findChrome() {
+  const override = process.env.CHROME_PATH;
+  if (override && existsSync(override)) return override;
+
+  const candidates =
+    process.platform === "darwin"
+      ? [
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          "/Applications/Chromium.app/Contents/MacOS/Chromium",
+          "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+          `${process.env.HOME}/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`,
+        ]
+      : process.platform === "win32"
+        ? [
+            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+            `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
+            "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+          ]
+        : [
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+          ];
+
+  for (const path of candidates) {
+    if (existsSync(path)) return path;
+  }
+  throw new Error(
+    `未找到 Chrome / Chromium。请安装后重试，或用 CHROME_PATH=/path/to/chrome 指定。\n已尝试：\n  ${candidates.join("\n  ")}`,
+  );
+}
+
+const CHROME = findChrome();
 
 function arg(name, fallback = undefined) {
   const i = process.argv.indexOf(`--${name}`);
