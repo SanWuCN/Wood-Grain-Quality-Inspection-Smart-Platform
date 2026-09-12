@@ -372,6 +372,9 @@ const probe = await evaluate(`(() => {
   const c = document.querySelector('canvas');
   out.push('canvas ' + (c ? [c.clientWidth, c.clientHeight].join('x') : 'none'));
   out.push('gl: ' + JSON.stringify(window.__gl));
+  // 最终落在哪个路由：没有会话时 RequireLogin 会把人送到 #/login，
+  // 截图看起来「有字有边框」、探针也照样出数，只有这一行能一眼看出截错了页
+  out.push('hash: ' + window.location.hash);
   return out.join('\\n');
 })()`);
 
