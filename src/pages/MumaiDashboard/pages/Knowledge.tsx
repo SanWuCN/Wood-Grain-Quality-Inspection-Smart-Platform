@@ -224,6 +224,8 @@ export default function Knowledge() {
 
   /* ---------------- 更新向量库 ---------------- */
   const [mode, setMode] = useState<"incremental" | "rebuild">("incremental");
+  /** 更新向量库的配置与进度在弹窗里，一级页面只留进度与入口 */
+  const [updateOpen, setUpdateOpen] = useState(false);
   const [phase, setPhase] = useState<{ step: UpdateStepKey | null; progress: number; done: boolean }>({
     step: null,
     progress: 0,
@@ -1022,60 +1024,12 @@ export default function Knowledge() {
                   <SourceTag label={`索引 ${kb.label}`} />
                 </>
               }>
-              <div className="kb-seg">
-                <span className="kb-seg__label">更新模式</span>
-                <Btn active={mode === "incremental"} onClick={() => setMode("incremental")} disabled={running}>
-                  增量更新
-                </Btn>
-                <Btn active={mode === "rebuild"} onClick={() => setMode("rebuild")} disabled={running}>
-                  全量重建
-                </Btn>
-                <span className="kb-actions__hint">{mode === "incremental" ? "只处理新增 / 变更" : "清空索引重算全部"}</span>
-              </div>
-
-              <div className="kb-actions kb-actions--nowrap">
-                <Btn tone="primary" onClick={() => handleUpdate(mode === "rebuild")} disabled={running}>
-                  更新向量库
-                </Btn>
-                <Btn onClick={() => handleUpdate(true)} disabled={running}>
-                  全量重建索引
-                </Btn>
-                <span className="kb-actions__hint">
-                  待入库 {queue.filter((item) => item.status !== "已入库").length} 份 · 未变更{" "}
-                  {queue.filter((item) => item.change === "unchanged").length} 份
-                </span>
-              </div>
-
-              <ol className="kb-steps">
-                {steps.map((step, index) => {
-                  const currentIndex = phase.step ? STEP_ORDER.indexOf(phase.step) : phase.done ? STEP_ORDER.length : -1;
-                  const stepPhase = index < currentIndex ? "done" : index === currentIndex ? "active" : "wait";
-                  return (
-                    <li
-                      key={step.key}
-                      className={stepPhase === "done" ? "is-done" : stepPhase === "active" ? "is-active" : ""}>
-                      <span className="kb-steps__dot" />
-                      <div className="kb-steps__copy">
-                        <b>
-                          {index + 1}. {step.label}
-                        </b>
-                        <span>{step.detail}</span>
-                      </div>
-                      <div className="kb-steps__meta">
-                        <em>
-                          {stepPhase === "done" ? "已完成" : stepPhase === "active" ? `${phase.progress}%` : "等待"}
-                        </em>
-                        <span>
-                          {(stepElapsed[step.key] ?? 0) > 0
-                            ? formatSeconds(stepElapsed[step.key])
-                            : `预计 ${(step.ms / 1000).toFixed(1)}s`}
-                        </span>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ol>
-
+              {/*
+                一级页面只留**进度与结论**：整体进度条 + 待入库统计 + 一个入口。
+                更新模式、两个动作按钮、六步明细都下沉到弹窗 ——
+                用户的要求是「复杂配置、算法参数、日志统一下沉到 Modal」，
+                以及重要操作先弹配置窗口。
+              */}
               <div className="kb-overall">
                 <div className="kb-overall__bar">
                   <i
@@ -1089,7 +1043,17 @@ export default function Knowledge() {
                     ? `${STEP_ORDER.indexOf(phase.step) + 1}/6 ${STEP_LABELS[phase.step]} · ${phase.progress}%`
                     : phase.done
                       ? "6/6 完成"
-                      : "0/6 未开始 · 增量只处理新增 / 变更，全量重建会重算全部"}
+                      : "0/6 未开始"}
+                </span>
+              </div>
+
+              <div className="kb-actions kb-actions--nowrap">
+                <Btn tone="primary" onClick={() => setUpdateOpen(true)} disabled={running}>
+                  {running ? "更新中…" : "配置并更新"}
+                </Btn>
+                <span className="kb-actions__hint">
+                  待入库 {queue.filter((item) => item.status !== "已入库").length} 份 · 未变更{" "}
+                  {queue.filter((item) => item.change === "unchanged").length} 份
                 </span>
               </div>
 
@@ -1149,11 +1113,77 @@ export default function Knowledge() {
                 </div>
               ) : (
                 <div className="kb-queue__empty">
-                  队列为空：拖入文件、粘贴一段文本，或点「选择本地目录导入」整批示例资料，再点上面的「更新向量库」。
-                  上传只读取文件名 / 大小 / 类型，文本类会真读内容算字符数。
+                  队列为空：拖入文件、粘贴一段文本，或点「选择本地目录导入」整批示例资料。
                 </div>
               )}
             </Panel>
+
+            {/*
+              更新向量库的二级窗口：更新模式、两个动作、六步明细都在这里。
+              跑起来之后窗口不自动关 —— 进度条与每步耗时就在上面，
+              关掉它等于看不到「正在发生什么」。
+            */}
+            {updateOpen ? (
+              <Modal
+                wide
+                title="更新 RAG 向量库"
+                subtitle={`索引 ${kb.label} · 待入库 ${queue.filter((item) => item.status !== "已入库").length} 份`}
+                onClose={() => setUpdateOpen(false)}
+                footer={
+                  <>
+                    <span className="muted">
+                      {mode === "incremental" ? "只处理新增 / 变更" : "清空索引重算全部"} ·{" "}
+                      {(stepElapsed[phase.step ?? ""] ?? 0) > 0
+                        ? `已用 ${formatSeconds(stepElapsed[phase.step ?? ""])}`
+                        : "增量更快，全量更彻底"}
+                    </span>
+                    <Btn onClick={() => setUpdateOpen(false)}>关闭</Btn>
+                    <Btn tone="primary" onClick={() => handleUpdate(mode === "rebuild")} disabled={running}>
+                      {running ? "更新中…" : mode === "rebuild" ? "全量重建索引" : "增量更新向量库"}
+                    </Btn>
+                  </>
+                }>
+                <div className="kb-seg">
+                  <span className="kb-seg__label">更新模式</span>
+                  <Btn active={mode === "incremental"} onClick={() => setMode("incremental")} disabled={running}>
+                    增量更新
+                  </Btn>
+                  <Btn active={mode === "rebuild"} onClick={() => setMode("rebuild")} disabled={running}>
+                    全量重建
+                  </Btn>
+                </div>
+
+                <ol className="kb-steps">
+                  {steps.map((step, index) => {
+                    const currentIndex = phase.step ? STEP_ORDER.indexOf(phase.step) : phase.done ? STEP_ORDER.length : -1;
+                    const stepPhase = index < currentIndex ? "done" : index === currentIndex ? "active" : "wait";
+                    return (
+                      <li
+                        key={step.key}
+                        className={stepPhase === "done" ? "is-done" : stepPhase === "active" ? "is-active" : ""}>
+                        <span className="kb-steps__dot" />
+                        <div className="kb-steps__copy">
+                          <b>
+                            {index + 1}. {step.label}
+                          </b>
+                          <span>{step.detail}</span>
+                        </div>
+                        <div className="kb-steps__meta">
+                          <em>
+                            {stepPhase === "done" ? "已完成" : stepPhase === "active" ? `${phase.progress}%` : "等待"}
+                          </em>
+                          <span>
+                            {(stepElapsed[step.key] ?? 0) > 0
+                              ? formatSeconds(stepElapsed[step.key])
+                              : `预计 ${(step.ms / 1000).toFixed(1)}s`}
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </Modal>
+            ) : null}
 
             <Panel title="流水线日志" extra={<SourceTag label="等宽输出 · 自动滚动" />}>
               <div className="kb-console kb-scroll" ref={consoleRef}>
