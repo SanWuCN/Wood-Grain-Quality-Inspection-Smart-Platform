@@ -25,6 +25,7 @@ import { createHub } from "./services/hub.mjs";
 import { DEFAULT_SESSION_ID, createSession, getSession, listSessions, snapshot } from "./services/session.mjs";
 import { ASSETS_ROOT, ensureAssetsRoot } from "./services/assets.mjs";
 import { ensureDemoPackage } from "./fixtures/preflight.mjs";
+import { ensureArchive } from "./fixtures/archive.mjs";
 
 export function startService({
   port = Number(process.env.MUMAI_PORT ?? 8000),
@@ -40,6 +41,8 @@ export function startService({
   // 开场会话：没有就建一个，保证四端一连上就有同一份状态
   if (!getSession(db, sessionId)) createSession(db, "chapter2", sessionId);
   const packReport = ensureDemoPackage(db, sessionId);
+  // 归档清单的真实文件（评审 F11）：缺了就补齐，已有的一律不动
+  const archiveReport = ensureArchive(db, sessionId);
 
   const server = createServer();
   const hub = createHub({ server, db });
@@ -57,6 +60,7 @@ export function startService({
       log(`  会话      ${sessionId}（共 ${listSessions(db).length} 场）`);
       log(`  数据库    ${dbFile}`);
       log(`  资产目录  ${ASSETS_ROOT}${packReport.created ? "（本次补齐了演示更新包）" : ""}`);
+      log(`  归档清单  ${archiveReport.count} 项${archiveReport.created ? "（本次补齐了真实文件）" : ""}`);
       if (staticDir) log(`  静态托管  ${resolve(staticDir)}`);
       resolvePromise({
         server,

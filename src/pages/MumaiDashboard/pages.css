@@ -3411,6 +3411,34 @@
   font-size: var(--fs-aux);
 }
 
+/*
+   补传 / 重选副本：只在「缺失」与「摘要不一致」两项上出现，
+   所以它必须看起来像一个可点的修复入口，而不是普通说明文字。
+*/
+.ar-repair {
+  justify-self: start;
+  margin-top: 2px;
+  padding: 1px 8px;
+  border: 1px solid var(--border-hover);
+  color: var(--primary);
+  font-size: var(--fs-aux);
+  cursor: pointer;
+  transition: background var(--motion-fast), color var(--motion-fast);
+}
+
+.ar-repair:hover {
+  background: var(--fill-soft);
+  color: var(--text-primary);
+}
+
+.ar-error {
+  margin: 0 0 var(--space-2);
+  padding: 6px 10px;
+  border-left: 2px solid var(--danger);
+  color: var(--danger);
+  font-size: var(--fs-aux);
+}
+
 .ar-side {
   min-height: 0;
   overflow-y: auto;

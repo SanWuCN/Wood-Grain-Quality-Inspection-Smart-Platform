@@ -15,7 +15,10 @@ import { useMemo, useState } from "react";
 import { Panel } from "../Panel";
 import { Btn, DataTable, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
 import { ARCHIVE_ITEMS, UPDATE_PACKAGE, WORK_ORDER } from "../seed/scenario";
-import { runArchiveCheck } from "../lib";
+import { api, isApiError } from "../api/client";
+import { archiveItems as archiveItemsOf, isOnline, useSharedStore } from "../store/shared";
+import { useMumai } from "../context";
+import { buildArchiveReportHtml } from "../lib";
 import type { ArchiveCheckResult, ArchiveCheckRow } from "../lib";
 import type { ArchiveItem } from "../seed/types";
 
@@ -40,6 +43,38 @@ function reportFileName(result: ArchiveCheckResult): string {
 export default function Archive() {
   const [check, setCheck] = useState<ArchiveCheckResult | null>(null);
   const [running, setRunning] = useState(false);
+  const [busyAsset, setBusyAsset] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  /**
+   * 清单与校验都走服务端（评审 F11）。
+   *
+   * 原来页面读种子里的 ARCHIVE_ITEMS，拿 `actualSha256` 和 `declaredSha256` 比 ——
+   * 两个值都写在种子里，等于自己跟自己比：文件删了、改坏了、换台机器，
+   * 结论都是同一份。现在清单来自服务端的 archiveItem 实体，校验由服务端
+   * 逐项流式读字节重算。
+   */
+  const sharedItems = useSharedStore(archiveItemsOf);
+  const online = useSharedStore(isOnline);
+  const toast = useMumai().toast;
+
+  const items: ArchiveItem[] = useMemo(
+    () =>
+      sharedItems.length
+        ? sharedItems.map((entity) => ({
+            assetId: entity.data.assetId,
+            group: entity.data.group as ArchiveItem["group"],
+            name: entity.data.name,
+            sizeText: entity.data.sizeText,
+            declaredSha256: entity.data.declaredSha256,
+            // 服务端不再提供「实际摘要」这种预置值：它就是校验算出来的
+            actualSha256: entity.data.present ? "" : "—",
+            present: entity.data.present,
+            sourceMode: "simulation" as const,
+          }))
+        : ARCHIVE_ITEMS,
+    [sharedItems],
+  );
 
   /** 校验行按资产 ID 索引，供左侧清单逐项取结论 */
   const rowByAsset = useMemo(() => {
@@ -49,11 +84,65 @@ export default function Archive() {
   }, [check]);
 
   const runCheck = async () => {
+    if (!online) {
+      setError("连接不上共享服务，归档校验需要服务端读取实际文件");
+      return;
+    }
     setRunning(true);
-    // PRD 3.8：逐项做存在性检查与 SHA-256 摘要对比，「一致 / 不一致」由真实比对给出
-    const result = await runArchiveCheck(ARCHIVE_ITEMS);
-    setCheck(result);
-    setRunning(false);
+    setError(null);
+    try {
+      const report = await api.archiveCheck(useSharedStore.getState().sessionId);
+      const rows: ArchiveCheckRow[] = report.rows.map((row) => ({
+        assetId: row.assetId,
+        group: row.group as ArchiveItem["group"],
+        name: row.name,
+        sizeText: row.sizeText,
+        declaredSha256: row.declaredSha256,
+        actualSha256: row.computedSha256 ?? "—",
+        present: row.status !== "缺失",
+        sourceMode: "simulation" as const,
+        computed: row.computedSha256 ?? "—",
+        match: row.status === "通过",
+        status: row.status,
+      }));
+      setCheck({
+        executedAt: report.executedAt.slice(0, 19).replace("T", " "),
+        total: report.total,
+        missing: report.missing,
+        mismatch: report.mismatch,
+        passed: report.passed,
+        rows,
+        // 报告是展示层，数据全部来自服务端那次真实比对
+        reportHtml: buildArchiveReportHtml(rows, report.executedAt.slice(0, 19).replace("T", " "), report.missing, report.mismatch),
+      });
+    } catch (err) {
+      setError(isApiError(err) ? err.message : "校验失败");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  /**
+   * 补传 / 重选副本（评审 F11 要求「提供补传或重选副本入口；完成后能全部通过」）。
+   *
+   * 上传的是真实字节，服务端把该项的登记摘要更新为这份文件的**真实摘要**，
+   * 所以修复之后重新校验能全部通过不是把结论改成通过，而是字节与登记值真的对上了。
+   */
+  const repair = async (assetId: string, file: File) => {
+    setBusyAsset(assetId);
+    setError(null);
+    try {
+      const sessionId = useSharedStore.getState().sessionId;
+      const uploaded = await api.upload(file, sessionId, `archive/${assetId}`);
+      await api.archiveRepair(sessionId, assetId, uploaded.fileId);
+      await useSharedStore.getState().refresh();
+      toast(`${assetId} 已重新登记：${uploaded.name}（${(uploaded.size / 1024).toFixed(1)} KB）`, "ok");
+      await runCheck();
+    } catch (err) {
+      setError(isApiError(err) ? err.message : "补传失败");
+    } finally {
+      setBusyAsset(null);
+    }
   };
 
   /** PRD 3.8：报告输出 HTML 打印版；runArchiveCheck 已返回完整报告，直接下载 */
@@ -68,7 +157,7 @@ export default function Archive() {
     URL.revokeObjectURL(url);
   };
 
-  const byGroup = (group: ArchiveItem["group"]) => ARCHIVE_ITEMS.filter((item) => item.group === group);
+  const byGroup = (group: ArchiveItem["group"]) => items.filter((item) => item.group === group);
 
   return (
     <div className="page page--archive">
@@ -79,7 +168,8 @@ export default function Archive() {
             <span>完整性校验不替代内容审核；大文件应流式读取并缓存摘要</span>
           </>
         }>
-        <Btn tone="primary" disabled={running} onClick={() => void runCheck()}>
+        <Btn tone="primary" disabled={running || !online} onClick={() => void runCheck()}
+          title={online ? "服务端逐项读取实际文件字节重算摘要" : "连接不上共享服务，无法读取实际文件"}>
           {running ? "校验中…" : "运行交付文件校验"}
         </Btn>
         <Btn disabled={!check} onClick={downloadReport} title="下载校验报告">
@@ -93,10 +183,19 @@ export default function Archive() {
         </Btn>
       </Toolbar>
 
+      {error ? <p className="ar-error">{error}</p> : null}
+      {online ? null : (
+        <StateBlock
+          kind="offline"
+          title="未连接共享服务"
+          hint="归档校验要读服务器上的实际文件字节，连接恢复后本页自动可用。"
+        />
+      )}
+
       <div className="ar-layout">
         <Panel
           title="交付清单"
-          extra={<span className="muted">{ARCHIVE_ITEMS.length} 项</span>}
+          extra={<span className="muted">{items.length} 项</span>}
           className="ar-list">
           <div className="ar-groups">
             {GROUPS.map((group) => {
@@ -136,6 +235,25 @@ export default function Archive() {
                           ) : (
                             <StatusChip text="清单中缺失" tone="danger" />
                           )}
+                          {/*
+                            补传 / 重选副本（评审 F11：「提供补传或重选副本入口」）。
+                            只在确实有问题时出现：缺失的补一份，摘要不符的重选一份。
+                          */}
+                          {checked && checked.status !== "通过" ? (
+                            <label className="ar-repair" title="上传一份真实副本，服务端按它的字节重新登记摘要">
+                              {busyAsset === item.assetId ? "上传中…" : checked.status === "缺失" ? "补传" : "重选副本"}
+                              <input
+                                type="file"
+                                hidden
+                                disabled={busyAsset !== null || !online}
+                                onChange={(event) => {
+                                  const picked = event.target.files?.[0];
+                                  event.target.value = "";
+                                  if (picked) void repair(item.assetId, picked);
+                                }}
+                              />
+                            </label>
+                          ) : null}
                         </li>
                       );
                     })}

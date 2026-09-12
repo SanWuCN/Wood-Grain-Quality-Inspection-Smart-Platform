@@ -606,7 +606,7 @@ export async function runArchiveCheck(items: ArchiveItem[]): Promise<ArchiveChec
   };
 }
 
-function buildArchiveReportHtml(
+export function buildArchiveReportHtml(
   rows: ArchiveCheckRow[],
   executedAt: string,
   missing: number,

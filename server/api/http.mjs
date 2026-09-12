@@ -30,7 +30,14 @@ import {
   snapshot,
 } from "../services/session.mjs";
 import { actorFromRequest, login } from "../services/auth.mjs";
-import { permissionsOf } from "../services/permissions.mjs";
+import { allows, permissionsOf } from "../services/permissions.mjs";
+import { formatSize } from "../fixtures/archive.mjs";
+import { parseJson } from "../storage/db.mjs";
+
+/** 归档副本的补传 / 重选属于「交付摘要校验」的写入侧，与前端 archive:verify 同一个权限 */
+function hasAssetPermission(actorId) {
+  return allows(actorId, "archive:verify");
+}
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 
@@ -85,7 +92,7 @@ function readJsonBody(req, limit = 4 * 1024 * 1024) {
  * ------------------------------------------------------------------ */
 
 const ROUTES = [];
-const route = (method, pattern, handler, { auth = true } = {}) => {
+const route = (method, pattern, handler, { auth = true, rawBody = false } = {}) => {
   // pattern 里的 :name 段编译成正则，顺序敏感（先注册的先生效）
   const keys = [];
   const regex = new RegExp(
@@ -100,7 +107,7 @@ const route = (method, pattern, handler, { auth = true } = {}) => {
       })
       .join("/")}$`,
   );
-  ROUTES.push({ method, regex, keys, handler, auth });
+  ROUTES.push({ method, regex, keys, handler, auth, rawBody });
 };
 
 export function createApi({ db, hub, staticRoot = null, logger = console }) {
@@ -120,7 +127,19 @@ export function createApi({ db, hub, staticRoot = null, logger = console }) {
     return { token: result.token, actor: result.actor, allowedActions: result.allowedActions };
   }, { auth: false });
 
-  route("GET", "/api/auth/me", async (ctx) => ({ actor: ctx.actor, allowedActions: ctx.actions }));
+  /*
+   * 「当前令牌是谁」——没有令牌或令牌过期都是**正常答案**，不是错误。
+   *
+   * 原来它和别的接口一样要求有效令牌，返回 401；而令牌是自校验的、密钥每次启动
+   * 随机，所以服务一重启，浏览器里那个旧令牌就会换来一个 401，
+   * Chrome 会把它记成一条 "Failed to load resource: 401"，验收里算 console error。
+   * 客户端本来就会在这之后重新登录，所以这里直接回 `actor: null` 让流程安静走完。
+   */
+  route("GET", "/api/auth/me", async (ctx) => (
+    ctx.actor
+      ? { actor: ctx.actor, allowedActions: ctx.actions }
+      : { actor: null, allowedActions: [] }
+  ), { auth: false });
 
   /* ---- 会话与快照 ---- */
 
@@ -192,6 +211,7 @@ export function createApi({ db, hub, staticRoot = null, logger = console }) {
 
   /* ---- 文件（真实字节） ---- */
 
+  // rawBody：上传要自己 pipe 请求流，见分发处的说明
   route("POST", "/api/files", async (ctx) => {
     const name = ctx.query.name ?? ctx.req.headers["x-file-name"];
     if (!name) throw new WorkflowError(422, "NO_NAME", "缺少文件名（?name=）");
@@ -214,7 +234,7 @@ export function createApi({ db, hub, staticRoot = null, logger = console }) {
       sha256: record.sha256,
       mediaType: record.media_type,
     };
-  });
+  }, { rawBody: true });
 
   route("GET", "/api/files/:id", async (ctx) => {
     const file = getFile(db, ctx.params.id);
@@ -314,6 +334,111 @@ export function createApi({ db, hub, staticRoot = null, logger = console }) {
     return { holderId: ctx.actor, viewType, focusIds, eventSeq: event.seq };
   });
 
+  /* ---- 归档完整性校验（PRD §12 / 评审 F11） ---- */
+
+  /**
+   * 逐项读**真实字节**重算摘要，再与清单登记值比。
+   *
+   * 这是 F11 的核心：原来前端拿种子里的 `actualSha256` 直接和 `declaredSha256` 比，
+   * 相当于自己跟自己比 —— 换台机器、把文件删了、改坏了，结论都一样。
+   * 现在服务端流式读文件算（`verifyFile` 边读边喂 hash），缺文件就是缺文件。
+   */
+  route("POST", "/api/archives/check", async (ctx) => {
+    const sessionId = ctx.body.sessionId ?? DEFAULT_SESSION_ID;
+    requireSession(sessionId);
+    const only = Array.isArray(ctx.body.assetIds) && ctx.body.assetIds.length ? new Set(ctx.body.assetIds) : null;
+
+    const rows = db
+      .prepare("SELECT id, revision, data, updated_at FROM entities WHERE session_id=? AND kind='archiveItem' ORDER BY id")
+      .all(sessionId)
+      .map((row) => ({ id: row.id, revision: row.revision, data: parseJson(row.data, {}), updatedAt: row.updated_at }))
+      .filter((row) => !only || only.has(row.id));
+
+    const results = [];
+    for (const row of rows) {
+      const item = row.data;
+      const file = item.fileId ? getFile(db, item.fileId) : null;
+      const verified = file ? await verifyFile(file) : null;
+      const computed = verified?.present ? verified.actualSha256 : null;
+      const status = !file || !verified?.present ? "缺失" : computed === item.declaredSha256 ? "通过" : "摘要不一致";
+      results.push({
+        assetId: item.assetId,
+        group: item.group,
+        name: item.name,
+        sizeText: item.sizeText,
+        fileId: item.fileId ?? null,
+        declaredSha256: item.declaredSha256,
+        computedSha256: computed,
+        bytes: verified?.size ?? 0,
+        status,
+      });
+    }
+
+    const missing = results.filter((row) => row.status === "缺失").length;
+    const mismatch = results.filter((row) => row.status === "摘要不一致").length;
+    return {
+      executedAt: new Date().toISOString(),
+      total: results.length,
+      passed: results.length - missing - mismatch,
+      missing,
+      mismatch,
+      rows: results,
+      // 校验方式写在响应里，报告与界面都照着它讲，避免两处口径不一致
+      method: "服务端流式读取文件字节重算 SHA-256，与清单登记摘要逐项比对",
+    };
+  });
+
+  /**
+   * 补传 / 重选副本。
+   *
+   * 缺失项补一个文件、摘要不符项重选一份副本，都会把该项的登记摘要更新为新文件
+   * 的**真实摘要**，并记下是谁在什么时候修的。所以「修复后重新校验能全部通过」
+   * 不是把结论改成通过，而是磁盘上的字节与登记值真的对上了。
+   */
+  route("POST", "/api/archives/repair", async (ctx) => {
+    const sessionId = ctx.body.sessionId ?? DEFAULT_SESSION_ID;
+    requireSession(sessionId);
+    const assetId = ctx.body.assetId;
+    const fileId = ctx.body.fileId;
+    if (!assetId || !fileId) throw new WorkflowError(422, "MISSING_FIELDS", "需要 assetId 与 fileId");
+
+    const row = db
+      .prepare("SELECT revision, data FROM entities WHERE session_id=? AND kind='archiveItem' AND id=?")
+      .get(sessionId, assetId);
+    if (!row) throw new WorkflowError(404, "NOT_FOUND", `清单里没有 ${assetId}`);
+    const file = getFile(db, fileId);
+    if (!file) throw new WorkflowError(404, "NO_FILE", `文件 ${fileId} 不存在`);
+
+    if (!hasAssetPermission(ctx.actor)) {
+      throw new WorkflowError(403, "FORBIDDEN", "当前角色无归档校验权限，不能修改归档副本");
+    }
+
+    const data = {
+      ...parseJson(row.data, {}),
+      fileId: file.id,
+      sizeText: formatSize(file.size),
+      declaredSha256: file.sha256,
+      present: true,
+      repairedBy: ctx.actor,
+      repairedAt: new Date().toISOString(),
+    };
+    db.prepare(
+      "UPDATE entities SET revision=revision+1, data=?, updated_at=? WHERE session_id=? AND kind='archiveItem' AND id=?",
+    ).run(JSON.stringify(data), new Date().toISOString(), sessionId, assetId);
+
+    const event = appendEvent(db, sessionId, {
+      type: "archive.repaired",
+      entityKind: "archiveItem",
+      entityId: assetId,
+      revision: row.revision + 1,
+      actorId: ctx.actor,
+      payload: { assetId, name: file.name, sha256: file.sha256, size: file.size },
+    });
+    if (event) hub.broadcast(sessionId, event);
+
+    return { assetId, fileId: file.id, name: file.name, sizeText: data.sizeText, sha256: file.sha256, repairedBy: ctx.actor };
+  });
+
   /* ---- 健康与预检（PRD §11 预检清单） ---- */
 
   route("GET", "/api/health", async () => {
@@ -371,7 +496,14 @@ export function createApi({ db, hub, staticRoot = null, logger = console }) {
       }
 
       try {
-        const body = req.method === "GET" || req.method === "HEAD" ? {} : await readJsonBody(req);
+        /*
+         * 上传接口要自己消费 `req` 这个流（边写盘边算摘要），
+         * 所以标了 rawBody 的路由**不能**在这里先把请求体当 JSON 读掉 ——
+         * 读掉之后处理器再读就是一个已经结束的流，表现为上传永远 0 字节，
+         * 而请求体解析又会先把二进制当成坏 JSON 拒掉（BAD_JSON）。
+         */
+        const body =
+          entry.rawBody || req.method === "GET" || req.method === "HEAD" ? {} : await readJsonBody(req);
         const result = await entry.handler({
           req,
           res,

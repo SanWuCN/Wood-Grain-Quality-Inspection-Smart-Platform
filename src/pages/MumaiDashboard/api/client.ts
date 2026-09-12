@@ -124,8 +124,41 @@ export type SceneEntity = {
   publishedAt: string | null;
 };
 
-export type ArtifactEntity = {
-  id: string;
+/** 归档清单项（服务端 archiveItem 实体）：登记摘要与真实文件是一一对应的 */
+export type ArchiveItemEntity = {
+  assetId: string;
+  group: string;
+  name: string;
+  sizeText: string;
+  declaredSha256: string;
+  fileId: string | null;
+  present: boolean;
+  repairedBy: string | null;
+  repairedAt: string | null;
+};
+
+/** 归档校验报告（服务端逐项读字节后的结论） */
+export type ArchiveCheckReport = {
+  executedAt: string;
+  total: number;
+  passed: number;
+  missing: number;
+  mismatch: number;
+  method: string;
+  rows: {
+    assetId: string;
+    group: string;
+    name: string;
+    sizeText: string;
+    fileId: string | null;
+    declaredSha256: string;
+    computedSha256: string | null;
+    bytes: number;
+    status: "通过" | "缺失" | "摘要不一致";
+  }[];
+};
+
+export type ArtifactEntity = {  id: string;
   name: string;
   kind: string;
   target: string;
@@ -244,15 +277,21 @@ export const api = {
     return result;
   },
 
-  /** 用当前账号换取令牌；页面刷新后令牌还在就直接复用 */
+  /**
+   * 用当前账号换取令牌；页面刷新后令牌还在就直接复用。
+   *
+   * `/api/auth/me` 对「没有令牌 / 令牌过期」回的是 `actor: null`（正常答案，不是 401），
+   * 所以这里不需要靠异常来发现令牌失效 —— 少一次 401，控制台就少一条噪音。
+   */
   async ensureSession(account: string, password: string) {
     if (readToken()) {
       try {
-        return await request<{ actor: Actor; allowedActions: string[] }>("/api/auth/me");
-      } catch (error) {
-        if (isApiError(error) && error.status === 401) writeToken(null);
-        else throw error;
+        const me = await request<{ actor: Actor | null; allowedActions: string[] }>("/api/auth/me");
+        if (me.actor) return { actor: me.actor, allowedActions: me.allowedActions };
+      } catch {
+        /* 服务没起来之类：下面统一走登录，失败会在登录那一步报出来 */
       }
+      writeToken(null);
     }
     return api.login(account, password);
   },
@@ -405,6 +444,28 @@ export const api = {
 
   health() {
     return request<{ ok: boolean; service: string; sessions: number; assetsReady: boolean; clients: number }>("/api/health");
+  },
+
+  /**
+   * 归档完整性校验（PRD §12 / 评审 F11）。
+   *
+   * 服务端逐项流式读文件字节重算 SHA-256，再与清单登记值比 ——
+   * 客户端**不再自己算**：以前是拿种子里的 actualSha256 和 declaredSha256 比，
+   * 等于自己跟自己比，把文件删了结论也一样。
+   */
+  archiveCheck(sessionId: string, assetIds?: string[]) {
+    return request<ArchiveCheckReport>("/api/archives/check", {
+      method: "POST",
+      body: JSON.stringify({ sessionId, assetIds: assetIds ?? [] }),
+    });
+  },
+
+  /** 补传 / 重选副本：把清单项指向一份真实文件，登记摘要取该文件的真实摘要 */
+  archiveRepair(sessionId: string, assetId: string, fileId: string) {
+    return request<{ assetId: string; fileId: string; name: string; sizeText: string; sha256: string; repairedBy: string }>(
+      "/api/archives/repair",
+      { method: "POST", body: JSON.stringify({ sessionId, assetId, fileId }) },
+    );
   },
 };
 

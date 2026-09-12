@@ -23,6 +23,7 @@ import {
   writeToken,
   type Actor,
   type ApiError,
+  type ArchiveItemEntity,
   type ArtifactEntity,
   type CommandResult,
   type EnvironmentEntity,
@@ -223,6 +224,11 @@ export function artifacts(state: SharedState): SharedEntity<ArtifactEntity>[] {
 /** 当前产物 = 最新一条；发布状态来自服务端，切页与刷新都不会回退 */
 export function currentArtifact(state: SharedState): SharedEntity<ArtifactEntity> | null {
   return entitiesOf<ArtifactEntity>(state, "artifact")[0] ?? null;
+}
+
+/** 归档清单：服务端持有登记摘要与真实文件，页面只读它 */
+export function archiveItems(state: SharedState): SharedEntity<ArchiveItemEntity>[] {
+  return entitiesOf<ArchiveItemEntity>(state, "archiveItem");
 }
 
 /** 是否连得上共享服务：连不上时所有写操作都要禁用并说明原因 */

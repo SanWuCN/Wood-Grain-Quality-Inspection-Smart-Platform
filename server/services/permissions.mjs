@@ -44,10 +44,17 @@ export const ACTION_PERMISSION = {
 /** 四个账号 → 权限集合（与 src/pages/MumaiDashboard/auth.ts 的 ROLE_ACTIONS 同源） */
 const ALL = [...new Set(Object.values(ACTION_PERMISSION))].filter((item) => item !== "*");
 
+/*
+ * 归档没有走命令总线（它是「读字节 + 写清单登记值」，不是实体状态机），
+ * 所以这张表里没有对应的 action，权限名要单独列出来。
+ * 与前端一致：沈 / 史 有归档校验与导出，饶 / 马 没有。
+ */
+const ARCHIVE_PERMISSIONS = ["archive:verify", "archive:export"];
+
 export const ROLE_PERMISSIONS = {
   // 沈 / 史：评审要求「项目经理和人工智能架构师权限最大」
-  shen: [...new Set(ALL)],
-  shi: [...new Set(ALL)],
+  shen: [...new Set([...ALL, ...ARCHIVE_PERMISSIONS])],
+  shi: [...new Set([...ALL, ...ARCHIVE_PERMISSIONS])],
   rao: [
     "env:ack",
     "scan:capture",
