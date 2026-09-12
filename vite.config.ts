@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -46,44 +46,39 @@ export default defineConfig({
     },
 
     /**
-     * 忽略编辑器 / 构建器写出的临时文件。
+     * 只 watch 真正参与构建的东西 —— 白名单，不是黑名单。
      *
-     * 这不是「优化」，是**必须的**：Windows 上这些文件被占用时 chokidar
-     * 会抛 EBUSY，而 Vite 没有捕获它 —— 整个 dev server 进程直接退出。
-     * 已经因此崩过两次，第二次是被 Word 打开的 CSS 生成的 `~RFxxxx.TMP` 锁文件搞挂的。
+     * 这个 dev server 已经被 EBUSY 搞挂四次，每次肇事文件都不同：
+     *   1. `.tmp-*.tmpdir`（Vite 依赖预构建的临时目录）
+     *   2. `~RFxxxx.TMP`（Word/WPS 打开 CSS 时生成的锁文件）
+     *   3. `docs/design/视觉设计规范-v1.1.md`（编辑器打开一份文档）
+     *   4. `tmp-docx/x/[Content_Types].xml`（解压 docx 的临时目录）
      *
-     * 覆盖这几类：
-     *   .tmp-xxx.tsx.1234.abc.tmpdir/   Vite 依赖预构建的临时目录
-     *   ~RF1d059e6c.TMP                 编辑器（Word/WPS 等）打开文件时的锁文件
-     *   ~$document.docx                 同上，Office 系列的锁文件
-     *   *.swp / *~                      Vim / Emacs 的交换文件
+     * 每补一个通配符，下一个新目录又会踩中。根因是 Vite 默认 watch
+     * **整个项目根目录**，而 Windows 上只要文件被任何进程锁住，chokidar 就抛
+     * EBUSY，Vite 又不捕获它 —— Node 进程直接退出，页面上就是「服务器没了」。
+     *
+     * 所以改成白名单：只有 src/ 与 public/ 需要 HMR，加上根目录少数几个
+     * 配置与入口文件。其余一律不 watch —— 从此在项目根目录里解压什么、
+     * 生成什么、用什么编辑器打开什么，都不会再把它弄崩。
      */
     watch: {
-      ignored: [
-        "**/*.tmpdir/**",
-        "**/.tmp-*",
-        "**/.tmp-*/**",
-        "**/*.TMP",
-        "**/*.tmp",
-        "**/~RF*",
-        "**/~$*",
-        "**/*.swp",
-        "**/*~",
-        "**/.cache/**",
-        "**/tmp-shot/**",
-        "**/dist/**",
-        /**
-         * 只 watch 参与构建的东西。`docs/` 与所有 Markdown 都是纯文档，
-         * 改了它们根本不需要 HMR —— 但 Vite 默认会 watch 整个项目根目录，
-         * 于是「用编辑器打开一份文档」这个动作就能把 dev server 干掉：
-         *   最后一次崩溃就是 watch 'docs/design/视觉设计规范-v1.1.md' 抛 EBUSY
-         *   → FSWatcher 抛 error → Node 进程直接退出
-         * 这已经是第三次被同一类问题搞挂了，所以直接把文档整体排除掉。
-         */
-        "**/docs/**",
-        "**/*.md",
-        "**/prd及第二章剧本/**",
-      ],
+      ignored: (watchPath: string) => {
+        const rel = relative(process.cwd(), watchPath);
+        // 项目根本身必须保留，否则整棵树都不 watch 了
+        if (!rel) return false;
+        const head = rel.split(/[\\/]/)[0];
+        if (head === "src" || head === "public") return false;
+        // 根目录下改了需要触发的配置与入口文件
+        if (
+          /^(index\.html|package\.json|pnpm-lock\.yaml|vite\.config\.[tj]s|tsconfig.*\.json|eslint\.config\.js|\.env.*)$/.test(
+            rel,
+          )
+        ) {
+          return false;
+        }
+        return true;
+      },
     },
   },
 });
