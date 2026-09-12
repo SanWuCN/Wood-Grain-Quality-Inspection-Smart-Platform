@@ -50,9 +50,65 @@
 .kb-main {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: 306px 384px minmax(0, 1fr);
+  /*
+     三列的分工按 v1.1 §4.2「知识库：查询、回答与原文来源为主；资料和索引管理可进入；
+     向量图另设技术观察」重排：
+
+       管理列 340px  资料与索引管理（上传 + 更新向量库），收窄
+       检索列 1fr    检索与回答 —— 首屏主体，最宽
+       观察列 400px  技术观察（关系链 / 分布）+ 索引状态
+
+     原来中间是「更新向量库」384px、右侧才是可视化，而「相似度检索」还被埋在
+     右侧面板的第三个页签里 —— 最有价值的问答首屏根本看不到（评审 U01/V03）。
+  */
+  grid-template-columns: 340px minmax(0, 1fr) 400px;
   gap: var(--space-3);
   min-width: 0;
+}
+
+/* 管理列：上传与更新竖排 */
+.kb-manage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/*
+   检索工作区：查询在上、证据与原文在下，中间的证据列表自己滚。
+   高度跟着 kb-main 的行高走，不写死 —— 字号调整时不再被吃掉内容。
+*/
+.kb-ask {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+}
+
+.kb-ask__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: var(--space-3);
+  min-height: 260px;
+}
+
+.kb-ask__body > .kb-hits {
+  max-height: none;
+  overflow-y: auto;
+}
+
+.kb-ask__legend {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+/* 窄档：证据列表与原文改为上下排列，避免两列都被挤成一条 */
+@media (max-width: 1500px) {
+  .kb-ask__body {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
 }
 
 /*
@@ -120,10 +176,17 @@
   min-height: 0;
 }
 
+/*
+   观察列内部改成上下两块：技术观察在上、索引状态在下。
+
+   原来是左右并排（1.62fr / 1fr），但观察列本身只占总宽的一小段，
+   再拆成两半之后三维关系链只剩 240px 宽 —— 图看不清、索引状态也挤成一条。
+   竖排之后两块各自拿到整列宽度，也符合「技术细节不占首屏」的层级。
+*/
 .kb-side {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: minmax(0, 1.62fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   min-width: 0;
 }
@@ -500,6 +563,8 @@
 .kb-seg {
   display: flex;
   align-items: center;
+  /* 管理列收窄到 340px 之后，模式按钮与说明会挤出面板 20px，允许换行 */
+  flex-wrap: wrap;
   gap: var(--space-1);
 }
 
@@ -622,7 +687,8 @@
   font-family: var(--font-data-mixed);
   font-size: var(--fs-aux);
   color: var(--text-secondary);
-  white-space: nowrap;
+  /* 管理列收窄后，进度读数不再 nowrap —— 否则它的固有宽度会把这一行顶出面板 */
+  white-space: normal;
 }
 
 /* 终端风格日志：等宽字体，自动滚到最新一行 */
@@ -692,10 +758,17 @@
    不再像散点图那样各占一行 —— 面板主体只有 250px 高，让给画布才看得清结构。
    浮层一律 pointer-events: none，否则会挡住 OrbitControls 的拖拽。
 */
+/*
+   三维视图给**确定高度**，不要写 height: 100%。
+
+   上一轮把 `.kb-side > .tech-panel` 的 height 改成 min-height 之后，
+   百分百高度失去了确定的包含块，浏览器解不开这个循环，画布被撑到一万多像素高。
+   三维视口本来就是「一块固定大小的观察窗」，写死高度反而更符合它的性质；
+   放大到弹窗时由 .kb3d--large 覆盖。
+*/
 .kb3d {
   position: relative;
-  height: 100%;
-  min-height: 200px;
+  height: 300px;
   background: var(--bg-page);
 }
 

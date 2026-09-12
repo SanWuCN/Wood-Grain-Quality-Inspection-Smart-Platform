@@ -870,6 +870,8 @@ export default function Knowledge() {
       <div className="kb-body">
         {/* ============ 主任务：上传资料 → 更新向量库 ============ */}
         <div className="kb-main">
+          {/* 左列：资料与索引管理（上传 + 更新），辅助区 */}
+          <div className="kb-manage">
           <Panel
             title="上传资料"
             extra={
@@ -1007,7 +1009,7 @@ export default function Knowledge() {
             ) : null}
           </Panel>
 
-          {/* 中列：更新动作 + 六步 + 终端日志 */}
+          {/* 管理列的下一块：更新动作 + 六步 + 终端日志 */}
           <div className="kb-run">
             <Panel
               title="更新 RAG 向量库"
@@ -1166,17 +1168,178 @@ export default function Knowledge() {
               </div>
             </Panel>
           </div>
-        </div>
+          </div>
 
-        {/* ============ 辅助：向量库可视化（三个视图）+ 索引状态 ============ */}
-        <div className="kb-side">
+          {/* ============ 主区：检索工作区（首屏要直接证明「从哪份资料找到什么答案」） ============ */}
           <Panel
-            title={tab === "space" ? "向量库可视化 · Token 关系链" : tab === "dist" ? "向量库可视化 · 分块分布" : "向量库可视化 · 相似度检索演示"}
+            title="检索与回答"
             extra={
               <>
-                {(["space", "dist", "search"] as const).map((key) => (
+                <StatusChip
+                  text={search.belowThreshold ? "未达阈值" : search.hits.length ? `命中 ${search.hits.length}` : "无命中"}
+                  tone={search.belowThreshold ? "warn" : search.hits.length ? "ok" : "muted"}
+                />
+                <SourceTag label={`索引 ${kb.label}`} />
+              </>
+            }>
+            <div className="kb-ask">
+              <form
+                className="kb-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  setSubmitted(query);
+                  setPicked(null);
+                }}>
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="输入一句话，例如：复检 / 渗水痕迹 / 平衡含水率 / 验收关闭"
+                  aria-label="检索资料"
+                />
+                <Btn
+                  tone="primary"
+                  onClick={() => {
+                    setSubmitted(query);
+                    setPicked(null);
+                  }}>
+                  检索
+                </Btn>
+              </form>
+
+              <div className="kb-filters">
+                <label>
+                  类别
+                  <select value={filterCategory} onChange={(event) => setFilterCategory(event.target.value)}>
+                    <option value="全部">全部</option>
+                    {KB_CATEGORIES.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  起始日期
+                  <input type="date" value={filterFrom} onChange={(event) => setFilterFrom(event.target.value)} />
+                </label>
+                <label>
+                  截止日期
+                  <input type="date" value={filterTo} onChange={(event) => setFilterTo(event.target.value)} />
+                </label>
+                <span className="kb-ask__legend">本地 TF-IDF（中文字符 2–4 元）· 余弦相似度 · 阈值 {KNOWLEDGE_META.noHitThreshold}</span>
+              </div>
+
+              <div className="kb-viz__stats">
+                <span>
+                  过滤后候选 <b>{search.filtered}</b> / <b>{search.total}</b>
+                </span>
+                <span>
+                  查询词 <b>{search.queryTokens}</b>
+                </span>
+                <span>
+                  命中 <b>{search.hits.length}</b>
+                </span>
+                <span>
+                  查询词 <b>「{submitted}」</b>
+                </span>
+              </div>
+
+              {search.hits.length && search.belowThreshold ? (
+                <StateBlock
+                  kind="partial"
+                  title={`最高检索相似度 ${search.hits[0].similarity.toFixed(4)} 低于阈值 ${KNOWLEDGE_META.noHitThreshold}`}
+                  hint="未达命中阈值，仅作参考。"
+                />
+              ) : null}
+
+              <div className="kb-ask__body">
+                {search.hits.length ? (
+                  <ul className="kb-hits kb-scroll">
+                    {search.hits.map((hit) => (
+                      <li
+                        key={hit.chunkId}
+                        className={activeHit?.chunkId === hit.chunkId ? "is-active" : ""}
+                        onClick={() => setPicked(hit.chunkId)}>
+                        <div className="kb-hits__copy">
+                          <b>
+                            #{hit.rank} {hit.docTitle}
+                          </b>
+                          <span>
+                            {hit.section} · <code>{hit.chunkId}</code> · {hit.source}
+                          </span>
+                          <em>{hit.text.slice(0, 52)}…</em>
+                        </div>
+                        <div className="kb-hits__rank">
+                          <b>{hit.similarity.toFixed(4)}</b>
+                          <i>
+                            <em style={{ width: `${Math.min(100, hit.similarity * 100)}%` }} />
+                          </i>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <StateBlock
+                    kind="empty"
+                    title="当前资料未检索到"
+                    hint="本地索引无命中，或已被筛选条件排除。"
+                  />
+                )}
+
+                {activeHit ? (
+                  <article className="kb-snippet">
+                    <dl>
+                      <div>
+                        <dt>来源</dt>
+                        <dd>{activeHit.docTitle}</dd>
+                      </div>
+                      <div>
+                        <dt>位置</dt>
+                        <dd>{activeHit.section}</dd>
+                      </div>
+                      <div>
+                        <dt>分块</dt>
+                        <dd>{activeHit.chunkId}</dd>
+                      </div>
+                      <div>
+                        <dt>检索相似度</dt>
+                        <dd>{activeHit.similarity.toFixed(4)}</dd>
+                      </div>
+                    </dl>
+                    <p>{highlightTerms(activeHit.text, submitted).map((part, index) =>
+                      part.hit ? <mark key={index}>{part.text}</mark> : <span key={index}>{part.text}</span>,
+                    )}</p>
+                  </article>
+                ) : null}
+              </div>
+
+              <div className="kb-actions">
+                <Btn onClick={() => askAssistant(submitted)}>把小木叫来一起看</Btn>
+                <span className="kb-actions__hint">{KB_DEMO_NOTES.search}</span>
+              </div>
+            </div>
+          </Panel>
+
+          {/* ============ 观察列：技术观察 + 索引状态 ============ */}
+          <div className="kb-side">
+          <Panel
+            /*
+              标题只写「技术观察」：观察列只有 400px，原来「技术观察 · Token 关系链」
+              加上两个页签按钮宽度合计 231px，标题栏放不下、被顶出面板 104px。
+              具体看哪一张由页签表达，标题不重复一遍。
+            */
+            title="技术观察"
+            extra={
+              <>
+                {/*
+                  「相似度检索」原来是这里的第三个页签 —— 最有价值的东西被埋在
+                  辅助面板的最后一页，首屏根本看不到（评审 U01/V03）。它现在移到
+                  中列成了页面的主区，这里只留技术观察。
+                */}
+                {(["space", "dist"] as const).map((key) => (
                   <Btn key={key} active={tab === key} onClick={() => setTab(key)}>
-                    {key === "space" ? "Token 关系链" : key === "dist" ? "分块分布" : "相似度检索"}
+                    {key === "space" ? "关系链" : "分块分布"}
                   </Btn>
                 ))}
               </>
@@ -1293,79 +1456,6 @@ export default function Knowledge() {
               </>
             ) : null}
 
-            {tab === "search" ? (
-              <>
-                <form
-                  className="kb-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    setSubmitted(query);
-                    setPicked(null);
-                  }}>
-                  <input
-                    type="search"
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="输入一句话，例如：复检 / 渗水痕迹 / 平衡含水率 / 验收关闭"
-                    aria-label="检索资料"
-                  />
-                  <Btn
-                    tone="primary"
-                    onClick={() => {
-                      setSubmitted(query);
-                      setPicked(null);
-                    }}>
-                    检索
-                  </Btn>
-                </form>
-
-                <div className="kb-filters">
-                  <label>
-                    类别
-                    <select value={filterCategory} onChange={(event) => setFilterCategory(event.target.value)}>
-                      <option value="全部">全部</option>
-                      {KB_CATEGORIES.map((category) => (
-                        <option key={category} value={category}>
-                          {category}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    起始日期
-                    <input type="date" value={filterFrom} onChange={(event) => setFilterFrom(event.target.value)} />
-                  </label>
-                  <label>
-                    截止日期
-                    <input type="date" value={filterTo} onChange={(event) => setFilterTo(event.target.value)} />
-                  </label>
-                  <span>
-                    {KNOWLEDGE_META.retriever} · Top K {KNOWLEDGE_META.topK} · 阈值 {KNOWLEDGE_META.noHitThreshold}
-                  </span>
-                </div>
-
-                <div className="kb-viz__stats">
-                  <span>
-                    过滤后候选 <b>{search.filtered}</b> / {search.total} 块
-                  </span>
-                  <span>
-                    查询词元 <b>{search.queryTokens}</b>
-                  </span>
-                  <span>
-                    命中 <b>{search.hits.length}</b>
-                  </span>
-                  <span>
-                    查询词 <b>「{submitted}」</b>
-                  </span>
-                </div>
-
-                {search.hits.length && search.belowThreshold ? (
-                  <StateBlock
-                    kind="partial"
-                    title={`最高检索相似度 ${search.hits[0].similarity.toFixed(4)} 低于阈值 ${KNOWLEDGE_META.noHitThreshold}`}
-                    hint="未达命中阈值，仅作参考。"
-                  />
-                ) : null}
 
                 {search.hits.length ? (
                   <ul className="kb-hits kb-scroll" style={{ maxHeight: 148 }}>
@@ -1439,12 +1529,6 @@ export default function Knowledge() {
                   </div>
                 ) : null}
 
-                <div className="kb-actions">
-                  <Btn onClick={() => askAssistant(submitted)}>把小木叫来一起看</Btn>
-                  <span className="kb-actions__hint">{KB_DEMO_NOTES.search}</span>
-                </div>
-              </>
-            ) : null}
           </Panel>
 
           <Panel
@@ -1524,6 +1608,7 @@ export default function Knowledge() {
               <p className="kb-actions__hint">{KNOWLEDGE_META.note}</p>
             </div>
           </Panel>
+        </div>
         </div>
 
         {/* ============ 历史：版本与资料清单 ============ */}
