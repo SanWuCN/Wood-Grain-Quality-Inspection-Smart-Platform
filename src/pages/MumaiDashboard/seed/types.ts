@@ -404,10 +404,77 @@ export type Experiment = {
   jobSteps: { key: string; label: string; state: "等待" | "进行中" | "已完成"; at: string | null }[];
   curveOld: Curve;
   curveNew: Curve;
+  /**
+   * 候选模型的训练 / 验证损失。
+   *
+   * 与 `curveOld / curveNew` 的区别：那两条是「旧版 / 新版同一条口径」的对比，
+   * 这两条是**同一个候选模型**在训练集与验证集上的损失 —— 剧本 S16 让架构师
+   * 口播的正是这两条（「训练误差下降、验证误差却持续上升，说明开始过拟合」）。
+   * 没有这一对曲线，页面上就没法判断候选版本是学好了还是背下来了。
+   */
+  curveTrain: Curve;
+  curveVal: Curve;
   predictionsOld: Prediction[];
   predictionsNew: Prediction[];
   acceptance: { key: string; label: string; detail: string; pass: boolean }[];
+  /** 本次实验的训练配置（剧本 S15：数据版本、学习率、更新范围、停止条件） */
+  config: TrainingConfigField[];
+  /** 任务控制台日志，任务逐步读取实验包形成可点击的真实记录（PRD 11.2） */
+  log: JobLogLine[];
+  /** 执行节点占用曲线，与日志播放同步（PRD 11.2 的 epochs.csv 口径） */
+  node: NodeMetric[];
   sourceMode: SourceMode;
+};
+
+/**
+ * 训练配置的一项。
+ *
+ * `readonly` 的项由数据集冻结状态或模型结构决定，不让改 —— 界面上要说明
+ * 为什么不能改，而不是灰着不解释。可改项带范围，越界一律拦下来。
+ */
+export type TrainingConfigField = {
+  key: string;
+  label: string;
+  value: number;
+  unit?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  /** 小数位，保证同一列里不出现 0.0005 与 0.5 混排 */
+  digits?: number;
+  readonly?: boolean;
+  /** 这一项为什么是这个值 / 为什么不能改 */
+  note: string;
+};
+
+/** 任务控制台的一行日志 */
+export type JobLogLine = {
+  /** 相对时间戳 mm:ss，与 EXPERIMENT.jobSteps 的 at 同一口径 */
+  at: string;
+  level: "INFO" | "WARN" | "ERROR";
+  /** 归属阶段，对应 Experiment.jobSteps 的 key */
+  step: string;
+  /**
+   * 这一行发生时的轮次。执行节点占用按它取对应的采样点，
+   * 所以回放时资源曲线会跟着日志一起走，而不是各播各的。
+   * 缺省表示该行不推进轮次（沿用上一行的值）。
+   */
+  epoch?: number;
+  text: string;
+};
+
+/** 执行节点的一项占用指标 */
+export type NodeMetric = {
+  key: string;
+  label: string;
+  unit: string;
+  digits?: number;
+  /** 整轮训练按 epoch 采样的序列，长度与损失曲线一致 */
+  series: number[];
+  /** 量程上限，用于画占用条与 sparkline */
+  scale: number;
+  /** 超过这个值算吃紧（仅用于着色，不改变数值） */
+  warnAbove?: number;
 };
 
 /** 更新交付（PRD 3.6 / 11.3） */

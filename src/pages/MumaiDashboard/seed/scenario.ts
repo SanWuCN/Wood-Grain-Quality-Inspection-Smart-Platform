@@ -29,11 +29,13 @@ import type {
   GridMap,
   HistoryRisk,
   HotspotEvidence,
+  JobLogLine,
   KnowledgeDoc,
   LogEntry,
   MapVersion,
   Member,
   Mission,
+  NodeMetric,
   Order,
   PoseSample,
   RevisitPlan,
@@ -42,6 +44,7 @@ import type {
   SceneAsset,
   SourceMode,
   StageDef,
+  TrainingConfigField,
   TriageItem,
   UpdatePackage,
   Waveform,
@@ -981,6 +984,165 @@ function lossCurve(base: number, floor: number, decay: number, id: string, label
   return { id, label, color, points };
 }
 
+/**
+ * 验证损失曲线。
+ *
+ * `overfitFrom` 之后验证损失开始反向抬升 —— 剧本 S16 让架构师口播的
+ * 「训练误差下降、验证误差却持续上升」就是这一段。成功案例给 null（不发散）。
+ * 用同一个衰减核加上一段可控的抬升，保证两套案例的曲线形状同源、可比。
+ */
+function valCurve(
+  base: number,
+  floor: number,
+  decay: number,
+  id: string,
+  label: string,
+  color: string,
+  overfitFrom: number | null = null,
+): Curve {
+  const points: { x: number; y: number }[] = [];
+  for (let e = 1; e <= 40; e += 1) {
+    let y = floor + 0.03 + (base - floor) * Math.exp(-decay * 0.72 * e) + 0.008 * Math.sin(e * 1.3);
+    if (overfitFrom !== null && e > overfitFrom) {
+      // 抬升斜率固定，且不叠正弦 —— 发散段要干净可读，不然像噪声
+      y += 0.011 * (e - overfitFrom);
+    }
+    points.push({ x: e, y: Number(Math.max(0.02, y).toFixed(4)) });
+  }
+  return { id, label, color, points };
+}
+
+/**
+ * 执行节点占用序列。
+ *
+ * 按 epoch 采样，与控制台日志、损失曲线共用同一个 epoch 轴 —— PRD 11.2
+ * 要求「不同页面必须来自同一实验ID，禁止各用随机数」，所以这里同样是
+ * 确定性生成（同一个 seed 恒定），不是每次渲染随机。
+ * 形状上刻意让 `warm` 段先低后高再回落，读起来像一轮真实训练，
+ * 而不是一条直线加抖动。
+ */
+function nodeSeries(seed: number, start: number, peak: number, end: number, jitter: number): number[] {
+  const out: number[] = [];
+  let state = seed >>> 0;
+  const rand = () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+  for (let e = 1; e <= 40; e += 1) {
+    // 三段时间线：前 15% 爬升（显卡还没跑满）→ 中段平台 → 尾段缓降（早停临近、批次变小）
+    const t = (e - 1) / 39;
+    const shape =
+      t < 0.15
+        ? start + (peak - start) * (t / 0.15)
+        : t < 0.8
+          ? peak
+          : peak + (end - peak) * ((t - 0.8) / 0.2);
+    // 兜底夹到 0：抖动不能把「占用」算成负数（实测出现过 CPU -1%、内存 -0.2 GB）
+    const value = Math.max(0, shape + (rand() - 0.5) * jitter);
+    out.push(Number(value.toFixed(2)));
+  }
+  return out;
+}
+
+/**
+ * 训练配置（剧本 S15：训练配置会记录数据版本、学习率、更新范围和停止条件）。
+ *
+ * 这几项就是「调整模型参数」能改的东西。小样本适配的关键是**控制需要更新的
+ * 参数数量**（剧本 S15 原话），所以「可训练参数占比」与「解冻层」是只读的 ——
+ * 它们由模型结构决定，不是操作员能随手填的数字。
+ */
+const TRAINING_CONFIG: TrainingConfigField[] = [
+  { key: "baseline", label: "基线版本", value: 0, readonly: true, note: "本轮以 DEMO-M02 为对照基线，不参与更新" },
+  { key: "dataset", label: "数据集版本", value: 0, readonly: true, note: "DS-06 已冻结；训练只引用冻结版本（PRD 11.1）" },
+  { key: "scope", label: "可训练参数", value: 8.4, unit: "%", digits: 1, readonly: true, note: "仅最后 2 个卷积块 + 分类头；主干权重冻结" },
+  { key: "lr", label: "学习率", value: 0.0005, digits: 4, min: 0.00001, max: 0.01, step: 0.0001, note: "小样本微调取值偏小，避免把主干已学到的通用特征冲掉" },
+  { key: "batch", label: "批大小", value: 16, min: 4, max: 128, step: 4, note: "受设备侧单批内存限制，上限 128" },
+  { key: "epochs", label: "最大轮数", value: 40, min: 12, max: 120, step: 4, note: "与停止条件配套；上限 120" },
+  { key: "patience", label: "早停耐心", value: 6, min: 2, max: 20, step: 1, note: "验证损失连续多少轮不下降即停止" },
+  { key: "threshold", label: "判定阈值", value: 0.5, digits: 2, min: 0.05, max: 0.95, step: 0.05, note: "新旧版本必须用同一阈值，否则指标不可比" },
+  { key: "seed", label: "随机种子", value: 20260911, readonly: true, note: "固定种子，保证实验可重复（PRD 11.1）" },
+];
+
+/**
+ * 任务控制台日志（PRD 11.2：任务逐步读取实验包，形成可点击的真实记录）。
+ *
+ * 时间戳与 `EXPERIMENT.jobSteps` 的 at 同一口径（mm:ss），五段分别对应
+ * 排队 / 数据准备 / 适配 / 验证 / 完成。内容写实际操作与判据，
+ * 不写「正在努力训练中」这类没有信息量的进度话术。
+ */
+const JOB_LOG: JobLogLine[] = [
+  { at: "34:20", level: "INFO", step: "queue", text: "job EXP-2026-0911 已入队，等待执行节点" },
+  { at: "34:22", level: "INFO", step: "queue", text: "调度到 node-train-02（GPU 1 张，可用显存 24 GB）" },
+  { at: "34:24", level: "INFO", step: "queue", text: "载入实验包：config.json / epochs.csv / predictions_*.csv / model_card.json" },
+  { at: "34:26", level: "INFO", step: "queue", text: "artifact_kind=demo_nonflashable · 归档演示任务，与现场任务分开记录" },
+
+  { at: "34:34", level: "INFO", step: "prepare", text: "数据集 DS-06 校验通过：12 条记录 / 6 个物理样本组" },
+  { at: "34:36", level: "INFO", step: "prepare", text: "排除不可用 3 条（空文件 1、列数不一致 2），保留 9 条" },
+  { at: "34:38", level: "WARN", step: "prepare", text: "r-0003 与 r-0002 摘要高度相似，标记疑似重复，转入待审核" },
+  { at: "34:41", level: "WARN", step: "prepare", text: "r-0007 饱和比例 11.8% 超限，转入待审核，不进入监督训练" },
+  { at: "34:44", level: "INFO", step: "prepare", text: "未知标签 2 条单列待核验集合，不作为已知病害标签使用" },
+  { at: "34:47", level: "INFO", step: "prepare", text: "按 physical_sample_id 分组：训练 4 组 / 验证 1 组 / 测试 1 组" },
+  { at: "34:49", level: "INFO", step: "prepare", text: "分组交集检查：train∩val=∅ train∩test=∅ val∩test=∅" },
+  { at: "34:52", level: "INFO", step: "prepare", text: "增强仅作用于训练集；同一原始样本的衍生记录保留同一 group_id" },
+
+  { at: "35:58", level: "INFO", step: "adapt", epoch: 0, text: "加载基线 DEMO-M02，冻结主干，解冻最后 2 个卷积块 + 分类头" },
+  { at: "35:59", level: "INFO", step: "adapt", epoch: 0, text: "可训练参数 8.4%（小样本适配，不重训整套网络）" },
+  { at: "36:00", level: "INFO", step: "adapt", epoch: 0, text: "optimizer=AdamW lr=5e-4 batch=16 seed=20260911（固定种子）" },
+  { at: "36:02", level: "INFO", step: "adapt", epoch: 1, text: "epoch 01/40 train_loss=1.1732 val_loss=0.7204" },
+  { at: "36:06", level: "INFO", step: "adapt", epoch: 4, text: "epoch 04/40 train_loss=0.6218 val_loss=0.4306" },
+  { at: "36:11", level: "INFO", step: "adapt", epoch: 8, text: "epoch 08/40 train_loss=0.3541 val_loss=0.2887" },
+  { at: "36:17", level: "INFO", step: "adapt", epoch: 12, text: "epoch 12/40 train_loss=0.2540 val_loss=0.2319" },
+  { at: "36:23", level: "INFO", step: "adapt", epoch: 16, text: "epoch 16/40 train_loss=0.2147 val_loss=0.2188" },
+  { at: "36:29", level: "INFO", step: "adapt", epoch: 20, text: "epoch 20/40 train_loss=0.1983 val_loss=0.2151" },
+  { at: "36:35", level: "INFO", step: "adapt", epoch: 24, text: "epoch 24/40 train_loss=0.1912 val_loss=0.2144" },
+  { at: "36:38", level: "WARN", step: "adapt", epoch: 30, text: "验证损失连续 6 轮未下降，触发早停（耐心 6）" },
+  { at: "36:41", level: "INFO", step: "adapt", epoch: 24, text: "回滚到第 24 轮权重作为候选版本 DEMO-M03-candidate" },
+
+  { at: "36:44", level: "INFO", step: "validate", epoch: 24, text: "固定测试清单、预处理 comp-v1.4 与判定阈值 0.50" },
+  { at: "36:47", level: "INFO", step: "validate", epoch: 24, text: "同一测试集 12 条，新旧版本各跑一次" },
+  { at: "36:52", level: "INFO", step: "validate", epoch: 24, text: "漏检 3 → 2，误报 4 → 2；原有材种杉木分组召回 0.92 → 0.94" },
+  { at: "36:56", level: "INFO", step: "validate", epoch: 24, text: "验收规则 6 项全部通过，无回归退化" },
+  { at: "36:58", level: "INFO", step: "validate", epoch: 24, text: "INT8 量化：缩放系数按代表性数据确定，复测集 24 条" },
+  { at: "37:02", level: "WARN", step: "validate", epoch: 24, text: "复测 2 条边界样本量化后判定翻转，回退 float 分支，不计入量化收益" },
+
+  { at: "37:08", level: "INFO", step: "done", epoch: 24, text: "封装 DEMO-PKG-02.demo.zip（模型 3.2 MB + 预处理配置 + 版本信息）" },
+  { at: "37:10", level: "INFO", step: "done", epoch: 24, text: "SHA-256 3f9c1d2a7b45… · 恢复版本 DEMO-M02 备份完整" },
+  { at: "37:12", level: "INFO", step: "done", epoch: 24, text: "任务结束：产物已装载。训练状态不代表现场模型已更新" },
+];
+
+/**
+ * 失败案例的日志：前四段与成功案例完全一致（同一份数据、同一套流程），
+ * 只在验收段分叉 —— 这样对照看的时候，能看出差别出在「验证不通过」，
+ * 而不是出在流程本身。
+ */
+const FAILED_JOB_LOG: JobLogLine[] = [
+  ...JOB_LOG.filter((line) => line.step !== "done"),
+  { at: "36:56", level: "ERROR", step: "validate", epoch: 24, text: "必要指标条件未通过：漏检率 0.333 高于基线 0.250" },
+  { at: "36:58", level: "ERROR", step: "validate", epoch: 24, text: "原有材种回归退化：杉木分组召回 0.92 → 0.78，超出容差 0.02" },
+  { at: "37:02", level: "ERROR", step: "done", epoch: 24, text: "验收未通过，候选版本阻止进入封装与发布" },
+];
+
+/** 执行节点占用：与损失曲线共用同一个 epoch 轴 */
+const NODE_METRICS: NodeMetric[] = [
+  { key: "gpu", label: "GPU 利用率", unit: "%", digits: 0, series: nodeSeries(7, 46, 97, 88, 4), scale: 100, warnAbove: 95 },
+  { key: "gpumem", label: "显存占用", unit: "GB", digits: 1, series: nodeSeries(13, 6.2, 15.4, 14.1, 0.35), scale: 24, warnAbove: 21 },
+  { key: "gputemp", label: "GPU 温度", unit: "℃", digits: 0, series: nodeSeries(23, 48, 74, 71, 1.6), scale: 100, warnAbove: 83 },
+  { key: "fan", label: "风扇转速", unit: "%", digits: 0, series: nodeSeries(29, 38, 82, 78, 2.4), scale: 100 },
+  { key: "cpu", label: "CPU 利用率", unit: "%", digits: 0, series: nodeSeries(31, 22, 68, 54, 5.5), scale: 100, warnAbove: 92 },
+  { key: "ram", label: "内存占用", unit: "GB", digits: 1, series: nodeSeries(37, 9.4, 26.8, 24.2, 0.7), scale: 64, warnAbove: 58 },
+];
+
+/** 执行节点档案：这几项在真实监看里和占用曲线一样常驻 */
+export const TRAIN_NODE = {
+  host: "node-train-02",
+  accelerator: "GPU 1 × 24 GB",
+  cpu: "16 vCPU",
+  ram: "64 GB",
+  driver: "535.161.07 · CUDA 12.2",
+  runtime: "torch 2.3.1 · python 3.11",
+  queue: "本节点队列 1 个任务（当前）",
+};
+
 const MATERIALS = ["楠木", "杉木", "松木"];
 
 function predictions(version: "old" | "new"): Experiment["predictionsOld"] {
@@ -1021,10 +1183,16 @@ export const EXPERIMENT: Experiment = {
     { key: "validate", label: "验证", state: "已完成", at: "36:41" },
     { key: "done", label: "完成", state: "已完成", at: "36:47" },
   ],
-  curveOld: lossCurve(1.24, 0.36, 0.09, "old", "DEMO-M02 旧版损失", "#789EFF"),
+  curveOld: lossCurve(1.24, 0.36, 0.09, "old", "DEMO-M02 基线验证损失", "#789EFF"),
   curveNew: lossCurve(1.18, 0.19, 0.13, "new", "DEMO-M02b 新版损失", "#8fc2ff"),
+  curveTrain: lossCurve(1.18, 0.185, 0.135, "train", "候选 · 训练损失", "#4ea8ff"),
+  // 成功案例：验证损失贴着训练损失收敛，不发散（对照 S16 的过拟合判据）
+  curveVal: valCurve(1.22, 0.2, 0.135, "val", "候选 · 验证损失", "#5fd4c4"),
   predictionsOld: predictions("old"),
   predictionsNew: predictions("new"),
+  config: TRAINING_CONFIG,
+  log: JOB_LOG,
+  node: NODE_METRICS,
   acceptance: [
     { key: "same-test", label: "测试集一致", detail: "新旧版本使用同一测试清单与同一预处理版本", pass: true },
     { key: "label-full", label: "标签完整", detail: "测试集全部样本 label_basis 非空；未知标签不进入监督训练", pass: true },
@@ -1042,6 +1210,10 @@ export const FAILED_EXPERIMENT: Experiment = {
   id: "EXP-2026-0911-FAIL",
   title: "Z04 新材适配 · 失败案例（漏检增加 + 旧材退化）",
   predictionsNew: predictions("old"),
+  // 失败案例的判据就在曲线上：第 18 轮后验证损失反向抬升、训练损失继续下降
+  // —— 典型的过拟合，剧本 S16 讲的正是这一现象。界面据此阻止进入发布。
+  curveVal: valCurve(1.22, 0.2, 0.135, "val", "候选 · 验证损失", "#5fd4c4", 18),
+  log: FAILED_JOB_LOG,
   acceptance: [
     { key: "same-test", label: "测试集一致", detail: "新旧版本使用同一测试清单与同一预处理版本", pass: true },
     { key: "label-full", label: "标签完整", detail: "测试集全部样本 label_basis 非空", pass: true },

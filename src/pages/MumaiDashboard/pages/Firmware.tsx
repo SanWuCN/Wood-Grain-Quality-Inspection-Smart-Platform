@@ -1,17 +1,18 @@
 /**
  * 固件及模型（`/firmware`）
  *
- * 由原「检测适配」页拆出：把**算法与版本侧**的四件事收在一页 ——
- *   1. 全局配置：平台使用的模型 / Agent / 小车程序 / 毫米波固件 / 采集配置 / 流水线版本
+ * 由原「检测适配」页拆出，收**算法与版本侧**的五件事：
+ *   1. 版本管理：平台使用的固件 / 配置 / 程序 / 模型 / Agent / 流水线的完整发行历史
  *   2. 数据集：分组检查与冻结
- *   3. 训练验证：用新采集的数据重训练候选模型，并与基线对比
- *   4. 更新交付：封装、回验、下发硬件工程师
+ *   3. 训练验证：装载实验包，看训练配置、控制台、执行节点占用与验证结果
+ *   4. 更新交付：量化、封装、下发、接收、回验
  *   5. 融合分析：雷达 / 视觉 / 融合三路按规则出优先级
  *
- * 后四个页签的实现原样复用 `adaptTabs.tsx`；「全局配置」是本页新增 ——
- * 用户明确要求「可以全局配置当前平台使用的模型、agent、小车程序版本、
- * 毫米波扫描枪的固件版本、模型版本等等，而且可以对采集来的数据重新训练模型
- * （流程要做的真实一些），也可以下发给硬件工程师」。
+ * 版本管理为什么是**列表**而不是几个版本 chip：
+ * 「当前用哪个版本」只是版本管理要回答的三分之一，另外两个是
+ * 「出问题能退到哪」和「设备回报的版本和平台以为的是否一致」（PRD 11.4）。
+ * 两三个 chip 既看不出发布时间与变更内容，也分不清「可回退」和「已弃用」，
+ * 更没法把 live / demo 两个回报版本摆在一起。列表把这些一次性摊开。
  *
  * 版本数据来自 `seed/versions.ts`，页面不硬编码任何版本号。
  */
@@ -19,11 +20,11 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { Panel } from "../Panel";
-import { Btn, DataTable, SourceTag, StateBlock, StatusChip, StepFlow, Toolbar } from "../ui";
+import { Btn, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
 import { useMumai } from "../context";
-import { DatasetTab, DeliveryTab, FusionTab, TrainingTab } from "./adaptTabs";
-import { RETRAIN_STAGES, VERSION_ITEMS, type VersionItem } from "../seed/versions";
-import { EXPERIMENT, SCAN_BATCHES, UPDATE_PACKAGE } from "../seed/scenario";
+import { DatasetTab, DeliveryTab, FusionTab } from "./adaptTabs";
+import { TrainingTab } from "./TrainingRun";
+import { VERSION_ITEMS, type Release, type VersionItem } from "../seed/versions";
 
 const TABS = [
   { key: "config", label: "全局配置" },
@@ -35,59 +36,165 @@ const TABS = [
 
 const GROUPS: VersionItem["group"][] = ["硬件", "算法", "平台"];
 
-/** 重训练的一次执行记录：让「跑过一次」和「还没跑」在界面上可区分 */
-type RunState = "idle" | "running" | "done";
+/** 发行状态 → 语义色。只表达「现在能不能用」，不表达新旧 */
+const RELEASE_TONE: Record<Release["status"], "ok" | "info" | "warn" | "muted"> = {
+  当前生效: "ok",
+  可回退: "info",
+  候选: "warn",
+  已弃用: "muted",
+};
+
+/* ------------------------------------------------------------------ *
+ * 版本矩阵
+ * ------------------------------------------------------------------ */
+
+/**
+ * 单个组件的发行历史。
+ *
+ * 每行一个版本，展开看目标与加载位置 / 依赖约束 / 摘要 —— 这三项决定
+ * 「这个版本能不能换上去」，比版本号本身重要，所以不塞进主行挤字号。
+ */
+function VersionBlock({
+  item,
+  draft,
+  onPick,
+}: {
+  item: VersionItem;
+  draft: string | undefined;
+  onPick: (key: string, version: string) => void;
+}) {
+  const [openVersion, setOpenVersion] = useState<string | null>(null);
+  const effective = draft ?? item.current;
+  const dirty = effective !== item.current;
+
+  /**
+   * 设备回报与平台记录的比对（PRD 11.4）。
+   * 两侧任一为 null 时不下结论 —— 「没回报」不等于「一致」。
+   */
+  const report = useMemo(() => {
+    const demo = item.reported.demo;
+    if (demo === null) return { tone: "muted" as const, text: "演示侧未回报" };
+    if (demo.includes(effective) || effective.includes(demo.split("（")[0])) {
+      return { tone: "ok" as const, text: `演示侧回报 ${demo}` };
+    }
+    return { tone: "warn" as const, text: `演示侧回报 ${demo}，与当前不一致` };
+  }, [item, effective]);
+
+  return (
+    <section className="fw-group">
+      <header className="fw-group__head">
+        <h4 className="fw-group__title">{item.label}</h4>
+        <span className="fw-group__now">
+          {effective}
+          {dirty ? <StatusChip text="未生效" tone="warn" dot /> : null}
+        </span>
+        <span className="fw-group__target">{item.target}</span>
+        <StatusChip text={report.text} tone={report.tone} dot />
+      </header>
+
+      <p className="fw-group__note" title={item.note}>
+        {item.note}
+      </p>
+
+      <div className="fw-matrix">
+        <div className="fw-matrix__head">
+          <span>版本</span>
+          <span>状态</span>
+          <span>包类型</span>
+          <span>发布日</span>
+          <span>大小</span>
+          <span>变更</span>
+          <span />
+        </div>
+        <ul>
+          {item.releases.map((release) => {
+            const expanded = openVersion === release.version;
+            const isCurrent = release.version === effective;
+            const selectable = release.status === "可回退" || release.status === "候选";
+            return (
+              <li
+                key={release.version}
+                className={`${isCurrent ? "is-current" : ""}${expanded ? " is-open" : ""}`}>
+                <div className="fw-matrix__row">
+                  <button
+                    type="button"
+                    className="fw-matrix__version"
+                    aria-expanded={expanded}
+                    onClick={() => setOpenVersion(expanded ? null : release.version)}>
+                    {release.version}
+                  </button>
+                  <StatusChip text={release.status} tone={RELEASE_TONE[release.status]} dot />
+                  <span className="fw-matrix__kind">{release.artifactKind}</span>
+                  <span className="fw-matrix__date">{release.releasedAt}</span>
+                  <span className="fw-matrix__size">{release.size}</span>
+                  <span className="fw-matrix__change" title={release.change}>
+                    {release.change}
+                  </span>
+                  <span className="fw-matrix__act">
+                    {isCurrent ? (
+                      <em className="muted">使用中</em>
+                    ) : selectable ? (
+                      <Btn tone="ghost" onClick={() => onPick(item.key, release.version)}>
+                        切换
+                      </Btn>
+                    ) : (
+                      <em className="muted">不可切换</em>
+                    )}
+                  </span>
+                </div>
+                {expanded ? (
+                  <dl className="fw-matrix__detail">
+                    <div>
+                      <dt>目标 / 加载位置</dt>
+                      <dd>{release.target}</dd>
+                    </div>
+                    <div>
+                      <dt>依赖与约束</dt>
+                      <dd>{release.depends}</dd>
+                    </div>
+                    <div>
+                      <dt>摘要</dt>
+                      <dd>{release.digest}（前 12 位）</dd>
+                    </div>
+                    <div>
+                      <dt>变更说明</dt>
+                      <dd>{release.change}</dd>
+                    </div>
+                  </dl>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </section>
+  );
+}
 
 /**
  * 全局配置
  *
- * 每个版本项都能看到：当前值 / 载体 / 为什么是这个值 / 能切到什么。
- * 「只能随更新包升级」的项（candidates 为空）不给下拉，说明原因而不是灰着不解释。
+ * 只做一件事：把当前平台这一套版本摆清楚，并支持切换到可回退 / 候选版本。
+ * 训练过程不在这里 —— 它属于「训练验证」页签。原来这块并排放着一个
+ * 「训练任务」摘要面板，既和训练页重复，也让「全局配置」这个名字名不副实。
  */
 function ConfigTab() {
   const { toast } = useMumai();
   const [draft, setDraft] = useState<Record<string, string>>({});
-  const [run, setRun] = useState<RunState>("idle");
-  const [stage, setStage] = useState(0);
 
   const pending = useMemo(
     () =>
-      VERSION_ITEMS.filter((item) => draft[item.key] && draft[item.key] !== item.current),
+      VERSION_ITEMS.filter((item) => draft[item.key] && draft[item.key] !== item.current).map(
+        (item) => ({ item, to: draft[item.key] }),
+      ),
     [draft],
   );
 
   const changed = pending.length > 0;
 
-  /** 重训练：按 RETRAIN_STAGES 逐步推进，每步之间留可见停顿 */
-  const startRetrain = () => {
-    if (run === "running") return;
-    setRun("running");
-    setStage(0);
-    let index = 0;
-    const timer = window.setInterval(() => {
-      index += 1;
-      setStage(index);
-      if (index >= RETRAIN_STAGES.length) {
-        window.clearInterval(timer);
-        setRun("done");
-        toast("候选模型已封装，等待下发", "ok");
-      }
-    }, 900);
-  };
-
-  const steps = RETRAIN_STAGES.map((item, index) => ({
-    key: item.key,
-    label: item.label,
-    note: item.detail,
-    state:
-      run === "idle"
-        ? ("等待" as const)
-        : index < stage || run === "done"
-          ? ("已完成" as const)
-          : index === stage
-            ? ("进行中" as const)
-            : ("等待" as const),
-  }));
+  /** 已弃用版本不给切换入口，这里再兜一次底：只有存在于 releases 里的版本才可能被选中 */
+  const pick = (key: string, version: string) =>
+    setDraft((prev) => ({ ...prev, [key]: version }));
 
   return (
     <div className="fw-config">
@@ -95,46 +202,19 @@ function ConfigTab() {
         title="版本管理"
         extra={
           <span className="muted">
-            {changed ? `${pending.length} 项待生效` : "已同步"}
+            {VERSION_ITEMS.length} 个组件 ·{" "}
+            {VERSION_ITEMS.reduce((sum, item) => sum + item.releases.length, 0)} 个版本
+            {changed ? ` · ${pending.length} 项待生效` : ""}
           </span>
         }
-        className="fw-panel">
+        className="fw-panel fw-panel--matrix">
         {GROUPS.map((group) => (
-          <section key={group} className="fw-group">
-            <h4 className="fw-group__title">{group}</h4>
-            <ul className="fw-versions">
-              {VERSION_ITEMS.filter((item) => item.group === group).map((item) => {
-                const value = draft[item.key] ?? item.current;
-                const dirty = value !== item.current;
-                return (
-                  <li key={item.key} className={dirty ? "is-dirty" : ""}>
-                    <div className="fw-versions__head">
-                      <span className="fw-versions__label">{item.label}</span>
-                      <span className="fw-versions__value">{value}</span>
-                      {dirty ? <StatusChip text="未生效" tone="warn" dot /> : null}
-                    </div>
-                    <p className="fw-versions__target" title={item.note}>{item.target}</p>
-                    {item.candidates.length > 1 ? (
-                      <div className="fw-versions__pick">
-                        {item.candidates.map((candidate) => (
-                          <Btn
-                            key={candidate}
-                            active={candidate === value}
-                            onClick={() =>
-                              setDraft((prev) => ({ ...prev, [item.key]: candidate }))
-                            }>
-                            {candidate}
-                          </Btn>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="fw-versions__locked">随更新包整体升级，不支持单独切换</p>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
+          <div key={group} className="fw-matrix__group">
+            <h3 className="fw-matrix__grouptitle">{group}</h3>
+            {VERSION_ITEMS.filter((item) => item.group === group).map((item) => (
+              <VersionBlock key={item.key} item={item} draft={draft[item.key]} onPick={pick} />
+            ))}
+          </div>
         ))}
 
         <div className="fw-actions">
@@ -142,72 +222,39 @@ function ConfigTab() {
             tone="primary"
             disabled={!changed}
             onClick={() => {
-              setDraft({});
               toast(`已应用 ${pending.length} 项版本配置`, "ok");
+              setDraft({});
             }}>
             应用
           </Btn>
           <Btn disabled={!changed} onClick={() => setDraft({})}>
             放弃改动
           </Btn>
-          <span className="muted">改动对后续采集与推理生效</span>
+          <span className="muted">改动对后续采集与推理生效，已在跑的批次不受影响</span>
         </div>
       </Panel>
 
       <Panel
-        title="训练任务"
-        extra={<SourceTag label="模拟训练" />}
-        className="fw-panel">
-        <DataTable
-          head={["项目", "值"]}
-          rows={[
-            ["基线版本", EXPERIMENT.baselineVersion],
-            ["候选版本", EXPERIMENT.candidateVersion],
-            ["数据集版本", EXPERIMENT.datasetVersion],
-            ["学习率", String(EXPERIMENT.learningRate)],
-            ["停止条件", EXPERIMENT.stopCondition],
-            ["判定阈值", String(EXPERIMENT.threshold)],
-          ]}
-          compact
-        />
-        <div className="fw-actions">
-          <Btn tone="primary" disabled={run === "running"} onClick={startRetrain}>
-            {run === "running" ? "训练中…" : run === "done" ? "重新训练" : "开始训练"}
-          </Btn>
-          <span className="muted">{SCAN_BATCHES.length} 个批次已入候选池</span>
-        </div>
-        <StepFlow steps={steps} />
-      </Panel>
-
-      <Panel title="更新包下发" className="fw-panel">
-        {run === "done" ? (
-          <>
-            <DataTable
-              head={["项", "值"]}
-              rows={[
-                ["更新包", UPDATE_PACKAGE.id],
-                ["包类型", UPDATE_PACKAGE.artifactKind],
-                ["模型版本", UPDATE_PACKAGE.modelVersion],
-                ["目标环境", UPDATE_PACKAGE.targetEnv],
-                ["SHA-256", UPDATE_PACKAGE.sha256],
-                ["回退版本", UPDATE_PACKAGE.fallbackVersion],
-              ]}
-              compact
-            />
-            <div className="fw-actions">
-              <Btn
-                tone="primary"
-                onClick={() => toast("更新包已下发给硬件工程师（饶 · 全栈开发工程师）", "ok")}>
-                下发
-              </Btn>
-              <span className="muted">等待接收方确认</span>
-            </div>
-          </>
+        title="待生效改动"
+        extra={changed ? <StatusChip text={`${pending.length} 项`} tone="warn" dot /> : undefined}
+        className="fw-panel fw-panel--pending">
+        {changed ? (
+          <ul className="fw-pending">
+            {pending.map(({ item, to }) => (
+              <li key={item.key}>
+                <b>{item.label}</b>
+                <span className="fw-pending__from">{item.current}</span>
+                <span className="fw-pending__arrow">→</span>
+                <span className="fw-pending__to">{to}</span>
+                <small>{item.target}</small>
+              </li>
+            ))}
+          </ul>
         ) : (
           <StateBlock
             kind="empty"
-            title="暂无待下发更新包"
-            hint="训练封装完成后在此下发。"
+            title="没有待生效改动"
+            hint="在上方版本矩阵里选择可回退或候选版本。"
           />
         )}
       </Panel>
@@ -225,13 +272,16 @@ export default function Firmware() {
     setParams(next, { replace: true });
   };
 
+  /** 页面共用的来源标识：本页所有数据都是回放 / 模拟，PRD 1.2 要求常驻 */
+  const sourceLabel = tab === "training" || tab === "delivery" ? "演示记录" : "演示回放";
+
   return (
     <div className="page page--adapt">
       <Toolbar
         note={
           <>
-            <SourceTag label="演示回放" />
-            <span>{VERSION_ITEMS.length} 个可配置项</span>
+            <SourceTag label={sourceLabel} />
+            <span>{VERSION_ITEMS.length} 个组件</span>
           </>
         }>
         {TABS.map((item) => (

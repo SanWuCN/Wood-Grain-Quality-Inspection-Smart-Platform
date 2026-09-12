@@ -27,9 +27,7 @@ import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
 import {
   Btn,
-  ConfusionMatrix,
   DataTable,
-  LineChart,
   PermNote,
   SourceTag,
   StateBlock,
@@ -37,13 +35,11 @@ import {
   StepFlow,
   WaveChart,
 } from "../ui";
-import { checkGrouping, fmtNum, fmtPct, runEvaluation } from "../lib";
+import { checkGrouping } from "../lib";
 import {
   ANOMALY_EVENTS,
   CLEAN_STEPS,
   DATASET,
-  EXPERIMENT,
-  FAILED_EXPERIMENT,
   FUSION_RECORD,
   FUSION_RULES,
   REFERENCE_BATCHES,
@@ -569,205 +565,6 @@ export function DatasetTab() {
           }}>
           冻结数据集版本
         </Btn>
-      </Panel>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * 训练验证
- * ------------------------------------------------------------------ */
-
-export function TrainingTab() {
-  const [useFailed, setUseFailed] = useState(false);
-  const experiment = useFailed ? FAILED_EXPERIMENT : EXPERIMENT;
-
-  /** PRD 3.6 / 12：比较程序读归档预测表真算精确率 / 召回率 / F1，页面不再自己数 TP/FP */
-  const evaluation = useMemo(() => runEvaluation(experiment), [experiment]);
-  const fnDelta = evaluation.overall.next.fn - evaluation.overall.old.fn;
-  const fpDelta = evaluation.overall.next.fp - evaluation.overall.old.fp;
-  const regression = evaluation.acceptance.find((item) => item.key === "regression");
-
-  return (
-    <div className="adapt-grid">
-      <Panel title="训练任务" extra={<SourceTag label="演示记录（归档实验包）" />}>
-        <dl className="kv">
-          <div>
-            <dt>实验</dt>
-            <dd>{experiment.title}</dd>
-          </div>
-          <div>
-            <dt>基线 / 候选</dt>
-            <dd>
-              {experiment.baselineVersion} → {experiment.candidateVersion}
-            </dd>
-          </div>
-          <div>
-            <dt>数据集</dt>
-            <dd>{experiment.datasetVersion}</dd>
-          </div>
-          <div>
-            <dt>学习率</dt>
-            <dd>{experiment.learningRate}</dd>
-          </div>
-          <div>
-            <dt>更新范围</dt>
-            <dd>{experiment.updateScope}</dd>
-          </div>
-          <div>
-            <dt>判定阈值</dt>
-            <dd>{experiment.threshold}</dd>
-          </div>
-        </dl>
-        <p className="note">{experiment.stopCondition}</p>
-        <p className="note">{experiment.inputSpec}</p>
-
-        <StepFlow steps={experiment.jobSteps} />
-
-        <label className="twin-compare">
-          <input
-            type="checkbox"
-            checked={useFailed}
-            onChange={(event) => setUseFailed(event.target.checked)}
-          />
-          切换到失败案例
-        </label>
-      </Panel>
-
-      <Panel title="损失曲线">
-        <LineChart
-          series={[
-            {
-              id: experiment.curveOld.id,
-              label: experiment.curveOld.label,
-              color: experiment.curveOld.color,
-              points: experiment.curveOld.points,
-            },
-            {
-              id: experiment.curveNew.id,
-              label: experiment.curveNew.label,
-              color: experiment.curveNew.color,
-              points: experiment.curveNew.points,
-            },
-          ]}
-          xLabel="轮次"
-          yLabel="损失"
-        />
-      </Panel>
-
-      <Panel
-        title="独立测试集对比"
-        extra={
-          <StatusChip
-            text={`同一测试集 ${evaluation.testSetIds.length} 条`}
-            tone={evaluation.testSetConsistent ? "ok" : "danger"}
-          />
-        }>
-        <div className="matrix-row">
-          <ConfusionMatrix
-            title={`${experiment.baselineVersion}（旧）`}
-            metrics={evaluation.overall.old}
-          />
-          <ConfusionMatrix
-            title={`${experiment.candidateVersion}（新）`}
-            metrics={evaluation.overall.next}
-          />
-        </div>
-
-        <div className="delta-row">
-          <span>
-            漏检变化{" "}
-            <b className={fnDelta > 0 ? "is-danger" : "is-ok"}>
-              {fnDelta > 0 ? "+" : ""}
-              {fnDelta}
-            </b>
-          </span>
-          <span>
-            误报变化{" "}
-            <b className={fpDelta > 0 ? "is-warn" : "is-ok"}>
-              {fpDelta > 0 ? "+" : ""}
-              {fpDelta}
-            </b>
-          </span>
-          <span>
-            逐样本 <b>{evaluation.summary.improved} 改善 / {evaluation.summary.regressed} 退化 / {evaluation.summary.same} 不变</b>
-          </span>
-        </div>
-
-        <h4 className="sub">按材种回归</h4>
-        <DataTable
-          compact
-          head={["材种", "测试样本", "旧版召回", "新版召回", "召回变化", "新版精确率", "新版 F1"]}
-          rows={evaluation.perMaterial.map((item) => {
-            const size =
-              item.next.tp + item.next.fp + item.next.tn + item.next.fn;
-            const recallDelta =
-              item.old.recall === null || item.next.recall === null
-                ? null
-                : item.next.recall - item.old.recall;
-            return [
-              <b key={`m-${item.material}`}>{item.material}</b>,
-              String(size),
-              fmtPct(item.old.recall),
-              fmtPct(item.next.recall),
-              <span
-                key={`d-${item.material}`}
-                className={recallDelta === null ? undefined : recallDelta < 0 ? "is-warn" : "is-ok"}>
-                {recallDelta === null
-                  ? "不适用"
-                  : `${recallDelta > 0 ? "+" : ""}${(recallDelta * 100).toFixed(1)}%`}
-              </span>,
-              fmtPct(item.next.precision),
-              fmtNum(item.next.f1),
-            ];
-          })}
-        />
-        {regression ? (
-          <p className="note">
-            回归判定：{regression.detail} ·{" "}
-            <b className={regression.pass ? "is-ok" : "is-danger"}>
-              {regression.pass ? "通过" : "未通过"}
-            </b>
-          </p>
-        ) : null}
-
-        <h4 className="sub">逐样本预测对比</h4>
-        <DataTable
-          compact
-          head={["样本", "组", "材种", "标签", "旧分", "新分", "新版判定", "对比"]}
-          rows={evaluation.rows.map((row) => {
-            const correct = (row.predNew === 1) === (row.label === 1);
-            return [
-              row.sampleId,
-              row.groupId,
-              row.material,
-              row.label === 1 ? "有缺陷" : "正常",
-              row.scoreOld.toFixed(2),
-              row.scoreNew.toFixed(2),
-              <StatusChip
-                key={`v-${row.sampleId}`}
-                text={correct ? "正确" : row.label === 1 ? "漏检" : "误报"}
-                tone={correct ? "ok" : row.label === 1 ? "danger" : "warn"}
-              />,
-              <StatusChip
-                key={`c-${row.sampleId}`}
-                text={row.verdict}
-                tone={row.verdict === "改善" ? "ok" : row.verdict === "退化" ? "danger" : "muted"}
-              />,
-            ];
-          })}
-        />
-
-        <h4 className="sub">验收规则</h4>
-        <ul className="acceptance">
-          {evaluation.acceptance.map((item) => (
-            <li key={item.key} className={item.pass ? "is-ok" : "is-bad"}>
-              <b>{item.label}</b>
-              <span>{item.detail}</span>
-              <StatusChip text={item.pass ? "通过" : "未通过"} tone={item.pass ? "ok" : "danger"} />
-            </li>
-          ))}
-        </ul>
       </Panel>
     </div>
   );

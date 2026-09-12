@@ -3498,6 +3498,548 @@
   min-width: 0;
 }
 
+/* ------------------------------------------------------------------
+   固件及模型 · 版本矩阵（/firmware?tab=config）
+   一行一个版本，列对齐到固定轨道，方便竖着扫「哪个版本能退」。
+   ------------------------------------------------------------------ */
+
+/* 版本矩阵要放下 7 列，横跨整行；占一列时列宽不够会退化成每格折行 */
+.fw-panel--matrix {
+  grid-column: 1 / -1;
+}
+
+.fw-matrix__group + .fw-matrix__group {
+  margin-top: var(--space-5);
+}
+
+.fw-matrix__grouptitle {
+  margin: 0 0 var(--space-3);
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+}
+
+.fw-group + .fw-group {
+  margin-top: var(--space-4);
+}
+
+/* 组件抬头：名称 / 当前值 / 载体 / 设备回报，一行读完 */
+.fw-group__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.fw-group__head .fw-group__title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.fw-group__now {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ma-text-1);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.fw-group__target {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.fw-group__head .chip {
+  margin-left: auto;
+}
+
+.fw-group__note {
+  margin: 3px 0 var(--space-2);
+  overflow: hidden;
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 列轨道：版本 / 状态 / 包类型 / 发布日 / 大小 / 变更 / 操作 */
+.fw-matrix__head,
+.fw-matrix__row {
+  display: grid;
+  grid-template-columns: 148px 84px 128px 96px 72px minmax(0, 1fr) 72px;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fw-matrix__head {
+  padding: 0 var(--space-2) 5px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.fw-matrix ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 用左侧细线表达「这一行属于哪个组件」，不画整块边框（规范 §4.3） */
+.fw-matrix li {
+  border-left: 2px solid transparent;
+}
+
+.fw-matrix li.is-current {
+  border-left-color: var(--ma-ok);
+  background: var(--fill-weak);
+}
+
+.fw-matrix__row {
+  min-height: 30px;
+  padding: 3px var(--space-2);
+}
+
+.fw-matrix li:hover {
+  background: var(--fill-weak);
+}
+
+/* 版本号是这一行的主键，做成可展开的按钮但不画按钮框 */
+.fw-matrix__version {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ma-text-1);
+  font-family: var(--font-data);
+  font-size: var(--fs-table);
+  font-weight: 600;
+  text-align: left;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.fw-matrix__version:hover {
+  color: var(--primary);
+}
+
+.fw-matrix__kind,
+.fw-matrix__date,
+.fw-matrix__size {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.fw-matrix__date,
+.fw-matrix__size {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 变更说明截一行；全文在展开区的「变更说明」里 */
+.fw-matrix__change {
+  overflow: hidden;
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fw-matrix__act {
+  justify-self: end;
+  font-size: var(--fs-aux);
+}
+
+.fw-matrix__act .btn {
+  height: 22px;
+  padding: 0 var(--space-2);
+  font-size: var(--fs-aux);
+}
+
+/* 展开区：目标 / 依赖 / 摘要 / 变更全文 */
+.fw-matrix__detail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 3px var(--space-4);
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-2) 150px;
+  background: var(--fill-weak);
+}
+
+.fw-matrix__detail dt {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.fw-matrix__detail dd {
+  margin: 0 0 4px;
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+}
+
+/* 待生效改动：只列差异，不重复整张矩阵 */
+.fw-pending {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fw-pending li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 14px auto;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-aux);
+}
+
+.fw-pending b {
+  color: var(--ma-text-2);
+  font-weight: 500;
+}
+
+.fw-pending__from {
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  text-decoration: line-through;
+}
+
+.fw-pending__arrow {
+  color: var(--ma-text-3);
+  text-align: center;
+}
+
+.fw-pending__to {
+  color: var(--primary);
+  font-family: var(--font-data);
+  font-weight: 600;
+}
+
+.fw-pending small {
+  grid-column: 1 / -1;
+  color: var(--ma-text-3);
+}
+
+/* ------------------------------------------------------------------
+   固件及模型 · 训练验证（/firmware?tab=training）
+   ------------------------------------------------------------------ */
+
+.fw-training {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+
+/* 控制台和对比表要宽度：终端折行就没法读了 */
+.fw-panel--console,
+.fw-panel--wide {
+  grid-column: 1 / -1;
+}
+
+.fw-training__switch {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+/* ---- 训练配置 ---- */
+
+.fw-params {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fw-params li {
+  display: grid;
+  grid-template-columns: 104px 132px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  padding: 3px var(--space-2);
+  border-left: 2px solid transparent;
+  font-size: var(--fs-aux);
+}
+
+.fw-params li.is-readonly {
+  border-left-color: var(--border-subtle);
+}
+
+.fw-params li.is-invalid {
+  border-left-color: var(--ma-danger);
+  background: var(--fill-weak);
+}
+
+.fw-params__label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ma-text-3);
+}
+
+/* 「固定」标记：用中性描边，别和错误态抢颜色 */
+.fw-params__label i {
+  padding: 0 4px;
+  border: 1px solid var(--border-subtle);
+  color: var(--ma-text-3);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 14px;
+}
+
+.fw-params__static {
+  color: var(--ma-text-1);
+  font-family: var(--font-data);
+  font-size: var(--fs-table);
+  font-weight: 600;
+}
+
+.fw-params__input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fw-params__input input {
+  width: 100px;
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  background: var(--fill-weak);
+  color: var(--ma-text-1);
+  font-family: var(--font-data);
+  font-size: var(--fs-table);
+  font-variant-numeric: tabular-nums;
+}
+
+.fw-params__input input:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.fw-params__input input:disabled {
+  color: var(--ma-text-3);
+  cursor: not-allowed;
+}
+
+.fw-params li.is-invalid input {
+  border-color: var(--ma-danger);
+}
+
+.fw-params__input em {
+  color: var(--ma-text-3);
+  font-style: normal;
+}
+
+.fw-params li small {
+  overflow: hidden;
+  color: var(--ma-text-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fw-params__error {
+  color: var(--ma-danger);
+  font-size: var(--fs-aux);
+}
+
+/* ---- 任务控制台（终端） ---- */
+
+.fw-console {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-subtle);
+}
+
+.fw-console__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fw-console__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 4px var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--fill-weak);
+  color: var(--ma-text-2);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+}
+
+/*
+  终端正文：固定高度 + 自己滚动，等宽字体。
+  高度写死是为了让「回放时逐行长出来」这个动作可见 —— 高度跟着内容走的话
+  面板会一边长一边把下面的内容顶下去。
+*/
+.fw-console__body {
+  height: 260px;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  list-style: none;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+  line-height: 1.75;
+}
+
+.fw-console__body li {
+  display: grid;
+  grid-template-columns: 48px 46px minmax(0, 1fr);
+  gap: var(--space-2);
+  color: var(--ma-text-2);
+}
+
+.fw-console__body time {
+  color: var(--ma-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.fw-console__body b {
+  font-weight: 500;
+}
+
+.fw-console__body .is-info b {
+  color: var(--ma-text-3);
+}
+
+.fw-console__body .is-warn {
+  color: var(--warning);
+}
+
+.fw-console__body .is-warn b {
+  color: var(--warning);
+}
+
+.fw-console__body .is-error,
+.fw-console__body .is-error b {
+  color: var(--danger);
+}
+
+/* 回放时的光标块：表明「还在往下写」，静态铺满时不出现 */
+.fw-console__cursor {
+  display: block;
+  width: 7px;
+  height: 12px;
+  margin-top: 2px;
+  background: var(--primary);
+  animation: fw-console-blink 1s steps(2, start) infinite;
+}
+
+@keyframes fw-console-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* ---- 执行节点占用 ---- */
+
+.fw-node__spec {
+  margin-bottom: var(--space-3);
+}
+
+.fw-node {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* 名称 / 当前值 / 占用条 / 整轮趋势 / 峰值 */
+.fw-node li {
+  display: grid;
+  grid-template-columns: 78px 74px minmax(60px, 1fr) 96px auto;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-aux);
+}
+
+.fw-node__label {
+  color: var(--ma-text-3);
+}
+
+.fw-node b {
+  justify-self: end;
+  color: var(--ma-text-1);
+  font-family: var(--font-data);
+  font-size: var(--fs-table);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.fw-node b em {
+  margin-left: 2px;
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.fw-node__bar {
+  height: 4px;
+  background: var(--fill-soft);
+}
+
+.fw-node__bar > i {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+  transition: width 180ms linear;
+}
+
+.fw-node li.is-warn .fw-node__bar > i {
+  background: var(--ma-warn);
+}
+
+.fw-node li.is-warn b {
+  color: var(--ma-warn);
+}
+
+.fw-node small {
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  white-space: nowrap;
+}
+
+/* 迷你趋势线：整轮形状 + 当前回放位置 */
+.fw-spark {
+  width: 96px;
+  height: 24px;
+}
+
+.fw-spark path {
+  stroke: var(--primary);
+}
+
+.fw-spark.is-warn path {
+  stroke: var(--ma-warn);
+}
+
+.fw-spark__cursor {
+  stroke: var(--ma-text-3);
+  stroke-dasharray: 2 2;
+  opacity: 0.7;
+}
+
 /* 参考样本是硬件监看里唯一的 5 列表格（批次 / 分组 / 材质来源 / 扫描次数 / 方向），
    而它那几列全是不可断的标识串。占一列时列宽只有 ~88px，浏览器会在连字符处
    折断：「G-SAMPLE-01」变成「G-」「SAMPLE-」「01」，「0° / 45° / 90°」变成两行
