@@ -108,7 +108,13 @@ export const ACCOUNTS = [
 /** 账号类型（auth.ts 与顶栏 / 登录页共用） */
 export type Account = (typeof ACCOUNTS)[number];
 
-/** 一级导航（PRD 2.2：控制在八项） */
+/**
+ * 一级导航（PRD 2.2：控制在八项）。
+ *
+ * 排练控制台刻意**不在这里** —— 它是管理员排练时用的，不是业务岗位的日常动作
+ * （PRD §11「管理员排练控制独立于日常岗位」）。放在顶栏的账号菜单旁边，
+ * 只有具备 console:admin 的角色看得见，导航栏保持业务八项不变。
+ */
 export const NAV_ITEMS = [
   { key: "overview", label: "任务总览", path: "/" },
   { key: "orders", label: "工单档案", path: "/orders" },

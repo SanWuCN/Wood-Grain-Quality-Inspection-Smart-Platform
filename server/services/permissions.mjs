@@ -48,13 +48,18 @@ const ALL = [...new Set(Object.values(ACTION_PERMISSION))].filter((item) => item
  * 归档没有走命令总线（它是「读字节 + 写清单登记值」，不是实体状态机），
  * 所以这张表里没有对应的 action，权限名要单独列出来。
  * 与前端一致：沈 / 史 有归档校验与导出，饶 / 马 没有。
+ *
+ * `console:admin` 同理：排练控制台会重建会话、回滚整场状态，
+ * 属于「管理员排练控制」而不是日常岗位动作（PRD §11：沈和史是否具有管理员权限
+ * 由配置指定；这里按演示口径给这两位）。
  */
 const ARCHIVE_PERMISSIONS = ["archive:verify", "archive:export"];
+const CONSOLE_PERMISSIONS = ["console:admin"];
 
 export const ROLE_PERMISSIONS = {
   // 沈 / 史：评审要求「项目经理和人工智能架构师权限最大」
-  shen: [...new Set([...ALL, ...ARCHIVE_PERMISSIONS])],
-  shi: [...new Set([...ALL, ...ARCHIVE_PERMISSIONS])],
+  shen: [...new Set([...ALL, ...ARCHIVE_PERMISSIONS, ...CONSOLE_PERMISSIONS])],
+  shi: [...new Set([...ALL, ...ARCHIVE_PERMISSIONS, ...CONSOLE_PERMISSIONS])],
   rao: [
     "env:ack",
     "scan:capture",

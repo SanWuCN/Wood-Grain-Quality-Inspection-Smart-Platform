@@ -88,8 +88,21 @@ CREATE TABLE IF NOT EXISTS projection (
   updated_at TEXT NOT NULL
 );
 
+-- 阶段快照（PRD §11 排练恢复）：把某一刻的全部实体存下来，排练时能退回去
+CREATE TABLE IF NOT EXISTS snapshots (
+  id         TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  stage      TEXT NOT NULL,
+  label      TEXT NOT NULL,
+  entity_seq INTEGER NOT NULL,
+  data       TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_session_seq ON events (session_id, seq);
 CREATE INDEX IF NOT EXISTS idx_entities_kind ON entities (session_id, kind);
+CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots (session_id, created_at);
 `;
 
 /**

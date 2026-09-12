@@ -81,7 +81,9 @@ export type Permission =
   /** 数据集冻结（POST /datasets/{id}/freeze），冻结后训练只引用该版本 */
   | "dataset:freeze"
   /** 参考样本采集（异常排查完成后的补采任务） */
-  | "sample:collect";
+  | "sample:collect"
+  /** 排练控制台：新建演示会话、捕获与恢复阶段快照、导出诊断包（PRD §11） */
+  | "console:admin";
 
 /** 权限中文名（PRD 用语，用于置灰提示；不带感叹号） */
 export const PERMISSION_LABEL: Record<Permission, string> = {
@@ -112,6 +114,7 @@ export const PERMISSION_LABEL: Record<Permission, string> = {
   "sample:review": "样本审核",
   "dataset:freeze": "数据集冻结",
   "sample:collect": "参考样本采集",
+  "console:admin": "排练控制台",
 };
 
 /** 全部权限，顺序与上面的联合类型一致；权限矩阵的自检基准 */
@@ -192,6 +195,8 @@ export const ROUTE_PERMISSION: Record<string, readonly Permission[]> = {
   "/knowledge": ["knowledge:search"],
   // 报告归档：交付摘要校验与报告输出
   "/archive": ["archive:verify"],
+  // 排练控制台：新建会话与回滚快照会改整场状态，属管理员排练控制（PRD §11）
+  "/console": ["console:admin"],
 };
 
 /**

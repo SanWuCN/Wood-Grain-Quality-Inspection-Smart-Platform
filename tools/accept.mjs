@@ -38,6 +38,8 @@ const ALL_ROUTES = [
   ["/knowledge", "知识库"],
   ["/archive", "报告归档"],
   ["/present", "演示窗口"],
+  // 排练控制台（PRD §11）：只有 console:admin 进得去，其余角色应看到「无权限」而不是空白
+  ["/console", "排练控制台"],
 ];
 
 function arg(name, fallback) {

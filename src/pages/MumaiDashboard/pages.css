@@ -3583,6 +3583,144 @@
 }
 
 /* ------------------------------------------------------------------
+   排练控制台（/console，PRD §11 / 评审 F12）
+   ------------------------------------------------------------------ */
+
+.page--console .cs-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  /* 会话 / 快照 / 预检三列：快照是主操作，给最宽 */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+/* 三列各自滚动，页面本身不滚 —— 控制台是一屏看完的工具 */
+.page--console .cs-layout > .tech-panel {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.page--console .cs-layout > .tech-panel > .tech-panel__inner > .tech-panel__body {
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.cs-sessions,
+.cs-snapshots,
+.cs-preflight {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.cs-sessions li,
+.cs-snapshots li,
+.cs-preflight li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--space-3);
+  align-items: center;
+  padding: 6px 9px;
+  border-left: 2px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.cs-sessions li.is-current {
+  border-left-color: var(--primary);
+  background: var(--fill-weak);
+}
+
+.cs-snapshots li,
+.cs-preflight li {
+  border-left-color: var(--border-default);
+}
+
+.cs-preflight li.is-ok {
+  border-left-color: var(--success);
+}
+
+.cs-preflight li.is-bad {
+  border-left-color: var(--warning);
+}
+
+.cs-sessions b,
+.cs-snapshots b,
+.cs-preflight b {
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 500;
+}
+
+.cs-sessions span,
+.cs-snapshots span,
+.cs-preflight span {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.cs-sessions em,
+.cs-snapshots em {
+  grid-column: 1;
+  color: var(--text-tertiary);
+  font-style: normal;
+  font-size: var(--fs-aux);
+}
+
+/* 快照的「恢复 / 删除」放在右侧，跨两行 */
+.cs-snapshots__ops {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.cs-capture {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.cs-capture label {
+  display: grid;
+  gap: 3px;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.cs-capture select,
+.cs-capture input {
+  height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-default);
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--fs-table);
+  outline: none;
+}
+
+.cs-capture input {
+  min-width: 200px;
+}
+
+@media (max-width: 1500px) {
+  .page--console .cs-layout {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+
+  .page--console .cs-layout > .tech-panel {
+    min-height: 240px;
+  }
+}
+
+/* ------------------------------------------------------------------
    大屏展示窗口
    ------------------------------------------------------------------ */
 .present {

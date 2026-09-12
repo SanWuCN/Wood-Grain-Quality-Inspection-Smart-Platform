@@ -117,6 +117,7 @@ export default function Shell() {
     toasts,
     dismissToast,
     toast,
+    can,
     events,
     sessionId,
     currentOrder,
@@ -264,8 +265,10 @@ export default function Shell() {
         activeNav={activeNavLabel}
         onNav={handleNav}
         accountId={accountId}
+        can={can}
         onLogout={handleLogout}
         onPresent={openPresent}
+        onConsole={() => navigate("/console")}
         onOpenDevices={() => {
           if (allowsPath(accountId, "/mapping")) navigate("/mapping");
           else navigate(lastAllowed.current);

@@ -124,6 +124,31 @@ export type SceneEntity = {
   publishedAt: string | null;
 };
 
+/** 排练控制台的总览（服务端 /api/console/overview） */
+export type RehearsalOverview = {
+  currentSessionId: string;
+  sessions: {
+    id: string;
+    scenarioId: string;
+    stage: string;
+    status: string;
+    lastSeq: number;
+    createdAt: string;
+    updatedAt: string;
+    entityCount: number;
+  }[];
+  stages: { key: string; label: string }[];
+  snapshots: {
+    id: string;
+    stage: string;
+    label: string;
+    entityCount: number;
+    createdBy: string;
+    createdAt: string;
+  }[];
+  preflight: { items: { key: string; label: string; pass: boolean; detail: string }[]; ok: boolean };
+};
+
 /** 归档清单项（服务端 archiveItem 实体）：登记摘要与真实文件是一一对应的 */
 export type ArchiveItemEntity = {
   assetId: string;
@@ -466,6 +491,47 @@ export const api = {
       "/api/archives/repair",
       { method: "POST", body: JSON.stringify({ sessionId, assetId, fileId }) },
     );
+  },
+
+  /* ---- 排练控制台（PRD §11 / 评审 F12） ---- */
+
+  consoleOverview(sessionId: string) {
+    return request<RehearsalOverview>(`/api/console/overview?sessionId=${encodeURIComponent(sessionId)}`);
+  },
+
+  /** 新建一场演示会话：新一轮隔离，从开场状态开始 */
+  consoleNewSession(scenarioId = "chapter2") {
+    return request<{ session: RehearsalOverview["sessions"][number]; entityCount: number }>(
+      "/api/console/sessions",
+      { method: "POST", body: JSON.stringify({ scenarioId }) },
+    );
+  },
+
+  consoleCapture(sessionId: string, stage: string, label: string) {
+    return request<{ id: string; stage: string; label: string; entityCount: number; createdAt: string }>(
+      "/api/console/snapshots",
+      { method: "POST", body: JSON.stringify({ sessionId, stage, label }) },
+    );
+  },
+
+  /** 恢复阶段快照：把整场实体换回快照内容，历史事件流不动 */
+  consoleRestore(sessionId: string, snapshotId: string) {
+    return request<{ restored: number; stage: string; at: string; label: string; snapshotId: string }>(
+      "/api/console/snapshots/restore",
+      { method: "POST", body: JSON.stringify({ sessionId, snapshotId }) },
+    );
+  },
+
+  consoleDeleteSnapshot(sessionId: string, snapshotId: string) {
+    return request<{ removed: boolean }>("/api/console/snapshots/delete", {
+      method: "POST",
+      body: JSON.stringify({ sessionId, snapshotId }),
+    });
+  },
+
+  /** 导出诊断包：会话 + 实体 + 快照 + 事件 + 预检，一份 JSON */
+  consoleDiagnostics(sessionId: string) {
+    return request<Record<string, unknown>>(`/api/console/diagnostics?sessionId=${encodeURIComponent(sessionId)}`);
   },
 };
 

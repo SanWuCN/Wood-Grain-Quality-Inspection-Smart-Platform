@@ -9,6 +9,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { ACCOUNTS } from "./design";
+import type { Permission } from "./auth";
 import { Icon } from "./icons";
 import { StatusChip } from "./ui";
 import type { Tone } from "./lib";
@@ -52,6 +53,8 @@ export interface HeaderProps {
   activeNav: string;
   onNav: (label: string) => void;
   accountId: string;
+  /** 权限判断：排练控制台入口按 console:admin 显示 */
+  can: (permission: Permission) => boolean;
   /**
    * 退出登录。
    *
@@ -61,6 +64,8 @@ export interface HeaderProps {
    */
   onLogout?: () => void;
   onPresent?: () => void;
+  /** 打开排练控制台（仅 console:admin） */
+  onConsole?: () => void;
   onOpenDevices?: () => void;
   extra?: ReactNode;
 }
@@ -71,8 +76,10 @@ export default function Header({
   activeNav,
   onNav,
   accountId,
+  can,
   onLogout,
   onPresent,
+  onConsole,
   onOpenDevices,
   extra,
 }: HeaderProps) {
@@ -101,6 +108,21 @@ export default function Header({
         }
         actions={
           <>
+            {/*
+              排练控制台入口：只给有 console:admin 的角色（沈 / 史）。
+              刻意不放进一级导航 —— PRD §11 说管理员排练控制独立于日常岗位，
+              业务导航保持八项（design.ts 的 NAV_ITEMS 里也有同样的说明）。
+            */}
+            {can("console:admin") ? (
+              <button
+                type="button"
+                className="appshell__present"
+                onClick={onConsole}
+                title="排练控制台：新建演示会话、捕获与恢复阶段快照">
+                <Icon name="database" />
+                排练控制台
+              </button>
+            ) : null}
             <button
               type="button"
               className="appshell__present"

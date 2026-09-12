@@ -31,7 +31,17 @@ import {
 } from "../services/session.mjs";
 import { actorFromRequest, login } from "../services/auth.mjs";
 import { allows, permissionsOf } from "../services/permissions.mjs";
-import { formatSize } from "../fixtures/archive.mjs";
+import { ensureArchive, formatSize } from "../fixtures/archive.mjs";
+import {
+  DEMO_STAGES,
+  captureSnapshot,
+  deleteSnapshot,
+  diagnosticsBundle,
+  getSnapshot,
+  listSnapshots,
+  restoreSnapshot,
+} from "../services/rehearsal.mjs";
+import { preflightDetail } from "../fixtures/preflight.mjs";
 import { parseJson } from "../storage/db.mjs";
 
 /** 归档副本的补传 / 重选属于「交付摘要校验」的写入侧，与前端 archive:verify 同一个权限 */
@@ -437,6 +447,118 @@ export function createApi({ db, hub, staticRoot = null, logger = console }) {
     if (event) hub.broadcast(sessionId, event);
 
     return { assetId, fileId: file.id, name: file.name, sizeText: data.sizeText, sha256: file.sha256, repairedBy: ctx.actor };
+  });
+
+  /* ---- 排练控制台（PRD §11 / 评审 F12） ---- */
+
+  /** 需要管理员权限：重建会话、回滚快照都会改整场状态，不该让任何角色随手点 */
+  const requireAdmin = (actorId) => {
+    if (!allows(actorId, "console:admin")) {
+      throw new WorkflowError(403, "FORBIDDEN", "当前角色没有排练控制台权限");
+    }
+  };
+
+  route("GET", "/api/console/overview", async (ctx) => {
+    const sessionId = ctx.query.sessionId ?? DEFAULT_SESSION_ID;
+    requireSession(sessionId);
+    return {
+      currentSessionId: sessionId,
+      sessions: listSessions(db).map((session) => ({
+        ...session,
+        entityCount: db.prepare("SELECT COUNT(*) AS n FROM entities WHERE session_id=?").get(session.id)?.n ?? 0,
+      })),
+      stages: DEMO_STAGES,
+      snapshots: listSnapshots(db, sessionId),
+      preflight: preflightDetail(db, sessionId),
+    };
+  });
+
+  /**
+   * 新建一场演示会话。
+   *
+   * 评审 F12 要的是「新一轮隔离」：新 sessionId 之下，上一轮的批次、产物、回执
+   * 一条都不会串进来（PRD §6）。种子会把开场实体重新播一遍，
+   * 所以新会话是**从开场开始**的，不是接到当前进度上。
+   */
+  route("POST", "/api/console/sessions", async (ctx) => {
+    requireAdmin(ctx.actor);
+    const session = createSession(db, ctx.body.scenarioId ?? "chapter2", null);
+    /*
+     * 新会话也要有自己的归档清单与真实文件。
+     * `createSession` 只播实体，归档那 24 个文件是启动时给默认会话补的 ——
+     * 不在这里补一遍，新会话打开归档页会是空的（实测 6 个实体 vs 30 个）。
+     */
+    ensureArchive(db, session.id);
+    const event = appendEvent(db, session.id, {
+      type: "session.created",
+      entityKind: "session",
+      entityId: session.id,
+      actorId: ctx.actor,
+      payload: { scenarioId: session.scenarioId, by: ctx.actor },
+    });
+    if (event) hub.broadcast(session.id, event);
+    return { session, entityCount: db.prepare("SELECT COUNT(*) AS n FROM entities WHERE session_id=?").get(session.id)?.n ?? 0 };
+  });
+
+  route("POST", "/api/console/snapshots", async (ctx) => {
+    requireAdmin(ctx.actor);
+    const sessionId = ctx.body.sessionId ?? DEFAULT_SESSION_ID;
+    requireSession(sessionId);
+    const snapshot = captureSnapshot(db, {
+      sessionId,
+      stage: ctx.body.stage ?? "P11",
+      label: ctx.body.label,
+      actorId: ctx.actor,
+    });
+    const event = appendEvent(db, sessionId, {
+      type: "snapshot.captured",
+      entityKind: "snapshot",
+      entityId: snapshot.id,
+      actorId: ctx.actor,
+      payload: { stage: snapshot.stage, label: snapshot.label, entities: snapshot.entitySeq },
+    });
+    if (event) hub.broadcast(sessionId, event);
+    return {
+      id: snapshot.id,
+      stage: snapshot.stage,
+      label: snapshot.label,
+      entityCount: snapshot.entitySeq,
+      createdAt: snapshot.createdAt,
+    };
+  });
+
+  route("POST", "/api/console/snapshots/restore", async (ctx) => {
+    requireAdmin(ctx.actor);
+    const sessionId = ctx.body.sessionId ?? DEFAULT_SESSION_ID;
+    requireSession(sessionId);
+    const snapshot = getSnapshot(db, sessionId, ctx.body.snapshotId);
+    if (!snapshot) throw new WorkflowError(404, "NOT_FOUND", "快照不存在");
+    const result = restoreSnapshot(db, sessionId, snapshot, ctx.actor);
+    const event = appendEvent(db, sessionId, {
+      type: "snapshot.restored",
+      entityKind: "snapshot",
+      entityId: snapshot.id,
+      actorId: ctx.actor,
+      payload: { stage: snapshot.stage, label: snapshot.label, restored: result.restored, by: ctx.actor },
+    });
+    if (event) hub.broadcast(sessionId, event);
+    return { ...result, snapshotId: snapshot.id, label: snapshot.label };
+  });
+
+  route("POST", "/api/console/snapshots/delete", async (ctx) => {
+    requireAdmin(ctx.actor);
+    const sessionId = ctx.body.sessionId ?? DEFAULT_SESSION_ID;
+    requireSession(sessionId);
+    const removed = deleteSnapshot(db, sessionId, ctx.body.snapshotId);
+    if (!removed) throw new WorkflowError(404, "NOT_FOUND", "快照不存在");
+    return { removed: true, snapshotId: ctx.body.snapshotId };
+  });
+
+  /** 导出诊断包：会话 + 实体 + 快照 + 事件 + 预检，一份 JSON */
+  route("GET", "/api/console/diagnostics", async (ctx) => {
+    const sessionId = ctx.query.sessionId ?? DEFAULT_SESSION_ID;
+    requireSession(sessionId);
+    return diagnosticsBundle(db, sessionId, preflightDetail(db, sessionId));
   });
 
   /* ---- 健康与预检（PRD §11 预检清单） ---- */

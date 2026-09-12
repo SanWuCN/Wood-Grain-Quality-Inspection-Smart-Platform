@@ -23,6 +23,7 @@ const Firmware = lazy(() => import("./pages/Firmware"));
 const Knowledge = lazy(() => import("./pages/Knowledge"));
 const Archive = lazy(() => import("./pages/Archive"));
 const Present = lazy(() => import("./pages/Present"));
+const Console = lazy(() => import("./pages/Console"));
 
 export default function RoutesTree() {
   return (
@@ -45,6 +46,8 @@ export default function RoutesTree() {
         <Route path="/knowledge" element={<Knowledge />} />
         <Route path="/archive" element={<Archive />} />
         <Route path="/present" element={<Present />} />
+        {/* 排练控制台（PRD §11）：管理员新建会话与恢复阶段快照 */}
+        <Route path="/console" element={<Console />} />
         {/*
           兜底路由：没有它的时候，访问一个未登记的地址（例如拆页前的
           `#/adapt`）会让 React Router 一个 route 都不匹配 —— 连这层带外壳的
