@@ -28,6 +28,7 @@
 
 import { useMemo, useState } from "react";
 import { useMumai } from "../context";
+import { Modal } from "../ui";
 import { Panel } from "../Panel";
 import {
   Btn,
@@ -300,64 +301,77 @@ export function DatasetTab() {
 
 export function FusionTab() {
   const { toast } = useMumai();
+  /** 保存是一次会写版本的正式动作，先弹二级确认（一级页面不直接落库） */
+  const [saveOpen, setSaveOpen] = useState(false);
 
   return (
-    <div className="adapt-grid">
-      <Panel title="数据完整性" extra={<SourceTag label={`规则 ${FUSION_RECORD.ruleVersion}`} />}>
-        <DataTable
-          head={["检查项", "结果", "说明"]}
-          rows={FUSION_RECORD.completeness.map((item) => [
-            item.label,
-            <StatusChip key={item.label} text={item.ok ? "通过" : "不通过"} tone={item.ok ? "ok" : "danger"} />,
-            item.note,
-          ])}
-        />
-        <h4 className="sub">分支状态</h4>
-        <ul className="pkg-list">
-          {FUSION_RECORD.branches.map((branch) => (
-            <li key={branch.key} className={branch.state === "合格" ? "is-ok" : "is-bad"}>
-              <b>{branch.label}</b>
-              <span>{branch.detail}</span>
-              <StatusChip text={branch.state} tone={branch.state === "合格" ? "ok" : "danger"} />
-            </li>
-          ))}
-        </ul>
-      </Panel>
+    /*
+      两列，不按「一模块一卡片」自动铺。
 
-      <Panel title="图像标注">
-        <DataTable
-          head={["标注框", "图像", "标签", "置信度", "测区"]}
-          rows={FUSION_RECORD.annotations.map((item) => [
-            item.boxId,
-            item.image,
-            item.label,
-            item.confidence.toFixed(2),
-            item.zone,
-          ])}
-        />
-        <h4 className="sub">测区匹配</h4>
-        <DataTable
-          head={["视觉测区", "雷达测区", "是否一致", "说明"]}
-          rows={FUSION_RECORD.zoneMatch.map((item) => [
-            item.visual,
-            item.radar,
-            <StatusChip key={item.visual} text={item.matched ? "一致" : "不一致"} tone={item.matched ? "ok" : "warn"} />,
-            item.note,
-          ])}
-        />
-      </Panel>
+      原来用 `auto-fit minmax(340px, 1fr)`，1920 下铺成三列：数据完整性、图像标注、
+      雷达特征都在左中，融合规则与结果又高又宽 —— 前三个早早结束、底下空一大片，
+      第四个还在往下长，看上去「有的长有的短」。
+      现在前三块（输入与校验）竖着排在一列，融合规则与结果（结论）单独一列，
+      两列底部齐平，同级面板的标题高度与间距本来就统一（都走 .tech-panel）。
+    */
+    <div className="adapt-grid adapt-grid--fusion">
+      <div className="adapt-col">
+        <Panel title="数据完整性" extra={<SourceTag label={`规则 ${FUSION_RECORD.ruleVersion}`} />}>
+          <DataTable
+            head={["检查项", "结果", "说明"]}
+            rows={FUSION_RECORD.completeness.map((item) => [
+              item.label,
+              <StatusChip key={item.label} text={item.ok ? "通过" : "不通过"} tone={item.ok ? "ok" : "danger"} />,
+              item.note,
+            ])}
+          />
+          <h4 className="sub">分支状态</h4>
+          <ul className="pkg-list">
+            {FUSION_RECORD.branches.map((branch) => (
+              <li key={branch.key} className={branch.state === "合格" ? "is-ok" : "is-bad"}>
+                <b>{branch.label}</b>
+                <span>{branch.detail}</span>
+                <StatusChip text={branch.state} tone={branch.state === "合格" ? "ok" : "danger"} />
+              </li>
+            ))}
+          </ul>
+        </Panel>
 
-      <Panel title="雷达特征">
-        <DataTable
-          head={["响应段", "测区", "幅值", "质量"]}
-          rows={FUSION_RECORD.radarFeatures.map((item) => [
-            item.segment,
-            item.zone,
-            item.amplitude.toFixed(2),
-            <StatusChip key={item.segment} text={item.quality} tone={item.quality === "合格" ? "ok" : "danger"} />,
-          ])}
-        />
-      </Panel>
+        <Panel title="图像标注">
+          <DataTable
+            head={["标注框", "图像", "标签", "置信度", "测区"]}
+            rows={FUSION_RECORD.annotations.map((item) => [
+              item.boxId,
+              item.image,
+              item.label,
+              item.confidence.toFixed(2),
+              item.zone,
+            ])}
+          />
+          <h4 className="sub">测区匹配</h4>
+          <DataTable
+            head={["视觉测区", "雷达测区", "是否一致", "说明"]}
+            rows={FUSION_RECORD.zoneMatch.map((item) => [
+              item.visual,
+              item.radar,
+              <StatusChip key={item.visual} text={item.matched ? "一致" : "不一致"} tone={item.matched ? "ok" : "warn"} />,
+              item.note,
+            ])}
+          />
+        </Panel>
+
+        <Panel title="雷达特征">
+          <DataTable
+            head={["响应段", "测区", "幅值", "质量"]}
+            rows={FUSION_RECORD.radarFeatures.map((item) => [
+              item.segment,
+              item.zone,
+              item.amplitude.toFixed(2),
+              <StatusChip key={item.segment} text={item.quality} tone={item.quality === "合格" ? "ok" : "danger"} />,
+            ])}
+          />
+        </Panel>
+      </div>
 
       {/* 规则条数是从种子现算的状态量；原来这里挂的
           「明确规则，非分数相加」是在向读者解释这套融合是怎么设计的（§5 判据） */}
@@ -391,14 +405,70 @@ export function FusionTab() {
           ])}
         />
 
-        <Btn
-          tone="primary"
-          onClick={() => {
-            toast("融合结果已保存，规则版本一并记录", "ok");
-          }}>
+        <Btn tone="primary" onClick={() => setSaveOpen(true)}>
           保存融合结果
         </Btn>
       </Panel>
+
+      {saveOpen ? (
+        <Modal
+          title="保存融合结果"
+          subtitle={`规则版本 ${FUSION_RECORD.ruleVersion}`}
+          onClose={() => setSaveOpen(false)}
+          footer={
+            <>
+              <Btn onClick={() => setSaveOpen(false)}>取消</Btn>
+              <Btn
+                tone="primary"
+                onClick={() => {
+                  setSaveOpen(false);
+                  toast("融合结果已保存，规则版本一并记录", "ok");
+                }}>
+                确认保存
+              </Btn>
+            </>
+          }>
+          {/*
+            确认弹窗要让人**看清将写下什么**，而不是只问一句「确定吗」：
+            规则版本、参与的分支、输出的条目数、以及哪几条要优先复核。
+          */}
+          <dl className="kv">
+            <div>
+              <dt>规则版本</dt>
+              <dd>{FUSION_RECORD.ruleVersion}</dd>
+            </div>
+            <div>
+              <dt>参与分支</dt>
+              <dd>{FUSION_RECORD.branches.map((item) => item.label).join(" / ")}</dd>
+            </div>
+            <div>
+              <dt>输出条目</dt>
+              <dd>{FUSION_RECORD.outputs.length} 条</dd>
+            </div>
+            <div>
+              <dt>需优先复核</dt>
+              <dd>{FUSION_RECORD.outputs.filter((item) => item.priority === "优先复核").length} 条</dd>
+            </div>
+          </dl>
+          <ul className="pkg-list">
+            {FUSION_RECORD.outputs.map((item) => (
+              <li key={item.riskId} className={item.priority === "优先复核" ? "is-bad" : ""}>
+                <b>{item.riskId}</b>
+                <span>
+                  {item.label} · {item.rule}
+                </span>
+                <StatusChip
+                  text={item.priority}
+                  tone={item.priority === "优先复核" ? "danger" : "warn"}
+                />
+              </li>
+            ))}
+          </ul>
+          <p className="note">
+            保存后按该规则版本归档；两路分数不做平均，结论由规则矩阵给出。
+          </p>
+        </Modal>
+      ) : null}
     </div>
   );
 }

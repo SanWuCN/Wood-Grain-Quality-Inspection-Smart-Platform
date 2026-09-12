@@ -2717,6 +2717,39 @@
   align-items: start;
 }
 
+/*
+   融合分析：两列，不自动铺。
+
+   原来三块输入（数据完整性 / 图像标注 / 雷达特征）与结论（融合规则与结果）
+   一起丢进 auto-fit，1920 下铺成三列 —— 前三块早早结束、底下空一大片，
+   结论那块又高又宽地吊在旁边，看上去「有的长有的短」（用户第二张图）。
+   现在输入竖排一列、结论单独一列，两列底部齐平。
+   窄档退回单列，输入列在前、结论在后（阅读顺序不变）。
+*/
+.adapt-grid--fusion {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  /*
+    两列**拉平到底**：输入列三块加起来 ~1110px，结论列只有 ~510px，
+    按内容排的话右边会早早结束、底下空一大块 —— 那还是「有的长有的短」。
+    stretch 之后结论面板占满整列高度，它的「输出」表是这一页真正要看的东西，
+    多出来的高度正好给它。
+  */
+  align-items: stretch;
+}
+
+.adapt-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+@media (max-width: 1400px) {
+  .adapt-grid--fusion {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .adapt-actions {
   display: flex;
   flex-wrap: wrap;
