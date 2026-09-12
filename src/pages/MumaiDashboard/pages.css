@@ -514,7 +514,11 @@
   color: var(--ma-info);
 }
 
-/* 来源标识：不是状态，用中性点 + 辅助色文字，不画框 */
+/* 来源标识：不是状态，用中性点 + 辅助色文字，不画框。
+   圆点刻意用 `--text-tertiary` 而不是 `--primary`：SourceTag 在几乎每一页
+   的工具栏里都会出现（PRD 1.2 要求标数据来源，所以不能删），亮蓝点在
+   一整排中性文字里会跳出来抢注意力，读起来像一个告警状态；改成和文字
+   同色之后它退回「这是元信息」的层级，真正的状态色仍然只留给 StatusChip。 */
 .source-tag {
   display: inline-flex;
   align-items: center;
@@ -530,7 +534,7 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--primary);
+  background: var(--text-tertiary);
 }
 
 /* 状态占位 */

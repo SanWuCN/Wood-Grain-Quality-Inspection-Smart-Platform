@@ -24,12 +24,18 @@ import type { Metrics, Tone } from "./lib";
 
 export type StateKind = "loading" | "empty" | "error" | "offline" | "partial" | "success";
 
+/**
+ * 默认空态 / 加载 / 错误文案。
+ *
+ * 只陈述「现在是什么状态」，不解释系统内部怎么运作（§5 文案判据）。
+ * 各调用方通常会覆盖 title/hint 给出具体对象，这里只是兜底。
+ */
 const STATE_COPY: Record<StateKind, { title: string; hint: string; tone: Tone }> = {
-  loading: { title: "正在加载", hint: "读取本地演示数据与索引快照…", tone: "info" },
-  empty: { title: "暂无数据", hint: "该对象还没有产生记录，完成采集或校验后自动出现。", tone: "muted" },
+  loading: { title: "正在加载", hint: "正在读取本地数据。", tone: "info" },
+  empty: { title: "暂无数据", hint: "该对象暂无记录。", tone: "muted" },
   error: { title: "读取失败", hint: "数据校验未通过，请重试或切换数据来源。", tone: "danger" },
-  offline: { title: "通道已断开", hint: "该通道独立断流，其余通道不受影响。", tone: "danger" },
-  partial: { title: "部分完成", hint: "整批校验未通过前不进入后续分析。", tone: "warn" },
+  offline: { title: "通道已断开", hint: "该通道已断开，其余通道正常。", tone: "danger" },
+  partial: { title: "部分完成", hint: "整批校验未通过，暂不进入后续分析。", tone: "warn" },
   success: { title: "已完成", hint: "结果已保存并可追溯。", tone: "ok" },
 };
 

@@ -135,7 +135,7 @@ export function CaptureTab() {
           <Btn tone="primary" onClick={() => toast("采集已启动，等待帧号与时间戳", "ok")}>
             启动采集
           </Btn>
-          <Btn onClick={() => toast("已请求暂停；实机须返回确认，未接入时显示等待操作员确认停止", "warn")}>
+          <Btn onClick={() => toast("已请求暂停采集，等待设备确认", "warn")}>
             暂停采集
           </Btn>
         </div>
@@ -144,7 +144,7 @@ export function CaptureTab() {
           <StateBlock
             kind="partial"
             title="该批次已冻结"
-            hint={`${batch.freezeReason ?? "等待适用域核验"}；整批校验通过前不报「数据全部回传」。`}
+            hint={`${batch.freezeReason ?? "等待适用域核验"}。`}
           />
         ) : null}
       </Panel>
@@ -175,7 +175,7 @@ export function CaptureTab() {
           <StateBlock
             kind="partial"
             title="适用域待核验"
-            hint="冻结该批次的诊断输出；异常由演示控制事件或实机检查结果触发。"
+            hint="该批次诊断输出已冻结，等待适用域核验。"
           />
         ) : null}
       </Panel>
@@ -241,7 +241,7 @@ export function TriageTab() {
               setDomainPending(true);
               pushEvent("适用域待核验：冻结该批诊断输出", "danger");
             }}>
-            触发适用域待核验
+            标记待核验
           </Btn>
           <Btn
             onClick={() => {
@@ -257,7 +257,7 @@ export function TriageTab() {
           <StateBlock
             kind="partial"
             title="诊断输出已冻结"
-            hint="不输出病害结论；先查设备与数据，再查模型。"
+            hint="该批次不输出病害结论，等待适用域核验。"
           />
         ) : null}
       </Panel>
@@ -539,7 +539,7 @@ export function DatasetTab() {
               ))}
             </select>
           </label>
-          <Btn onClick={crossGroup}>编入所选集合（故意跨集合）</Btn>
+          <Btn onClick={crossGroup}>编入所选集合</Btn>
           <Btn tone="primary" onClick={regroupAndRerun}>
             整组调整后重跑
           </Btn>
@@ -628,7 +628,7 @@ export function TrainingTab() {
             checked={useFailed}
             onChange={(event) => setUseFailed(event.target.checked)}
           />
-          切换到「失败案例」（漏检增加 + 旧材退化）
+          切换到失败案例
         </label>
       </Panel>
 
@@ -818,7 +818,7 @@ export function DeliveryTab() {
         </dl>
       </Panel>
 
-      <Panel title="量化记录与兼容性检查">
+      <Panel title="量化与兼容性">
         <h4 className="sub">量化</h4>
         <ul className="pkg-list">
           {pkg.quantization.map((item) => (
@@ -878,7 +878,7 @@ export function DeliveryTab() {
         <StateBlock
           kind="empty"
           title="实机写入未接入"
-          hint="演示使用不可烧录包；实机写入须核对包清单并在写入后重启自检、读取实际版本。"
+          hint="本批次交付物为不可烧录演示包，实机写入未接入。"
         />
       </Panel>
     </div>
@@ -950,7 +950,9 @@ export function FusionTab() {
         />
       </Panel>
 
-      <Panel title="融合规则与结果" extra={<StatusChip text="明确规则，非分数相加" tone="info" />}>
+      {/* 规则条数是从种子现算的状态量；原来这里挂的
+          「明确规则，非分数相加」是在向读者解释这套融合是怎么设计的（§5 判据） */}
+      <Panel title="融合规则与结果" extra={<span className="muted">{FUSION_RULES.length} 条规则</span>}>
         <ul className="fusion-rules">
           {FUSION_RULES.map((rule) => (
             <li key={rule.key}>
