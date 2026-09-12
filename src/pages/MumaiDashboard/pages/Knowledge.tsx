@@ -13,7 +13,7 @@
  *   不接后端、不上传文件、不引向量库依赖；文件只在浏览器内读取。
  *   但每一步的数字都由真实计算或种子得出：
  *     - 分块数：真分块器切出来的块数（块大小 420 / 重叠 60）
- *     - 向量维度：768（模拟），向量数 = 分块数 × 768
+ *     - 向量：条数 = 分块数，维度 768（模拟）；分块数 × 768 是标量元素数，不是向量条数
  *     - 散点坐标：对 768 维向量做真的 PCA（幂迭代求前两个主成分）
  *     - 检索：复用 lib.searchKnowledge（真 TF-IDF + 余弦）
  *
@@ -71,8 +71,10 @@ import {
   nextVersionLabel,
   ngrams,
   runSearch,
+  scalarElements,
   stepLogs,
   toQueueItem,
+  vectorMeasure,
 } from "../knowledge/logic";
 import type { UpdateStats } from "../knowledge/logic";
 // 本页样式（规范 §9：只写 var(--token)，不散落硬编码色值）
@@ -203,8 +205,7 @@ export default function Knowledge() {
       mode: "seed",
       docCount: KNOWLEDGE_DOCS.length,
       chunkCount: KNOWLEDGE_DOCS.reduce((total, doc) => total + doc.chunks.length, 0),
-      vectorCount:
-        KNOWLEDGE_DOCS.reduce((total, doc) => total + doc.chunks.length, 0) * KNOWLEDGE_PIPELINE.embeddingDims,
+      vectorCount: KNOWLEDGE_DOCS.reduce((total, doc) => total + doc.chunks.length, 0),
       added: 0,
       changed: 0,
       deleted: 0,
@@ -423,7 +424,7 @@ export default function Knowledge() {
           },
           {
             at: "",
-            text: `${event.item.chunkCount} × ${KNOWLEDGE_PIPELINE.embeddingDims} = ${formatCount(event.item.chunkCount * KNOWLEDGE_PIPELINE.embeddingDims)} 个浮点数已生成，等待「更新向量库」写入索引`,
+            text: `已生成 ${vectorMeasure(event.item.chunkCount)}（${formatCount(scalarElements(event.item.chunkCount))} 个标量元素），等待「更新向量库」写入索引`,
             tone: "info",
           },
         ]);
@@ -516,12 +517,12 @@ export default function Knowledge() {
         },
       ]);
       appendLog([
-        { at: "", text: `写入索引完成：条目 ${result.state.docs.length} 份 / 分块 ${result.state.chunks.length} / 向量 ${formatCount(result.state.vectorCount)}`, tone: "ok" },
+        { at: "", text: `写入索引完成：条目 ${result.state.docs.length} 份 / 分块 ${result.state.chunks.length} / 向量 ${formatCount(result.state.vectorCount)} 条 · ${KNOWLEDGE_PIPELINE.embeddingDims} 维`, tone: "ok" },
         { at: "", text: `向量库版本 ${result.stats.versionFrom} → ${result.stats.versionTo}`, tone: "ok" },
       ]);
       if (result.committedIds.length) {
         toast(
-          `向量库已更新到 ${version}：分块 ${result.state.chunks.length}、向量 ${formatCount(result.state.vectorCount)}`,
+          `向量库已更新到 ${version}：分块 ${result.state.chunks.length}、向量 ${formatCount(result.state.vectorCount)} 条 · ${KNOWLEDGE_PIPELINE.embeddingDims} 维`,
           "ok",
         );
       } else {
@@ -635,8 +636,8 @@ export default function Knowledge() {
         chunkTotal: kbRef.current.chunks.length + plan.chunkCount,
         charsAdded: plan.chars,
         charsTotal: 0,
-        vectorAdded: plan.chunkCount * KNOWLEDGE_PIPELINE.embeddingDims,
-        vectorTotal: (kbRef.current.chunks.length + plan.chunkCount) * KNOWLEDGE_PIPELINE.embeddingDims,
+        vectorAdded: plan.chunkCount,
+        vectorTotal: kbRef.current.chunks.length + plan.chunkCount,
         versionFrom: kbRef.current.label,
         versionTo: nextVersionLabel(kbRef.current.label),
       };
@@ -673,7 +674,7 @@ export default function Knowledge() {
           indexedChunkIds: [...keptIds],
           builtAt: nowStamp(),
           mode: "rollback",
-          vectorCount: keptChunks.length * KNOWLEDGE_PIPELINE.embeddingDims,
+          vectorCount: keptChunks.length,
         };
       });
       setVersions((list) => [
@@ -698,11 +699,14 @@ export default function Knowledge() {
         { at: "", text: `回滚：向量库版本 ${currentLabel} → ${target.label}`, tone: "warn" },
         {
           at: "",
-          text: `回滚后条目 ${target.docCount} / 分块 ${target.chunkCount} / 向量 ${formatCount(target.vectorCount)}`,
+          text: `回滚后条目 ${target.docCount} / 分块 ${target.chunkCount} / 向量 ${formatCount(target.vectorCount)} 条 · ${KNOWLEDGE_PIPELINE.embeddingDims} 维`,
           tone: "warn",
         },
       ]);
-      toast(`已回滚到 ${target.label}：分块 ${target.chunkCount}、向量 ${formatCount(target.vectorCount)}`, "warn");
+      toast(
+        `已回滚到 ${target.label}：分块 ${target.chunkCount}、向量 ${formatCount(target.vectorCount)} 条 · ${KNOWLEDGE_PIPELINE.embeddingDims} 维`,
+        "warn",
+      );
     },
     [appendLog, toast, versions],
   );
@@ -1120,9 +1124,7 @@ export default function Knowledge() {
                           </span>
                           <em>
                             {item.chunks.length ? `实切 ${item.chunks.length} 块` : `预估 ${item.chunkCount} 块`}
-                            {item.chunks.length
-                              ? ` · ${formatCount(item.chunks.length * KNOWLEDGE_PIPELINE.embeddingDims)} 维`
-                              : ""}
+                            {item.chunks.length ? ` · ${vectorMeasure(item.chunks.length)}` : ""}
                           </em>
                         </div>
                         <div className="kb-queue__ops">
@@ -1470,10 +1472,12 @@ export default function Knowledge() {
                   <dd>{kb.chunks.length} 块</dd>
                 </div>
                 <div>
-                  <dt>向量数</dt>
-                  <dd>
-                    {kb.chunks.length} × {KNOWLEDGE_PIPELINE.embeddingDims} = {formatCount(kb.vectorCount)}
-                  </dd>
+                  <dt>向量条数</dt>
+                  <dd>{vectorMeasure(kb.vectorCount)}</dd>
+                </div>
+                <div>
+                  <dt>标量元素数</dt>
+                  <dd>{formatCount(scalarElements(kb.vectorCount))} 个（向量条数 × 维度，不是向量条数）</dd>
                 </div>
                 <div>
                   <dt>已写入索引</dt>
@@ -1502,6 +1506,8 @@ export default function Knowledge() {
                   <dd>{versions.length} 条</dd>
                 </div>
               </dl>
+              {/* 规范 v1.1 §6：向量按条计数、维度单列，条数不是资料质量的度量 */}
+              <p className="kb-actions__hint">{KB_DEMO_NOTES.vectorCount}</p>
 
               <h4 className="sub">业务状态（结构化数据，不来自资料）</h4>
               <dl className="kv">
@@ -1548,7 +1554,8 @@ export default function Knowledge() {
                             : version.mode === "rebuild"
                               ? "全量重建"
                               : "回滚"}{" "}
-                        · 条目 {version.docCount} / 分块 {version.chunkCount} / 向量 {formatCount(version.vectorCount)}
+                        · 条目 {version.docCount} / 分块 {version.chunkCount} / 向量 {formatCount(version.vectorCount)} 条
+                        · {KNOWLEDGE_PIPELINE.embeddingDims} 维
                       </span>
                       <em>
                         新增 {version.added} · 变更 {version.changed} · 删除 {version.deleted} · {version.note}

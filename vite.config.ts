@@ -25,6 +25,27 @@ export default defineConfig({
     strictPort: true,
 
     /**
+     * 开发期把共享服务代理到同源。
+     *
+     * 页面在 5173、服务在 8000，如果不代理，前端就得写死
+     * `http://<这台机器的IP>:8000`，跨电脑演示时那个地址是错的
+     * （PRD §5.3：四人的 localhost 不是同一台服务）。
+     * 走同源相对路径 `/api`、`/ws` 之后，谁访问页面，请求就自动打到
+     * 「提供这个页面的那台机器」上 —— 前提是页面本身也从那台机器的 Vite 提供。
+     */
+    proxy: {
+      "/api": {
+        target: process.env.MUMAI_API ?? "http://localhost:8000",
+        changeOrigin: true,
+      },
+      "/ws": {
+        target: process.env.MUMAI_API ?? "http://localhost:8000",
+        ws: true,
+        changeOrigin: true,
+      },
+    },
+
+    /**
      * 忽略编辑器 / 构建器写出的临时文件。
      *
      * 这不是「优化」，是**必须的**：Windows 上这些文件被占用时 chokidar

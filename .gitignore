@@ -36,3 +36,8 @@ src/assets/sc_ambient_occlusion_map.png
 # 无头截图自查产物（tools/shot.mjs）
 tmp-shot/
 
+
+# 共享服务的运行期状态：SQLite 库与磁盘资产都由服务启动时重建，
+# 入库会把「本机演示到哪一步了」带进仓库，换台机器反而对不上。
+server/data/
+server/assets/

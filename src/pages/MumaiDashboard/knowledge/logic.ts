@@ -75,7 +75,7 @@ export type KbState = {
   indexedChunkIds: string[];
   builtAt: string;
   mode: "seed" | "incremental" | "rebuild" | "rollback";
-  /** 索引里的向量总数 = 已写入索引的分块数 × 维度 */
+  /** 索引里的向量**条数**（一条分块一条向量）；标量元素数另算，见 scalarElements */
   vectorCount: number;
 };
 
@@ -273,6 +273,26 @@ export function chunkSections(
 /* ------------------------------------------------------------------ *
  * 2. 768 维「入库向量」（确定性哈希投影，不是真嵌入模型）
  * ------------------------------------------------------------------ */
+
+/**
+ * 向量条数 → 「13 条向量 · 768 维」。
+ *
+ * 条数与维度必须分列（规范 v1.1 §6）：768 是维度，不是条数，任何一处把
+ * 两者相乘的结果写成「向量数」，页面上的口径就对不上了。
+ */
+export function vectorMeasure(vectorCount: number): string {
+  return `${formatCount(vectorCount)} 条向量 · ${KNOWLEDGE_PIPELINE.embeddingDims} 维`;
+}
+
+/**
+ * 向量条数 → 标量元素数（条数 × 维度）。
+ *
+ * 只有说明存储规模时才用它，且必须写明「标量元素数」：
+ * 9984 = 13 × 768 是标量元素数，向量条数仍然是 13。
+ */
+export function scalarElements(vectorCount: number): number {
+  return vectorCount * KNOWLEDGE_PIPELINE.embeddingDims;
+}
 
 /** 元数据槽位：类别 16 + 文档 32 + 月份 12，共 60 个槽，都落在 768 维的最后一段 */
 const CATEGORY_SLOTS = 16;
@@ -747,25 +767,25 @@ export function buildInitialKbState(builtAt: string): KbState {
     indexedChunkIds: [...ids],
     builtAt,
     mode: "seed",
-    vectorCount: ids.length * KNOWLEDGE_PIPELINE.embeddingDims,
+    vectorCount: ids.length,
   };
 }
 
-/** 三重恒等：条目数 = 分块数 = 向量数 / 维度 —— 页面上直接显示这个断言 */
+/** 三重恒等：条目数 = 分块数 = 向量条数 —— 页面上直接显示这个断言 */
 export function assertConsistency(state: KbState) {
   const chunkCount = state.chunks.length;
   const vectorized = state.vectorizedChunkIds.length;
   const indexed = state.indexedChunkIds.length;
-  const expectedVectors = indexed * KNOWLEDGE_PIPELINE.embeddingDims;
   return {
     chunkCount,
     vectorized,
     indexed,
-    expectedVectors,
+    /** 向量按条计：已写入索引的分块数就是应有的向量条数（维度不参与恒等） */
+    expectedVectors: indexed,
     consistent:
       chunkCount === vectorized &&
       vectorized === indexed &&
-      state.vectorCount === expectedVectors,
+      state.vectorCount === indexed,
   };
 }
 
@@ -878,7 +898,7 @@ export function toQueueItem(incoming: IncomingDoc, knownDigests: Set<string>): Q
  * 队列推进：按真实经过的毫秒推进当前步骤，走完一步进入下一步。
  *
  * 演示里的入队流水线是两步：解析（读取段落结构）→ 分块与向量化。
- * 分块完成即视为向量已生成（分块数 × 768 维），标为「已向量化」，
+ * 分块完成即视为向量已生成（一条分块一条向量，维度 768），标为「已向量化」，
  * 之后停在队列里等「更新向量库」写入索引 —— 所以不会卡在「待解析」上。
  */
 export function advanceQueue(
@@ -982,7 +1002,7 @@ export function buildSteps(mode: "incremental" | "rebuild", docCount: number, ch
     {
       key: "embed",
       label: "生成向量",
-      detail: `维度 ${KNOWLEDGE_PIPELINE.embeddingDims}（模拟：TF-IDF 权重经确定性哈希投影，未加载嵌入模型）· ${chunkCount} × ${KNOWLEDGE_PIPELINE.embeddingDims}`,
+      detail: `维度 ${KNOWLEDGE_PIPELINE.embeddingDims}（模拟：TF-IDF 权重经确定性哈希投影，未加载嵌入模型）· ${vectorMeasure(chunkCount)}（标量元素 ${formatCount(scalarElements(chunkCount))}）`,
       ms: 1300,
     },
     {
@@ -1032,7 +1052,11 @@ export function stepLogs(step: UpdateStep, mode: "incremental" | "rebuild", stat
     case "embed":
       return [
         { at: "", text: `embedding_dim=${KNOWLEDGE_PIPELINE.embeddingDims}（模拟向量，非模型输出）`, tone: "warn" },
-        { at: "", text: `生成 ${stats.chunkAdded} × ${KNOWLEDGE_PIPELINE.embeddingDims} = ${formatCount(stats.vectorAdded)} 个浮点数`, tone: "info" },
+        {
+          at: "",
+          text: `生成 ${vectorMeasure(stats.vectorAdded)}（${formatCount(scalarElements(stats.vectorAdded))} 个标量元素）`,
+          tone: "info",
+        },
       ];
     case "write":
       return [
@@ -1054,7 +1078,7 @@ export function stepLogs(step: UpdateStep, mode: "incremental" | "rebuild", stat
       return [
         {
           at: "",
-          text: `完成：条目 ${stats.docTotal} 份 / 分块 ${stats.chunkTotal} / 向量 ${formatCount(stats.vectorTotal)}`,
+          text: `完成：条目 ${stats.docTotal} 份 / 分块 ${stats.chunkTotal} / 向量 ${formatCount(stats.vectorTotal)} 条 · ${KNOWLEDGE_PIPELINE.embeddingDims} 维`,
           tone: "ok",
         },
       ];
@@ -1075,7 +1099,9 @@ export type UpdateStats = {
   chunkTotal: number;
   charsAdded: number;
   charsTotal: number;
+  /** 本次新增的向量**条数**（= 新增分块数）；标量元素数用 scalarElements 现算 */
   vectorAdded: number;
+  /** 更新后的向量**条数**（= 分块总数） */
   vectorTotal: number;
   versionFrom: string;
   versionTo: string;
@@ -1154,8 +1180,8 @@ export function commitQueue(
     chunkTotal: chunks.length,
     charsAdded: sum(addedChunks.map((chunk) => chunk.chars)),
     charsTotal: sum(chunks.map((chunk) => chunk.chars)),
-    vectorAdded: addedChunks.length * KNOWLEDGE_PIPELINE.embeddingDims,
-    vectorTotal: chunks.length * KNOWLEDGE_PIPELINE.embeddingDims,
+    vectorAdded: addedChunks.length,
+    vectorTotal: chunks.length,
     versionFrom: state.label,
     versionTo: nextVersion,
   };
@@ -1169,7 +1195,7 @@ export function commitQueue(
       indexedChunkIds: [...chunkIds],
       builtAt,
       mode: mode === "incremental" ? "incremental" : "rebuild",
-      vectorCount: chunks.length * KNOWLEDGE_PIPELINE.embeddingDims,
+      vectorCount: chunks.length,
     },
     stats,
     committedIds,
@@ -1186,6 +1212,7 @@ export type KbVersion = {
   mode: "seed" | "incremental" | "rebuild" | "rollback";
   docCount: number;
   chunkCount: number;
+  /** 向量条数（= 分块数）；维度见 KNOWLEDGE_PIPELINE.embeddingDims */
   vectorCount: number;
   added: number;
   changed: number;
@@ -1320,7 +1347,7 @@ export function buildVectorSpace(chunks: KbChunk[]): VectorSpace {
   const tokenized = chunks.map((chunk) => ngrams(chunk.text));
   const idf = fitIdf(tokenized);
 
-  // 768 维向量沿用到「向量条目」的统计里：向量数 = 分块数 × 768
+  // 统计里向量按条计：一条分块一条向量，768 只是维度
   const vectors = chunks.map((chunk) =>
     buildEmbedding(
       { text: chunk.text, category: chunk.category, docId: chunk.docId, month: MONTH_LABEL(chunk.date) },
@@ -1439,6 +1466,8 @@ export const KB_DEMO_NOTES = {
     "本页不连接后端、不上传任何文件、不加载嵌入模型：上传只在浏览器内读取，解析 / 分块 / 向量化 / 写索引均为前端演示流程。",
   embedding:
     "768 维「入库向量」是把 TF-IDF 权重按确定性哈希投影到 768 维再归一化得到的，形状用于演示向量库，语义不等于真实嵌入模型。",
+  vectorCount:
+    "向量按条计数、维度单列：13 条 768 维向量是 13 条向量，9984 是标量元素数（13 × 768）。向量条数只说明索引规模，不作为资料质量的度量。",
   projection:
     "关系链的边是 768 维空间里真算的余弦相似度（每个块连最相似的 4 个块），坐标是对同一批向量做真 PCA 后跑 3D 力导向布局得到的；两者都由数据算出，不是随机撒点。",
   search:

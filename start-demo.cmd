@@ -29,11 +29,19 @@ if errorlevel 1 (
 
 :start_server
 echo.
-echo 木脉智检正在启动，浏览器请打开 http://localhost:5173
-echo （端口固定在 vite.config.ts 的 server.port，如果这里提示被占用，
-echo   请先关掉已经在跑的旧窗口；下方 Vite 输出的 Local 地址才是准的）
-echo 关闭本窗口即可停止服务。
+echo 木脉智检正在启动：
+echo   共享服务  http://localhost:8000   （配置 / 产物 / 场景的跨端状态）
+echo   页面      http://localhost:5173
 echo.
+echo 共享服务在新窗口里跑，四台电脑要连同一场演示时把 5173 这台机器的
+echo 局域网地址发给其他人（页面里的 /api 会自动打到提供页面的那台机器）。
+echo 关闭本窗口即可停止页面；共享服务那个窗口要单独关。
+echo.
+
+start "mumai-shared" cmd /k ""%MUMAI_PNPM%" run server"
+rem 给共享服务一点启动时间，避免页面第一次请求就打空
+timeout /t 2 /nobreak >nul
+
 call "%MUMAI_PNPM%" dev
 
 if errorlevel 1 (

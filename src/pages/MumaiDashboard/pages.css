@@ -1704,6 +1704,41 @@
   margin: 9px 0;
 }
 
+/*
+   字段级错误（v1.1 §5.2：错误显示在字段旁，保留已填值，不只弹 toast）。
+   颜色只是辅助，文字本身写明了有效范围 —— 不能只靠颜色表达失败。
+*/
+.env-grid label.is-bad input {
+  border-color: var(--ma-danger);
+}
+
+.env-field-error {
+  color: var(--ma-danger);
+  font-size: var(--fs-aux);
+  font-style: normal;
+}
+
+.env-field-range {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-style: normal;
+}
+
+.env-action-error {
+  margin: 4px 0 0;
+  padding: 5px 8px;
+  border-left: 2px solid var(--ma-danger);
+  color: var(--ma-danger);
+  font-size: var(--fs-aux);
+}
+
+.env-rev {
+  margin-left: 6px;
+  color: var(--ma-text-3);
+  font-style: normal;
+  font-family: var(--font-data-mixed);
+}
+
 .env-checks {
   margin: 0;
   padding: 0;

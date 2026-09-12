@@ -58,30 +58,57 @@ const RELEASE_TONE: Record<Release["status"], "ok" | "info" | "warn" | "muted"> 
 /** 摘要表里每行显示的最新发布日期 = 发行历史第一条 */
 const latestOf = (item: VersionItem) => item.releases[0];
 
+/** 回报值括号里若带产物摘要，就是这种 12 位十六进制串（与 seed/versions.ts 的 digest 同口径） */
+const REPORT_DIGEST = /[0-9a-f]{12}/i;
+
+type ReportState = {
+  tone: "ok" | "warn" | "muted";
+  /** 回报与所选版本是否**明确冲突**：冲突时不允许确认应用 */
+  conflict: boolean;
+  text: string;
+  title: string;
+};
+
 /**
  * 设备回报比对（PRD 11.4）。
  *
- * 两侧任一为 null 时不下结论 —— 「没回报」不等于「一致」。
+ * 两侧任一为 null 时不下结论 —— 「没回报」不等于「一致」，
+ * 但「没回报」也不是冲突：设备还没回执，平台不该把它当成更新失败。
+ *
  * 回报值里常带括号说明（如「FW-1.4.2（实机未变）」），比对时只取版本号部分。
+ * 版本号按**整串相等**比对，不再用 includes：`DEMO-M02b` 是 `DEMO-M02` 之后
+ * 另一个产物，包含匹配会把「设备还在跑另一个版本」判成一致 —— 而这正是版本
+ * 回执最不能出错的地方。括号里若给出产物摘要，摘要也必须与所选版本的摘要
+ * 完全一致：版本号相同但摘要不同，说明包里装的不是同一份产物。
  *
  * 文案用 ✓ / ≠ 前缀而不是「已回报 / 回报…≠…」整句：这一列只有 176px，
  * 整句会被折成两行，而一致与否本来就是这个前缀加颜色要说的事。
  * 完整说明放在 title 里，需要时悬停看。
  */
-function reportState(item: VersionItem, effective: string) {
+function reportState(item: VersionItem, effective: string): ReportState {
   const demo = item.reported.demo;
   if (demo === null) {
-    return { tone: "muted" as const, text: "未回报", title: "演示侧尚未回报版本" };
+    return { tone: "muted", conflict: false, text: "未回报", title: "演示侧尚未回报版本，不能据此判定一致" };
   }
-  const bare = demo.split("（")[0];
-  const matched = demo.includes(effective) || effective.includes(bare);
-  return matched
-    ? { tone: "ok" as const, text: `✓ ${bare}`, title: `设备回报 ${bare}，与当前一致` }
-    : {
-        tone: "warn" as const,
-        text: `≠ ${bare}`,
-        title: `设备回报 ${bare}，与当前 ${effective} 不一致`,
-      };
+  const [rawVersion, rawNote = ""] = demo.split("（");
+  const version = rawVersion.trim();
+  const note = rawNote.replace(/）$/, "").trim();
+  const reportedDigest = REPORT_DIGEST.exec(note)?.[0].toLowerCase() ?? null;
+  const current = item.releases.find((release) => release.version === effective);
+  const digestMatched = reportedDigest === null || current?.digest.toLowerCase() === reportedDigest;
+
+  if (version === effective && digestMatched) {
+    return { tone: "ok", conflict: false, text: `✓ ${version}`, title: `设备回报 ${version}，与当前一致` };
+  }
+  return {
+    tone: "warn",
+    conflict: true,
+    text: `≠ ${version}`,
+    title:
+      version !== effective
+        ? `设备回报 ${version}，与当前 ${effective} 不一致（按完整版本号逐字比对）`
+        : `设备回报摘要 ${reportedDigest}，与当前 ${effective} 的摘要 ${current?.digest ?? "—"} 不一致`,
+  };
 }
 
 /* ------------------------------------------------------------------ *
@@ -281,6 +308,21 @@ function ConfigTab() {
 
   const changed = pending.length > 0;
 
+  /**
+   * 设备回报与当前（或已选）版本明确冲突的组件。
+   *
+   * PRD 11.4：平台以为的版本与设备回报的版本一致，才算更新到位 ——
+   * 只要有组件对不上，「应用」就不放行。少了这道闸，界面会把
+   * 「设备还在跑另一个版本」静默当成确认通过，版本表也就失去意义。
+   */
+  const conflicts = useMemo(
+    () =>
+      VERSION_ITEMS.map((item) => ({ item, report: reportState(item, draft[item.key] ?? item.current) })).filter(
+        (entry) => entry.report.conflict,
+      ),
+    [draft],
+  );
+
   return (
     <div className="fw-config">
       <Panel
@@ -322,8 +364,19 @@ function ConfigTab() {
         <div className="fw-actions">
           <Btn
             tone="primary"
-            disabled={!changed}
+            disabled={!changed || conflicts.length > 0}
+            title={conflicts.length ? "存在设备回报与所选版本不一致的组件，核对后再应用" : undefined}
             onClick={() => {
+              // 置灰之外再挡一次：应用是不可逆动作，回报对不上就不能放它过去
+              if (conflicts.length) {
+                toast(
+                  `设备回报与所选版本不一致，已阻止应用：${conflicts
+                    .map(({ item, report }) => `${item.label}（${report.title}）`)
+                    .join("；")}`,
+                  "warn",
+                );
+                return;
+              }
               toast(`已应用 ${pending.length} 项版本配置`, "ok");
               setDraft({});
             }}>
@@ -333,6 +386,12 @@ function ConfigTab() {
             放弃改动
           </Btn>
           <span className="muted">改动在下一批采集与推理时生效</span>
+          {conflicts.length ? (
+            <small className="muted">
+              设备回报与所选版本不一致，已阻止应用：
+              {conflicts.map(({ item, report }) => `${item.label} · ${report.title}`).join("；")}
+            </small>
+          ) : null}
         </div>
       </Panel>
 

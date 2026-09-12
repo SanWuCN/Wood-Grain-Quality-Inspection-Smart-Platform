@@ -5,7 +5,7 @@
  *   - 环境校验：assert 0 ≤ RH ≤ 100、风速非负、仪表量程
  *   - 分组检查：物理样本 ID 集合求交，输出冲突清单
  *   - 新旧评估：同一测试集逐样本比较，算 TP/FP/TN/FN、精确率、召回率、F1
- *   - 融合规则：明确三分支规则，不做分数相加平均
+ *   - 融合规则：先判有效性与缺失，再判异常标志，不做分数相加平均
  *   - 归档校验：Web Crypto SHA-256 摘要对比
  *   - 知识库检索：中文字符 2–4 元 TF-IDF + 余弦相似度
  */
@@ -13,7 +13,6 @@
 import type {
   ArchiveItem,
   ConfigDiffRow,
-  CurrentRisk,
   Dataset,
   EnvRecord,
   Experiment,
@@ -403,71 +402,146 @@ export function fmtNum(value: number | null, digits = 3): string {
 }
 
 /* ------------------------------------------------------------------ *
- * 4. 融合规则（PRD 3.7：明确规则，不做分数相加平均）
+ * 4. 融合规则（PRD 3.7 / 升级版 §10.4：明确规则，不做分数相加平均）
  * ------------------------------------------------------------------ */
 
+/**
+ * 融合输入。
+ *
+ * 「有没有异常」「哪一路缺失」都要调用方**显式给出**，不能由分数反推：
+ * 分数是连续量，0.4 也是分数、有分数也不等于有异常提示，用「分数非空」
+ * 当异常标志会把没出结论的一路说成提示异常。
+ */
 export type FusionInput = {
   riskId: string;
   label: string;
+  /** 两路分数只作证据展示；判定不读它们 */
   visualScore: number | null;
   radarScore: number | null;
+  /** 两路结果是否落在同一测区（位置关联是否成立） */
   sameZone: boolean;
+  /** 质量门槛（有效数据比例、时间对齐等）是否通过 */
   visualQualityOk: boolean;
   radarQualityOk: boolean;
+  /** 本次该路是否**提示异常**：由各自的判定分支给出，不由分数推导 */
+  visualAbnormal: boolean;
+  radarAbnormal: boolean;
+  /** 本次**缺失**的模态：没有数据 ≠ 数据质量不合格，两者处置不同 */
+  missing: { visual: boolean; radar: boolean };
+  /** 规则版本：结论要能追到是哪一版规则出的 */
+  ruleVersion: string;
 };
+
+/** 规则表的五种输出：正常、缺失、无效各自独立，不能合并成一句「待处理」 */
+export type FusionPriority = "优先复核" | "补充检测" | "待核对" | "待补充" | "本次未提示异常";
 
 export type FusionDecision = {
   riskId: string;
   label: string;
-  priority: CurrentRisk["priority"];
-  ruleKey: "both" | "one" | "mismatch";
+  priority: FusionPriority;
+  ruleKey: "invalid" | "missing" | "both" | "one" | "normal";
   ruleLabel: string;
   basis: string;
   nextAction: string;
   /** 明确写出「不做分数相加平均」，避免被误解为综合置信度 */
   noAggregationNote: string;
+  /** 本次结论依据的规则版本，原样带回 */
+  ruleVersion: string;
+  /** 判定用到的输入原样保留，复盘时看得到当时两路的有效性与异常标志 */
+  inputs: FusionInput;
 };
 
-export function fuseByRule(input: FusionInput): FusionDecision {
-  const bothPresent = input.visualScore !== null && input.radarScore !== null;
-  const qualityOk = input.visualQualityOk && input.radarQualityOk;
-  const noAggregationNote = "本平台不对两路分数做相加或平均，不产生综合置信度。";
+/** 分数只作证据展示：未出分就写「未出分」，不四舍五入成 0 */
+const scoreText = (score: number | null) => (score === null ? "未出分" : score.toFixed(2));
 
-  if (bothPresent && input.sameZone && qualityOk) {
+/**
+ * 融合规则（升级版 PRD §10.4 规则表）。
+ *
+ * 判定顺序固定为**有效性 → 缺失 → 异常**，三者的下一步动作完全不同：
+ *   位置不一致或任一路质量无效 → 待核对（修正关联或补采）；
+ *   任一路缺失               → 待补充（补齐该模态再运行）；
+ *   两路都有效才轮到看异常     → 优先复核 / 补充检测 / 本次未提示异常。
+ *
+ * 顺序反过来（先看分数）会把两种不同的坏情况混在一起：位置对不上或质量
+ * 不合格会被写成「补充检测」，缺失也被当成「单路异常」，读起来像是已经有了
+ * 检测结论。缺失的一路不参与质量判定 —— 它是「没有数据」，不是「数据无效」。
+ */
+export function fuseByRule(input: FusionInput): FusionDecision {
+  const noAggregationNote = "本平台不对两路分数做相加或平均，不产生综合置信度。";
+  const base = {
+    riskId: input.riskId,
+    label: input.label,
+    noAggregationNote,
+    ruleVersion: input.ruleVersion,
+    inputs: input,
+  };
+  const missingLabels = [input.missing.visual ? "视觉" : null, input.missing.radar ? "雷达" : null].filter(
+    (item): item is string => item !== null,
+  );
+  const brokenLabels = [
+    !input.missing.visual && !input.visualQualityOk ? "视觉" : null,
+    !input.missing.radar && !input.radarQualityOk ? "雷达" : null,
+  ].filter((item): item is string => item !== null);
+
+  /* ① 有效性：位置关联与质量门槛先过，没过就没有可比的两路结果 */
+  if (!input.sameZone || brokenLabels.length > 0) {
     return {
-      riskId: input.riskId,
-      label: input.label,
-      priority: "优先复核",
-      ruleKey: "both",
-      ruleLabel: "规则一：两路在同一测区提示异常且质量合格",
-      basis: `视觉 ${input.visualScore?.toFixed(2)} 与雷达 ${input.radarScore?.toFixed(2)} 落在同一测区，两路质量均合格`,
-      nextAction: "列为优先复核，先查环境来源，再安排进一步检测",
-      noAggregationNote,
+      ...base,
+      priority: "待核对",
+      ruleKey: "invalid",
+      ruleLabel: "规则一：位置不一致或任一路质量无效",
+      basis: !input.sameZone
+        ? `视觉 ${scoreText(input.visualScore)} 与雷达 ${scoreText(input.radarScore)} 未落在同一测区，位置关联未成立`
+        : `${brokenLabels.join("、")}质量门槛未通过（视觉 ${scoreText(input.visualScore)} / 雷达 ${scoreText(input.radarScore)}），两路不构成可比结果`,
+      nextAction: "修正测区关联或补采质量不合格的一路，重新运行融合；本轮返回待核对，不输出确定性结论",
     };
   }
-  if (!bothPresent || (!input.visualQualityOk && !input.radarQualityOk)) {
+
+  /* ② 缺失：有一路本次没有数据，先补齐再谈异常 */
+  if (missingLabels.length > 0) {
     return {
-      riskId: input.riskId,
-      label: input.label,
-      priority: "待核对",
-      ruleKey: "mismatch",
-      ruleLabel: "规则三：位置不一致或任一路质量不合格",
-      basis: !bothPresent
-        ? "仅一路存在有效结果，另一路缺失"
-        : "两路质量均不合格，不能形成判定",
-      nextAction: "补充采集后重新运行融合，暂不输出确定性结论",
-      noAggregationNote,
+      ...base,
+      priority: "待补充",
+      ruleKey: "missing",
+      ruleLabel: "规则二：任一路缺失",
+      basis: `本次缺失${missingLabels.join("、")}（该路没有结果，不是质量不合格），另一路 ${scoreText(
+        input.missing.visual ? input.radarScore : input.visualScore,
+      )}`,
+      nextAction: `补齐${missingLabels.join("、")}模态后重新运行融合，单路结果不作为结论`,
+    };
+  }
+
+  /* ③ 异常：两路同测区且都有效，才按两路的异常标志出优先级 */
+  if (input.visualAbnormal && input.radarAbnormal) {
+    return {
+      ...base,
+      priority: "优先复核",
+      ruleKey: "both",
+      ruleLabel: "规则三：同测区且两路有效，均提示异常",
+      basis: `视觉 ${scoreText(input.visualScore)} 与雷达 ${scoreText(input.radarScore)} 在同一测区、质量均合格，两路均提示异常`,
+      nextAction: "汇总两路证据生成复核任务：先查环境来源，再安排进一步检测",
+    };
+  }
+  if (input.visualAbnormal || input.radarAbnormal) {
+    const source = input.visualAbnormal ? "视觉" : "雷达";
+    return {
+      ...base,
+      priority: "补充检测",
+      ruleKey: "one",
+      ruleLabel: "规则四：同测区且两路有效，仅一路异常",
+      basis: `仅${source}一路提示异常（视觉 ${scoreText(input.visualScore)} / 雷达 ${scoreText(
+        input.radarScore,
+      )}），另一路同测区、质量合格且未提示异常`,
+      nextAction: `保留${source}异常来源，安排补充检测；另一路复核后再判定`,
     };
   }
   return {
-    riskId: input.riskId,
-    label: input.label,
-    priority: "补充检测",
-    ruleKey: "one",
-    ruleLabel: "规则二：仅一路提示异常",
-    basis: `仅${input.visualScore !== null ? "视觉" : "雷达"}一路存在异常提示，另一路未提示或质量不合格`,
-    nextAction: "安排补充检测，另一路复核后再判定",
-    noAggregationNote,
+    ...base,
+    priority: "本次未提示异常",
+    ruleKey: "normal",
+    ruleLabel: "规则五：同测区且两路有效，均无异常",
+    basis: `视觉 ${scoreText(input.visualScore)} 与雷达 ${scoreText(input.radarScore)} 在同一测区、质量均合格，两路均未提示异常`,
+    nextAction: "保存结果，不新增异常风险；两路分数不合并成综合置信度",
   };
 }
 

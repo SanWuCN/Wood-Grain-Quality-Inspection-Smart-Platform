@@ -166,13 +166,13 @@ const ROLE_ACTIONS: Record<string, readonly Permission[]> = {
  * ------------------------------------------------------------------ */
 
 /**
- * 一级导航每一项的进入条件。
+ * 一级导航每一项的**写**权限：能对这一页的对象执行什么动作。
  *
- * 读写都在这里：左侧导航过滤、直接输入 URL 的拦截共用同一张表，
- * 不会出现「导航里没有、但地址栏能进」的缺口。
- *
- * 之所以用 `anyOf` 而不是给每个角色单独列页面：与 PRD 2.1 的口径一致 ——
- * 页面可见性由「该角色能执行的操作」推导，权限集合是唯一事实来源。
+ * 这张表不再决定「能不能进这一页」—— 那由下面的 `ROUTE_READ` 决定。
+ * 评审 F04 的现象正是把两者混在一起造成的：饶有 `env:ack`（接收配置），
+ * 却因为缺 `order:review` 而进不去配置所在的工单页；马同样进不去样本审核与孪生。
+ * PRD §2 的原话是「页面权限不等于写入权限：按 read、review、publish、receive
+ * 分别控制」，所以读写必须拆成两张表。
  */
 export const ROUTE_PERMISSION: Record<string, readonly Permission[]> = {
   // 任务总览：四人共用的当轮任务与通道摘要，不做限制
@@ -184,9 +184,6 @@ export const ROUTE_PERMISSION: Record<string, readonly Permission[]> = {
   // 数字孪生：场景发布（史）、场景成果提交（饶）
   "/twin": ["scene:publish", "scene:submit"],
   // 硬件详情：采集作业 / 异常排查 / 硬件监看 —— 设备侧工作区（饶）
-  //   样本审核（sample:review）刻意不作为进入条件 —— 马也承担「查样本来源和位置」
-  //   （PRD 3.5），但本页主流程是设备采集与排查，与 PRD 2.1 给马的
-  //   「建图巡检」工作区不符，因此马不进这一页。
   "/hardware": ["scan:capture", "data:upload"],
   // 固件及模型：版本配置 / 数据集 / 训练验证 / 更新交付 / 融合分析 —— 算法与交付侧
   //   饶要能提交训练任务、接收并回验更新包（PRD 3.6），沈 / 史 有全量权限
@@ -195,6 +192,22 @@ export const ROUTE_PERMISSION: Record<string, readonly Permission[]> = {
   "/knowledge": ["knowledge:search"],
   // 报告归档：交付摘要校验与报告输出
   "/archive": ["archive:verify"],
+};
+
+/**
+ * 页面**读取**资格：谁能打开这一页（只看，不代表能改）。
+ *
+ * 依据 PRD §2「四人均可读取本次工单及与自身交接有关的记录。马可只读孪生并审核样本，
+ * 饶可只读工单并接收配置」。表里没登记的路径回退到 `ROUTE_PERMISSION`（写权限），
+ * 保持其余页面原有行为不变 —— 这是一次有针对性的放权，不是把权限模型推倒重来。
+ */
+export const ROUTE_READ: Record<string, readonly string[]> = {
+  // 工单是全部交接的上下文：饶要在这里接收环境配置（评审 F04）
+  "/orders": ["shen", "shi", "rao"],
+  // 孪生：马要只读场景并配合测区/样本位置审核（评审 F04）
+  "/twin": ["shen", "shi", "rao", "ma"],
+  // 数据集与样本审核页签在固件及模型页：马承担「查样本来源和位置」（评审 F04）
+  "/firmware": ["shen", "shi", "rao", "ma"],
 };
 
 /** 取某个角色的可执行操作集合 */
@@ -207,11 +220,34 @@ export function allows(accountId: string, permission: Permission): boolean {
   return actionsOf(accountId).includes(permission);
 }
 
-/** 该角色是否可进入某条路由；未登记的路径视为不可进入 */
+/**
+ * 该角色是否可进入某条路由（**读取**判定）。
+ *
+ * 先看 `ROUTE_READ`（显式的读取资格），没有登记再回退到写权限表 ——
+ * 于是「能改这一页」一定也「能看这一页」，而反过来不成立。
+ * 未登记的路径视为不可进入。
+ */
 export function allowsPath(accountId: string, pathname: string): boolean {
+  const readers = ROUTE_READ[pathname];
+  if (readers) return readers.includes(accountId);
+
   const required = ROUTE_PERMISSION[pathname];
   if (!required) return false;
   return required.length === 0 || required.some((item) => allows(accountId, item));
+}
+
+/**
+ * 该角色进入这一页是不是**只读**的（能看、但这一页没有任何他能执行的动作）。
+ *
+ * 用于在页面上挂一条「只读查阅」的说明 —— 评审 F04 要求「允许协作查阅，
+ * 仅限制修改动作」，那么放权之后必须让人知道自己在这里只能看，
+ * 而不是对着一排灰按钮猜原因。
+ */
+export function isReadOnlyPath(accountId: string, pathname: string): boolean {
+  if (!allowsPath(accountId, pathname)) return false;
+  const required = ROUTE_PERMISSION[pathname];
+  if (!required || required.length === 0) return false;
+  return !required.some((item) => allows(accountId, item));
 }
 
 /**

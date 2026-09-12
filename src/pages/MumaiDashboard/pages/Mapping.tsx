@@ -10,7 +10,7 @@
  *   - 通信状态分别显示地图 / 位姿 / 视频 / 车辆更新时间，任一路断流只影响该通道
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useMumai } from "../context";
 import { permissionHint } from "../auth";
@@ -25,6 +25,24 @@ import {
   WAYPOINTS,
 } from "../seed/scenario";
 import { CHINA_SITES, SHANGHAI_SITES, waypointsForSite, siteRegion } from "../seed/sites";
+import { isApiError } from "../api/client";
+import { currentMission, isOnline, mapVersions, useSharedStore } from "../store/shared";
+
+/**
+ * 服务端任务状态 → 本页沿用的中文状态词。
+ *
+ * 服务端用 PRD §7 的英文状态机（queued/running/paused/succeeded/failed/cancelled），
+ * 本页地图渲染与既有文案按中文状态读，映射集中在这一处，
+ * 不让两套词在页面里各判各的。
+ */
+const SHARED_TO_LOCAL_STATE: Record<string, string> = {
+  queued: "等待机器人确认",
+  running: "执行中",
+  paused: "已暂停",
+  succeeded: "已完成",
+  failed: "已完成",
+  cancelled: "已取消",
+};
 
 /**
  * RViz 画面配置。
@@ -49,11 +67,122 @@ const RVIZ_STREAM = {
 const CELL_HINT = "10 cm / 格";
 
 export default function Mapping() {
-  const { mission, patchMission, channels, toast, pushEvent, deviceSource, setDeviceSource, can } =
-    useMumai();
+  const { mission, channels, toast, pushEvent, deviceSource, setDeviceSource, can } = useMumai();
   const [versionId, setVersionId] = useState(MAP_VERSIONS[0]?.id ?? "");
   const [compare, setCompare] = useState(true);
   const [showLaser, setShowLaser] = useState(true);
+
+  /* ---- 任务与地图都改成走共享服务（评审 F03） ---- */
+
+  const online = useSharedStore(isOnline);
+  const sharedMission = useSharedStore(currentMission);
+  const mapVersionList = useSharedStore(mapVersions);
+  const [missionBusy, setMissionBusy] = useState<string | null>(null);
+  const [savingMap, setSavingMap] = useState(false);
+
+  /**
+   * 任务状态以服务端为准，**没有服务端任务时就是「未下发」，不回退到种子里那条**。
+   *
+   * 原来「任务下发」是先改本地状态、再挂一个 1.5 秒的 setTimeout 推到执行中；
+   * 在这个窗口里点「取消」，本地状态会被延迟回调覆盖回执行中（评审 F03）。
+   * 现在延迟推进交给服务端的状态机：取消是终态，之后任何迁移都会被 409 拒掉。
+   *
+   * 回退到种子会造成一个很隐蔽的假象：种子里 `MISSION.state` 是「执行中」，
+   * 于是没有共享任务时页面显示任务在跑、「任务下发」被禁用、「取消」点了没反应 ——
+   * 反馈和真实状态完全脱节。宁可显示「未下发」。
+   */
+  const missionState = sharedMission ? (SHARED_TO_LOCAL_STATE[sharedMission.data.state] ?? "草稿") : "未下发";
+  const isRunning = missionState === "执行中";
+  const isTerminal = ["已完成", "已取消"].includes(missionState);
+
+  const missionEntityId = sharedMission?.id ?? null;
+
+  const missionAction = useCallback(
+    async (action: string, eventText: string) => {
+      if (!missionEntityId) {
+        toast("还没有下发过任务", "danger");
+        return;
+      }
+      setMissionBusy(action);
+      try {
+        const result = await useSharedStore.getState().send({
+          action,
+          entityId: missionEntityId,
+          // 带上 revision：另一端同时改过就返回 409，让操作员刷新而不是盲目覆盖
+          expectedRevision: sharedMission?.revision ?? null,
+          payload: action === "mission.cancel" ? { reason: "操作员取消" } : {},
+        });
+        const next = (result.entity.data as { state?: string }).state ?? "";
+        pushEvent(`${eventText}：${SHARED_TO_LOCAL_STATE[next] ?? next}`, action === "mission.cancel" ? "danger" : "warn");
+        toast(`${eventText}已保存到共享会话`, "ok");
+      } catch (error) {
+        const message = isApiError(error) ? error.message : "任务操作失败";
+        toast(message, "danger");
+        // 409/422 说明本地看到的状态已经过期，立刻重拉对齐
+        void useSharedStore.getState().refresh();
+      } finally {
+        setMissionBusy(null);
+      }
+    },
+    [missionEntityId, pushEvent, sharedMission?.revision, toast],
+  );
+
+  const dispatchMission = useCallback(async () => {
+    setMissionBusy("mission.create");
+    try {
+      const created = await useSharedStore.getState().send({
+        action: "mission.create",
+        payload: { mapVersion: mapVersionList[0]?.id ?? versionId },
+      });
+      const missionId = String(created.result.missionId ?? "");
+      pushEvent(`巡检任务 ${missionId} 已下发，等待机器人确认`, "info");
+      toast(`任务 ${missionId} 已下发，等待机器人确认`, "info");
+      // 车端 ack：实机控制必须收到 ack 才进入执行中（PRD §9.1），演示回放由适配器回一个
+      window.setTimeout(() => {
+        void useSharedStore
+          .getState()
+          .send({ action: "mission.ack", entityId: missionId })
+          .then(() => pushEvent("机器人已接收任务，进入执行中", "ok"))
+          .catch(() => {
+            /* 期间被取消：服务端已拒，控制台不必再报一次 */
+          });
+      }, 1500);
+    } catch (error) {
+      toast(isApiError(error) ? error.message : "任务下发失败", "danger");
+    } finally {
+      setMissionBusy(null);
+    }
+  }, [mapVersionList, pushEvent, toast, versionId]);
+
+  const version = useMemo(
+    () => MAP_VERSIONS.find((item) => item.id === versionId) ?? MAP_VERSIONS[0],
+    [versionId],
+  );
+
+  /**
+   * 保存地图只生成 MapVersion，**不碰任务状态**。
+   * 评审 F03 原文：「保存地图还会把任务改成已完成」。
+   */
+  const saveMap = useCallback(async () => {
+    setSavingMap(true);
+    try {
+      const result = await useSharedStore.getState().send({
+        action: "map.save",
+        payload: {
+          label: version.label,
+          resolutionM: version.resolutionM,
+          coveragePct: version.coveragePct,
+          sizeText: version.sizeText,
+        },
+      });
+      pushEvent(`地图版本 ${String(result.result.mapVersionId)} 已保存（巡检任务状态不变）`, "ok");
+      toast("地图版本已保存，巡检任务状态不受影响", "ok");
+    } catch (error) {
+      toast(isApiError(error) ? error.message : "保存地图失败", "danger");
+    } finally {
+      setSavingMap(false);
+    }
+  }, [pushEvent, toast, version.coveragePct, version.label, version.resolutionM, version.sizeText]);
 
   /**
    * `?site=` —— 从地图点位点进来时定位到这一轮要看的航点。
@@ -82,14 +211,8 @@ export default function Mapping() {
     setParams(next, { replace: true });
   };
 
-  const version = useMemo(
-    () => MAP_VERSIONS.find((item) => item.id === versionId) ?? MAP_VERSIONS[0],
-    [versionId],
-  );
-
   const robot = useMemo(() => WAYPOINTS.find((item) => item.state === "当前目标"), []);
   const videoChannel = channels.find((item) => item.key === "video");
-  const running = mission.state === "执行中";
 
   return (
     <div className="page page--mapping">
@@ -121,7 +244,7 @@ export default function Mapping() {
             value={deviceSource}
             onChange={(event) => {
               // PRD 3.2：切换来源只能在任务停止后进行
-              if (running) {
+              if (isRunning) {
                 toast("任务执行中不允许切换数据来源，请先暂停", "danger");
                 return;
               }
@@ -143,40 +266,59 @@ export default function Mapping() {
         <Btn active={showLaser} onClick={() => setShowLaser((value) => !value)}>
           {showLaser ? "隐藏激光点" : "显示激光点"}
         </Btn>
-        <Btn onClick={() => { patchMission({ state: "已完成" }); toast("地图版本已保存", "ok"); }}>
-          保存地图
+        <Btn
+          disabled={!online || !can("map:save") || savingMap}
+          title={
+            !can("map:save")
+              ? permissionHint("map:save")
+              : !online
+                ? "连接不上共享服务，地图版本无法保存"
+                : "检查无误后保存地图版本（只生成地图版本，不改变巡检任务状态）"
+          }
+          onClick={() => void saveMap()}>
+          {savingMap ? "保存中…" : "保存地图"}
         </Btn>
-        <Btn onClick={() => { patchMission({ state: "已预览" }); toast("路线预览已生成", "info"); }}>
+        <Btn onClick={() => { toast("路线预览已生成", "info"); }}>
           路线预览
         </Btn>
         {/* PRD 2.1 / S11：任务下发与监视由具身智能工程师与架构师负责 */}
         <Btn
           tone="primary"
-          disabled={running || !can("mission:dispatch")}
-          title={can("mission:dispatch") ? "下发巡检任务，等待机器人确认" : permissionHint("mission:dispatch")}
-          onClick={() => {
-            patchMission({ state: "等待机器人确认" });
-            pushEvent("巡检任务已下发，等待机器人确认", "info");
-            toast("任务已下发，等待机器人确认", "info");
-            window.setTimeout(() => {
-              patchMission({ state: "执行中" });
-              pushEvent("机器人已接收任务，进入执行中", "ok");
-            }, 1500);
-          }}>
-          任务下发
+          disabled={!online || !can("mission:dispatch") || missionBusy !== null || isRunning}
+          title={
+            !can("mission:dispatch")
+              ? permissionHint("mission:dispatch")
+              : !online
+                ? "连接不上共享服务，任务无法下发"
+                : "下发巡检任务，等待机器人确认"
+          }
+          onClick={() => void dispatchMission()}>
+          {missionBusy === "mission.create" ? "下发中…" : "任务下发"}
         </Btn>
         <Btn
-          disabled={!can("mission:dispatch")}
-          title={can("mission:dispatch") ? "暂停任务" : permissionHint("mission:dispatch")}
-          onClick={() => { patchMission({ state: "已暂停" }); pushEvent("巡检任务暂停", "warn"); }}>
-          暂停
+          disabled={!online || !can("mission:monitor") || missionBusy !== null || missionState !== "执行中"}
+          title={
+            !can("mission:monitor")
+              ? permissionHint("mission:monitor")
+              : missionState !== "执行中"
+                ? "只有执行中的任务可以暂停"
+                : "暂停任务"
+          }
+          onClick={() => void missionAction("mission.pause", "巡检任务暂停")}>
+          {missionBusy === "mission.pause" ? "暂停中…" : "暂停"}
         </Btn>
         <Btn
           tone="danger"
-          disabled={!can("mission:dispatch")}
-          title={can("mission:dispatch") ? "取消任务并记录反馈" : permissionHint("mission:dispatch")}
-          onClick={() => { patchMission({ state: "已取消" }); pushEvent("巡检任务取消", "danger"); }}>
-          取消
+          disabled={!online || !can("mission:monitor") || missionBusy !== null || isTerminal}
+          title={
+            !can("mission:monitor")
+              ? permissionHint("mission:monitor")
+              : isTerminal
+                ? `任务已是终态 ${missionState}，不能再次取消`
+                : "取消任务并记录反馈"
+          }
+          onClick={() => void missionAction("mission.cancel", "巡检任务取消")}>
+          {missionBusy === "mission.cancel" ? "取消中…" : "取消"}
         </Btn>
         <PermNote permissions={["mission:dispatch"]} />
       </Toolbar>
@@ -261,7 +403,7 @@ export default function Mapping() {
 
           <Panel
             title="巡检任务"
-            extra={<StatusChip text={mission.state} tone={running ? "ok" : "warn"} />}>
+            extra={<StatusChip text={missionState} tone={isRunning ? "ok" : "warn"} />}>
             <dl className="mission">
               <div>
                 <dt>任务编号</dt>

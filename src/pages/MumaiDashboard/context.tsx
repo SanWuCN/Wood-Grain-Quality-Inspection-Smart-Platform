@@ -10,6 +10,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type PropsWithChildren,
@@ -36,6 +37,7 @@ import {
   WORK_ORDER,
 } from "./seed/scenario";
 import { clockStamp } from "./lib";
+import { isOnline, useSharedStore, type ConnectionStatus } from "./store/shared";
 
 export type NavKey = "overview" | "orders" | "mapping" | "twin" | "adapt" | "knowledge" | "archive";
 
@@ -109,6 +111,19 @@ export type MumaiState = {
   presetAnnotation: boolean;
   setPresetAnnotation: (value: boolean) => void;
 
+  /**
+   * 共享服务的连接状态。
+   *
+   * 配置、地图、场景、产物这类**跨端共享**的记录一律以服务端为准，
+   * 页面通过 useSharedStore 的选择器读取；这里只暴露连接状态，
+   * 让顶栏与各页能把「连不上」说清楚，而不是继续显示本地默认值装成正常。
+   */
+  sharedStatus: ConnectionStatus;
+  sharedOnline: boolean;
+  sharedError: string | null;
+  /** 当前共享演示会话 id（四端加入的是同一场） */
+  sharedSessionId: string;
+
   resetDemo: () => void;
 };
 
@@ -150,6 +165,16 @@ export function MumaiProvider({ children }: PropsWithChildren) {
     { id: 0, at: clockStamp(), text: "会话 session-A 已建立，装载阶段快照 fusion", tone: "info" },
   ]);
   const [toasts, setToasts] = useState<Toast[]>([]);
+
+  /* ---- 共享服务：登录后连一次，切账号重连 ---- */
+  const sharedStatus = useSharedStore((state) => state.status);
+  const sharedError = useSharedStore((state) => state.connectionError);
+  const sharedOnline = useSharedStore(isOnline);
+  const sharedSessionId = useSharedStore((state) => state.sessionId);
+
+  useEffect(() => {
+    void useSharedStore.getState().init(accountId);
+  }, [accountId]);
 
   const pushEvent = useCallback((text: string, tone: SessionEvent["tone"] = "info") => {
     setEvents((list) => [{ id: nextId(), at: clockStamp(), text, tone }, ...list].slice(0, 40));
@@ -204,7 +229,6 @@ export function MumaiProvider({ children }: PropsWithChildren) {
     setStage("fusion");
     pushEvent("装载阶段快照 fusion：工单、环境、巡检、数据集与更新记录同步回退", "warn");
   }, [pushEvent]);
-
   /* ---- 角色权限（auth.ts 的角色权限表是唯一来源） ---- */
 
   const permissions = useMemo(() => actionsOf(accountId), [accountId]);
@@ -216,9 +240,10 @@ export function MumaiProvider({ children }: PropsWithChildren) {
 
   const accountLogin = ACCOUNT_LOGIN[accountId] ?? accountId;
 
-  /** 退出登录：清会话、把演示状态退回快照、回登录页（由调用方负责跳转后的重挂载） */
+  /** 退出登录：清会话、断开共享服务、把演示状态退回快照 */
   const logout = useCallback(() => {
     clearSession();
+    useSharedStore.getState().reset();
     resetDemo();
   }, [resetDemo]);
 
@@ -273,13 +298,18 @@ export function MumaiProvider({ children }: PropsWithChildren) {
       setDomainPending,
       presetAnnotation,
       setPresetAnnotation,
+      sharedStatus,
+      sharedOnline,
+      sharedError,
+      sharedSessionId,
       resetDemo,
     };
   }, [
     accountId, accountLogin, askAssistant, assistantOpen, assistantSeed, can, changeAccount, channels,
     confirmDraftOrder, deviceAck, deviceSource, dismissToast, domainPending, draftOrder, envRecord,
     events, logout, mission, navCollapsed, orders, patchMission, permissions, presetAnnotation,
-    publishConfig, publishedConfig, pushEvent, resetDemo, setOrderStatus, stage, toast, toasts,
+    publishConfig, publishedConfig, pushEvent, resetDemo, setOrderStatus, sharedError, sharedOnline,
+    sharedSessionId, sharedStatus, stage, toast, toasts,
   ]);
 
   return <MumaiContext.Provider value={value}>{children}</MumaiContext.Provider>;

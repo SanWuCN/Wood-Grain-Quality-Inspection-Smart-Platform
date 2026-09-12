@@ -26,6 +26,9 @@ import { useMumai } from "../context";
 import { permissionHint } from "../auth";
 import { DELIVERY_ARTIFACTS } from "../seed/scenario";
 import type { DeliveryArtifact, DeliveryTarget } from "../seed/types";
+import { ACCOUNT_NAME } from "../api/accounts";
+import { api, isApiError, type ArtifactEntity, type SharedEntity } from "../api/client";
+import { artifacts as artifactsOf, isOnline, useSharedStore } from "../store/shared";
 
 const TARGETS: DeliveryTarget[] = ["硬件侧端模型", "平台模型", "小车 OTA"];
 
@@ -164,8 +167,18 @@ export function DeliveryTab() {
   );
   const [uploadOpen, setUploadOpen] = useState(false);
 
+  /**
+   * 已发布产物来自共享服务，不再来自本地 useState。
+   *
+   * 评审 F02 的现象是「点击下载只增加取用记录；切换页签再回来，已发布候选产物
+   * 又重新待发布」—— 根因是「哪些产物在平台上」只活在这个组件的内存里。
+   * 现在它由服务端持有：切页、刷新、换一台电脑都读到同一份。
+   */
+  const sharedArtifacts = useSharedStore(artifactsOf);
+  const online = useSharedStore(isOnline);
+  const [busy, setBusy] = useState<string | null>(null);
+
   const pending = artifacts.filter((item) => item.state === "待提交");
-  const published = artifacts.filter((item) => item.state === "已发布");
   const selected = pending.find((item) => item.id === selectedId) ?? pending[0] ?? null;
 
   const failed = useMemo(
@@ -194,26 +207,78 @@ export function DeliveryTab() {
     toast(`${artifact.name} 已发布，其他工程师可以下载`, "ok");
   };
 
-  /** 取用：下载 / 烧录都记一条，谁在什么时候拿走了什么 */
-  const recordUse = (artifact: DeliveryArtifact, action: string) => {
-    setArtifacts((current) =>
-      current.map((item) =>
-        item.id === artifact.id
-          ? { ...item, used: [...item.used, { at: "2026-09-11 42:20", by: "饶 · 全栈开发工程师", action }] }
-          : item,
-      ),
-    );
-    toast(`${artifact.name} ${action}`, "ok");
+  /**
+   * 真实下载。
+   *
+   * 原来这里是 `recordUse(artifact, "已下载")`：只往本地列表塞一条取用记录，
+   * 浏览器根本不会产生下载事件（评审 F02 第一条）。现在直接打到
+   * `/api/files/{id}/download`，服务端返回真实字节 + Content-Disposition，
+   * 并把产物的状态从「已发布」推到「已下载」—— 切页与刷新都不会回退，
+   * 因为那条状态在服务端，不在这个组件的 useState 里。
+   */
+  const download = async (artifact: SharedEntity<ArtifactEntity>) => {
+    const entry =
+      artifact.data.files.find((item) => item.role === "整包") ??
+      artifact.data.files.find((item) => item.role === "清单") ??
+      artifact.data.files[0];
+    if (!entry) {
+      toast("这条产物没有登记文件，无法下载", "danger");
+      return;
+    }
+    setBusy(`download:${artifact.id}`);
+    try {
+      const saved = await api.download(entry.fileId, artifact.data.name);
+      pushEvent(
+        `已下载 ${saved.name}（${(saved.size / 1024).toFixed(1)} KB，摘要 ${saved.sha256?.slice(0, 12) ?? "—"}…）`,
+        "ok",
+      );
+      toast(`已下载 ${saved.name}`, "ok");
+    } catch (error) {
+      toast(isApiError(error) ? error.message : "下载失败", "danger");
+    } finally {
+      setBusy(null);
+    }
   };
 
-  const renderRow = (artifact: DeliveryArtifact, mode: "pending" | "published") => (
+  /**
+   * 回验：让操作员选回刚下载的那份文件，浏览器算它的 SHA-256 再提交。
+   *
+   * PRD §10.3 建议的做法就是 `crypto.subtle.digest` 读 ArrayBuffer 做小文件复核。
+   * 这样「摘要一致」是真的算出来的，不是拿服务端自己的值回填一个通过 ——
+   * 选错文件就会走失败分支（验收 T11 要的正是这个）。
+   */
+  const verify = async (artifact: SharedEntity<ArtifactEntity>, file: File) => {
+    setBusy(`verify:${artifact.id}`);
+    try {
+      const buffer = await file.arrayBuffer();
+      const digest = await crypto.subtle.digest("SHA-256", buffer);
+      const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      const result = await useSharedStore.getState().send({
+        action: "artifact.receipt",
+        entityId: artifact.id,
+        expectedRevision: artifact.revision,
+        payload: { reportedVersion: artifact.data.modelVersion, verifiedHash: hash, deviceMode: "demo" },
+      });
+      const receipt = result.result.receipt as { pass: boolean; note: string } | undefined;
+      toast(receipt?.note ?? "回验完成", receipt?.pass ? "ok" : "danger");
+      pushEvent(
+        `${artifact.data.name} 回验${receipt?.pass ? "通过" : "未通过"}：本地摘要 ${hash.slice(0, 12)}…`,
+        receipt?.pass ? "ok" : "danger",
+      );
+    } catch (error) {
+      toast(isApiError(error) ? error.message : "回验失败", "danger");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const renderRow = (artifact: DeliveryArtifact) => (
     <li
       key={artifact.id}
-      className={`art-row${mode === "pending" && selected?.id === artifact.id ? " is-selected" : ""}`}>
+      className={`art-row${selected?.id === artifact.id ? " is-selected" : ""}`}>
       <button
         type="button"
-        className="art-row__main"
-        disabled={mode === "published"}
+        className="art-row__main is-static"
         onClick={() => setSelectedId(artifact.id)}>
         <span className="art-row__name">
           <b>{artifact.name}</b>
@@ -225,49 +290,31 @@ export function DeliveryTab() {
         <span className="art-row__ver">{artifact.modelVersion}</span>
         <span className="art-row__num">{artifact.sizeText}</span>
         <span className="art-row__num">{artifact.sha256}</span>
-        {mode === "pending" ? (
-          <span className="art-row__checks">
-            {artifact.checks.filter((check) => !check.pass).length > 0 ? (
-              <StatusChip
-                text={`${artifact.checks.filter((check) => !check.pass).length} 项待处理`}
-                tone="warn"
-              />
-            ) : (
-              <StatusChip text="校验通过" tone="ok" />
-            )}
-          </span>
-        ) : (
-          <span className="art-row__checks">
-            <StatusChip text={`${artifact.used.length} 次取用`} tone="muted" />
-          </span>
-        )}
+        <span className="art-row__checks">
+          {artifact.checks.filter((check) => !check.pass).length > 0 ? (
+            <StatusChip
+              text={`${artifact.checks.filter((check) => !check.pass).length} 项待处理`}
+              tone="warn"
+            />
+          ) : (
+            <StatusChip text="校验通过" tone="ok" />
+          )}
+        </span>
       </button>
       <span className="art-row__act">
-        {mode === "pending" ? (
-          <Btn
-            tone="primary"
-            disabled={!canSubmit || artifact.checks.some((check) => !check.pass)}
-            title={
-              !canSubmit
-                ? permissionHint("package:deliver")
-                : artifact.checks.some((check) => !check.pass)
-                  ? "有未通过的提交前校验，不能发布"
-                  : "提交到平台，其他工程师可下载"
-            }
-            onClick={() => submit(artifact)}>
-            提交
-          </Btn>
-        ) : (
-          <>
-            <Btn onClick={() => recordUse(artifact, "已下载")}>下载</Btn>
-            <Btn
-              disabled={!can("deployment:receive")}
-              title={can("deployment:receive") ? "记录一次烧录" : permissionHint("deployment:receive")}
-              onClick={() => recordUse(artifact, "已烧录")}>
-              记录烧录
-            </Btn>
-          </>
-        )}
+        <Btn
+          tone="primary"
+          disabled={!canSubmit || artifact.checks.some((check) => !check.pass)}
+          title={
+            !canSubmit
+              ? permissionHint("package:deliver")
+              : artifact.checks.some((check) => !check.pass)
+                ? "有未通过的提交前校验，不能发布"
+                : "提交到平台，其他工程师可下载"
+          }
+          onClick={() => submit(artifact)}>
+          提交
+        </Btn>
       </span>
     </li>
   );
@@ -295,7 +342,7 @@ export function DeliveryTab() {
               <span>提交前校验</span>
               <span />
             </div>
-            <ul className="art-list">{pending.map((item) => renderRow(item, "pending"))}</ul>
+            <ul className="art-list">{pending.map((item) => renderRow(item))}</ul>
           </>
         ) : (
           <StateBlock
@@ -345,7 +392,13 @@ export function DeliveryTab() {
 
       <Panel
         title="已发布产物"
-        extra={<span className="muted">{published.length} 项 · 平台可下载</span>}
+        extra={
+          online ? (
+            <span className="muted">{sharedArtifacts.length} 项 · 平台可下载</span>
+          ) : (
+            <StatusChip text="未连接共享服务" tone="warn" />
+          )
+        }
         className="dl-panel">
         <div className="art-head">
           <span>产物</span>
@@ -353,28 +406,100 @@ export function DeliveryTab() {
           <span>版本</span>
           <span>大小</span>
           <span>摘要</span>
-          <span>取用记录</span>
+          <span>状态</span>
           <span />
         </div>
-        <ul className="art-list">{published.map((item) => renderRow(item, "published"))}</ul>
+        <ul className="art-list">
+          {sharedArtifacts.length ? (
+            sharedArtifacts.map((item) => (
+              <li key={item.id} className="art-row">
+                <span className="art-row__main">
+                  <span className="art-row__name">
+                    <b>{item.data.name}</b>
+                    <i>
+                      {item.data.fromJob ?? "手工上传"} · rev {item.revision}
+                      {item.data.demoOnly ? " · 演示资产" : ""}
+                    </i>
+                  </span>
+                  <StatusChip text={item.data.target} tone="info" />
+                  <span className="art-row__ver">{item.data.modelVersion}</span>
+                  <span className="art-row__num">{item.data.sizeText}</span>
+                  <span className="art-row__num">{item.data.sha256.slice(0, 16)}…</span>
+                  <span className="art-row__checks">
+                    <StatusChip
+                      text={item.data.state}
+                      tone={item.data.state === "已回验" ? "ok" : item.data.state === "已下载" ? "info" : "muted"}
+                    />
+                    {item.data.downloadCount ? (
+                      <em className="muted">取用 {item.data.downloadCount} 次</em>
+                    ) : null}
+                  </span>
+                </span>
+                <span className="art-row__act">
+                  <Btn
+                    disabled={!online || busy !== null}
+                    title={online ? "下载真实产物文件" : "连接不上共享服务，无法下载"}
+                    onClick={() => void download(item)}>
+                    下载
+                  </Btn>
+                  {/* 回验：选回刚下载的文件，浏览器算摘要再提交 */}
+                  <label className={`btn${!online || !can("deployment:receive") ? " is-disabled" : ""}`}>
+                    回验
+                    <input
+                      type="file"
+                      hidden
+                      disabled={!online || !can("deployment:receive") || busy !== null}
+                      onChange={(event) => {
+                        const picked = event.target.files?.[0];
+                        event.target.value = "";
+                        if (picked) void verify(item, picked);
+                      }}
+                    />
+                  </label>
+                </span>
+              </li>
+            ))
+          ) : (
+            <li className="art-row">
+              <StateBlock
+                kind={online ? "empty" : "offline"}
+                title={online ? "平台还没有已发布产物" : "未连接共享服务"}
+                hint={online ? "提交一份待提交产物后，这里会出现可下载的产物。" : "交付状态保存在服务端，连接恢复后自动显示。"}
+              />
+            </li>
+          )}
+        </ul>
 
-        {/* 取用记录：谁下载 / 谁烧录。交付的闭环就在这张表上 */}
-        <h4 className="sub">最近取用</h4>
+        {/* 回验记录：谁在什么时候提交了什么摘要。交付的闭环就在这张表上 */}
+        <h4 className="sub">回验与取用记录</h4>
         <ol className="art-used">
-          {published
-            .flatMap((item) => item.used.map((use) => ({ ...use, name: item.name })))
+          {sharedArtifacts
+            .flatMap((item) =>
+              item.data.receipts.map((receipt) => ({
+                at: receipt.at,
+                by: receipt.actor,
+                action: receipt.pass ? "回验通过" : "回验未通过",
+                name: item.data.name,
+                note: receipt.note,
+              })),
+            )
             .sort((a, b) => b.at.localeCompare(a.at))
             .slice(0, 6)
             .map((use, index) => (
               <li key={`${use.at}-${use.name}-${index}`}>
-                <time>{use.at}</time>
-                <b>{use.by}</b>
+                <time>{use.at.slice(11, 19)}</time>
+                <b>{ACCOUNT_NAME[use.by] ?? use.by}</b>
                 <span>
                   {use.action} · {use.name}
+                  {use.note ? ` · ${use.note}` : ""}
                 </span>
               </li>
             ))}
         </ol>
+        <p className="note">
+          下载与回验是两步：下载只证明文件取走了，回验要由接收方提交自己算出的摘要。
+          摘要在浏览器内用 SHA-256 现算，选错文件就会走到未通过分支。
+        </p>
       </Panel>
 
       {uploadOpen ? (
