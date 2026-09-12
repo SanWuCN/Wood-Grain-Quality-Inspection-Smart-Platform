@@ -1,0 +1,301 @@
+/**
+ * CDP 截图 / 控制台检查工具（临时验证脚本，验收后删除）
+ *
+ * 用法：
+ *   node tools/shot.mjs --url http://localhost:5199/ --out tmp-shot/ov-china.png --wait 7000
+ *   node tools/shot.mjs --url ... --eval "window.dispatchEvent(new CustomEvent('mumai:request-mode',{detail:'shanghai'}))" --wait 4000
+ *   node tools/shot.mjs --url ... --drag 160,0
+ */
+
+import { spawn } from "node:child_process";
+import { mkdirSync, openSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+
+const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+
+function arg(name, fallback = undefined) {
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
+}
+
+const url = arg("url", "http://localhost:5199/");
+const out = resolve(arg("out", "tmp-shot/shot.png"));
+const wait = Number(arg("wait", "7000"));
+const width = Number(arg("w", "1920"));
+const height = Number(arg("h", "1080"));
+const evalExpr = arg("eval", "");
+const evalAfter = arg("evalAfter", "");
+const drag = arg("drag", "");
+const port = 9222 + Math.floor(Math.random() * 400);
+
+mkdirSync(dirname(out), { recursive: true });
+
+// GPU 模式：用真实显卡跑 ANGLE/D3D11，避免 SwiftShader 软件渲染把画面压黑
+const glFlags = process.argv.includes("--gpu")
+  ? ["--use-angle=d3d11", "--enable-gpu", "--ignore-gpu-blocklist", "--enable-unsafe-webgpu"]
+  : ["--enable-unsafe-swiftshader", "--use-angle=swiftshader"];
+
+const profile = resolve("tmp-shot", `profile-${port}`);
+const logFd = process.argv.includes("--log")
+  ? openSync(resolve("tmp-shot", `chrome-${port}.log`), "w")
+  : "ignore";
+const chrome = spawn(
+  CHROME,
+  [
+    "--headless=new",
+    ...glFlags,
+    ...(process.argv.includes("--log") ? ["--enable-logging=stderr", "--v=1"] : []),
+    "--disable-gpu-sandbox",
+    "--no-sandbox",
+    "--no-first-run",
+    "--disable-extensions",
+    "--hide-scrollbars",
+    "--force-device-scale-factor=1",
+    `--window-size=${width},${height}`,
+    `--user-data-dir=${profile}`,
+    `--remote-debugging-port=${port}`,
+    "about:blank",
+  ],
+  { stdio: ["ignore", logFd, logFd] },
+);
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function endpoint() {
+  for (let i = 0; i < 60; i++) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/json/version`);
+      if (res.ok) return (await res.json()).webSocketDebuggerUrl;
+    } catch {
+      /* not up yet */
+    }
+    await sleep(250);
+  }
+  throw new Error("chrome devtools endpoint never came up");
+}
+
+const wsUrl = await endpoint();
+const ws = new WebSocket(wsUrl);
+await new Promise((r, j) => {
+  ws.onopen = r;
+  ws.onerror = j;
+});
+
+let seq = 0;
+const pending = new Map();
+const logs = [];
+let sessionId = null;
+
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  if (msg.id && pending.has(msg.id)) {
+    const { resolve: res, reject } = pending.get(msg.id);
+    pending.delete(msg.id);
+    msg.error ? reject(new Error(JSON.stringify(msg.error))) : res(msg.result);
+    return;
+  }
+  const m = msg.method;
+  if (m === "Runtime.exceptionThrown") {
+    const d = msg.params.exceptionDetails;
+    logs.push(`[exception] ${d.exception?.description ?? d.text}`);
+  } else if (m === "Runtime.consoleAPICalled") {
+    const text = msg.params.args
+      .map((a) => a.value ?? a.description ?? a.type)
+      .join(" ");
+    if (msg.params.type === "log") {
+      if (process.argv.includes("--alllogs")) logs.push(`[log] ${text}`);
+    } else if (["error", "warning"].includes(msg.params.type)) {
+      logs.push(`[console.${msg.params.type}] ${text}`);
+    }
+  } else if (m === "Log.entryAdded" && msg.params.entry.level === "error") {
+    logs.push(`[log] ${msg.params.entry.text}`);
+  }
+};
+
+function send(method, params = {}, useSession = true) {
+  const id = ++seq;
+  const payload = { id, method, params };
+  if (useSession && sessionId) payload.sessionId = sessionId;
+  ws.send(JSON.stringify(payload));
+  return new Promise((res, rej) => pending.set(id, { resolve: res, reject: rej }));
+}
+
+const { targetId } = await send("Target.createTarget", { url: "about:blank" }, false);
+const attached = await send("Target.attachToTarget", { targetId, flatten: true }, false);
+sessionId = attached.sessionId;
+
+await send("Runtime.enable");
+await send("Log.enable");
+await send("Page.enable");
+// 尽早挂上 WebGL 上下文事件钩子，抓上下文丢失/恢复的原因
+await send("Page.addScriptToEvaluateOnNewDocument", {
+  source: `window.__gl = [];
+    (() => {
+      const orig = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (type, attrs) {
+        const ctx = orig.call(this, type, attrs);
+        if (ctx && (type === 'webgl2' || type === 'webgl' || type === 'webgpu') && !this.__hooked) {
+          this.__hooked = true;
+          window.__gl.push('created ' + type + ' ' + this.width + 'x' + this.height);
+          this.addEventListener('webglcontextlost', (e) => {
+            window.__gl.push('LOST ' + (e.statusMessage || 'no-message'));
+          });
+          this.addEventListener('webglcontextrestored', () => window.__gl.push('restored'));
+        }
+        return ctx;
+      };
+      window.addEventListener('error', (e) => window.__gl.push('error ' + e.message));
+      window.addEventListener('unhandledrejection', (e) => window.__gl.push('reject ' + e.reason));
+    })();`,
+});
+await send("Emulation.setDeviceMetricsOverride", {
+  width,
+  height,
+  deviceScaleFactor: 1,
+  mobile: false,
+});
+await send("Page.navigate", { url });
+
+await sleep(wait);
+
+async function evaluate(expression) {
+  const r = await send("Runtime.evaluate", {
+    expression,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  return r?.result?.value;
+}
+
+if (evalExpr) {
+  const v = await evaluate(evalExpr);
+  const dumpPng = arg("dumpPng", "");
+  if (dumpPng) {
+    const b64 = String(v).replace(/^data:image\/png;base64,/, "");
+    writeFileSync(resolve(dumpPng), Buffer.from(b64, "base64"));
+    console.log(`[dumpPng] ${dumpPng} ${Buffer.from(b64, "base64").length} bytes`);
+  } else {
+    console.log(`[eval] ${JSON.stringify(v)}`);
+  }
+  await sleep(Number(arg("evalWait", "4200")));
+}
+
+if (drag) {
+  const [dx, dy] = drag.split(",").map(Number);
+  const cx = width / 2;
+  const cy = height / 2;
+  const steps = 14;
+  await send("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: cx,
+    y: cy,
+    button: "left",
+    buttons: 1,
+    clickCount: 1,
+  });
+  for (let i = 1; i <= steps; i++) {
+    await send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: cx + (dx * i) / steps,
+      y: cy + (dy * i) / steps,
+      button: "left",
+      buttons: 1,
+    });
+    await sleep(24);
+  }
+  await send("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x: cx + dx,
+    y: cy + dy,
+    button: "left",
+    buttons: 0,
+    clickCount: 1,
+  });
+  await sleep(Number(arg("dragWait", "1600")));
+}
+
+if (evalAfter) {
+  const v = await evaluate(evalAfter);
+  console.log(`[evalAfter] ${JSON.stringify(v)}`);
+  await sleep(Number(arg("evalAfterWait", "1200")));
+}
+
+const shot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+writeFileSync(out, Buffer.from(shot.data, "base64"));
+
+/**
+ * 设计规范 §12 验收 Checklist 的可量化项：
+ *   - 字号层级数（规范要求一个页面最多 5 个明显层级）
+ *   - 有色边框元素占比（规范要求砍掉约 50% 亮边框）
+ *   - 去重后的文字色 / 背景色 / 边框色数量（规范要求收敛到一套 token）
+ *   - emoji / 装饰性彩色元素
+ */
+if (process.argv.includes("--audit")) {
+  const audit = await evaluate(`(() => {
+    const els = [...document.querySelectorAll('body *')];
+    const sizes = new Map(), textColors = new Map(), bgColors = new Map(), borderColors = new Map();
+    let bordered = 0, coloredBorder = 0, textNodes = 0;
+    for (const el of els) {
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue;
+      const cs = getComputedStyle(el);
+      const fs = Math.round(parseFloat(cs.fontSize) * 2) / 2;
+      if (el.textContent && el.children.length === 0 && el.textContent.trim()) {
+        textNodes++;
+        sizes.set(fs, (sizes.get(fs) || 0) + 1);
+        textColors.set(cs.color, (textColors.get(cs.color) || 0) + 1);
+      }
+      const bg = cs.backgroundColor;
+      if (bg && bg !== 'rgba(0, 0, 0, 0)') bgColors.set(bg.replace(/\\s/g, ''), 1);
+      const bw = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderBottomWidth) + parseFloat(cs.borderRightWidth);
+      if (bw > 0 && cs.borderTopStyle !== 'none') {
+        bordered++;
+        const bc = cs.borderTopColor;
+        const m = bc.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([\\d.]+))?/);
+        // 「有色」= 有实际 alpha 且不是灰阶
+        if (m && m[4] !== '0' && !(m[1] === m[2] && m[2] === m[3])) {
+          coloredBorder++;
+          borderColors.set(bc.replace(/\\s/g, ''), 1);
+        }
+      }
+    }
+    const top = (map, n) => [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, n)
+      .map(([k, v]) => k + (typeof v === 'number' && v > 1 ? '(' + v + ')' : '')).join(' ');
+    return [
+      'textNodes=' + textNodes,
+      'fontSizes=' + sizes.size + ' -> ' + [...sizes.keys()].sort((a, b) => b - a).join('/'),
+      'topFontSizes=' + top(sizes, 5),
+      'bordered=' + bordered + ' coloredBorder=' + coloredBorder + ' (' + Math.round(coloredBorder / Math.max(1, bordered) * 100) + '%)',
+      'textColors=' + textColors.size,
+      'bgColors=' + bgColors.size,
+      'borderColors=' + borderColors.size,
+      'topText=' + top(textColors, 5),
+      'topBg=' + top(bgColors, 6),
+      'topBorder=' + top(borderColors, 5),
+    ].join('\\n');
+  })()`);
+  console.log('--- audit ---');
+  console.log(audit ?? '(no audit)');
+}
+
+// 顺带把页面上的关键尺寸打出来，方便定位布局问题
+const probe = await evaluate(`(() => {
+  const out = [];
+  document.querySelectorAll('.ov__panel, .ov__crumb, .ov__actions, .ov__hint, .ov__foot').forEach(el => {
+    const r = el.getBoundingClientRect();
+    out.push(el.className + ' @ ' + [r.left, r.top, r.width, r.height].map(v => Math.round(v)).join(','));
+  });
+  const c = document.querySelector('canvas');
+  out.push('canvas ' + (c ? [c.clientWidth, c.clientHeight].join('x') : 'none'));
+  out.push('gl: ' + JSON.stringify(window.__gl));
+  return out.join('\\n');
+})()`);
+
+console.log(probe ?? "(no probe)");
+console.log(`--- console (${logs.length}) ---`);
+console.log(logs.slice(0, 40).join("\n") || "(clean)");
+console.log(`saved ${out}`);
+
+ws.close();
+chrome.kill();
+process.exit(0);
