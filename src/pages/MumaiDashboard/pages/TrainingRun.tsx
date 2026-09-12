@@ -57,10 +57,16 @@ import type {
   DataPackageCheck,
   DataPackageKind,
   Experiment,
-  JobLogLine,
   NodeMetric,
   TrainingConfigField,
 } from "../seed/types";
+import { buildDistillScript, buildTrainScript } from "./terminalScripts";
+
+/** 毫秒 → 控制台时钟 mm:ss。脚本本身不打时间戳，用控制台自己的运行时钟补 */
+function clockFromMs(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
 
 /** 回放一行日志的间隔。太快看不清，太慢演示时坐不住 */
 const LINE_INTERVAL_MS = 260;
@@ -262,34 +268,65 @@ function rangeText(field: TrainingConfigField) {
  * ② 任务控制台
  * ------------------------------------------------------------------ */
 
+/** 控制台一行的显示模型（两个脚本任务与归档包任务共用） */
+type ConsoleLine = {
+  /** 时间戳 mm:ss。脚本本身不打时间戳，用控制台自己的运行时钟补 */
+  at: string;
+  level: "CMD" | "INFO" | "WARN" | "ERROR" | "OK";
+  text: string;
+};
+
+/** 播放计划里的一步 */
+type PlaybackStep = {
+  line: Omit<ConsoleLine, "at">;
+  /** 这一步停留多久。归档包任务没有给节奏，用统一的逐行间隔 */
+  dwellMs: number;
+  /** true = 覆盖当前最后一行（脚本里 `\r` 原地刷新的进度条帧） */
+  replace: boolean;
+  /** 归档包任务的日志自带时间戳；两个脚本任务没有，用运行时钟 */
+  at?: string;
+};
+
+/** 控制台可跑的三个任务 */
+type JobKey = "archive" | "train" | "distill";
+
 function ConsolePanel({
-  log,
-  visible,
+  job,
+  jobs,
+  onPickJob,
+  lines,
   running,
-  experimentId,
-  onReplay,
+  progress,
+  meta,
+  onRun,
 }: {
-  log: JobLogLine[];
-  visible: number;
+  job: JobKey;
+  jobs: { key: JobKey; label: string; command: string; summary: string; demo: boolean }[];
+  onPickJob: (key: JobKey) => void;
+  lines: ConsoleLine[];
   running: boolean;
-  experimentId: string;
-  onReplay: () => void;
+  /** 0–100，播放进度 */
+  progress: number;
+  /** 右上角的两段元信息：任务号 / 节点与行数 */
+  meta: { task: string; tail: string };
+  onRun: () => void;
 }) {
   const bodyRef = useRef<HTMLOListElement>(null);
-  const shown = log.slice(0, visible);
 
-  /** 回放时把视口跟到底部；一次性铺满时不动，避免用户刚进页面就被滚走 */
+  /** 运行时把视口跟到底部；静态铺满时不动，避免用户刚进页面就被滚走 */
   useEffect(() => {
     if (!running) return;
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [visible, running]);
+  }, [lines.length, running]);
 
   const counts = useMemo(() => {
-    const warn = shown.filter((line) => line.level === "WARN").length;
-    const error = shown.filter((line) => line.level === "ERROR").length;
+    const warn = lines.filter((line) => line.level === "WARN").length;
+    const error = lines.filter((line) => line.level === "ERROR").length;
     return { warn, error };
-  }, [shown]);
+  }, [lines]);
+
+  const current = jobs.find((item) => item.key === job) ?? jobs[0];
 
   return (
     <Panel
@@ -298,21 +335,43 @@ function ConsolePanel({
         <span className="fw-console__actions">
           {counts.error > 0 ? <StatusChip text={`${counts.error} 条错误`} tone="danger" dot /> : null}
           {counts.warn > 0 ? <StatusChip text={`${counts.warn} 条告警`} tone="warn" dot /> : null}
-          <Btn tone="ghost" disabled={running} onClick={onReplay}>
-            回放
+          <Btn tone="ghost" disabled={running} onClick={onRun}>
+            {running ? `运行中 ${progress}%` : "运行"}
           </Btn>
         </span>
       }
       className="fw-panel fw-panel--console">
+      {/*
+        任务选择器。两个终端脚本与归档实验包在同一个控制台里跑 ——
+        它们本来就是同一台训练节点上的三种作业，分成三个页面反而看不出关系。
+        「演示脚本」标记是硬要求：这两个脚本自身就是终端演示（distill 的
+        docstring 第一行就是 Simulates:），不能让它看起来像真实训练。
+      */}
+      <div className="fw-jobs">
+        {jobs.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            className={job === item.key ? "is-active" : ""}
+            disabled={running}
+            onClick={() => onPickJob(item.key)}>
+            <b>
+              {item.label}
+              {item.demo ? <i>演示脚本</i> : null}
+            </b>
+            <span>{item.command}</span>
+            <em>{item.summary}</em>
+          </button>
+        ))}
+      </div>
+
       <div className="fw-console">
         <div className="fw-console__bar">
-          <span>task {experimentId}</span>
-          <span className="muted">
-            {TRAIN_NODE.host} · {shown.length}/{log.length} 行
-          </span>
+          <span>task {meta.task}</span>
+          <span className="muted">{meta.tail}</span>
         </div>
         <ol className="fw-console__body" ref={bodyRef}>
-          {shown.map((line, index) => (
+          {lines.map((line, index) => (
             <li key={`${line.at}-${index}`} className={`is-${line.level.toLowerCase()}`}>
               <time>{line.at}</time>
               <b>{line.level}</b>
@@ -321,7 +380,14 @@ function ConsolePanel({
           ))}
           {running ? <li className="fw-console__cursor" aria-hidden="true" /> : null}
         </ol>
+        {/* 进度条钉在底部：脚本任务的节奏由 dwellMs 决定，看不出还剩多久会以为卡住了 */}
+        {running ? (
+          <div className="fw-console__progress">
+            <i style={{ width: `${progress}%` }} />
+          </div>
+        ) : null}
       </div>
+      <p className="note">{current.summary}</p>
     </Panel>
   );
 }
@@ -1031,6 +1097,8 @@ export function TrainingTab() {
    */
   const [packages, setPackages] = useState<DataPackage[]>(DATA_PACKAGES);
   const [importOpen, setImportOpen] = useState(false);
+  /** 控制台当前跑哪个任务。默认归档实验包（本轮适配的记录） */
+  const [job, setJob] = useState<JobKey>("archive");
   const timer = useRef<number | null>(null);
 
   const stopTimer = () => {
@@ -1109,6 +1177,125 @@ export function TrainingTab() {
     }, QUEUE_DELAY_MS);
   };
 
+  /* ---- 三个任务在同一个控制台里跑 ---------------------------------- */
+
+  /** 两个终端脚本的步骤流。构建是纯函数，只算一次（里面会消费随机数序列） */
+  const scripts = useMemo(
+    () => ({ train: buildTrainScript(), distill: buildDistillScript() }),
+    [],
+  );
+
+  const jobs = useMemo(
+    () => [
+      {
+        key: "archive" as JobKey,
+        label: "本轮适配",
+        command: experiment.id,
+        summary: experiment.title,
+        demo: false,
+      },
+      {
+        key: "train" as JobKey,
+        label: scripts.train.label,
+        command: scripts.train.command,
+        summary: scripts.train.summary,
+        demo: true,
+      },
+      {
+        key: "distill" as JobKey,
+        label: scripts.distill.label,
+        command: scripts.distill.command,
+        summary: scripts.distill.summary,
+        demo: true,
+      },
+    ],
+    [experiment, scripts],
+  );
+
+  /**
+   * 把任一任务统一成同一份「播放计划」。
+   *
+   * 归档实验包的日志是逐行静态输出（没有原地刷新的帧）；
+   * 两个脚本有进度条帧（`replace: true`）与各自的节奏（`dwellMs`）。
+   * 统一成计划之后，下面的播放器只有一套逻辑。
+   */
+  const plan: PlaybackStep[] = useMemo(() => {
+    if (job === "train" || job === "distill") {
+      const script = job === "train" ? scripts.train : scripts.distill;
+      return script.steps.map((step) => ({
+        line: { text: step.text, level: step.level },
+        dwellMs: step.dwellMs,
+        replace: Boolean(step.replace),
+      }));
+    }
+    return experiment.log.map((line) => ({
+      line: { text: line.text, level: line.level },
+      dwellMs: LINE_INTERVAL_MS,
+      replace: false,
+      at: line.at,
+    }));
+  }, [job, scripts, experiment]);
+
+  const totalMs = useMemo(() => plan.reduce((sum, step) => sum + step.dwellMs, 0), [plan]);
+
+  /** 播放到第几步。`replace` 的帧不推进行列表，只换掉最后一行 */
+  const [step, setStep] = useState(plan.length);
+  const [lines, setLines] = useState<ConsoleLine[]>([]);
+
+  /** 按计划重建到第 n 步的控制台内容（纯计算，便于重播与跳转） */
+  const renderUpTo = (count: number): ConsoleLine[] => {
+    const out: ConsoleLine[] = [];
+    let elapsed = 0;
+    for (let i = 0; i < count && i < plan.length; i += 1) {
+      const item = plan[i];
+      elapsed += item.dwellMs;
+      const at = item.at ?? clockFromMs(elapsed);
+      if (item.replace && out.length > 0) out[out.length - 1] = { at, ...item.line };
+      else out.push({ at, ...item.line });
+    }
+    return out;
+  };
+
+  /** 切换任务：直接把该任务的输出铺满（与归档包任务一致，不做「先空后播」） */
+  useEffect(() => {
+    stopTimer();
+    setRunning(false);
+    setStep(plan.length);
+    setLines(renderUpTo(plan.length));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan]);
+
+  const runConsole = () => {
+    if (running) return;
+    stopTimer();
+    setLines([]);
+    setStep(0);
+    setRunning(true);
+    let index = 0;
+    let acc = 0;
+    const advance = () => {
+      if (index >= plan.length) {
+        stopTimer();
+        setRunning(false);
+        return;
+      }
+      const item = plan[index];
+      acc += item.dwellMs;
+      setLines((prev) => {
+        const next = [...prev];
+        const line: ConsoleLine = { at: item.at ?? clockFromMs(acc), ...item.line };
+        if (item.replace && next.length > 0) next[next.length - 1] = line;
+        else next.push(line);
+        return next;
+      });
+      index += 1;
+      setStep(index);
+      // 脚本的快帧可能只有几毫秒，设一个下限免得 setInterval 空转
+      timer.current = window.setTimeout(advance, Math.max(8, item.dwellMs));
+    };
+    timer.current = window.setTimeout(advance, QUEUE_DELAY_MS);
+  };
+
   const submit = () => {
     if (invalid.length > 0) return;
     replay();
@@ -1146,11 +1333,17 @@ export function TrainingTab() {
       />
 
       <ConsolePanel
-        log={experiment.log}
-        visible={visible}
+        job={job}
+        jobs={jobs}
+        onPickJob={setJob}
+        lines={lines}
         running={running}
-        experimentId={experiment.id}
-        onReplay={replay}
+        progress={totalMs > 0 ? Math.round((plan.slice(0, step).reduce((a, b) => a + b.dwellMs, 0) / totalMs) * 100) : 100}
+        meta={{
+          task: job === "archive" ? experiment.id : jobs.find((item) => item.key === job)?.command ?? "",
+          tail: `${TRAIN_NODE.host} · ${lines.length} 行`,
+        }}
+        onRun={runConsole}
       />
 
       <NodePanel node={experiment.node} cursor={drawnEpochs} totalEpochs={totalEpochs} />

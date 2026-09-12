@@ -4580,12 +4580,13 @@
 }
 
 /*
-  终端正文：固定高度 + 自己滚动，等宽字体。
-  高度写死是为了让「回放时逐行长出来」这个动作可见 —— 高度跟着内容走的话
-  面板会一边长一边把下面的内容顶下去。
+  终端正文：自己滚动，等宽字体。
+  高度跟着视口走而不是写死 —— 原来固定 260px，旁边「训练配置」有 540px 高，
+  于是右栏下面空一大片（用户原话「右边窗口排的太空了」）。
+  用 min() 保证窄屏也不会高过可视区。
 */
 .fw-console__body {
-  height: 260px;
+  height: clamp(300px, 42vh, 620px);
   margin: 0;
   padding: var(--space-2) var(--space-3);
   list-style: none;
@@ -4627,6 +4628,112 @@
 .fw-console__body .is-error,
 .fw-console__body .is-error b {
   color: var(--danger);
+}
+
+
+/* ---- 控制台任务选择器 ---- */
+
+/*
+ * 三个任务（归档实验包 / 全量重训 / 蒸馏与量化）在同一个控制台里切换。
+ * 做成三张并列的卡片而不是下拉：任务名 + 脚本文件名 + 一句话说明，
+ * 下拉收起来之后只剩一个任务名，看不出另外两个是什么。
+ */
+.fw-jobs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.fw-jobs button {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-left: 2px solid var(--border-subtle);
+  background: var(--fill-weak);
+  text-align: left;
+  cursor: pointer;
+}
+
+.fw-jobs button:hover:not(:disabled) {
+  border-color: var(--border-hover);
+}
+
+.fw-jobs button.is-active {
+  border-color: var(--primary);
+  border-left-color: var(--primary);
+  background: var(--fill-soft);
+}
+
+.fw-jobs button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.fw-jobs b {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ma-text-1);
+  font-size: var(--fs-table);
+  font-weight: 600;
+}
+
+/* 「演示脚本」标记：这两个 py 自身就是终端演示，不能让它看起来像真实训练 */
+.fw-jobs b i {
+  padding: 0 4px;
+  border: 1px solid var(--border-subtle);
+  color: var(--ma-text-3);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 14px;
+}
+
+.fw-jobs span {
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+}
+
+.fw-jobs em {
+  overflow: hidden;
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fw-jobs button.is-active em {
+  color: var(--primary);
+}
+
+/* 播放进度：脚本任务的节奏由每帧停留时间决定，没有进度条会以为卡住了 */
+.fw-console__progress {
+  height: 2px;
+  background: var(--fill-soft);
+}
+
+.fw-console__progress > i {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+  transition: width 120ms linear;
+}
+
+/* CMD 级别（那条命令行）单独着色，和脚本自己的输出区分开 */
+.fw-console__body .is-cmd,
+.fw-console__body .is-cmd b {
+  color: var(--ma-glow);
+}
+
+/* OK 级别（Training complete / PASSED 这类收尾行）用成功色 */
+.fw-console__body .is-ok,
+.fw-console__body .is-ok b {
+  color: var(--ma-ok);
 }
 
 /* 回放时的光标块：表明「还在往下写」，静态铺满时不出现 */
