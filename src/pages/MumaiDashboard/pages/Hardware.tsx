@@ -16,12 +16,13 @@
  * 避免「读数已经不合格、结论还写着合格」。
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { Panel } from "../Panel";
 import { Btn, DataTable, KV, Metric, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
 import { useMumai } from "../context";
-import { CaptureTab, TriageTab } from "./adaptTabs";
+import { CaptureTab } from "./CaptureRun";
+import { TriageTab } from "./TriageLog";
 import {
   CHANNELS,
   DEVICES,
@@ -61,11 +62,14 @@ const versionOf = (key: string) =>
  * 阈值在种子里，结论在页面现算 —— 改一条读数，采集条件跟着变，
  * 不会出现「读数已经不合格、结论还写着合格」的假一致。
  * 没有阈值的项只监看不判定（返回「仅监看」而不是硬凑一个结论）。
+ *
+ * `value` 由调用方传入（实时监看时是浮动后的值），判定永远针对**当前显示的那个数**，
+ * 不能拿种子里的基准值去判态 —— 否则屏幕上写着 39%，结论却说合格。
  */
-function readingState(item: DeviceReading): { tone: Tone; text: string } {
-  const bad = item.min !== undefined && item.value < item.min
+function readingState(item: DeviceReading, value: number): { tone: Tone; text: string } {
+  const bad = item.min !== undefined && value < item.min
     ? "低于下限"
-    : item.max !== undefined && item.value > item.max
+    : item.max !== undefined && value > item.max
       ? "超出上限"
       : null;
   if (bad) {
@@ -79,8 +83,44 @@ function readingState(item: DeviceReading): { tone: Tone; text: string } {
 }
 
 /** 读数带单位显示：小数位由种子给定，同一列不会 68 与 68.0 混排 */
-function readingValue(item: DeviceReading): string {
-  return item.digits === undefined ? String(item.value) : item.value.toFixed(item.digits);
+function readingValue(item: DeviceReading, value: number): string {
+  return item.digits === undefined ? String(Math.round(value)) : value.toFixed(item.digits);
+}
+
+/** 实时读数的刷新间隔（毫秒）。手持设备的读数本来就不是一秒一变 */
+const READING_TICK_MS = 1200;
+
+/**
+ * 实时读数。
+ *
+ * 用户的观察是「设备数据可以稍微浮动，显得真实一些」—— 一条钉死的数字确实
+ * 不像在监看。这里让带 `drift` 的读数围绕种子基准做正弦摆动：
+ *   · 用正弦而不是随机数：围绕基准摆动、不会单向漂走，也不需要平滑处理；
+ *   · 每项给不同周期，避免六个数字同频一起跳（那比不动还假）；
+ *   · 没有 `drift` 的项（版本号之类）保持不动。
+ *
+ * 幅度很小（电量 ±0.4%、温度 ±0.5℃），不会把「合格」抖成「不合格」，
+ * 但足以让画面看起来是活的。判态用的是浮动后的当前值，不是基准值。
+ */
+function useLiveReadings(items: DeviceReading[]): { item: DeviceReading; value: number }[] {
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setTick((value) => value + 1), READING_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return useMemo(
+    () =>
+      items.map((item) => {
+        if (!item.drift) return { item, value: item.value };
+        const period = item.driftPeriod ?? 13;
+        const seconds = (tick * READING_TICK_MS) / 1000;
+        const value = item.value + item.drift * Math.sin((seconds / period) * Math.PI * 2);
+        return { item, value: Number(value.toFixed(item.digits ?? 2)) };
+      }),
+    [items, tick],
+  );
 }
 
 /**
@@ -91,8 +131,9 @@ function readingValue(item: DeviceReading): string {
  * 面板标题右侧直接给「核对几项通过」，而不是让操作员自己逐条比阈值。
  */
 function ReadingsPanel() {
-  const preflight = SCANNER_TELEMETRY.filter((item) => item.preflight);
-  const failed = preflight.filter((item) => readingState(item).tone !== "ok");
+  const readings = useLiveReadings(SCANNER_TELEMETRY);
+  const preflight = readings.filter(({ item }) => item.preflight);
+  const failed = preflight.filter(({ item, value }) => readingState(item, value).tone !== "ok");
 
   return (
     <Panel
@@ -110,12 +151,12 @@ function ReadingsPanel() {
       }
       className="hw-panel">
       <ul className="hw-readings">
-        {SCANNER_TELEMETRY.map((item) => {
-          const state = readingState(item);
+        {readings.map(({ item, value }) => {
+          const state = readingState(item, value);
           const filled =
             item.scale === undefined
               ? null
-              : Math.min(100, Math.max(0, (item.value / item.scale) * 100));
+              : Math.min(100, Math.max(0, (value / item.scale) * 100));
           return (
             <li key={item.key}>
               <span className="hw-readings__label">
@@ -123,7 +164,7 @@ function ReadingsPanel() {
                 {item.preflight ? <i title="采集前必须核对项">核对</i> : null}
               </span>
               <b>
-                {readingValue(item)}
+                {readingValue(item, value)}
                 <em>{item.unit}</em>
               </b>
               {filled === null ? (

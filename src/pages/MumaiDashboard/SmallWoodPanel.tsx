@@ -36,7 +36,6 @@ import {
   KNOWLEDGE_DOCS,
   KNOWLEDGE_META,
   REVISIT_PLAN,
-  TRIAGE_ITEMS,
   UPDATE_PACKAGE,
   XIAOMU_INTENTS,
   XIAOMU_TOOLS,
@@ -85,12 +84,19 @@ function factsFor(intent: XiaomuIntent): { k: string; v: string }[] {
     HISTORY_RISKS.find((item) => item.title.startsWith(focusComponentId)) ?? HISTORY_RISKS[0];
   const openRisks = HISTORY_RISKS.filter((item) => !item.closed);
   const anomaly = ANOMALY_EVENTS[0];
-  /** 记录里出现待复核 / 超限 / 不适用 / 部分接收的检查项，其结论就是下一步动作 */
-  const pendingChecks = TRIAGE_ITEMS.filter((item) =>
-    item.records.some((record) =>
-      ["待复核", "超限", "不适用", "部分接收"].includes(record.result),
-    ),
-  );
+  /**
+   * 下一步动作。
+   *
+   * 原来取「四项检查」里那几条待复核 / 超限 / 不适用记录的结论，但那张检查单
+   * 已经改造成采集前的设备启动检查，事后排查改成按事件记录了。
+   * 现在从异常事件本身取：已结案用结论；未结案则列出没通过的那几条证据 —— 
+   * 「哪一条还没过」就是下一步要处理的事。
+   */
+  const pendingChecks = anomaly
+    ? [...anomaly.deviceEvidence, ...anomaly.modelEvidence].filter((row) =>
+        ["待复核", "超限", "不适用", "部分接收"].includes(row.result),
+      )
+    : [];
   const evaluation = runEvaluation(EXPERIMENT);
   const reviewPassed = DATASET.reviewAssign.filter((item) => item.state === "已通过").length;
   const compatPass = UPDATE_PACKAGE.compatibility.filter((item) => item.pass).length;
@@ -114,7 +120,7 @@ function factsFor(intent: XiaomuIntent): { k: string; v: string }[] {
     bookmark: historyRisk.bookmark,
     // 异常排查
     anomalyId: anomaly.id,
-    nextActions: pendingChecks.map((item) => item.conclusion).join("；"),
+    nextActions: anomaly.conclusion ?? pendingChecks.map((row) => row.text).join("；"),
     // 清洗与数据集
     cleanSteps: `${CLEAN_STEPS.length} 步（输入 ${cleanInput} → 保留 ${cleanKept}）`,
     reviewCount: `${reviewCount} 条`,

@@ -1,13 +1,18 @@
 /**
- * 检测适配的页签组件（共享模块）
+ * 检测适配的中段页签组件（共享模块）
  *
- * 原「检测适配」单页已拆成两个页面，本文件只保留页签**内容**、不导出页面：
- *   - pages/Hardware.tsx  硬件详情（`/hardware`）—— 采集作业 / 异常排查 / 硬件监看
- *   - pages/Firmware.tsx  固件及模型（`/firmware`）—— 全局配置 / 数据集 / 训练验证 /
- *     更新交付 / 融合分析
+ * 原「检测适配」单页已经拆开，本文件只剩三个页签的内容：
+ *   - DatasetTab   数据集      → `/firmware?tab=dataset`
+ *   - DeliveryTab  更新交付    → `/firmware?tab=delivery`
+ *   - FusionTab    融合分析    → `/firmware?tab=fusion`
  *
- * 六个页签的实现原样保留在这里，两个页面按职责各自组合，避免把已经做完的内容重写一遍。
- * 页签切换器与 Toolbar 归各页面自己负责。
+ * 首尾三段各自独立成文件了，因为它们的形态与剩下这几个差别太大：
+ *   - CaptureRun.tsx   采集作业 → `/hardware?tab=capture`
+ *     启动前逐条确认并签署的设备启动检查 + 采集端屏幕推流位
+ *   - TriageLog.tsx    异常排查 → `/hardware?tab=triage`
+ *     异常事件列表 + 详情弹窗 + 设备日志
+ *   - TrainingRun.tsx  训练验证 → `/firmware?tab=training`
+ *     训练配置、任务控制台、执行节点占用
  *
  * ⚠️ 文件名里的 `adapt` 是历史遗留，**没有 `/adapt` 这条路由了**。
  * 往这里加跳转时请指向 `/hardware?tab=…` 或 `/firmware?tab=…`：
@@ -21,7 +26,6 @@
  */
 
 import { useMemo, useState } from "react";
-import { useSearchParams } from "react-router";
 import { useMumai } from "../context";
 import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
@@ -33,294 +37,18 @@ import {
   StateBlock,
   StatusChip,
   StepFlow,
-  WaveChart,
 } from "../ui";
 import { checkGrouping } from "../lib";
 import {
-  ANOMALY_EVENTS,
   CLEAN_STEPS,
   DATASET,
   FUSION_RECORD,
   FUSION_RULES,
-  REFERENCE_BATCHES,
   SAMPLES,
-  SCAN_BATCHES,
-  TRIAGE_ITEMS,
   UPDATE_PACKAGE,
-  WAVEFORMS,
 } from "../seed/scenario";
 import type { SplitGroup } from "../seed/types";
 
-/* ------------------------------------------------------------------ *
- * 采集
- * ------------------------------------------------------------------ */
-
-export function CaptureTab() {
-  const { domainPending, toast } = useMumai();
-  /** PRD 2.2：当前批次写在 URL 里，切页签 / 刷新都保留（单一批次来源） */
-  const [params, setParams] = useSearchParams();
-  const batchId = params.get("batch") ?? SCAN_BATCHES[0]?.batchId ?? "";
-  const batch = SCAN_BATCHES.find((item) => item.batchId === batchId) ?? SCAN_BATCHES[0];
-  const waveform = WAVEFORMS.find((item) => item.batchId === batchId) ?? WAVEFORMS[0];
-
-  const selectBatch = (nextBatchId: string) => {
-    const next = new URLSearchParams(params);
-    next.set("batch", nextBatchId);
-    next.set("tab", params.get("tab") ?? "capture");
-    setParams(next, { replace: true });
-  };
-
-  if (!batch) return <StateBlock kind="empty" title="暂无采集批次" />;
-
-  const receiveRows = (["radar", "image", "result"] as const).map((key) => {
-    const item = batch.receive[key];
-    const label = key === "radar" ? "雷达原始数据" : key === "image" ? "表面图像" : "结果文件";
-    return [
-      <b key={`l-${key}`}>{label}</b>,
-      `${item.received} / ${item.expected}`,
-      <StatusChip
-        key={`s-${key}`}
-        text={item.state}
-        tone={item.state === "完成" ? "ok" : item.state === "部分接收" ? "warn" : "muted"}
-      />,
-    ];
-  });
-
-  return (
-    <div className="adapt-grid">
-      <Panel title="采集配置" extra={<SourceTag label={`批次 ${batch.batchId}`} />}>
-        <dl className="kv">
-          <div>
-            <dt>构件 / 测区</dt>
-            <dd>
-              {batch.componentId} · {batch.zoneId}
-            </dd>
-          </div>
-          <div>
-            <dt>轮次</dt>
-            <dd>{batch.round}</dd>
-          </div>
-          <div>
-            <dt>配置版本</dt>
-            <dd>{batch.configVersion}</dd>
-          </div>
-          <div>
-            <dt>模型版本</dt>
-            <dd>{batch.modelVersion}</dd>
-          </div>
-          <div>
-            <dt>原始数据级别</dt>
-            <dd>{batch.rawLevel}</dd>
-          </div>
-          <div>
-            <dt>开始时间</dt>
-            <dd>{batch.startedAt}</dd>
-          </div>
-        </dl>
-
-        <label className="field">
-          <span>切换批次</span>
-          <select value={batchId} onChange={(event) => selectBatch(event.target.value)}>
-            {SCAN_BATCHES.map((item) => (
-              <option key={item.batchId} value={item.batchId}>
-                {item.batchId} · {item.round} · {item.frozen ? "已冻结" : "正常"}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="adapt-actions">
-          <Btn tone="primary" onClick={() => toast("采集已启动，等待帧号与时间戳", "ok")}>
-            启动采集
-          </Btn>
-          <Btn onClick={() => toast("已请求暂停采集，等待设备确认", "warn")}>
-            暂停采集
-          </Btn>
-        </div>
-
-        {batch.frozen ? (
-          <StateBlock
-            kind="partial"
-            title="该批次已冻结"
-            hint={`${batch.freezeReason ?? "等待适用域核验"}。`}
-          />
-        ) : null}
-      </Panel>
-
-      <Panel title="接收情况">
-        <DataTable head={["数据类型", "已接收 / 预期", "状态"]} rows={receiveRows} />
-        <h4 className="sub">实时波形</h4>
-        <WaveChart
-          points={waveform?.points ?? []}
-          unit={waveform?.unit}
-          axisLabel={waveform?.axisLabel}
-          markers={waveform?.markers ?? []}
-        />
-      </Panel>
-
-      <Panel title="参考样本批次">
-        <DataTable
-          head={["批次", "分组", "材种来源", "扫描次数", "方向"]}
-          rows={REFERENCE_BATCHES.map((item) => [
-            item.batchId,
-            item.groupId,
-            item.material,
-            String(item.scans),
-            item.direction,
-          ])}
-        />
-        {domainPending ? (
-          <StateBlock
-            kind="partial"
-            title="适用域待核验"
-            hint="该批次诊断输出已冻结，等待适用域核验。"
-          />
-        ) : null}
-      </Panel>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * 异常排查
- * ------------------------------------------------------------------ */
-
-export function TriageTab() {
-  const { domainPending, setDomainPending, toast, pushEvent } = useMumai();
-  const [conclusions, setConclusions] = useState<Record<string, string>>({});
-  const [signed, setSigned] = useState<Record<string, string>>({});
-
-  const event = ANOMALY_EVENTS[0];
-  const done = Object.keys(signed).length;
-
-  return (
-    <div className="adapt-grid">
-      <Panel title="异常事件" extra={<StatusChip text={event?.kind ?? "—"} tone="danger" />}>
-        {event ? (
-          <>
-            <dl className="kv">
-              <div>
-                <dt>时间</dt>
-                <dd>{event.at}</dd>
-              </div>
-              <div>
-                <dt>冻结批次</dt>
-                <dd>{event.frozenBatch}</dd>
-              </div>
-              <div>
-                <dt>触发来源</dt>
-                <dd>{event.trigger}</dd>
-              </div>
-              <div>
-                <dt>输出状态</dt>
-                <dd>
-                  <StatusChip
-                    text={event.outputsFrozen ? "已冻结" : "正常"}
-                    tone={event.outputsFrozen ? "warn" : "ok"}
-                  />
-                </dd>
-              </div>
-            </dl>
-            <p className="note">{event.detail}</p>
-            <ul className="evidence-list">
-              {event.evidence.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </>
-        ) : (
-          <StateBlock kind="empty" title="暂无异常事件" />
-        )}
-
-        <div className="adapt-actions">
-          <Btn
-            tone="danger"
-            onClick={() => {
-              setDomainPending(true);
-              pushEvent("适用域待核验：冻结该批诊断输出", "danger");
-            }}>
-            标记待核验
-          </Btn>
-          <Btn
-            onClick={() => {
-              setDomainPending(false);
-              pushEvent("适用域核验通过，恢复诊断输出", "ok");
-              toast("已恢复诊断输出", "ok");
-            }}>
-            核验通过并恢复
-          </Btn>
-        </div>
-
-        {domainPending ? (
-          <StateBlock
-            kind="partial"
-            title="诊断输出已冻结"
-            hint="该批次不输出病害结论，等待适用域核验。"
-          />
-        ) : null}
-      </Panel>
-
-      <Panel title="四项检查与签名" extra={<span className="muted">{done}/{TRIAGE_ITEMS.length} 已签名</span>}>
-        <ul className="triage-list">
-          {TRIAGE_ITEMS.map((item) => (
-            <li key={item.id} className={signed[item.id] ? "is-done" : ""}>
-              <header>
-                <b>{item.title}</b>
-                <StatusChip text={item.state} tone={item.state === "已签名" ? "ok" : "warn"} />
-                <em>负责人 {item.owner}</em>
-              </header>
-              <ul className="triage-records">
-                {item.records.map((record) => (
-                  <li key={record.at}>
-                    <time>{record.at}</time>
-                    <span>{record.text}</span>
-                    <StatusChip
-                      text={record.result}
-                      tone={record.result === "正常" ? "ok" : record.result === "异常" ? "danger" : "warn"}
-                    />
-                  </li>
-                ))}
-              </ul>
-              <div className="triage-form">
-                <input
-                  value={conclusions[item.id] ?? item.conclusion ?? ""}
-                  placeholder="填写检查结论"
-                  onChange={(event) =>
-                    setConclusions((current) => ({ ...current, [item.id]: event.target.value }))
-                  }
-                />
-                <Btn
-                  tone="primary"
-                  onClick={() => {
-                    const text = conclusions[item.id] ?? item.conclusion ?? "";
-                    if (!text.trim()) {
-                      toast("请先填写结论再签名", "danger");
-                      return;
-                    }
-                    setSigned((current) => ({ ...current, [item.id]: item.owner }));
-                    pushEvent(`${item.title} 检查结论已签名（${item.owner}）`, "ok");
-                  }}>
-                  签名
-                </Btn>
-                {signed[item.id] ? <StatusChip text={`已签名 ${signed[item.id]}`} tone="ok" /> : null}
-              </div>
-            </li>
-          ))}
-        </ul>
-
-        <Btn
-          tone="primary"
-          disabled={done < TRIAGE_ITEMS.length}
-          onClick={() => {
-            toast("已创建参考样本采集任务", "ok");
-            pushEvent("四项检查完成，创建参考样本采集任务", "ok");
-          }}>
-          创建参考样本采集任务
-        </Btn>
-      </Panel>
-    </div>
-  );
-}
 
 /* ------------------------------------------------------------------ *
  * 数据集

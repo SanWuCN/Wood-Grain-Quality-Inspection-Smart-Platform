@@ -10,8 +10,9 @@
  *   - 状态标签是「彩色圆点 + 文本 + 细边框」，不做整块高饱和 Badge
  */
 
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { CHART, COLORS } from "./design";
+import { Icon } from "./icons";
 import { permissionHint, type Permission } from "./auth";
 import { useMumai } from "./context";
 import { fmtNum } from "./lib";
@@ -475,6 +476,73 @@ export function ConfusionMatrix({ title, metrics }: { title: string; metrics: Me
         ))}
       </div>
       {metrics.naReason ? <p className="note">{metrics.naReason}</p> : null}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 弹窗
+ * ------------------------------------------------------------------ */
+
+/**
+ * 通用弹窗。
+ *
+ * 异常事件详情这类「列表一行 + 点开看全部」的场景用：列表负责扫，
+ * 弹窗负责看全，不用把明细硬塞进列表行。
+ *
+ * 两个细节不能省：
+ *   - 遮罩上按下就关、弹窗内按下不关（`stopPropagation`），
+ *     否则在弹窗里选中文字拖到外面松手会误关；
+ *   - Esc 关闭 + 打开时锁 body 滚动，长列表页面才不会在弹窗后面跟着滚。
+ */
+export function Modal({
+  title,
+  subtitle,
+  onClose,
+  children,
+  footer,
+  wide,
+}: {
+  title: string;
+  subtitle?: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+  wide?: boolean;
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [onClose]);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <article
+        className={`modal${wide ? " modal--wide" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onMouseDown={(event) => event.stopPropagation()}>
+        <header className="modal__head">
+          <div>
+            <h3>{title}</h3>
+            {subtitle ? <p className="modal__sub">{subtitle}</p> : null}
+          </div>
+          <button type="button" className="modal__close" onClick={onClose} aria-label="关闭">
+            <Icon name="close" />
+          </button>
+        </header>
+        <div className="modal__body">{children}</div>
+        {footer ? <footer className="modal__foot">{footer}</footer> : null}
+      </article>
     </div>
   );
 }

@@ -13,6 +13,7 @@
 import type {
   AnomalyEvent,
   ArchiveItem,
+  BootCheckItem,
   CleanStep,
   ChannelStatus,
   ClockPhase,
@@ -22,6 +23,7 @@ import type {
   Curve,
   Dataset,
   DemoEvent,
+  DeviceLogEntry,
   DeviceReading,
   EnvRecord,
   Experiment,
@@ -45,7 +47,6 @@ import type {
   SourceMode,
   StageDef,
   TrainingConfigField,
-  TriageItem,
   UpdatePackage,
   Waveform,
   Waypoint,
@@ -233,12 +234,34 @@ export const DEVICES = {
  * 界面统一挂「模拟采集」来源标识（PRD 1.2）。
  */
 export const SCANNER_TELEMETRY: DeviceReading[] = [
-  { key: "battery", label: "电池电量", value: 68, unit: "%", min: 40, scale: 100, preflight: true },
-  { key: "storage", label: "存储余量", value: 12.4, unit: "GB", digits: 1, min: 2, scale: 32, preflight: true },
-  { key: "clock", label: "时钟偏差", value: 0.18, unit: "s", digits: 2, max: 1, preflight: true, note: "对工单时间基准" },
-  { key: "temp", label: "机身温度", value: 41.6, unit: "℃", digits: 1, max: 55 },
-  { key: "rssi", label: "无线信号", value: -58, unit: "dBm", min: -75 },
+  { key: "battery", label: "电池电量", value: 68, unit: "%", min: 40, scale: 100, preflight: true, drift: 0.4, driftPeriod: 17 },
+  { key: "storage", label: "存储余量", value: 12.4, unit: "GB", digits: 1, min: 2, scale: 32, preflight: true, drift: 0.06, driftPeriod: 23 },
+  { key: "clock", label: "时钟偏差", value: 0.18, unit: "s", digits: 2, max: 1, preflight: true, note: "对工单时间基准", drift: 0.04, driftPeriod: 7 },
+  { key: "temp", label: "机身温度", value: 41.6, unit: "℃", digits: 1, max: 55, drift: 0.5, driftPeriod: 11 },
+  { key: "rssi", label: "无线信号", value: -58, unit: "dBm", min: -75, drift: 2.2, driftPeriod: 5 },
 ];
+
+/**
+ * 采集设备画面（屏幕推流）。
+ *
+ * 与 `RvizView` 的 `RvizStreamConfig` 同一套口径：演示阶段给静态参考画面，
+ * 接实机时把 `image` 留空、填 `url` + `kind`，界面**不用改**就能切到真实推流。
+ * 现在 `url` 是 null —— 明确表达「未接入」，不拿静态图冒充实时画面
+ * （PRD 3.4：暂停页面状态不等于实际传感器停止；同理，静态图不等于推流）。
+ */
+export const CAPTURE_SCREEN_STREAM: {
+  image?: string;
+  url: string | null;
+  kind: "mjpeg" | "webrtc";
+  source: string;
+  note: string;
+} = {
+  image: "/rviz-reference.png",
+  url: null,
+  kind: "mjpeg",
+  source: "手持毫米波 02 号机 · 上位机屏幕",
+  note: "采集端上位机屏幕推流；未接入时显示最近一帧静态画面，不标作实时。",
+};
 
 /** 读数采样时间：与 CHANNELS 的更新时间同属一次会话快照 */
 export const SCANNER_TELEMETRY_AT = "14:22:33";
@@ -864,55 +887,187 @@ export const WAVEFORMS: Waveform[] = [
 ];
 
 /** 异常排查四项（PRD 3.4） */
-export const TRIAGE_ITEMS: TriageItem[] = [
+/**
+ * 异常事件。
+ *
+ * 列表一行一条，点开看详情（设备证据 / 模型证据 / 处置过程）。
+ * 证据分两类的依据是剧本 S12 沈的原话：「设备是否正常有设备证据，
+ * 模型是否适用有模型证据。请分别核对，不能把低分直接解释为木柱出了严重病害」——
+ * 混成一堆会让人以为换个账号或重跑一次就能解决。
+ *
+ * 首版异常由演示控制事件触发，关联预置证据；真实模式只有实际检查结果或
+ * 检测程序输出才能触发（PRD 3.4）。
+ */
+export const ANOMALY_EVENTS: AnomalyEvent[] = [
   {
-    id: "tr-device", key: "device", title: "设备状态", owner: "饶",
-    records: [
+    id: "evt-domain-01",
+    at: "2026-09-11 28:04",
+    kind: "适用域待核验",
+    summary: "Z04 初扫批次触发模型适用性检查，诊断输出已冻结",
+    detail:
+      "输入质量合格、特征偏移超限、模型配置不覆盖该材种，三项合并后触发。该批次暂不输出病害结论。",
+    frozenBatch: "scan-Z04-001",
+    outputsFrozen: true,
+    trigger: "演示控制事件",
+    deviceEvidence: [
       { at: "28:12", text: "供电电压 12.4V，传感器响应正常", result: "正常" },
       { at: "28:40", text: "参考件回波与出厂基线一致（偏差 0.3dB）", result: "正常" },
       { at: "29:05", text: "USB 传输无丢包，落盘 386/420 帧", result: "部分接收" },
     ],
-    conclusion: "未发现足以解释本次异常的明显设备问题", signature: "饶", state: "已签名",
-  },
-  {
-    id: "tr-signal", key: "signal", title: "信号质量", owner: "饶",
-    records: [
-      { at: "28:18", text: "空帧 0，非有限值 0，饱和帧比例 2.1%", result: "合格" },
-      { at: "28:52", text: "有效数据比例 91.9%，低于整批校验阈值", result: "待复核" },
-    ],
-    conclusion: "信号可用但有效比例偏低，需补采后再判定", signature: "饶", state: "已签名",
-  },
-  {
-    id: "tr-zone", key: "zone", title: "测区条件", owner: "马",
-    records: [
-      { at: "29:20", text: "柱号 Z04、参考标高 +0.35m 与现场标尺一致", result: "一致" },
-      { at: "29:44", text: "表面存在反光与遮挡，距离变化 ±18mm", result: "记录" },
-    ],
-    conclusion: "测区位置与扫描方向已核对；表面反光需在复扫时避开", signature: "马", state: "已签名",
-  },
-  {
-    id: "tr-applicability", key: "applicability", title: "模型适用范围", owner: "史",
-    records: [
+    modelEvidence: [
       { at: "30:02", text: "输入质量：信号完整度 91.9%", result: "合格" },
       { at: "30:20", text: "特征偏移：与参考分布偏离 2.7σ", result: "超限" },
       { at: "30:38", text: "模型配置：DEMO-M02 缺少该批次木材标定记录", result: "不适用" },
     ],
-    conclusion: "触发适用域待核验，冻结该批诊断输出；仅凭低置信度不判定材种", signature: "史", state: "已签名",
+    handling: [
+      { at: "28:04", owner: "史", text: "发现适用域事件，要求暂停当前采集并保留原始数据" },
+      { at: "28:20", owner: "饶", text: "停止采集，封存批次 scan-Z04-001，记录设备位置" },
+      { at: "29:30", owner: "马", text: "确认小车已到安全点暂停，核对 Z04 编号与扫描方向" },
+      { at: "30:50", owner: "饶", text: "参考件复核与设备日志检查完成，未发现足以解释异常的明显设备问题" },
+    ],
+    conclusion: null,
+    state: "处理中",
+    owner: "史",
+  },
+  {
+    id: "evt-recv-01",
+    at: "2026-09-11 28:41",
+    kind: "接收不完整",
+    summary: "scan-Z04-001 雷达原始数据 386/420，34 帧未回传",
+    detail:
+      "整批校验未通过，不报「数据全部回传」。缺帧集中在批次后段，与暂停时间点吻合。",
+    frozenBatch: "scan-Z04-001",
+    outputsFrozen: false,
+    trigger: "演示控制事件",
+    deviceEvidence: [
+      { at: "28:41", text: "雷达 386/420、图像 12/12、结果 0/1", result: "部分接收" },
+      { at: "28:44", text: "缺帧区间与 28:20 暂停时刻重叠", result: "记录" },
+    ],
+    modelEvidence: [],
+    handling: [
+      { at: "28:45", owner: "饶", text: "已向扫描枪请求重传未接收分片，等待设备回报" },
+    ],
+    conclusion: null,
+    state: "处理中",
+    owner: "饶",
+  },
+  {
+    id: "evt-signal-01",
+    at: "2026-09-11 28:52",
+    kind: "信号质量",
+    summary: "有效数据比例 91.9%，低于整批校验阈值",
+    detail: "信号可用但有效比例偏低。整批校验未通过前不进入后续分析；需补采后再判定。",
+    frozenBatch: "scan-Z04-001",
+    outputsFrozen: false,
+    trigger: "演示控制事件",
+    deviceEvidence: [
+      { at: "28:18", text: "空帧 0，非有限值 0，饱和帧比例 2.1%", result: "合格" },
+      { at: "28:52", text: "有效数据比例 91.9%", result: "待复核" },
+    ],
+    modelEvidence: [],
+    handling: [
+      { at: "28:55", owner: "饶", text: "标记该批次待补采，保持当前配置不变" },
+    ],
+    conclusion: "信号可用但有效比例偏低，需补采后再判定",
+    state: "已结案",
+    owner: "饶",
+  },
+  {
+    id: "evt-img-01",
+    at: "2026-09-11 22:06",
+    kind: "表面疑点",
+    summary: "四柱关键帧对比，Z04 视角可见表面缺损与孔洞状疑点",
+    detail:
+      "图像可提示外观异常，不能确认内部是否存在空洞，也不能直接判定承载能力。已建立 Z04 下部精扫任务。",
+    frozenBatch: "—",
+    outputsFrozen: false,
+    trigger: "演示控制事件",
+    deviceEvidence: [
+      { at: "22:06", text: "关键帧 keyframe-Z04-03 与 Z01-02 对比", result: "记录" },
+    ],
+    modelEvidence: [
+      { at: "22:08", text: "视觉初筛：表面缺损与孔洞状疑点", result: "优先复核" },
+    ],
+    handling: [
+      { at: "22:10", owner: "史", text: "在平台标注建立 Z04 下部精扫任务" },
+      { at: "22:15", owner: "沈", text: "核对现场编号，指定对 Z04 测区开展手持精扫" },
+    ],
+    conclusion: "已转入 Z04 下部测区精扫，内部情况待精扫确认",
+    state: "已结案",
+    owner: "史",
   },
 ];
 
-export const ANOMALY_EVENTS: AnomalyEvent[] = [
+/**
+ * 硬件日志输出记录。
+ *
+ * 来源分五类：下位机（ESP32-S3，管采集时序与模型输入）、上位机（树莓派，
+ * 管数据汇集 / 界面 / 文件）、毫米波模块、传输链路、供电 —— 剧本 S09 里
+ * 饶讲的分工，出问题时先按 source 分层再看时间，比按时间翻一条流水账快。
+ *
+ * 前四条沿用原「四项检查」里已经写好的记录（供电、参考件、落盘、信号），
+ * 那几条本来就是设备日志的口径，放在检查单里反而埋没了。
+ */
+export const DEVICE_LOGS: DeviceLogEntry[] = [
+  { id: "log-001", at: "27:52", level: "INFO", source: "供电", text: "上电自检完成，电池电量 68%，供电电压 12.4V" },
+  { id: "log-002", at: "27:53", level: "INFO", source: "ESP32-S3", text: "固件 FW-2.4.1 启动，采集配置 CFG-02 已加载" },
+  { id: "log-003", at: "27:54", level: "INFO", source: "树莓派", text: "上位机服务就绪，存储余量 12.4 GB，时间同步偏差 0.18s" },
+  { id: "log-004", at: "27:56", level: "INFO", source: "毫米波模块", text: "模块自检通过，频段与增益按 CFG-02 下发" },
+  { id: "log-005", at: "28:01", level: "INFO", source: "毫米波模块", text: "参考件回波与出厂基线一致（偏差 0.3dB）" },
+  { id: "log-006", at: "28:04", level: "WARN", source: "树莓派", text: "适用域检查未通过：模型 DEMO-M02 缺少该批次木材标定记录" },
+  { id: "log-007", at: "28:04", level: "WARN", source: "树莓派", text: "特征偏移 2.7σ 超限，诊断输出已冻结，暂停输出结论" },
+  { id: "log-008", at: "28:18", level: "INFO", source: "毫米波模块", text: "信号质量：空帧 0，非有限值 0，饱和帧比例 2.1%" },
+  { id: "log-009", at: "28:20", level: "WARN", source: "ESP32-S3", text: "收到暂停请求，停止采集控制；等待上位机确认落盘" },
+  { id: "log-010", at: "28:41", level: "WARN", source: "传输", text: "批次 scan-Z04-001 雷达原始数据 386/420 帧，34 帧未回传" },
+  { id: "log-011", at: "28:44", level: "WARN", source: "传输", text: "缺帧区间与 28:20 暂停时刻重叠，判定为暂停导致而非链路丢包" },
+  { id: "log-012", at: "28:52", level: "WARN", source: "树莓派", text: "有效数据比例 91.9%，低于整批校验阈值 95%" },
+  { id: "log-013", at: "29:05", level: "INFO", source: "传输", text: "USB 传输无丢包，落盘 386/420 帧" },
+  { id: "log-014", at: "29:30", level: "INFO", source: "树莓派", text: "批次 scan-Z04-001 已封存，原始数据保留，未做清理" },
+  { id: "log-015", at: "31:12", level: "INFO", source: "ESP32-S3", text: "切换到参考样本采集模式，等待新批次下发" },
+  { id: "log-016", at: "31:20", level: "ERROR", source: "传输", text: "参考样本批次 ref-Z04-g1 第 3 条重传失败一次，已自动重试成功" },
+];
+
+/**
+ * 设备启动检查。
+ *
+ * 采集启动前的硬门槛：硬件工程师点「启动采集」后逐条确认并签署，
+ * 全部签完才真正进入采集。前三项来自知识库 SOP
+ * 「每次采集前核对设备电量、存储余量与时间同步状态，三项任一不满足即不开始采集」，
+ * 后三项补传感器响应、通道连通与测区方向。
+ *
+ * `expected` 必须写清楚「对着什么看」，否则检查单只剩一个「通过」按钮，
+ * 签了等于没签。
+ */
+export const BOOT_CHECKS: BootCheckItem[] = [
   {
-    id: "evt-domain-01", at: "2026-09-11 28:04", kind: "适用域待核验",
-    detail: "输入质量合格、特征偏移超限、模型配置不覆盖该材种，三项合并后触发",
-    frozenBatch: "scan-Z04-001", outputsFrozen: true, trigger: "演示控制事件",
-    evidence: ["输入质量报告 q-0911", "参考分布对比 chart-ref", "模型卡模型卡 DEMO-M02"],
+    id: "chk-power", group: "设备", label: "供电与电量", owner: "饶",
+    expected: "电池电量 ≥ 40%，供电电压 12.0–13.0V",
+    onFail: "电量不足会中途掉电，本批次作废",
   },
   {
-    id: "evt-img-01", at: "2026-09-11 22:06", kind: "表面疑点",
-    detail: "四柱关键帧对比，Z04 视角可见表面缺损与孔洞状疑点",
-    frozenBatch: "—", outputsFrozen: false, trigger: "演示控制事件",
-    evidence: ["keyframe-Z04-03", "keyframe-Z01-02"],
+    id: "chk-storage", group: "设备", label: "存储余量", owner: "饶",
+    expected: "可用空间 ≥ 2 GB，落盘目录可写",
+    onFail: "空间不足会截断原始数据，无法复算",
+  },
+  {
+    id: "chk-clock", group: "设备", label: "时间同步", owner: "饶",
+    expected: "对工单时间基准偏差 ≤ 1s",
+    onFail: "时间戳错位，环境记录与雷达数据无法按时间对齐",
+  },
+  {
+    id: "chk-sensor", group: "设备", label: "传感器响应", owner: "饶",
+    expected: "参考件回波与出厂基线偏差 ≤ 1.0dB",
+    onFail: "响应异常时后续结论不可信，须先排查模块",
+  },
+  {
+    id: "chk-link", group: "链路", label: "通道连通", owner: "饶",
+    expected: "地图 / 位姿 / 视频 / 车辆四路均在线",
+    onFail: "任一通道断开都会造成测区对应关系缺失",
+  },
+  {
+    id: "chk-zone", group: "测区", label: "测区与扫描方向", owner: "马",
+    expected: "柱号、参考标高与扫描方向与任务一致",
+    onFail: "测区错位会把数据挂到错误的构件编号下",
   },
 ];
 

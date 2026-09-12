@@ -75,6 +75,16 @@ export type DeviceReading = {
   scale?: number;
   /** 读数来自哪一份记录，便于追溯 */
   note?: string;
+  /**
+   * 实时监看时的浮动幅度（与 value 同单位）。
+   *
+   * 手持设备在采集中读数本来就会小幅摆动，一条钉死的数字反而假。
+   * 界面按这个幅度做确定性摆动（围绕 value，不产生超出幅度的漂移），
+   * 幅度缺省表示该项不摆动 —— 版本号、采样时间这类不该抖。
+   */
+  drift?: number;
+  /** 摆动周期（秒），不同项给不同周期，避免所有数字同频一起跳 */
+  driftPeriod?: number;
 };
 
 /** 环境记录（PRD 3.1 / 12：温度℃、湿度 0–100、风速非负、仪表、位置、测量时间） */
@@ -312,26 +322,78 @@ export type Waveform = {
   markers: { x: number; label: string; tone: "red" | "amber" | "cyan" }[];
 };
 
-export type TriageItem = {
+/**
+ * 硬件日志的一条输出记录。
+ *
+ * 来源分设备侧进程（上位机 / 下位机 / 毫米波模块）与链路（传输 / 供电），
+ * 对应剧本 S09 里饶讲的分工：「上位机检查图像与文件，下位机检查采集时序与
+ * 模型输入，异常也更容易定位」—— 所以日志必须带 `source`，只按时间排一条
+ * 流水账就分不出该查哪一层。
+ */
+export type DeviceLogEntry = {
   id: string;
-  key: "device" | "signal" | "zone" | "applicability";
-  title: string;
-  owner: string;
-  records: { at: string; text: string; result: string }[];
-  conclusion: string | null;
-  signature: string | null;
-  state: "未开始" | "已填结论" | "已签名";
+  /** 相对时间戳 mm:ss，与剧本时间轴同口径 */
+  at: string;
+  level: "INFO" | "WARN" | "ERROR";
+  source: DeviceLogSource;
+  text: string;
 };
 
+export type DeviceLogSource =
+  | "ESP32-S3"
+  | "树莓派"
+  | "毫米波模块"
+  | "传输"
+  | "供电";
+
+/**
+ * 异常事件。
+ *
+ * 列表页一行一条，点开看详情 —— 所以除了列表要显示的摘要，还要有
+ * 详情弹窗用的证据与处置过程。证据按剧本 S12 分「设备证据 / 模型证据」：
+ * 沈的原话是「设备是否正常有设备证据，模型是否适用有模型证据，
+ * 请分别核对」，混成一堆会让人以为换个账号就能解决。
+ */
 export type AnomalyEvent = {
   id: string;
   at: string;
   kind: string;
+  /** 一句话说清发生了什么，列表里显示这一条 */
+  summary: string;
   detail: string;
   frozenBatch: string;
   outputsFrozen: boolean;
   trigger: "演示控制事件" | "实机检查结果";
-  evidence: string[];
+  /** 证据分两类：设备侧看设备是否正常，模型侧看模型是否适用 */
+  deviceEvidence: { at: string; text: string; result: string }[];
+  modelEvidence: { at: string; text: string; result: string }[];
+  /** 处置过程：谁在什么时候做了什么，形成可追溯的处理链 */
+  handling: { at: string; owner: string; text: string }[];
+  /** 结论；未结案时为 null，不要用空字符串冒充「已处理」 */
+  conclusion: string | null;
+  state: "待处理" | "处理中" | "已结案";
+  owner: string;
+};
+
+/**
+ * 设备启动检查项。
+ *
+ * 由原「四项检查」改造而来：原来在异常排查页里事后逐项填结论，现在是
+ * **采集启动前的硬门槛** —— 硬件工程师点「启动采集」后逐条确认并签署，
+ * 全部签完才真正进入采集。判据来自知识库 SOP
+ * 「每次采集前核对设备电量、存储余量与时间同步状态，三项任一不满足即不开始采集」，
+ * 另外补上传感器响应、通道连通与测区方向。
+ */
+export type BootCheckItem = {
+  id: string;
+  label: string;
+  /** 期望值：签署时要对着看的东西，不能只有一个「通过」按钮 */
+  expected: string;
+  /** 这一项不过会怎样 */
+  onFail: string;
+  owner: string;
+  /** 检查项归属的子过程，界面上按这个分组 */
+  group: "设备" | "链路" | "测区";
 };
 
 /** 数据集与样本（PRD 3.5 / 11.1） */

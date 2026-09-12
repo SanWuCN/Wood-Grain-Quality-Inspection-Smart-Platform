@@ -2540,49 +2540,135 @@
   margin-top: 9px;
 }
 
-.evidence-list {
-  margin: 6px 0 0;
-  padding-left: 16px;
-  color: var(--ma-text-2);
-  font-size: var(--fs-aux);
+/* ------------------------------------------------------------------
+   硬件详情 · 异常排查（/hardware?tab=triage）
+   异常事件列表 + 详情弹窗 + 设备日志。
+   原来的「四项检查与签名」已移出本页（改成采集作业里的设备启动检查），
+   配套的 .triage-list / .triage-records / .triage-form 一并删除。
+   ------------------------------------------------------------------ */
+
+.triage {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: var(--space-3);
+  align-items: start;
 }
 
-.triage-list {
+.tri-panel,
+.cap-panel {
+  min-width: 0;
+}
+
+/* 设备日志要宽度：一条记录里时间 / 级别 / 来源 / 正文四段，
+   挤在一列宽里会退化成每段折行 */
+.tri-panel:last-child {
+  grid-column: 1 / -1;
+}
+
+/*
+ * 采集作业：左边操作链（配置 + 启动检查），右边监看链（设备画面 + 接收情况）。
+ * 用户的要求是「启动后在右侧空白处看到采集设备画面」—— 采集时人是一边看画面
+ * 一边核对接收情况，这两件事必须在同一屏，所以不能用 auto-fit 排成一行再
+ * 让画面掉到下面去。左列给一个下限宽度，剩下的都给画面。
+ */
+.capture {
+  display: grid;
+  grid-template-columns: minmax(340px, 0.85fr) minmax(0, 1.15fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.cap-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* 窄视口退回单列：两列并排时每列不足 340px，键值对会折成每行两个字 */
+@media (max-width: 1180px) {
+  .capture {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- 异常事件列表 ---- */
+
+.evt-list {
   margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 9px;
 }
 
-.triage-list > li {
-  padding: 8px 10px;
-}
-
-.triage-list > li.is-done {
-  border-color: var(--success);
-}
-
-.triage-list header {
+/* 整行是打开详情的入口，但只有悬停才提亮 —— 不做成一排按钮框 */
+.evt-list button {
+  width: 100%;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: none;
+  text-align: left;
+  cursor: pointer;
 }
 
-.triage-list header b {
+.evt-list button:hover {
+  background: var(--fill-weak);
+}
+
+.evt-list__main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.evt-list__main b {
+  color: var(--text-primary);
   font-size: var(--fs-table);
+  font-weight: 600;
 }
 
-.triage-list header em {
-  margin-left: auto;
-  color: var(--ma-text-3);
+.evt-list__main i {
+  overflow: hidden;
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
   font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.evt-list__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
   font-size: var(--fs-aux);
 }
 
-.triage-records {
-  margin: 6px 0;
+.evt-list__meta em {
+  font-style: normal;
+}
+
+.evt-list__meta time {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 异常详情弹窗内的两段证据 ---- */
+
+.evt-modal__section + .evt-modal__section {
+  margin-top: var(--space-3);
+}
+
+.evt-modal__rows {
+  margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
@@ -2590,35 +2676,256 @@
   gap: 4px;
 }
 
-.triage-records li {
-  display: flex;
+.evt-modal__rows li {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
+  padding: 2px 0;
   font-size: var(--fs-aux);
   color: var(--ma-text-2);
 }
 
-.triage-records time {
+.evt-modal__rows time {
   color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 处置过程：时间 / 人 / 做了什么，竖排成一条链 */
+.evt-modal__handling {
+  margin: 0;
+  padding: 0 0 0 var(--space-3);
+  list-style: none;
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.evt-modal__handling li {
+  display: grid;
+  grid-template-columns: 52px 40px minmax(0, 1fr);
+  gap: var(--space-2);
+  font-size: var(--fs-aux);
+  color: var(--ma-text-2);
+}
+
+.evt-modal__handling time {
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.evt-modal__handling b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ---- 设备日志 ---- */
+
+.devlog {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 420px;
+  overflow-y: auto;
+  scrollbar-width: thin;
   font-family: var(--font-data);
   font-size: var(--fs-aux);
 }
 
-.triage-form {
-  display: flex;
-  align-items: center;
-  gap: 7px;
+/* 时间 / 级别 / 来源 / 正文 四段定宽对齐，竖着扫能只看某一列 */
+.devlog li {
+  display: grid;
+  grid-template-columns: 46px 48px 84px minmax(0, 1fr);
+  gap: var(--space-2);
+  padding: 3px var(--space-2);
+  border-left: 2px solid transparent;
+  color: var(--ma-text-2);
+  line-height: 1.6;
 }
 
-.triage-form input {
-  flex: 1;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--ma-line);
-  background: var(--bg-page);
-  color: var(--ma-text);
+.devlog li.is-warn {
+  border-left-color: var(--ma-warn);
+}
+
+.devlog li.is-error {
+  border-left-color: var(--ma-danger);
+}
+
+.devlog time {
+  color: var(--ma-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.devlog__level {
+  color: var(--ma-text-3);
+  font-weight: 500;
+}
+
+.devlog li.is-warn .devlog__level {
+  color: var(--ma-warn);
+}
+
+.devlog li.is-error .devlog__level {
+  color: var(--ma-danger);
+}
+
+.devlog__source {
+  color: var(--ma-text-3);
+}
+
+/* ---- 设备启动检查 ---- */
+
+.boot-group + .boot-group {
+  margin-top: var(--space-3);
+}
+
+.boot-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* 未签署的项给左侧告警线，签完转成功色 —— 一眼能看出还剩哪几条 */
+.boot-list > li {
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--ma-warn);
+  background: var(--fill-weak);
+}
+
+.boot-list > li.is-done {
+  border-left-color: var(--ma-ok);
+}
+
+.boot-list__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.boot-list__head b {
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 600;
+}
+
+.boot-list__head .chip {
+  margin-left: auto;
+}
+
+/* 「核对什么」和「不过会怎样」两列并排：只给一个通过按钮，签了等于没签 */
+.boot-list__meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px var(--space-3);
+  margin: var(--space-2) 0;
+}
+
+.boot-list__meta dt {
+  color: var(--ma-text-3);
   font-size: var(--fs-aux);
-  outline: none;
+}
+
+.boot-list__meta dd {
+  margin: 0;
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+}
+
+.boot-list .btn {
+  height: 26px;
+  font-size: var(--fs-aux);
+}
+
+/* ---- 采集设备画面（实时推流位） ---- */
+
+.cap-screen {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  max-height: 420px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.cap-screen__media {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* 未接入时的静态参考画面压暗，和真实推流区分开 —— 不拿静态图冒充实时 */
+.cap-screen__media.is-still {
+  opacity: 0.28;
+}
+
+.cap-screen__placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-5);
+  text-align: center;
+}
+
+.cap-screen__placeholder b {
+  color: var(--text-primary);
+  font-size: var(--fs-panel);
+  font-weight: 600;
+}
+
+.cap-screen__placeholder em {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  line-height: var(--lh-aux);
+}
+
+.cap-screen__placeholder code {
+  padding: 1px 5px;
+  background: var(--fill-soft);
+  font-family: var(--font-data);
+}
+
+/* 来源标识钉在左下角，像监看画面自带的角标 */
+.cap-screen__tag {
+  position: absolute;
+  left: var(--space-2);
+  bottom: var(--space-2);
+  padding: 2px var(--space-2);
+  background: var(--panel-surface);
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+/* 接上真实推流后左上角亮一个红点 —— 一眼区分「有画面」和「没有画面」 */
+.cap-screen.is-live::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  left: var(--space-2);
+  top: var(--space-2);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ma-danger);
+  animation: cap-live-blink 1.4s ease-in-out infinite;
+}
+
+@keyframes cap-live-blink {
+  50% {
+    opacity: 0.25;
+  }
 }
 
 .split-groups {
@@ -4449,4 +4756,96 @@
   font-family: var(--font-data);
   font-size: var(--fs-aux);
   font-style: normal;
+}
+
+/* ------------------------------------------------------------------
+   通用弹窗（异常事件详情等）
+   遮罩 + 居中卡片。项目里原来只有已下线旧单页的 .order-modal，
+   没有任何可用样式，所以这里从零定义一套。
+   ------------------------------------------------------------------ */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background: rgba(2, 7, 17, 0.72);
+}
+
+.modal {
+  width: min(620px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-hover);
+  background: var(--panel-surface);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+
+.modal--wide {
+  width: min(880px, 100%);
+}
+
+.modal__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.modal__head h3 {
+  margin: 0;
+  color: var(--text-title);
+  font-size: var(--fs-panel);
+  font-weight: 600;
+  line-height: var(--lh-panel);
+}
+
+.modal__sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0 0;
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+}
+
+.modal__close {
+  margin-left: auto;
+  padding: 4px;
+  border: 0;
+  background: none;
+  color: var(--ma-text-3);
+  cursor: pointer;
+}
+
+.modal__close:hover {
+  color: var(--text-primary);
+}
+
+.modal__close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.modal__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4);
+  scrollbar-width: thin;
+}
+
+.modal__foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border-subtle);
 }
