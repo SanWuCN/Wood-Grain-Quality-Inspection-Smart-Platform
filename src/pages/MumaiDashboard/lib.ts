@@ -100,17 +100,19 @@ export function diffConfig(before: string, after: string): ConfigDiffRow[] {
   );
 }
 
-/** PRD 3.1：风速不代入 HH 公式，HH 只作环境先验 */
-export function hhPrior(record: EnvRecord): { emcPct: number; note: string; windUsed: boolean } {
-  const t = record.airTempC;
-  const rh = record.relativeHumidityPct;
-  const emc = 6.1 + 0.032 * rh + 0.18 * Math.max(0, 24 - t) - 0.04 * Math.max(0, t - 24);
-  return {
-    emcPct: Number(Math.max(4, Math.min(28, emc)).toFixed(2)),
-    note: "HH 只作环境先验：现场木柱未必与环境充分平衡，估计值不能直接当成木柱内部实测含水率。",
-    windUsed: false,
-  };
-}
+/*
+ * 平衡含水率（HH 先验）**不在前端算**。
+ *
+ * 这里原来有一个 `hhPrior()`，用的是一条线性近似
+ * （`6.1 + 0.032·rh + 0.18·max(0, 24 − t) …`），而服务端
+ * `server/services/workflow.mjs` 的 `estimateEmc()` 用的是真正的
+ * Hailwood-Horrobin 公式 —— 同一工况下两边给出的数不一样，
+ * 正是评审反复点过的「两套口径」。
+ *
+ * 处理办法是**删掉重复的那一份**而不是维护一个镜像：EMC 由服务端在发布配置时
+ * 算好、写在 `environment` 实体上，页面直接读 `envEntity.data.emcPct`。
+ * 公式的参考点检查在 `tools/test-emc.mjs`（`npm run test:emc`）。
+ */
 
 /* ------------------------------------------------------------------ *
  * 2. 分组检查（PRD 3.5 / 12：真的做集合求交）

@@ -574,10 +574,16 @@ export const CONFIG_DIFF: ConfigDiffRow[] = [
   { field: "处理函数版本", before: "comp-v1.3", after: "comp-v1.4", note: "每条曲线保存来源文件和处理配置" },
 ];
 
-/** HH 平衡含水率只作环境先验（PRD 3.1） */
+/**
+ * HH 平衡含水率只作环境先验（PRD 3.1）。
+ *
+ * **这里不写数值**：EMC 由服务端在发布配置时按 Hailwood-Horrobin 算好、
+ * 落在 `environment` 实体的 `emcPct` 上，页面读实体。原来这里写死
+ * `estimatedEmcPct: 14.2`，而按现场工况（26.4℃ / 78%）真算出来是 15.081 ——
+ * 页面上一旦两个数都出现就是对不上的。种子只留文案与口径声明。
+ */
 export const HH_PRIOR = {
   model: "Hailwood-Horrobin",
-  estimatedEmcPct: 14.2,
   note: "该值描述木材与环境充分平衡时的状态；现场木柱未必已平衡，不能直接当成木柱内部实测含水率。",
   windExcluded: true,
   functionVersion: "hh-emc-v1.2（已核对的现有函数，非凭空生成实测值）",
