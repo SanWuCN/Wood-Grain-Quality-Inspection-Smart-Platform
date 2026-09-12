@@ -319,8 +319,87 @@ export function DeliveryTab() {
     </li>
   );
 
+  /**
+   * 四段轨道：生成 → 校验 → 发布 → 接收。
+   *
+   * 评审 U04/V08 说这一页「字段横向分散，主操作混在长列表里」，PRD §4.5 要求
+   * 「候选包、检查结果、发布和接收形成顺序；当前步骤展开详细内容，已完成步骤显示摘要」。
+   * 所以把**当前产物**提到最上面，用一条轨道说明它走到哪一步、下一步该谁做什么 ——
+   * 下面是全量表格，看细节时再往下翻。
+   */
+  /** 当前产物 = 最新一条已发布/已回验的产物 */
+  const current = sharedArtifacts[0] ?? null;
+
+  const track = useMemo(() => {
+    if (!current) return null;
+    const state = current.data.state;
+    const receipts = current.data.receipts ?? [];
+    const verified = receipts.some((item) => item.pass);
+    const downloaded = (current.data.downloadCount ?? 0) > 0;
+    return {
+      name: current.data.name,
+      version: current.data.modelVersion,
+      target: current.data.target,
+      demoOnly: current.data.demoOnly,
+      steps: [
+        { key: "build", label: "生成", done: true, owner: "史 · 人工智能架构师", detail: current.data.fromJob ?? "手工上传" },
+        { key: "check", label: "校验", done: true, owner: "平台", detail: `${current.data.sizeText} · 摘要 ${current.data.sha256.slice(0, 12)}…` },
+        {
+          key: "publish",
+          label: "发布",
+          done: state !== "待提交",
+          owner: "史 · 人工智能架构师",
+          detail: current.data.publishedAt ? `发布于 ${current.data.publishedAt.slice(0, 19).replace("T", " ")}` : "尚未发布",
+        },
+        {
+          key: "receive",
+          label: "接收",
+          done: downloaded,
+          owner: "饶 · 全栈开发工程师",
+          detail: downloaded
+            ? `已取用 ${current.data.downloadCount} 次${verified ? " · 摘要已回验" : " · 等待提交摘要"}`
+            : "尚未取用",
+        },
+      ],
+      verified,
+    };
+  }, [current]);
+
   return (
     <div className="delivery">
+      {track ? (
+        <Panel
+          title="本轮产物"
+          extra={
+            <StatusChip
+              text={track.verified ? "已回验" : current?.data.state ?? "—"}
+              tone={track.verified ? "ok" : "info"}
+            />
+          }
+          className="dl-track-panel">
+          <div className="dl-track__head">
+            <b>{track.name}</b>
+            <span>
+              {track.target} · {track.version}
+              {track.demoOnly ? " · 演示资产，不可烧录" : ""}
+            </span>
+          </div>
+          <ol className="dl-track">
+            {track.steps.map((step, index) => {
+              const next = !step.done && track.steps.slice(0, index).every((item) => item.done);
+              return (
+                <li key={step.key} className={`${step.done ? "is-done" : next ? "is-next" : "is-wait"}`}>
+                  <span className="dl-track__dot" />
+                  <b>{step.label}</b>
+                  <em>{step.owner}</em>
+                  <span className="dl-track__detail">{step.detail}</span>
+                </li>
+              );
+            })}
+          </ol>
+        </Panel>
+      ) : null}
+
       <Panel
         title="待提交产物"
         extra={

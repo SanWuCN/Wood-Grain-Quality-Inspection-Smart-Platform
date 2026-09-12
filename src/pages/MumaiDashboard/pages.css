@@ -5931,6 +5931,109 @@
   min-width: 0;
 }
 
+/*
+   本轮产物轨道（评审 U04/V08 / PRD §4.5）。
+
+   评审说这一页「字段横向分散，主操作混在长列表里」。轨道把**当前产物**提到最上面，
+   横向铺开四段：生成 → 校验 → 发布 → 接收。已完成的段只留摘要，
+   下一段写清该谁做什么，全量表格退到下面看细节。
+*/
+.dl-track-panel {
+  grid-column: span 12;
+  min-width: 0;
+}
+
+.dl-track__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.dl-track__head b {
+  color: var(--text-primary);
+  font-size: var(--fs-panel);
+  font-weight: 600;
+}
+
+.dl-track__head span {
+  color: var(--text-tertiary);
+  font-size: var(--fs-table);
+}
+
+.dl-track {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dl-track li {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: var(--space-3) var(--space-4);
+  border-top: 2px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.dl-track li.is-done {
+  border-top-color: var(--success);
+}
+
+.dl-track li.is-next {
+  border-top-color: var(--primary);
+  background: var(--fill-weak);
+}
+
+.dl-track__dot {
+  position: absolute;
+  top: -5px;
+  left: var(--space-4);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-disabled);
+}
+
+.dl-track li.is-done .dl-track__dot {
+  background: var(--success);
+}
+
+.dl-track li.is-next .dl-track__dot {
+  background: var(--primary);
+}
+
+.dl-track li b {
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 600;
+}
+
+.dl-track li.is-wait b {
+  color: var(--text-tertiary);
+}
+
+.dl-track li em {
+  color: var(--text-tertiary);
+  font-style: normal;
+  font-size: var(--fs-aux);
+}
+
+.dl-track__detail {
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+}
+
+@media (max-width: 1200px) {
+  .dl-track {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* 提交前校验并到已发布旁边：它是提交动作的解释，不需要占满一整行 */
 .dl-panel--checks {
   grid-column: span 12;
