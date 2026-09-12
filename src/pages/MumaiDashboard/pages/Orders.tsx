@@ -17,7 +17,7 @@ import { isReadOnlyPath, permissionHint } from "../auth";
 import { WorkOrderCreateModal } from "./WorkOrderCreate";
 import { Panel } from "../Panel";
 import { Icon } from "../icons";
-import { Btn, DataTable, KV, PermNote, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
+import { Btn, DataTable, KV, Modal, PermNote, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
 import {
   CONFIG_DIFF,
   ENV_HISTORY,
@@ -104,6 +104,8 @@ export default function Orders() {
 
   /** 建单弹窗：表单在二级，一级页面只放一个「生成工单」按钮 */
   const [createOpen, setCreateOpen] = useState(false);
+  /** 操作记录弹窗：历史记录下沉，一级页面只留最近一条 */
+  const [logOpen, setLogOpen] = useState(false);
   /**
    * 工单号由**已有列表 + 草稿单**一起推导，弹窗不自己编。
    *
@@ -577,7 +579,19 @@ export default function Orders() {
             </Panel>
           </div>
 
-          <Panel title="人员分工与操作记录">
+          {/*
+            人员分工与操作记录（811px、12 行）原来整块铺在一级页面 ——
+            它是**历史记录**，用户明确要求「历史记录……统一下沉」。
+            一级页面只留：谁负责、最近一条动作是什么、完整记录入口。
+          */}
+          <Panel
+            title="人员与操作记录"
+            extra={
+              <span className="fw-console__actions">
+                <span className="muted">{ORDER_LOGS.length} 条记录</span>
+                <Btn onClick={() => setLogOpen(true)}>查看全部</Btn>
+              </span>
+            }>
             <div className="members">
               {MEMBERS.map((member) => (
                 <article key={member.id}>
@@ -585,25 +599,62 @@ export default function Orders() {
                     {member.name} · {member.role}
                   </b>
                   <span>{member.duty}</span>
-                  <em>默认工作区：{member.workspace}</em>
                 </article>
               ))}
             </div>
-            <ol className="order-logs">
-              {ORDER_LOGS.map((log) => (
-                <li key={log.at + log.action}>
-                  <time>{log.at}</time>
-                  <b>{log.actor}</b>
+            {ORDER_LOGS.length ? (
+              <ol className="order-logs order-logs--latest">
+                <li>
+                  <time>{ORDER_LOGS[ORDER_LOGS.length - 1].at}</time>
+                  <b>{ORDER_LOGS[ORDER_LOGS.length - 1].actor}</b>
                   <span>
-                    {log.action} · {log.object}
+                    {ORDER_LOGS[ORDER_LOGS.length - 1].action} · {ORDER_LOGS[ORDER_LOGS.length - 1].object}
                   </span>
-                  <em>{log.result}</em>
+                  <em>{ORDER_LOGS[ORDER_LOGS.length - 1].result}</em>
                 </li>
-              ))}
-            </ol>
+              </ol>
+            ) : null}
           </Panel>
         </div>
       </div>
+
+      {logOpen ? (
+        <Modal
+          wide
+          title="操作记录"
+          subtitle={`${selected.id} · ${ORDER_LOGS.length} 条`}
+          onClose={() => setLogOpen(false)}
+          footer={
+            <Btn tone="primary" onClick={() => setLogOpen(false)}>
+              关闭
+            </Btn>
+          }>
+          <ol className="order-logs">
+            {ORDER_LOGS.map((log) => (
+              <li key={log.at + log.action}>
+                <time>{log.at}</time>
+                <b>{log.actor}</b>
+                <span>
+                  {log.action} · {log.object}
+                </span>
+                <em>{log.result}</em>
+              </li>
+            ))}
+          </ol>
+          <h4 className="sub">人员分工</h4>
+          <div className="members">
+            {MEMBERS.map((member) => (
+              <article key={member.id}>
+                <b>
+                  {member.name} · {member.role}
+                </b>
+                <span>{member.duty}</span>
+                <em>默认工作区：{member.workspace}</em>
+              </article>
+            ))}
+          </div>
+        </Modal>
+      ) : null}
 
       {/*
         建单表单在二级弹窗里。一级页面只有一个「生成工单」按钮 ——
