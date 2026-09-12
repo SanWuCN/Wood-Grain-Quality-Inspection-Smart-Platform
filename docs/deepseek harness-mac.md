@@ -86,6 +86,17 @@ npx eslint src                           # 基线：0 问题
 
 ## 2. 你负责的四个页面
 
+> ✅ **本节已完成（2026-09-11）。** 下面写的是**接手时**的缺口清单，保留作为需求记录；
+> 实际完成情况、以及后来新增的固件及模型页改动，见 `docs/deepseek harness-windows.md` §2。
+> 逐条对照：
+>
+> | 原缺口 | 状态 |
+> | --- | --- |
+> | ① 总览页：文案二轮 / 点位遮挡 / 看板密度 | 文案与看板密度已做；**点位遮挡评估后未改**（理由见 Windows 交接 §3） |
+> | ② 建图巡检：`?site=` 未被消费 | ✅ 已做（`7e209a8`），并修掉了 `waypointForSite()` 本身的错误 |
+> | ③ 数字孪生：5 个缺陷 | ✅ 4 个已修；第 5 个「手搓低模 / 无高斯泼溅」已由真实 SOG 产物替换（`a9cbf44`、`1941ad1`） |
+> | ④ 硬件详情：硬件监看偏静态 / 文案二轮 | ✅ 已做（`560cd15`、`63c5961`） |
+
 ### ① 总览页 `/` — `pages/Overview.tsx`（约 560 行）
 
 **已重构为四个浮层看板**，地图铺满内容区、面板浮在其上：
@@ -110,9 +121,13 @@ npx eslint src                           # 基线：0 问题
 
 ### ② 建图巡检 `/mapping` — `pages/Mapping.tsx`（约 297 行）
 
-**已知缺口（P1）**：
+**已知缺口（P1）—— ✅ 已修复（`7e209a8`）**：
 
-> **`?site=` 参数没有被消费。** 地图点位点击「有任务的点位」会跳到 `/mapping?site=<id>`，但本页没有 `useSearchParams`，所以页面不会高亮对应航点。
+> ~~**`?site=` 参数没有被消费。** 地图点位点击「有任务的点位」会跳到 `/mapping?site=<id>`，但本页没有 `useSearchParams`，所以页面不会高亮对应航点。~~
+>
+> 补的时候还发现 `seed/sites.ts` 的 `waypointForSite()` **本身写错了**：它忽略传入的点位、
+> 永远返回第一个带构件的航点（P2）且只返回一个；而它从来没被调用过，所以两处错误
+> 刚好互相盖住。已改成 `waypointsForSite()` 返回全部构件观察点（示例寺 = P2–P5）。
 
 **要做的事**：
 - 读 `useSearchParams().get("site")`，把点位映射到 `WAYPOINTS`（`seed/scenario.ts`）并高亮。示例寺对应 P2–P5，`seed/sites.ts` 已导出 `waypointForSite(site)` 可直接用。
@@ -122,7 +137,13 @@ npx eslint src                           # 基线：0 问题
 
 ### ③ 数字孪生 `/twin` — `pages/Twin.tsx`（约 551 行）
 
-**这是四个页面里完成度最低的，PRD 差距分析里被点名「不是孪生」。**
+**✅ 已修复（`a9cbf44` + `1941ad1`）。** 原来这是四个页面里完成度最低的，
+PRD 差距分析里被点名「不是孪生」。下面是接手时的问题清单，保留作为需求记录：
+
+> 其中「手搓低模 / 无高斯泼溅」已由**真实重建产物**替换 ——
+> `public/model/sog/gs.sog`（SOG v2 / 238 万高斯点 / 31 MB），
+> 渲染用 `@sparkjsdev/spark`，页面上保留「低模示意」作为明确的降级视图。
+> 其余四项（图层开关、相机、波形、热点处理记录）也都已接进场景。
 
 | 问题 | 位置 | 说明 |
 | --- | --- | --- |
@@ -133,11 +154,19 @@ npx eslint src                           # 基线：0 问题
 | 波形写死 | `Twin.tsx:293` | `const waveform = WAVEFORMS[0]` —— 永远是初扫 `wf-Z04-001`，复扫的三处标记（0.71 / 0.84 / 0.87）在孪生页永远看不到 |
 | `hotspot.history` 未渲染 | 全库 | `HOTSPOTS[].history` 有 3 条处理记录，没有任何页面渲染 |
 
-**优先做**：把 `route` / `history` 图层接进场景 → 「复位」真的动相机 → 波形按当前构件取（`wf-Z04-002` 才是复扫）→ 渲染 `hotspot.history`。
+**优先做（✅ 全部完成）**：把 `route` / `history` 图层接进场景 → 「复位」真的动相机 → 波形按当前构件取（`wf-Z04-002` 才是复扫）→ 渲染 `hotspot.history`。
+
+> 另外按用户后续要求做了两轮改动：异常排查改成日志形态（异常事件逐条列表 + 详情弹窗，
+> **设备证据 / 模型证据分开**；去掉四项检查签名，换成硬件实际日志）；
+> 四项检查改造成「设备启动检查」移入采集作业（点「启动采集」后逐条确认并签署）。
+> 见 `docs/deepseek harness-windows.md` §2.4。
 
 ---
 
 ### ④ 硬件详情 `/hardware` — `pages/Hardware.tsx`（新建）
+
+**✅ 已完成**（`560cd15` 硬件监看补齐读数与逐路接收进度；`63c5961` 异常排查改日志形态、
+启动检查移入采集、补设备画面推流位）。
 
 **由原「检测适配」拆出**，三个页签：
 
@@ -235,12 +264,22 @@ src/
 │   ├── auth.ts                       账号 / 28 项权限 / 路由权限表 / 会话读写
 │   ├── Shell.tsx                     外壳 + 导航过滤 + 路由守卫
 │   ├── entrance.ts + entrance.css    入场编排（CSS 负责初始隐藏态）
-│   ├── Panel.tsx / ui.tsx            折角面板与共享组件（Toolbar / Btn / StatusChip / KV / DataTable / StepFlow / WaveChart…）
+│   ├── Panel.tsx / ui.tsx            折角面板与共享组件（Toolbar / Btn / StatusChip / KV / DataTable / StepFlow / WaveChart / Modal…）
+│   ├── pyrandom.ts                   CPython MT19937 移植（供终端脚本逐位复现随机数）
 │   ├── seed/                         唯一数据源
-│   │   ├── scenario.ts               工单 / 构件 / 批次 / 环境 / 知识库 / 波形
-│   │   ├── sites.ts                  地图点位（全国 27 / 上海 12）+ waypointForSite()
-│   │   └── versions.ts               版本管理矩阵 + 训练流水线阶段
-│   ├── pages/                        业务页（你负责 Overview / Mapping / Twin / Hardware）
+│   │   ├── scenario.ts               工单 / 构件 / 批次 / 环境 / 知识库 / 波形 / 交付产物
+│   │   ├── sites.ts                  地图点位（全国 27 / 上海 12）+ waypointsForSite()
+│   │   └── versions.ts               版本管理矩阵（8 组件 / 71 条发行记录）+ 训练流水线阶段
+│   ├── pages/                        业务页
+│   │   ├── Overview / Mapping / Twin / Hardware / Firmware / Orders / Knowledge / Archive / Login
+│   │   ├── CaptureRun.tsx            采集作业（设备启动检查 + 设备画面推流位）
+│   │   ├── TriageLog.tsx             异常排查（事件列表 + 详情弹窗 + 设备日志）
+│   │   ├── TrainingRun.tsx           训练验证（配置 / 控制台 / 节点占用 / 数据包）
+│   │   ├── terminalScripts.ts        两个终端脚本的前端移植（步骤流）
+│   │   ├── DeliveryCenter.tsx        更新交付（产物提交与分发）
+│   │   ├── SplatStage.tsx            高斯泼溅主视图（Spark + SOG）
+│   │   ├── splat.ts                  高斯视图的常量与类型（含取景标定值）
+│   │   └── RvizView.tsx              建图巡检的三种渲染路径（串流 / 静态图 / 内置画布）
 │   ├── mapDemo/                      三维地图（迁移自上游 Demo2）
 │   ├── map/                          早期地图实现；SiteMarker / status / store 仍在使用
 │   ├── agent/                        语音智能体
@@ -249,7 +288,9 @@ src/
     ├── design/视觉设计规范-v1.0.md     视觉唯一权威
     ├── 语音语义Agent技术方案.md
     ├── prd-gap-analysis.md           150 条需求逐条核查（查「已实现/部分/未实现」看这个）
-    └── 交接说明.md                    Windows 侧交接（含完整历史与全部待办分级）
+    ├── 交接说明.md                    Windows 侧交接（含完整历史与全部待办分级）
+    ├── deepseek harness-mac.md        本文（Mac 侧接手说明 + 内网上线）
+    └── deepseek harness-windows.md    Mac → Windows 的增量交接（这轮做了什么 / 还剩什么 / 新踩的坑）
 ```
 
 ---
