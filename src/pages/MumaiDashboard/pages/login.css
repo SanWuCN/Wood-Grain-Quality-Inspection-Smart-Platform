@@ -1,0 +1,602 @@
+/* ==================================================================
+   木脉智检 · 登录页
+   ------------------------------------------------------------------
+   唯一依据：docs/design/视觉设计规范-v1.0.md + src/styles/tokens.css
+     - 背景 BG-00 #030812 / BG-01 #060D18，面板 rgba(9,19,33,.86)（§1.1）
+     - #4EA8FF 是唯一 UI 主色；#5DE4FF 只给地图与扫描光效（§1.2）
+     - 普通面板不发光（§4.1 / §6.1）：卡片只有低对比描边，
+       背景的等高线、檐柱线稿与扫描光带全部压到接近底纹
+     - 间距只用 --space-*（4/8/12/16/20/24/32/40，§3.1）
+     - 字号只用 --fs-* token，全页 5 个层级：28 / 22 / 16 / 13 / 11（§2.2）
+     - 动效 180–320ms，easing 只用 power2.out / power3.out（§6.2），
+       入场时间线写在 Login.tsx（与 entrance.ts 同一套手法）
+   ------------------------------------------------------------------
+   布局要点：卡片左右两栏等宽（1fr 1fr），两栏各自的视觉重量由
+   「左：品牌 + 2×2 事实矩阵 + 檐柱线稿」对「右：标题 + 表单 + 底纹」
+   来配平 —— 修掉上一版「左栏三行小字、右栏表单挤在一边」的重心偏移。
+   ================================================================== */
+
+.login {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  overflow: hidden;
+  background:
+    radial-gradient(120% 80% at 50% 0%, var(--fill-weak), transparent 62%),
+    var(--bg-page);
+  font-family: var(--font-ui);
+}
+
+/* ------------------------------------------------------------------
+   背景层 1/2/3/4：网格 → 等高线 → 扫描光带 → 檐柱线稿
+   统一装在 .login__bg 里：卡片在下、背景在上会互相吃对比度，
+   所以整层固定在卡片之下（z-index 0），并整体参与「先淡入」这一步
+   ------------------------------------------------------------------ */
+.login__bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* 1. 8px 网格底纹：只做秩序感，不产生第二个视觉焦点 */
+.login__grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, var(--border-subtle) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--border-subtle) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(90% 70% at 50% 42%, #000 0%, transparent 78%);
+  -webkit-mask-image: radial-gradient(90% 70% at 50% 42%, #000 0%, transparent 78%);
+}
+
+/* 2. 等高线：三层同心地形线，压到几乎看不见，只把「空」填出层次 */
+.login__terrain {
+  position: absolute;
+  left: 50%;
+  bottom: -8vh;
+  width: min(1560px, 108vw);
+  transform: translateX(-50%);
+}
+
+.login__terrain svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.login__contour {
+  fill: none;
+  stroke: var(--border-default);
+  stroke-width: 1;
+  opacity: 0.34;
+}
+
+.login__contour path:nth-child(2n) {
+  stroke-dasharray: 3 9;
+}
+
+.login__contour path:nth-child(3) {
+  opacity: 0.7;
+}
+
+/* 3. 扫描光带：9s 一次缓慢下扫（规范要求「稳、准、短」，因此用线性长周期
+      而不是闪烁），透明度极低，禁止被误读成加载条 */
+.login__scan {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    var(--fill-weak) 42%,
+    var(--border-subtle) 50%,
+    var(--fill-weak) 58%,
+    transparent 100%
+  );
+  background-size: 100% 260px;
+  background-repeat: no-repeat;
+  opacity: 0.5;
+  animation: loginScan 9000ms linear infinite;
+}
+
+@keyframes loginScan {
+  from {
+    background-position: 0 -260px;
+  }
+  to {
+    background-position: 0 100vh;
+  }
+}
+
+/* 4. 檐柱 / 斗拱轮廓：纯 SVG 线稿，贴底居中，像一张剖面图压在页面下方 */
+.login__frame {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: min(1360px, 96vw);
+  height: min(240px, 26vh);
+  transform: translateX(-50%);
+  fill: none;
+  stroke: var(--border-default);
+  stroke-width: 1;
+  opacity: 0.5;
+}
+
+.login__frame-ridge {
+  stroke: var(--border-hover);
+}
+
+.login__frame-axis {
+  stroke: var(--border-subtle);
+  stroke-dasharray: 2 8;
+}
+
+.login__frame-node {
+  fill: var(--glow-cyan);
+  stroke: none;
+  opacity: 0.4;
+}
+
+/* ------------------------------------------------------------------
+   卡片：左右等宽两栏，重心居中
+   ------------------------------------------------------------------ */
+.login__card {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-10);
+  width: min(1000px, 92vw);
+  max-height: 92vh;
+  padding: var(--space-6) var(--space-10);
+  border: 1px solid var(--border-subtle);
+  background: linear-gradient(180deg, var(--panel-surface), var(--overlay-deep));
+  overflow: hidden;
+}
+
+/* 卡片顶部一条极细高光：金属面板的收边，不是发光（§6.1） */
+.login__card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-hover), transparent);
+}
+
+/* 右栏底纹：30px 蓝图网格 + 向左侧淡出，让表单区有「工作面」的质感 */
+.login__pattern {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 50%;
+  background-image:
+    linear-gradient(to right, var(--border-subtle) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--border-subtle) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(90deg, transparent, #000 34%);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 34%);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------
+   左栏：品牌
+   ------------------------------------------------------------------ */
+.login__brand {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* 版本号 / 构建号：安静地待在左上角，是「真实产品」的痕迹之一 */
+.login__meta {
+  margin: 0 0 var(--space-2);
+  color: var(--text-disabled);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+  letter-spacing: 0.18em;
+}
+
+/* 斗拱标记：现造的几何图形，比引用图标更像这个平台自己的标识 */
+.login__mark {
+  width: 40px;
+  height: 40px;
+  margin-bottom: var(--space-2);
+  fill: none;
+  stroke: var(--text-tertiary);
+  stroke-width: 1.4;
+  stroke-linecap: square;
+}
+
+.login__eyebrow {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+  letter-spacing: 0.22em;
+}
+
+.login__name {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--fs-logo);
+  font-weight: 700;
+  line-height: var(--lh-logo);
+  letter-spacing: 0.06em;
+}
+
+.login__sub {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-page);
+  font-weight: 600;
+  line-height: var(--lh-page);
+}
+
+/* 2×2 事实矩阵：把左栏下半段的空白填成有结构的信息，重量与右侧表单相当 */
+.login__facts {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* 每项一条发丝分隔：左栏因此获得与右栏一致的结构密度，
+   而不是「几行小字漂在大片留白里」 */
+.login__facts li {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  padding: var(--space-2) 0 var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+
+.login__facts li:last-child {
+  border-bottom: 0;
+}
+
+/* 品牌语：钉在左栏底部，与右栏的底部状态行同一水平线，两栏收口对齐 */
+.login__motto {
+  margin: auto 0 0;
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+  width: 100%;
+  color: var(--text-disabled);
+  font-size: var(--fs-aux);
+  letter-spacing: 0.18em;
+}
+
+/* ------------------------------------------------------------------
+   右栏：表单
+   ------------------------------------------------------------------ */
+.login__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.login__form-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.login__form-title {
+  margin: 0;
+  color: var(--text-title);
+  font-size: var(--fs-page);
+  font-weight: 600;
+  line-height: var(--lh-page);
+  letter-spacing: 0.02em;
+}
+
+.login__form-title::before {
+  content: "// ";
+  color: var(--glow-cyan);
+}
+
+.login__form-cap {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+
+.login__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.login__field > span:first-child {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+}
+
+/* 图标 + 输入框：图标绝对定位在左侧，输入框内边距让出图标宽度 */
+.login__control {
+  position: relative;
+  display: block;
+}
+
+.login__control-icon {
+  position: absolute;
+  left: var(--space-3);
+  top: 50%;
+  width: 15px;
+  height: 15px;
+  transform: translateY(-50%);
+  color: var(--text-disabled);
+  pointer-events: none;
+  transition: color var(--motion-fast);
+}
+
+.login__field input {
+  width: 100%;
+  height: 38px;
+  padding: 0 var(--space-3) 0 34px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  outline: none;
+  transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+
+.login__field input::placeholder {
+  color: var(--text-disabled);
+}
+
+.login__field input:hover {
+  border-color: var(--border-hover);
+}
+
+/* 聚焦：边框到 border-hover + 极轻 glow —— 全页唯一允许发光的地方（§6.1）。
+   autofocus 落在账号框，若直接给到 border-active(0.55) 会被误当成主操作，
+   因此聚焦用 border-hover，主按钮仍是页面上唯一的强焦点 */
+.login__field input:focus {
+  border-color: var(--border-hover);
+  background: var(--bg-panel-hover);
+  box-shadow: 0 0 6px var(--fill-weak);
+}
+
+.login__control:focus-within .login__control-icon {
+  color: var(--text-accent);
+}
+
+/* 错误态：只换边框颜色，不做抖动 / 缩放（规范禁止花哨动效） */
+.login__field.is-error input {
+  border-color: var(--danger);
+}
+
+.login__field.is-error input:focus {
+  box-shadow: 0 0 10px var(--fill-soft);
+}
+
+/* 错误提示：中性陈述，图标 + 文案，不用感叹号。
+   空态保留一行高度（避免报错时表单整体跳动），但不画分隔线，
+   只有真的出错时才把它变成一条有边界的告警行 */
+.login__error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  min-height: var(--lh-aux);
+  padding: 0 var(--space-2);
+  border-left: 2px solid transparent;
+  color: var(--danger);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+}
+
+.login__error:not(:empty) {
+  padding: var(--space-2) var(--space-3);
+  border-left-color: var(--danger);
+  background: var(--fill-weak);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+
+.login__error svg {
+  flex: 0 0 13px;
+  width: 13px;
+  height: 13px;
+}
+
+/* 说明行：表单里的最后一条静态信息，与左栏事实矩阵同一语汇 */
+.login__hint {
+  position: relative;
+  margin: 0;
+  padding-left: var(--space-3);
+  color: var(--text-tertiary);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+
+.login__hint::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 6px;
+  height: 1px;
+  background: var(--border-hover);
+}
+
+.login__submit {
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  letter-spacing: 0.06em;
+}
+
+.login__submit svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* 提交中：文字换「正在登录」+ 一枚细环，按钮同时 disabled 防重复提交 */
+.login__spinner {
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid var(--fill-active);
+  border-top-color: var(--on-primary);
+  border-radius: 50%;
+  animation: loginSpin 800ms linear infinite;
+}
+
+@keyframes loginSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 系统状态区：运维口径的环境信息，把右栏下半段的空填成有内容的状态卡 */
+.login__session {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.login__session-label {
+  margin: 0 0 var(--space-1);
+  color: var(--text-disabled);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+  letter-spacing: 0.18em;
+}
+
+.login__session-line {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+  letter-spacing: 0.04em;
+}
+
+/* 底部系统状态行：钉在右栏底部，与左栏品牌语一起收口 */
+.login__form-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: auto 0 0;
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-disabled);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+  letter-spacing: 0.06em;
+}
+
+.login__form-note::before {
+  content: "";
+  width: var(--space-5);
+  height: 1px;
+  background: var(--border-hover);
+}
+
+/* ------------------------------------------------------------------
+   响应式
+   ------------------------------------------------------------------
+   1920×1080 / 1672×940：保持左右两栏，标题不折行
+   1280×720 或窄于 1360：改单列（品牌在上、表单在下），
+   减内容而不是缩字号（§8）
+   ------------------------------------------------------------------ */
+
+/* 高度吃紧时先把两栏的垂直节奏收紧，不急着改单列 */
+@media (max-height: 880px) {
+  .login__card {
+    padding: var(--space-5) var(--space-8);
+  }
+
+  .login__frame {
+    opacity: 0.4;
+  }
+}
+
+@media (max-width: 1360px), (max-height: 760px) {
+  .login__card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-6);
+    width: min(540px, 94vw);
+    padding: var(--space-6) var(--space-6) var(--space-5);
+    max-height: 94vh;
+    overflow-y: auto;
+  }
+
+  .login__pattern {
+    display: none;
+  }
+
+  /* 单列时左栏是「页头」：事实矩阵收窄，不再重复占据整段高度 */
+  .login__brand {
+    gap: var(--space-2);
+  }
+
+  .login__mark {
+    display: none;
+  }
+
+  .login__facts {
+    margin-top: 0;
+  }
+
+  .login__motto {
+    margin-top: var(--space-3);
+    padding-top: var(--space-3);
+  }
+
+  /* 单列时两栏收口对齐已无意义，去掉重复的环境说明 */
+  .login__form-note {
+    display: none;
+  }
+
+  .login__frame {
+    opacity: 0.3;
+  }
+}
+
+/* 1280×720：檐柱只留台基一段，避免线条压在表单下面 */
+@media (max-height: 760px) {
+  .login__frame {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------------
+   降低动效偏好：直接进终态（入场时间线在 JS 里已提前返回，这里兜住 CSS 那部分）
+   ------------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  .login__scan,
+  .login__spinner {
+    animation: none;
+  }
+
+  .login__field input,
+  .login__control-icon {
+    transition: none;
+  }
+}

@@ -16,6 +16,16 @@ import {
 } from "react";
 import type { ChannelStatus, EnvRecord, Mission, Order, StageKey } from "./seed/types";
 import {
+  ACCOUNT_LOGIN,
+  DEFAULT_ACCOUNT_ID,
+  actionsOf,
+  allows,
+  clearSession,
+  readSession,
+  writeSession,
+  type Permission,
+} from "./auth";
+import {
   CHANNELS,
   COMPONENTS,
   DRAFT_ORDER,
@@ -27,7 +37,7 @@ import {
 } from "./seed/scenario";
 import { clockStamp } from "./lib";
 
-export type NavKey = "overview" | "orders" | "mapping" | "twin" | "adapt" | "knowledge" | "archive" | "console";
+export type NavKey = "overview" | "orders" | "mapping" | "twin" | "adapt" | "knowledge" | "archive";
 
 export type SessionEvent = {
   id: number;
@@ -43,9 +53,17 @@ export type MumaiState = {
   stage: StageKey;
   stageLabel: string;
   setStage: (stage: StageKey) => void;
-  /** 当前登录账号（PRD 2.1 四个账号） */
+  /** 当前登录账号（PRD 2.1 四个账号），初值取自 localStorage 里的会话 */
   accountId: string;
   setAccountId: (id: string) => void;
+  /** 当前账号的拼音登录名 */
+  accountLogin: string;
+  /** 当前账号的可执行操作集合（来源：auth.ts 的角色权限表） */
+  permissions: readonly Permission[];
+  /** 页面内按钮的权限判断：无权限时置灰并说明原因 */
+  can: (permission: Permission) => boolean;
+  /** 退出登录：清会话 + 重置演示状态 + 回登录页 */
+  logout: () => void;
   /** 一级导航折叠为图标栏，给内容区留宽 */
   navCollapsed: boolean;
   toggleNav: () => void;
@@ -104,7 +122,10 @@ const nextId = () => {
 
 export function MumaiProvider({ children }: PropsWithChildren) {
   const [stage, setStage] = useState<StageKey>("fusion");
-  const [accountId, setAccountId] = useState("shen");
+  // 会话是登录页写进 localStorage 的，刷新后从这里恢复；脏数据由守卫拦在登录页
+  const [accountId, setAccountId] = useState(
+    () => readSession()?.accountId ?? DEFAULT_ACCOUNT_ID,
+  );
   // 默认收起为窄图标栏：顶栏已有完整导航，主视觉（地图 / 三维）优先占宽
   const [navCollapsed, setNavCollapsed] = useState(true);
   const [assistantOpen, setAssistantOpen] = useState(false);
@@ -184,6 +205,28 @@ export function MumaiProvider({ children }: PropsWithChildren) {
     pushEvent("装载阶段快照 fusion：工单、环境、巡检、数据集与更新记录同步回退", "warn");
   }, [pushEvent]);
 
+  /* ---- 角色权限（auth.ts 的角色权限表是唯一来源） ---- */
+
+  const permissions = useMemo(() => actionsOf(accountId), [accountId]);
+
+  const can = useCallback(
+    (permission: Permission) => allows(accountId, permission),
+    [accountId],
+  );
+
+  const accountLogin = ACCOUNT_LOGIN[accountId] ?? accountId;
+
+  /** 退出登录：清会话、把演示状态退回快照、回登录页（由调用方负责跳转后的重挂载） */
+  const logout = useCallback(() => {
+    clearSession();
+    resetDemo();
+  }, [resetDemo]);
+
+  const changeAccount = useCallback((id: string) => {
+    setAccountId(id);
+    writeSession(id, new Date().toISOString());
+  }, []);
+
   const value = useMemo<MumaiState>(() => {
     const stageDef = STAGES.find((item) => item.key === stage) ?? STAGES[STAGES.length - 1];
     return {
@@ -192,7 +235,11 @@ export function MumaiProvider({ children }: PropsWithChildren) {
       stageLabel: stageDef.label,
       setStage,
       accountId,
-      setAccountId,
+      setAccountId: changeAccount,
+      accountLogin,
+      permissions,
+      can,
+      logout,
       navCollapsed,
       toggleNav: () => setNavCollapsed((collapsed) => !collapsed),
       assistantOpen,
@@ -229,10 +276,10 @@ export function MumaiProvider({ children }: PropsWithChildren) {
       resetDemo,
     };
   }, [
-    accountId, askAssistant, assistantOpen, assistantSeed, channels, confirmDraftOrder, deviceAck,
-    deviceSource, dismissToast, domainPending, draftOrder, envRecord, events, mission, navCollapsed,
-    orders, patchMission, presetAnnotation, publishConfig, publishedConfig, pushEvent, resetDemo,
-    setOrderStatus, stage, toast, toasts,
+    accountId, accountLogin, askAssistant, assistantOpen, assistantSeed, can, changeAccount, channels,
+    confirmDraftOrder, deviceAck, deviceSource, dismissToast, domainPending, draftOrder, envRecord,
+    events, logout, mission, navCollapsed, orders, patchMission, permissions, presetAnnotation,
+    publishConfig, publishedConfig, pushEvent, resetDemo, setOrderStatus, stage, toast, toasts,
   ]);
 
   return <MumaiContext.Provider value={value}>{children}</MumaiContext.Provider>;

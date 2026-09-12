@@ -52,7 +52,14 @@ export interface HeaderProps {
   activeNav: string;
   onNav: (label: string) => void;
   accountId: string;
-  onAccountChange?: (id: string) => void;
+  /**
+   * 退出登录。
+   *
+   * 这里**不再传 onAccountChange**：账号只能从登录页进入，
+   * 顶栏提供角色下拉就等于绕开角色权限（PRD 2.1 把角色限制放在后端，演示版
+   * 至少要做到「换角色必须重新登录」）。
+   */
+  onLogout?: () => void;
   onPresent?: () => void;
   onOpenDevices?: () => void;
   extra?: ReactNode;
@@ -64,7 +71,7 @@ export default function Header({
   activeNav,
   onNav,
   accountId,
-  onAccountChange,
+  onLogout,
   onPresent,
   onOpenDevices,
   extra,
@@ -85,7 +92,6 @@ export default function Header({
         activeNav={activeNav}
         onNav={onNav}
         account={{ name: account.name, role: account.role }}
-        onAccountChange={onAccountChange}
         time={time}
         statusExtra={
           <>
@@ -94,14 +100,26 @@ export default function Header({
           </>
         }
         actions={
-          <button
-            type="button"
-            className="appshell__present"
-            onClick={onPresent}
-            title="打开 presentation 角色的展示窗口">
-            <Icon name="arrow" />
-            投到展示窗口
-          </button>
+          <>
+            <button
+              type="button"
+              className="appshell__present"
+              onClick={onPresent}
+              title="投屏">
+              <Icon name="arrow" />
+              投到展示窗口
+            </button>
+            <button
+              type="button"
+              className="appshell__logout"
+              onClick={onLogout}
+              title={`退出登录：${account.name} · ${account.role}（账号 ${account.login}）`}>
+              <Icon name="user" />
+              <b>{account.name}</b>
+              <small>{account.role}</small>
+              <em>退出</em>
+            </button>
+          </>
         }
       />
     </header>
