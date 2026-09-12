@@ -24,7 +24,7 @@ import { useMumai } from "../context";
 import { actorName } from "../api/accounts";
 
 export default function Console() {
-  const { toast, accountId } = useMumai();
+  const { toast } = useMumai();
   const online = useSharedStore(isOnline);
   const currentSessionId = useSharedStore((state) => state.sessionId);
   const [overview, setOverview] = useState<RehearsalOverview | null>(null);
@@ -144,10 +144,6 @@ export default function Console() {
               </li>
             ))}
           </ul>
-          <p className="note">
-            新建会话会拿到一个全新的 sessionId，上一轮的批次、产物与回执按 demoSessionId
-            隔离，不会串进新一轮。切换会话在顶栏的账号菜单里完成。
-          </p>
         </Panel>
 
         <Panel title="阶段快照" extra={<span className="muted">{overview?.snapshots.length ?? 0} 个</span>}>
@@ -199,12 +195,8 @@ export default function Console() {
               ))}
             </ul>
           ) : (
-            <StateBlock kind="empty" title="还没有快照" hint="排练走到一个稳定阶段时捕获一份，走岔了可以退回来。" />
+            <StateBlock kind="empty" title="还没有快照" hint="排练走到一个稳定阶段时捕获一份。" />
           )}
-          <p className="note">
-            当前登录：{actorName(accountId)}。恢复会清掉快照之后新建的实体，
-            所以回滚出来的是那一刻的整场状态，不是「旧的 + 新的」混在一起。
-          </p>
         </Panel>
 
         <Panel
@@ -222,11 +214,6 @@ export default function Console() {
           ) : (
             <StateBlock kind="empty" title="尚未读取预检" />
           )}
-          <h4 className="sub">尚未接入</h4>
-          <p className="note">
-            适配器切换、单任务重放、真机控制重置都需要尚不存在的设备适配器，
-            这里不摆点了没反应的按钮。真机控制中禁止重置这一条也由「没有适配器」兜住。
-          </p>
         </Panel>
       </div>
     </div>
