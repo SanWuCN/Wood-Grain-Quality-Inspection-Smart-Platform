@@ -539,8 +539,50 @@ export type NodeMetric = {
   warnAbove?: number;
 };
 
-/** 更新交付（PRD 3.6 / 11.3） */
-export type DeliveryStep = {
+/**
+ * 数据包。
+ *
+ * 训练验证页要能看到「拿来训练的东西到底是什么」—— 剧本 S13 里饶专门讲过
+ * 「当前模式保存传感器能输出的原始数据，不只保存最终分数。这样模型更新后，
+ * 还能用同一批输入重新运行，比较算法变化」。所以这里按 `kind` 把
+ * **原始雷达数据**（ADC / IQ / spectrum）与**成果数据**（表面图像 / 结果文件）
+ * 分开，`rawLevel` 沿用 ScanBatch 的原始级别口径。
+ *
+ * `checks` 是导入校验的逐项结果：PRD 11.1 要求先清洗去重再按物理样本分组，
+ * 所以「重复摘要」「分组交叉」这些必须是能看见的检查项，而不是一个「通过」。
+ */
+export type DataPackage = {
+  id: string;
+  /** 包名，按文件口径写（含扩展名） */
+  name: string;
+  kind: DataPackageKind;
+  rawLevel: "ADC" | "IQ" | "spectrum" | "features" | "result_only" | "opaque";
+  /** 采集设备 */
+  source: string;
+  /** 关联批次；未关联批次（如外部导入）为 null */
+  batchId: string | null;
+  componentId: string | null;
+  /**
+   * 帧 / 文件数。`null` 表示尚未解析 —— 导入的包在入库前不知道内部帧数，
+   * 用 0 冒充会读成「这个包是空的」（数据判据：未采集用 null，不用 0）。
+   */
+  frames: number | null;
+  sizeText: string;
+  capturedAt: string;
+  state: "已入库" | "待审核" | "已驳回";
+  checks: DataPackageCheck[];
+};
+
+export type DataPackageKind = "原始雷达数据" | "表面图像" | "结果文件" | "混合包";
+
+export type DataPackageCheck = {
+  key: string;
+  label: string;
+  pass: boolean;
+  detail: string;
+};
+
+/** 更新交付（PRD 3.6 / 11.3） */export type DeliveryStep = {
   key: string;
   label: string;
   owner: string;

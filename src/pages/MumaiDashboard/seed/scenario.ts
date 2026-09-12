@@ -21,6 +21,8 @@ import type {
   ConfigDiffRow,
   CurrentRisk,
   Curve,
+  DataPackage,
+  DataPackageKind,
   Dataset,
   DemoEvent,
   DeviceLogEntry,
@@ -1076,6 +1078,131 @@ export const BOOT_CHECKS: BootCheckItem[] = [
  * ------------------------------------------------------------------ */
 
 /** 参考样本批次：同一块样本的连续扫描属于同一 group，不能拆散到不同集合 */
+/**
+ * 数据包清单（训练验证页 · 采集数据）
+ *
+ * 分两类摆在一起，因为训练要用的是这两类：
+ *   原始雷达数据 —— ADC / IQ / spectrum，传感器直接输出的，模型换了还能重跑比对；
+ *   成果数据     —— 表面图像 / 结果文件，已经过端侧处理，不能用来复算算法变化。
+ * 混在一起会让人以为「有数据就能重训」，而只有原始级别的那几种才行。
+ *
+ * 校验项按 PRD 11.1 的顺序：格式字段 → 重复摘要 → 分组交叉 → 时间戳与配置版本。
+ * `state` 只有经过审核才从「待审核」转「已入库」；被驳回的留在列表里，
+ * 不删 —— 排查时要知道是哪些包没过、为什么没过。
+ */
+export const DATA_PACKAGES: DataPackage[] = [
+  {
+    id: "pkg-Z04-001-raw", name: "scan-Z04-001_radar_spectrum.zip", kind: "原始雷达数据",
+    rawLevel: "spectrum", source: "手持毫米波 02 号机", batchId: "scan-Z04-001", componentId: "Z04",
+    frames: 386, sizeText: "412 MB", capturedAt: "2026-09-11 27:36", state: "已入库",
+    checks: [
+      { key: "schema", label: "格式与字段", pass: true, detail: "420 点频谱 / 每帧含时间戳与测区编号" },
+      { key: "dup", label: "重复摘要", pass: true, detail: "无重复帧段" },
+      { key: "group", label: "分组交叉", pass: true, detail: "归属 G-SAMPLE-04，未跨集合" },
+      { key: "stamp", label: "时间戳与配置版本", pass: false, detail: "缺 34 帧（暂停导致），配置版本 CFG-02 记录一致" },
+    ],
+  },
+  {
+    id: "pkg-Z04-001-img", name: "scan-Z04-001_images.zip", kind: "表面图像",
+    rawLevel: "opaque", source: "手持毫米波 02 号机", batchId: "scan-Z04-001", componentId: "Z04",
+    frames: 12, sizeText: "38.4 MB", capturedAt: "2026-09-11 27:52", state: "已入库",
+    checks: [
+      { key: "schema", label: "格式与字段", pass: true, detail: "JPEG 12 帧，含张号与拍摄方向" },
+      { key: "dup", label: "重复摘要", pass: true, detail: "无重复图像" },
+    ],
+  },
+  {
+    id: "pkg-Z04-002-raw", name: "scan-Z04-002_radar_spectrum.zip", kind: "原始雷达数据",
+    rawLevel: "spectrum", source: "手持毫米波 02 号机", batchId: "scan-Z04-002", componentId: "Z04",
+    frames: 420, sizeText: "448 MB", capturedAt: "2026-09-11 39:26", state: "已入库",
+    checks: [
+      { key: "schema", label: "格式与字段", pass: true, detail: "420 点频谱，帧号连续" },
+      { key: "dup", label: "重复摘要", pass: true, detail: "与初扫无重叠帧段" },
+      { key: "group", label: "分组交叉", pass: true, detail: "归属 G-SAMPLE-04" },
+      { key: "stamp", label: "时间戳与配置版本", pass: true, detail: "与工单时间基准偏差 0.18s" },
+    ],
+  },
+  {
+    id: "pkg-ref-g1", name: "ref-Z04-g1_radar_adc.zip", kind: "原始雷达数据",
+    rawLevel: "ADC", source: "手持毫米波 02 号机", batchId: "ref-batch-01", componentId: "REF",
+    frames: 168, sizeText: "196 MB", capturedAt: "2026-09-11 31:22", state: "已入库",
+    checks: [
+      { key: "schema", label: "格式与字段", pass: true, detail: "ADC 原始采样，含距离与方向标注" },
+      { key: "dup", label: "重复摘要", pass: false, detail: "r-0003 与 r-0002 摘要高度相似，疑似重复" },
+      { key: "group", label: "分组交叉", pass: true, detail: "G-SAMPLE-01 三帧同组" },
+    ],
+  },
+  {
+    id: "pkg-ref-g3", name: "ref-Z04-g3_radar_adc.zip", kind: "原始雷达数据",
+    rawLevel: "ADC", source: "手持毫米波 02 号机", batchId: "ref-batch-01", componentId: "REF",
+    frames: 96, sizeText: "112 MB", capturedAt: "2026-09-11 32:05", state: "待审核",
+    checks: [
+      { key: "schema", label: "格式与字段", pass: true, detail: "ADC 原始采样" },
+      { key: "sat", label: "饱和比例", pass: false, detail: "r-0007 饱和比例 11.8%，超出阈值 5%" },
+      { key: "label", label: "标签依据", pass: false, detail: "来源卡缺失，标记为未知待核验" },
+    ],
+  },
+  {
+    id: "pkg-may", name: "legacy_may-round1.zip", kind: "混合包",
+    rawLevel: "result_only", source: "历史归档 · 五月批次", batchId: "may-round1", componentId: null,
+    frames: 3, sizeText: "8.2 MB", capturedAt: "2026-05-18 17:40", state: "已驳回",
+    checks: [
+      { key: "schema", label: "格式与字段", pass: false, detail: "Z01_scan.csv 列数不一致，无法解析" },
+      { key: "raw", label: "原始级别", pass: false, detail: "仅存结果分数，无原始回波，不能用于复算" },
+    ],
+  },
+  {
+    id: "pkg-Z01-may", name: "may-round1_Z02_scan.csv", kind: "原始雷达数据",
+    rawLevel: "features", source: "历史归档 · 五月批次", batchId: "may-round1", componentId: "Z02",
+    frames: 1, sizeText: "0.6 MB", capturedAt: "2026-05-18 17:44", state: "已入库",
+    checks: [
+      { key: "schema", label: "格式与字段", pass: true, detail: "特征级数据，字段完整" },
+      { key: "raw", label: "原始级别", pass: false, detail: "features 级，可用于对照但不可复算原始回波" },
+    ],
+  },
+  {
+    id: "pkg-Z04-result", name: "scan-Z04-002_result.json", kind: "结果文件",
+    rawLevel: "result_only", source: "扫描枪推理进程", batchId: "scan-Z04-002", componentId: "Z04",
+    frames: 3, sizeText: "24 KB", capturedAt: "2026-09-11 39:41", state: "已入库",
+    checks: [
+      { key: "schema", label: "格式与字段", pass: true, detail: "含模型版本、阈值与逐段判定" },
+      { key: "ver", label: "模型版本可追溯", pass: true, detail: "DEMO-M02b / PIPE-A" },
+    ],
+  },
+  {
+    id: "pkg-cart-map", name: "MAP-SH-06_slam.tar", kind: "混合包",
+    rawLevel: "opaque", source: "演示车 DEMO-CART-01", batchId: null, componentId: null,
+    frames: 1, sizeText: "86 MB", capturedAt: "2026-09-11 22:40", state: "已入库",
+    checks: [
+      { key: "schema", label: "格式与字段", pass: true, detail: "栅格地图 + 位姿轨迹" },
+    ],
+  },
+  {
+    id: "pkg-ref-g2", name: "ref-Z04-g2_radar_adc.zip", kind: "原始雷达数据",
+    rawLevel: "ADC", source: "手持毫米波 02 号机", batchId: "ref-batch-01", componentId: "REF",
+    frames: 84, sizeText: "98 MB", capturedAt: "2026-09-11 31:48", state: "待审核",
+    checks: [
+      { key: "schema", label: "格式与字段", pass: true, detail: "ADC 原始采样" },
+      { key: "file", label: "文件完整性", pass: false, detail: "scan_001.csv 为 0 字节空文件" },
+    ],
+  },
+];
+
+/** 演示素材包：导入弹窗里可以直接选这些，不需要真的传文件 */
+export const IMPORTABLE_PACKAGES: {
+  id: string;
+  name: string;
+  kind: DataPackageKind;
+  rawLevel: DataPackage["rawLevel"];
+  sizeText: string;
+  detail: string;
+}[] = [
+  { id: "imp-01", name: "ref-Z04-g4_radar_adc.zip", kind: "原始雷达数据", rawLevel: "ADC", sizeText: "134 MB", detail: "楠木参考样本第 4 组，来源卡齐全" },
+  { id: "imp-02", name: "scan-Z05-001_radar_spectrum.zip", kind: "原始雷达数据", rawLevel: "spectrum", sizeText: "396 MB", detail: "檐柱 Z05 初扫，新构件编号" },
+  { id: "imp-03", name: "site-survey-images.zip", kind: "表面图像", rawLevel: "opaque", sizeText: "212 MB", detail: "现场补充拍摄的表面图像 48 帧" },
+  { id: "imp-04", name: "external_lab_samples.zip", kind: "混合包", rawLevel: "result_only", sizeText: "18 MB", detail: "外单位提供，仅结果分数，无原始回波" },
+];
+
 export const REFERENCE_BATCHES = [
   { batchId: "ref-Z04-g1", groupId: "G-SAMPLE-01", material: "楠木（来源：修缮余料库）", scans: 3, direction: "0° / 45° / 90°" },
   { batchId: "ref-Z04-g2", groupId: "G-SAMPLE-02", material: "杉木（来源：同批旧料）", scans: 2, direction: "0° / 90°" },
@@ -1132,7 +1259,9 @@ export const DATASET: Dataset = {
 
 function lossCurve(base: number, floor: number, decay: number, id: string, label: string, color: string): Curve {
   const points: { x: number; y: number }[] = [];
-  for (let e = 1; e <= 40; e += 1) {
+  // 30 = 本轮实际跑过的轮数（maxEpochs=40，早停在第 30 轮触发）。
+  // 曲线长度必须等于实际轮数，界面上「跟着回放画到第几轮」才有意义。
+  for (let e = 1; e <= 30; e += 1) {
     const y = floor + (base - floor) * Math.exp(-decay * e) + 0.004 * Math.sin(e * 0.9);
     points.push({ x: e, y: Number(y.toFixed(4)) });
   }
@@ -1156,7 +1285,7 @@ function valCurve(
   overfitFrom: number | null = null,
 ): Curve {
   const points: { x: number; y: number }[] = [];
-  for (let e = 1; e <= 40; e += 1) {
+  for (let e = 1; e <= 30; e += 1) {
     let y = floor + 0.03 + (base - floor) * Math.exp(-decay * 0.72 * e) + 0.008 * Math.sin(e * 1.3);
     if (overfitFrom !== null && e > overfitFrom) {
       // 抬升斜率固定，且不叠正弦 —— 发散段要干净可读，不然像噪声
@@ -1183,9 +1312,9 @@ function nodeSeries(seed: number, start: number, peak: number, end: number, jitt
     state = (state * 1664525 + 1013904223) >>> 0;
     return state / 4294967296;
   };
-  for (let e = 1; e <= 40; e += 1) {
+  for (let e = 1; e <= 30; e += 1) {
     // 三段时间线：前 15% 爬升（显卡还没跑满）→ 中段平台 → 尾段缓降（早停临近、批次变小）
-    const t = (e - 1) / 39;
+    const t = (e - 1) / 29;
     const shape =
       t < 0.15
         ? start + (peak - start) * (t / 0.15)
@@ -1243,26 +1372,26 @@ const JOB_LOG: JobLogLine[] = [
   { at: "35:58", level: "INFO", step: "adapt", epoch: 0, text: "加载基线 DEMO-M02，冻结主干，解冻最后 2 个卷积块 + 分类头" },
   { at: "35:59", level: "INFO", step: "adapt", epoch: 0, text: "可训练参数 8.4%（小样本适配，不重训整套网络）" },
   { at: "36:00", level: "INFO", step: "adapt", epoch: 0, text: "optimizer=AdamW lr=5e-4 batch=16 seed=20260911（固定种子）" },
-  { at: "36:02", level: "INFO", step: "adapt", epoch: 1, text: "epoch 01/40 train_loss=1.1732 val_loss=0.7204" },
-  { at: "36:06", level: "INFO", step: "adapt", epoch: 4, text: "epoch 04/40 train_loss=0.6218 val_loss=0.4306" },
-  { at: "36:11", level: "INFO", step: "adapt", epoch: 8, text: "epoch 08/40 train_loss=0.3541 val_loss=0.2887" },
-  { at: "36:17", level: "INFO", step: "adapt", epoch: 12, text: "epoch 12/40 train_loss=0.2540 val_loss=0.2319" },
-  { at: "36:23", level: "INFO", step: "adapt", epoch: 16, text: "epoch 16/40 train_loss=0.2147 val_loss=0.2188" },
-  { at: "36:29", level: "INFO", step: "adapt", epoch: 20, text: "epoch 20/40 train_loss=0.1983 val_loss=0.2151" },
-  { at: "36:35", level: "INFO", step: "adapt", epoch: 24, text: "epoch 24/40 train_loss=0.1912 val_loss=0.2144" },
-  { at: "36:38", level: "WARN", step: "adapt", epoch: 30, text: "验证损失连续 6 轮未下降，触发早停（耐心 6）" },
-  { at: "36:41", level: "INFO", step: "adapt", epoch: 24, text: "回滚到第 24 轮权重作为候选版本 DEMO-M03-candidate" },
+  { at: "36:02", level: "INFO", step: "adapt", epoch: 1, text: "epoch 01/30 train_loss=1.1732 val_loss=0.7204" },
+  { at: "36:06", level: "INFO", step: "adapt", epoch: 4, text: "epoch 04/30 train_loss=0.6218 val_loss=0.4306" },
+  { at: "36:11", level: "INFO", step: "adapt", epoch: 8, text: "epoch 08/30 train_loss=0.3541 val_loss=0.2887" },
+  { at: "36:17", level: "INFO", step: "adapt", epoch: 12, text: "epoch 12/30 train_loss=0.2540 val_loss=0.2319" },
+  { at: "36:23", level: "INFO", step: "adapt", epoch: 16, text: "epoch 16/30 train_loss=0.2147 val_loss=0.2188" },
+  { at: "36:29", level: "INFO", step: "adapt", epoch: 20, text: "epoch 20/30 train_loss=0.1983 val_loss=0.2151" },
+  { at: "36:35", level: "INFO", step: "adapt", epoch: 24, text: "epoch 24/30 train_loss=0.1912 val_loss=0.2144" },
+  { at: "36:38", level: "WARN", step: "adapt", epoch: 30, text: "验证损失连续 6 轮未下降，第 30 轮触发早停（耐心 6）" },
+  { at: "36:41", level: "INFO", step: "adapt", epoch: 24, text: "取第 24 轮权重作为候选版本 DEMO-M03-candidate；第 25–30 轮权重丢弃" },
 
-  { at: "36:44", level: "INFO", step: "validate", epoch: 24, text: "固定测试清单、预处理 comp-v1.4 与判定阈值 0.50" },
-  { at: "36:47", level: "INFO", step: "validate", epoch: 24, text: "同一测试集 12 条，新旧版本各跑一次" },
-  { at: "36:52", level: "INFO", step: "validate", epoch: 24, text: "漏检 3 → 2，误报 4 → 2；原有材种杉木分组召回 0.92 → 0.94" },
-  { at: "36:56", level: "INFO", step: "validate", epoch: 24, text: "验收规则 6 项全部通过，无回归退化" },
-  { at: "36:58", level: "INFO", step: "validate", epoch: 24, text: "INT8 量化：缩放系数按代表性数据确定，复测集 24 条" },
-  { at: "37:02", level: "WARN", step: "validate", epoch: 24, text: "复测 2 条边界样本量化后判定翻转，回退 float 分支，不计入量化收益" },
+  { at: "36:44", level: "INFO", step: "validate", epoch: 30, text: "固定测试清单、预处理 comp-v1.4 与判定阈值 0.50" },
+  { at: "36:47", level: "INFO", step: "validate", epoch: 30, text: "同一测试集 12 条，新旧版本各跑一次" },
+  { at: "36:52", level: "INFO", step: "validate", epoch: 30, text: "漏检 3 → 2，误报 4 → 2；原有材种杉木分组召回 0.92 → 0.94" },
+  { at: "36:56", level: "INFO", step: "validate", epoch: 30, text: "验收规则 6 项全部通过，无回归退化" },
+  { at: "36:58", level: "INFO", step: "validate", epoch: 30, text: "INT8 量化：缩放系数按代表性数据确定，复测集 24 条" },
+  { at: "37:02", level: "WARN", step: "validate", epoch: 30, text: "复测 2 条边界样本量化后判定翻转，回退 float 分支，不计入量化收益" },
 
-  { at: "37:08", level: "INFO", step: "done", epoch: 24, text: "封装 DEMO-PKG-02.demo.zip（模型 3.2 MB + 预处理配置 + 版本信息）" },
-  { at: "37:10", level: "INFO", step: "done", epoch: 24, text: "SHA-256 3f9c1d2a7b45… · 恢复版本 DEMO-M02 备份完整" },
-  { at: "37:12", level: "INFO", step: "done", epoch: 24, text: "任务结束：产物已装载。训练状态不代表现场模型已更新" },
+  { at: "37:08", level: "INFO", step: "done", epoch: 30, text: "封装 DEMO-PKG-02.demo.zip（模型 3.2 MB + 预处理配置 + 版本信息）" },
+  { at: "37:10", level: "INFO", step: "done", epoch: 30, text: "SHA-256 3f9c1d2a7b45… · 恢复版本 DEMO-M02 备份完整" },
+  { at: "37:12", level: "INFO", step: "done", epoch: 30, text: "任务结束：产物已装载。训练状态不代表现场模型已更新" },
 ];
 
 /**
@@ -1272,9 +1401,9 @@ const JOB_LOG: JobLogLine[] = [
  */
 const FAILED_JOB_LOG: JobLogLine[] = [
   ...JOB_LOG.filter((line) => line.step !== "done"),
-  { at: "36:56", level: "ERROR", step: "validate", epoch: 24, text: "必要指标条件未通过：漏检率 0.333 高于基线 0.250" },
-  { at: "36:58", level: "ERROR", step: "validate", epoch: 24, text: "原有材种回归退化：杉木分组召回 0.92 → 0.78，超出容差 0.02" },
-  { at: "37:02", level: "ERROR", step: "done", epoch: 24, text: "验收未通过，候选版本阻止进入封装与发布" },
+  { at: "36:56", level: "ERROR", step: "validate", epoch: 30, text: "必要指标条件未通过：漏检率 0.333 高于基线 0.250" },
+  { at: "36:58", level: "ERROR", step: "validate", epoch: 30, text: "原有材种回归退化：杉木分组召回 0.92 → 0.78，超出容差 0.02" },
+  { at: "37:02", level: "ERROR", step: "done", epoch: 30, text: "验收未通过，候选版本阻止进入封装与发布" },
 ];
 
 /** 执行节点占用：与损失曲线共用同一个 epoch 轴 */

@@ -308,6 +308,8 @@ export function LineChart({
   xLabel,
   showAxis = true,
   threshold,
+  xMax,
+  yMax,
 }: {
   series: { id: string; label: string; color: string; points: { x: number; y: number }[] }[];
   height?: number;
@@ -315,14 +317,25 @@ export function LineChart({
   xLabel?: string;
   showAxis?: boolean;
   threshold?: number;
+  /**
+   * 固定横轴上限（可选）。
+   *
+   * 默认按传入的点算 —— 那些「边跑边画」的曲线必须传这个值：只画了 3 轮时
+   * 若按现有数据算横轴，3 个点会铺满整个宽度，看起来像「已经跑完了」，
+   * 而渐进绘制的意义正是「看得出还没跑完」。传了之后刻度固定，
+   * 曲线从左往右长。
+   */
+  xMax?: number;
+  /** 固定纵轴下限 / 上限（可选），理由同上 */
+  yMax?: number;
 }) {
   const width = 420;
   const pad = { left: 34, right: 10, top: 12, bottom: 22 };
   const allPoints = series.flatMap((item) => item.points);
   if (allPoints.length === 0) return <StateBlock kind="empty" title="暂无曲线数据" hint="该任务还没有产生损失曲线或预测表。" />;
-  const maxX = Math.max(...allPoints.map((point) => point.x));
+  const maxX = xMax ?? Math.max(...allPoints.map((point) => point.x));
   const minX = Math.min(...allPoints.map((point) => point.x));
-  const maxY = Math.max(...allPoints.map((point) => point.y));
+  const maxY = yMax ?? Math.max(...allPoints.map((point) => point.y));
   const minY = Math.min(...allPoints.map((point) => point.y));
   const spanX = maxX - minX || 1;
   const spanY = maxY - minY || 1;

@@ -34,14 +34,33 @@ import {
   ConfusionMatrix,
   DataTable,
   LineChart,
+  Modal,
   SourceTag,
+  StateBlock,
   StatusChip,
   StepFlow,
+  Toolbar,
+  WaveChart,
 } from "../ui";
 import { useMumai } from "../context";
 import { fmtNum, fmtPct, runEvaluation } from "../lib";
-import { EXPERIMENT, FAILED_EXPERIMENT, TRAIN_NODE } from "../seed/scenario";
-import type { Experiment, JobLogLine, NodeMetric, TrainingConfigField } from "../seed/types";
+import {
+  DATA_PACKAGES,
+  EXPERIMENT,
+  FAILED_EXPERIMENT,
+  IMPORTABLE_PACKAGES,
+  TRAIN_NODE,
+  WAVEFORMS,
+} from "../seed/scenario";
+import type {
+  DataPackage,
+  DataPackageCheck,
+  DataPackageKind,
+  Experiment,
+  JobLogLine,
+  NodeMetric,
+  TrainingConfigField,
+} from "../seed/types";
 
 /** 回放一行日志的间隔。太快看不清，太慢演示时坐不住 */
 const LINE_INTERVAL_MS = 260;
@@ -126,7 +145,7 @@ function ConfigPanel({
     <Panel
       title="训练任务"
       extra={<SourceTag label="演示记录（归档实验包）" />}
-      className="fw-panel">
+      className="fw-panel fw-panel--task">
       <dl className="kv">
         <div>
           <dt>实验</dt>
@@ -343,7 +362,7 @@ function NodePanel({
     <Panel
       title="执行节点"
       extra={<span className="muted">{TRAIN_NODE.host}</span>}
-      className="fw-panel">
+      className="fw-panel fw-panel--node">
       <dl className="kv fw-node__spec">
         <div>
           <dt>加速卡</dt>
@@ -428,36 +447,59 @@ function detectOverfit(val: number[]): { minEpoch: number; rise: number } | null
   return { minEpoch: minIndex + 1, rise };
 }
 
-function LossPanel({ experiment }: { experiment: Experiment }) {
+/**
+ * 损失曲线。
+ *
+ * `drawn` 是当前画到第几轮：任务回放时跟着日志一起往前画，回放结束后画满整轮。
+ * 曲线是这一页唯一的「过程」视图 —— 一条静态铺满的曲线看不出训练走到哪了，
+ * 而「画到第 24 轮就早停了」本身就是结论的一部分。
+ */
+function LossPanel({ experiment, drawn }: { experiment: Experiment; drawn: number }) {
   const overfit = useMemo(
     () => detectOverfit(experiment.curveVal.points.map((point) => point.y)),
     [experiment],
   );
 
+  const total = experiment.curveTrain.points.length;
+  /**
+   * 候选模型的两条曲线跟着回放长；**基线整条铺满**。
+   *
+   * 基线是上一版模型跑完的历史记录，本来就该是完整的 —— 留着它整条，
+   * 候选曲线往上长的时候才有对照物（「现在降到基线下面了没有」）。
+   * 三条一起截断反而看不出谁比谁好。
+   */
+  const growing = (points: { x: number; y: number }[]) =>
+    points.slice(0, Math.max(1, Math.min(drawn, points.length)));
+
   return (
     <Panel
       title="损失曲线"
       extra={
-        overfit ? (
-          <StatusChip text={`验证损失自第 ${overfit.minEpoch} 轮起抬升`} tone="danger" dot />
-        ) : (
-          <StatusChip text="训练 / 验证同向收敛" tone="ok" dot />
-        )
+        <span className="fw-console__actions">
+          <span className="muted">
+            epoch {Math.min(drawn, total)}/{total}
+          </span>
+          {overfit ? (
+            <StatusChip text={`验证损失自第 ${overfit.minEpoch} 轮起抬升`} tone="danger" dot />
+          ) : (
+            <StatusChip text="训练 / 验证同向收敛" tone="ok" dot />
+          )}
+        </span>
       }
-      className="fw-panel">
+      className="fw-panel fw-panel--loss">
       <LineChart
         series={[
           {
             id: experiment.curveTrain.id,
             label: experiment.curveTrain.label,
             color: experiment.curveTrain.color,
-            points: experiment.curveTrain.points,
+            points: growing(experiment.curveTrain.points),
           },
           {
             id: experiment.curveVal.id,
             label: experiment.curveVal.label,
             color: experiment.curveVal.color,
-            points: experiment.curveVal.points,
+            points: growing(experiment.curveVal.points),
           },
           {
             id: experiment.curveOld.id,
@@ -468,6 +510,10 @@ function LossPanel({ experiment }: { experiment: Experiment }) {
         ]}
         xLabel="轮次"
         yLabel="损失"
+        // 横轴按整轮（30）固定，纵轴按训练曲线的起点固定：
+        // 回放时曲线从左往右长，而不是 3 个点铺满整幅假装跑完了
+        xMax={total}
+        yMax={experiment.curveTrain.points[0]?.y}
       />
       <p className="note">
         {overfit
@@ -475,6 +521,359 @@ function LossPanel({ experiment }: { experiment: Experiment }) {
           : "训练损失与验证损失同向收敛，未出现分叉。"}
       </p>
     </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * ⑤ 采集数据（训练要用到的数据源）
+ * ------------------------------------------------------------------ */
+
+/** 数据包类型 → 语义色。原始数据与成果数据要一眼分得开 */
+const PKG_TONE: Record<DataPackageKind, "ok" | "info" | "muted" | "warn"> = {
+  原始雷达数据: "ok",
+  表面图像: "info",
+  结果文件: "muted",
+  混合包: "warn",
+};
+
+const PKG_STATE_TONE: Record<DataPackage["state"], "ok" | "warn" | "danger"> = {
+  已入库: "ok",
+  待审核: "warn",
+  已驳回: "danger",
+};
+
+/** 只有原始级别能复算 —— 成果数据不能用来比较算法变化（剧本 S13） */
+const RAW_LEVELS = ["ADC", "IQ", "spectrum", "features"];
+
+/** 文件名里匹配到的小写级别 → 种子里的规范写法 */
+const RAW_LEVEL_CANON: Record<string, string> = {
+  adc: "ADC",
+  iq: "IQ",
+  spectrum: "spectrum",
+  features: "features",
+  result: "result_only",
+};
+
+const PKG_FILTERS: (DataPackageKind | "全部")[] = [
+  "全部",
+  "原始雷达数据",
+  "表面图像",
+  "结果文件",
+  "混合包",
+];
+
+/**
+ * 采集数据。
+ *
+ * 点开一行看这个包的校验结果，原始级别为 spectrum 的还能看到波形 ——
+ * 「有数据」和「这批数据能拿来干什么」是两件事，校验项和波形就是后者。
+ */
+function DataPanel({
+  packages,
+  onImport,
+}: {
+  packages: DataPackage[];
+  onImport: () => void;
+}) {
+  const [filter, setFilter] = useState<DataPackageKind | "全部">("全部");
+  const [rawOnly, setRawOnly] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  const rows = useMemo(
+    () =>
+      packages
+        .filter((item) => (filter === "全部" ? true : item.kind === filter))
+        .filter((item) => (rawOnly ? RAW_LEVELS.includes(item.rawLevel) : true)),
+    [packages, filter, rawOnly],
+  );
+
+  const rawCount = packages.filter((item) => RAW_LEVELS.includes(item.rawLevel)).length;
+  const pending = packages.filter((item) => item.state === "待审核").length;
+
+  return (
+    <Panel
+      title="采集数据"
+      extra={
+        <span className="fw-console__actions">
+          <SourceTag label="模拟采集" />
+          {pending > 0 ? <StatusChip text={`${pending} 个待审核`} tone="warn" dot /> : null}
+          <Btn tone="ghost" onClick={onImport}>
+            导入数据包
+          </Btn>
+        </span>
+      }
+      className="fw-panel fw-panel--data">
+      <Toolbar
+        note={
+          <span className="muted">
+            原始级别 {rawCount}/{packages.length} · 可复算
+          </span>
+        }>
+        {PKG_FILTERS.map((item) => (
+          <Btn key={item} active={filter === item} onClick={() => setFilter(item)}>
+            {item}
+          </Btn>
+        ))}
+        <Btn active={rawOnly} onClick={() => setRawOnly((value) => !value)}>
+          仅原始级别
+        </Btn>
+      </Toolbar>
+
+      {rows.length > 0 ? (
+        <ul className="pkg-list2">
+          {rows.map((item) => {
+            const expanded = openId === item.id;
+            const waveform = WAVEFORMS.find((wave) => wave.batchId === item.batchId);
+            const failed = item.checks.filter((check) => !check.pass);
+            return (
+              <li key={item.id} className={expanded ? "is-open" : ""}>
+                <button type="button" onClick={() => setOpenId(expanded ? null : item.id)}>
+                  <span className="pkg-list2__name">
+                    <b>{item.name}</b>
+                    <i>
+                      {item.source}
+                      {item.componentId ? ` · ${item.componentId}` : ""}
+                    </i>
+                  </span>
+                  <StatusChip text={item.kind} tone={PKG_TONE[item.kind]} />
+                  <span className="pkg-list2__level">{item.rawLevel}</span>
+                  <span className="pkg-list2__num">
+                    {item.frames === null ? "—" : item.frames}
+                  </span>
+                  <span className="pkg-list2__num">{item.sizeText}</span>
+                  <span className="pkg-list2__date">{item.capturedAt.slice(5)}</span>
+                  <StatusChip text={item.state} tone={PKG_STATE_TONE[item.state]} dot />
+                </button>
+
+                {expanded ? (
+                  <div className="pkg-list2__detail">
+                    <ul className="pkg-checks">
+                      {item.checks.map((check) => (
+                        <li key={check.key} className={check.pass ? "is-ok" : "is-bad"}>
+                          <b>{check.label}</b>
+                          <span>{check.detail}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {item.batchId ? (
+                      <p className="note">
+                        关联批次 {item.batchId}
+                        {failed.length > 0
+                          ? ` · ${failed.length} 项未通过，未通过项不进入监督训练`
+                          : " · 校验通过"}
+                      </p>
+                    ) : (
+                      <p className="note">未关联采集批次（外部导入）</p>
+                    )}
+                    {waveform ? (
+                      <WaveChart
+                        points={waveform.points}
+                        unit={waveform.unit}
+                        axisLabel={waveform.axisLabel}
+                        markers={waveform.markers}
+                      />
+                    ) : null}
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <StateBlock kind="empty" title="该筛选条件下没有数据包" hint="换一个类型或关闭「仅原始级别」。" />
+      )}
+    </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * ⑥ 导入数据包
+ * ------------------------------------------------------------------ */
+
+/** 允许的扩展名。列表外的格式一律在导入前拦下，不进待审核区 */
+const ALLOWED_EXT = [".zip", ".tar", ".gz", ".csv", ".json"];
+
+/**
+ * 导入校验。
+ *
+ * 对**本地文件**跑的是真的检查：扩展名、大小、文件名里能不能解析出批次号与
+ * 原始级别 —— 这三项都能从 File 对象本身算出来，不是编的。
+ * 演示素材包走同一套函数，只是输入换成它的名称与大小。
+ */
+function validateImport(name: string, bytes: number): DataPackageCheck[] {
+  const lower = name.toLowerCase();
+  const ext = ALLOWED_EXT.find((item) => lower.endsWith(item));
+  const batch = /(scan|ref)-[a-z0-9-]+/i.exec(name)?.[0] ?? null;
+  const level = ["adc", "iq", "spectrum", "features", "result"].find((item) =>
+    lower.includes(item),
+  );
+
+  return [
+    {
+      key: "ext",
+      label: "文件格式",
+      pass: Boolean(ext),
+      detail: ext ? `识别为 ${ext}` : `不在允许列表（${ALLOWED_EXT.join(" / ")}）`,
+    },
+    {
+      key: "size",
+      label: "文件大小",
+      pass: bytes > 0,
+      detail: bytes > 0 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : "空文件，无法解析",
+    },
+    {
+      key: "batch",
+      label: "批次号可解析",
+      pass: Boolean(batch),
+      detail: batch ? `识别为 ${batch}` : "文件名里没有批次号，将按外部导入归档",
+    },
+    {
+      key: "level",
+      label: "原始级别可判定",
+      pass: Boolean(level),
+      detail: level
+        ? `识别为 ${level}`
+        : "无法判定，按 opaque 归档，不可用于复算算法变化",
+    },
+  ];
+}
+
+function ImportModal({
+  onClose,
+  onImport,
+}: {
+  onClose: () => void;
+  onImport: (pkg: DataPackage) => void;
+}) {
+  const { toast } = useMumai();
+  /** 已选中的候选：本地文件与演示素材包共用一份状态，二选一 */
+  const [file, setFile] = useState<{ name: string; bytes: number } | null>(null);
+  const [presetId, setPresetId] = useState<string | null>(null);
+
+  const preset = IMPORTABLE_PACKAGES.find((item) => item.id === presetId) ?? null;
+
+  const candidate = file
+    ? { name: file.name, bytes: file.bytes }
+    : preset
+      ? { name: preset.name, bytes: Number.parseFloat(preset.sizeText) * 1024 * 1024 }
+      : null;
+
+  // 校验很轻（几次字符串判断），不值得 useMemo —— 而且 candidate 是每次渲染
+  // 新建的对象，拿它当依赖会让 memo 每次都失效
+  const checks = candidate ? validateImport(candidate.name, candidate.bytes) : [];
+
+  const blocking = checks.filter((check) => !check.pass && (check.key === "ext" || check.key === "size"));
+
+  const submit = () => {
+    if (!candidate) return;
+    const levelCheck = checks.find((check) => check.key === "level");
+    // 规范化成种子里的大写口径：文件名是小写的，直接透传会得到 "adc"，
+    // 和 DATA_PACKAGES 里的 "ADC" 混在一列里看着像两种东西
+    const levelRaw = levelCheck?.pass ? levelCheck.detail.replace("识别为 ", "") : "";
+    const rawLevel = (RAW_LEVEL_CANON[levelRaw] ?? "opaque") as DataPackage["rawLevel"];
+    const kind: DataPackageKind = candidate.name.includes("image")
+      ? "表面图像"
+      : candidate.name.includes("result")
+        ? "结果文件"
+        : rawLevel === "opaque"
+          ? "混合包"
+          : "原始雷达数据";
+
+    onImport({
+      id: `pkg-import-${Date.now()}`,
+      name: candidate.name,
+      kind,
+      rawLevel,
+      source: file ? "本地导入" : "演示素材包",
+      batchId: /(scan|ref)-[a-z0-9-]+/i.exec(candidate.name)?.[0] ?? null,
+      componentId: /Z\d{2}/.exec(candidate.name)?.[0] ?? null,
+      frames: null,
+      sizeText: `${(candidate.bytes / 1024 / 1024).toFixed(1)} MB`,
+      capturedAt: "2026-09-11 41:00",
+      state: "待审核",
+      checks,
+    });
+    toast(`${candidate.name} 已进入待审核区`, "ok");
+    onClose();
+  };
+
+  return (
+    <Modal
+      wide
+      title="导入数据包"
+      subtitle={
+        <>
+          <span>格式校验 → 待审核 → 入库</span>
+        </>
+      }
+      onClose={onClose}
+      footer={
+        <>
+          <span className="muted">
+            {blocking.length > 0 ? "存在阻断项，无法导入" : "导入后进入待审核区，不直接进入训练"}
+          </span>
+          <Btn onClick={onClose}>取消</Btn>
+          <Btn tone="primary" disabled={!candidate || blocking.length > 0} onClick={submit}>
+            导入
+          </Btn>
+        </>
+      }>
+      <h4 className="sub">选择本地文件</h4>
+      <label className="pkg-drop">
+        <input
+          type="file"
+          accept={ALLOWED_EXT.join(",")}
+          onChange={(event) => {
+            const picked = event.target.files?.[0];
+            if (!picked) return;
+            setFile({ name: picked.name, bytes: picked.size });
+            setPresetId(null);
+          }}
+        />
+        <span>
+          <b>{file ? file.name : "点击选择数据包"}</b>
+          <em>
+            {file
+              ? `${(file.bytes / 1024 / 1024).toFixed(1)} MB`
+              : `支持 ${ALLOWED_EXT.join(" / ")}`}
+          </em>
+        </span>
+      </label>
+
+      <h4 className="sub">或从演示素材包导入</h4>
+      <ul className="pkg-presets">
+        {IMPORTABLE_PACKAGES.map((item) => (
+          <li key={item.id} className={presetId === item.id ? "is-active" : ""}>
+            <button
+              type="button"
+              onClick={() => {
+                setPresetId(item.id);
+                setFile(null);
+              }}>
+              <b>{item.name}</b>
+              <span>
+                {item.kind} · {item.rawLevel} · {item.sizeText}
+              </span>
+              <i>{item.detail}</i>
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      {candidate ? (
+        <>
+          <h4 className="sub">导入校验</h4>
+          <ul className="pkg-checks">
+            {checks.map((check) => (
+              <li key={check.key} className={check.pass ? "is-ok" : "is-bad"}>
+                <b>{check.label}</b>
+                <span>{check.detail}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </Modal>
   );
 }
 
@@ -625,6 +1024,13 @@ export function TrainingTab() {
   /** 已装载的日志行数。归档包默认整段铺满，不做「先隐藏再播放」 */
   const [visible, setVisible] = useState(experiment.log.length);
   const [running, setRunning] = useState(false);
+  /**
+   * 数据包清单。导入的包就地插到最前面并标为「待审核」——
+   * 导入是个真的会改变页面状态的动作用户才看得出来。演示种子里的包
+   * 也在同一份 state 里，所以筛选 / 展开 / 导入走的是同一条路径。
+   */
+  const [packages, setPackages] = useState<DataPackage[]>(DATA_PACKAGES);
+  const [importOpen, setImportOpen] = useState(false);
   const timer = useRef<number | null>(null);
 
   const stopTimer = () => {
@@ -675,7 +1081,16 @@ export function TrainingTab() {
     return epoch;
   }, [experiment, visible]);
 
-  const totalEpochs = experiment.config.find((field) => field.key === "epochs")?.value ?? 40;
+  /**
+   * 曲线画到第几轮。
+   *
+   * 与执行节点占用、控制台日志共用同一个 epoch 轴：回放时跟着往前画，
+   * 回放结束（或还没开始时）画满整轮。取 `Math.max(reached, 1)` 是因为
+   * 第一行日志的 epoch 是 0，画 0 个点会让曲线整个消失。
+   */
+  const drawnEpochs = useMemo(() => Math.max(cursor, 1), [cursor]);
+
+  const totalEpochs = experiment.curveTrain.points.length;
 
   const replay = () => {
     stopTimer();
@@ -709,6 +1124,14 @@ export function TrainingTab() {
   };
 
   return (
+    /*
+      12 栅格布局，按「配置 → 过程 → 结果」分三层：
+        第一层 训练配置(4) | 任务控制台(5) | 执行节点(3)
+        第二层 损失曲线(5) | 采集数据(7)
+        第三层 独立测试集对比(12)
+      上一层是操作与过程，中间是数据源，最后一层是结论 —— 结论最宽，
+      因为它要放混淆矩阵、按材种回归、逐样本预测三张表。
+    */
     <div className="fw-training">
       <ConfigPanel
         experiment={experiment}
@@ -722,8 +1145,6 @@ export function TrainingTab() {
         onReset={() => setDraft({})}
       />
 
-      <NodePanel node={experiment.node} cursor={cursor} totalEpochs={totalEpochs} />
-
       <ConsolePanel
         log={experiment.log}
         visible={visible}
@@ -732,7 +1153,11 @@ export function TrainingTab() {
         onReplay={replay}
       />
 
-      <LossPanel experiment={experiment} />
+      <NodePanel node={experiment.node} cursor={drawnEpochs} totalEpochs={totalEpochs} />
+
+      <LossPanel experiment={experiment} drawn={drawnEpochs} />
+
+      <DataPanel packages={packages} onImport={() => setImportOpen(true)} />
 
       <ComparisonPanel experiment={experiment} />
 
@@ -745,6 +1170,13 @@ export function TrainingTab() {
         />
         切换到失败案例
       </label>
+
+      {importOpen ? (
+        <ImportModal
+          onClose={() => setImportOpen(false)}
+          onImport={(pkg) => setPackages((current) => [pkg, ...current])}
+        />
+      ) : null}
     </div>
   );
 }

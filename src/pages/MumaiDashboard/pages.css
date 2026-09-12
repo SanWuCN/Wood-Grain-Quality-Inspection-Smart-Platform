@@ -4116,22 +4116,272 @@
    固件及模型 · 训练验证（/firmware?tab=training）
    ------------------------------------------------------------------ */
 
+/*
+ * 训练验证用 12 栅格显式分区，不用 auto-fit。
+ *
+ * auto-fit 会按容器宽度自动决定列数，结果两块高面板并排、高度参差，
+ * 而且换一档分辨率分区就变了 —— 配置 / 过程 / 结论这三层的左右关系
+ * 应该是稳定的，所以这里把每块面板的跨度写死：
+ *   训练配置(4) | 任务控制台(5) | 执行节点(3)
+ *   损失曲线(5) | 采集数据(7)
+ *   独立测试集对比(12)
+ */
 .fw-training {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: var(--space-3);
   align-items: start;
 }
 
-/* 控制台和对比表要宽度：终端折行就没法读了 */
-.fw-panel--console,
-.fw-panel--wide {
-  grid-column: 1 / -1;
+.fw-panel--task {
+  grid-column: span 4;
+}
+
+.fw-panel--console {
+  grid-column: span 5;
+}
+
+.fw-panel--node {
+  grid-column: span 3;
+}
+
+.fw-panel--loss {
+  grid-column: span 5;
+}
+
+.fw-panel--data {
+  grid-column: span 7;
+}
+
+.fw-panel--wide,
+.fw-training__switch {
+  grid-column: span 12;
 }
 
 .fw-training__switch {
-  grid-column: 1 / -1;
   margin: 0;
+}
+
+/* 中等宽度退成两列：三列时执行节点只剩 ~290px，六项读数的数值与趋势线会挤在一起 */
+@media (max-width: 1560px) {
+  .fw-panel--task,
+  .fw-panel--console,
+  .fw-panel--node,
+  .fw-panel--loss,
+  .fw-panel--data {
+    grid-column: span 6;
+  }
+}
+
+/* 窄视口单列 */
+@media (max-width: 1040px) {
+  .fw-panel--task,
+  .fw-panel--console,
+  .fw-panel--node,
+  .fw-panel--loss,
+  .fw-panel--data {
+    grid-column: span 12;
+  }
+}
+
+/* ---- 采集数据：数据包清单 ---- */
+
+.pkg-list2 {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pkg-list2 > li {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pkg-list2 > li.is-open {
+  background: var(--fill-weak);
+}
+
+/* 包名 / 类型 / 原始级别 / 帧数 / 大小 / 采集时间 / 状态 */
+.pkg-list2 button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(200px, 1.6fr) 104px 76px 56px 76px 84px 76px;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 34px;
+  padding: 3px var(--space-2);
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pkg-list2 button:hover {
+  background: var(--fill-weak);
+}
+
+.pkg-list2__name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.pkg-list2__name b {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: var(--font-data);
+  font-size: var(--fs-table);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pkg-list2__name i {
+  overflow: hidden;
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 原始级别是这一页最关键的判据之一（决定能不能复算），用等宽字体单独成列 */
+.pkg-list2__level {
+  color: var(--ma-text-2);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+}
+
+.pkg-list2__num,
+.pkg-list2__date {
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.pkg-list2__detail {
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.pkg-checks {
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pkg-checks li {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: var(--space-2);
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--border-subtle);
+  font-size: var(--fs-aux);
+}
+
+.pkg-checks li.is-ok {
+  border-left-color: var(--ma-ok);
+}
+
+.pkg-checks li.is-bad {
+  border-left-color: var(--ma-danger);
+}
+
+.pkg-checks b {
+  color: var(--ma-text-2);
+  font-weight: 500;
+}
+
+.pkg-checks span {
+  color: var(--ma-text-3);
+}
+
+/* ---- 导入数据包 ---- */
+
+.pkg-drop {
+  display: block;
+  padding: var(--space-4);
+  border: 1px dashed var(--border-hover);
+  background: var(--fill-weak);
+  text-align: center;
+  cursor: pointer;
+}
+
+.pkg-drop:hover {
+  border-color: var(--primary);
+}
+
+.pkg-drop input {
+  display: none;
+}
+
+.pkg-drop span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pkg-drop b {
+  color: var(--text-primary);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.pkg-drop em {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-style: normal;
+}
+
+.pkg-presets {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pkg-presets button {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-left: 2px solid var(--border-subtle);
+  background: var(--fill-weak);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pkg-presets li.is-active button {
+  border-color: var(--primary);
+  border-left-color: var(--primary);
+  background: var(--fill-soft);
+}
+
+.pkg-presets b {
+  color: var(--ma-text-1);
+  font-family: var(--font-data);
+  font-size: var(--fs-table);
+  font-weight: 600;
+}
+
+.pkg-presets span {
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+}
+
+.pkg-presets i {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-style: normal;
 }
 
 /* ---- 训练配置 ---- */
