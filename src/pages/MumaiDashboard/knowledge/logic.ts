@@ -5,7 +5,8 @@
  *   - 分块：按空行与句群切段后合并，目标 420 字上下、相邻块 60 字重叠，保存原段落序号
  *   - 检索向量：中文字符 2–4 元稀疏 TF-IDF（自带 DF/IDF，保证权重非负、余弦相似度落在 [0,1]）
  *   - 入库向量：768 维，由 TF-IDF 权重经确定性哈希投影得到（不下载模型、不调后端）
- *   - 降维：对「入库向量」做一次真的 PCA（幂迭代求前两个主成分），不是随机撒点
+ *   - 降维：对「入库向量」做一次真的 PCA（幂迭代求前三个主成分），不是随机撒点
+ *   - 关系链：全维空间里的余弦相似度取每点前 4 个近邻做边，再以 PCA 三轴为初值跑 3D 力导向
  *   - 版本：KB-11 → KB-12 的增量 / 全量重建与回滚，全部由真实条目数推导
  *
  * 注意：页面上的检索一律复用 lib.searchKnowledge，本文件不另写一套检索器。
@@ -325,21 +326,32 @@ export function buildEmbedding(
 }
 
 /* ------------------------------------------------------------------ *
- * 3. PCA：真算前两个主成分（幂迭代 + 正交化）
+ * 3. PCA：真算前三个主成分（幂迭代 + 对已求方向做 deflation）
  * ------------------------------------------------------------------ */
+
+/** 三个主成分各用一个固定种子起幂迭代，保证同一份数据每次得到同一组方向 */
+const PCA_SEEDS = [20260912, 19981216, 20260118] as const;
+/** 关系链取多少近邻：每个块连到最相似的 KNN_K 个块 */
+const KNN_K = 4;
 
 export type PcaResult = {
   dims: number;
   count: number;
-  /** 第一 / 第二主成分方向 */
-  axisU: Float64Array;
-  axisV: Float64Array;
+  /** 第一 / 第二 / 第三主成分方向（单位向量） */
+  axes: [Float64Array, Float64Array, Float64Array];
   /** 该主成分方向上的方差（真算） */
-  variance: [number, number];
+  variance: [number, number, number];
+  /** 数据中心：投影前要先减掉 */
   mean: Float64Array;
+  /**
+   * 去中心化后的总方差（= 协方差矩阵的迹）。
+   * 解释方差比的分母必须是它，不能拿「前几个主成分之和」再归一化 ——
+   * 那样前两个的占比会永远加起来接近 100%，读起来像解释度很高。
+   */
+  totalVariance: number;
 };
 
-export function pcaTop2(vectors: Float64Array[], iterations = 60): PcaResult {
+export function pcaTop3(vectors: Float64Array[], iterations = 60): PcaResult {
   const dims = vectors[0]?.length ?? 0;
   const count = vectors.length;
   const mean = new Float64Array(dims);
@@ -379,7 +391,7 @@ export function pcaTop2(vectors: Float64Array[], iterations = 60): PcaResult {
     return count ? total / count : 0;
   };
 
-  /** 确定性初值：用序号做伪随机，避免每次刷新换一组数 */
+  /** 确定性初值：用固定种子做伪随机，避免每次刷新换一组数 */
   const seedVector = (seed: number): Float64Array => {
     const vec = new Float64Array(dims);
     let state = seed >>> 0;
@@ -390,58 +402,284 @@ export function pcaTop2(vectors: Float64Array[], iterations = 60): PcaResult {
     return vec;
   };
 
-  // 第一主成分
-  let u = normalize(seedVector(20260912));
-  for (let step = 0; step < iterations; step += 1) u = normalize(multiply(u));
+  /**
+   * 第 k 个主成分：每轮先把协方差乘出来的向量对**已求出的方向**做正交化，
+   * 等价于在收缩后的算子上做幂迭代，收敛到的就是下一个特征向量。
+   */
+  const found: Float64Array[] = [];
+  const deflate = (vec: Float64Array) => {
+    found.forEach((axis) => {
+      let dot = 0;
+      for (let i = 0; i < dims; i += 1) dot += vec[i] * axis[i];
+      for (let i = 0; i < dims; i += 1) vec[i] -= dot * axis[i];
+    });
+    return vec;
+  };
 
-  // 第二主成分：先减掉在 u 上的投影，再幂迭代
-  let v = normalize(seedVector(19981216));
-  for (let step = 0; step < iterations; step += 1) {
-    let dot = 0;
-    for (let i = 0; i < dims; i += 1) dot += v[i] * u[i];
-    const ortho = new Float64Array(dims);
-    for (let i = 0; i < dims; i += 1) ortho[i] = v[i] - dot * u[i];
-    v = normalize(multiply(normalize(ortho)));
+  for (let k = 0; k < 3; k += 1) {
+    let v = normalize(seedVector(PCA_SEEDS[k]));
+    for (let step = 0; step < iterations; step += 1) v = normalize(deflate(multiply(v)));
+    found.push(normalize(deflate(v)));
   }
+
+  const totalVariance = count
+    ? vectors.reduce((total, vec) => {
+        let norm = 0;
+        for (let i = 0; i < dims; i += 1) {
+          const value = centered(vec, i);
+          norm += value * value;
+        }
+        return total + norm;
+      }, 0) / count
+    : 0;
 
   return {
     dims,
     count,
-    axisU: u,
-    axisV: v,
-    variance: [varianceOf(u), varianceOf(v)],
+    axes: [found[0], found[1], found[2]],
+    variance: [varianceOf(found[0]), varianceOf(found[1]), varianceOf(found[2])],
     mean,
+    totalVariance,
   };
 }
 
-export type ProjectedPoint = {
-  chunkId: string;
-  x: number;
-  y: number;
-  /** 原始投影坐标（未归一化），保留 4 位小数，供 tooltip 显示 */
-  rawX: number;
-  rawY: number;
+/* ------------------------------------------------------------------ *
+ * 4. Token 关系链：余弦相似度 kNN 边 + 3D 力导向布局
+ * ------------------------------------------------------------------ */
+
+export type TokenEdge = {
+  /** 端点序号（对应 chunks 的下标） */
+  a: number;
+  b: number;
+  /** 全维空间里的余弦相似度，不是降维后的距离 */
+  similarity: number;
 };
 
-/** 凸包（Andrew monotone chain）：给每个类别画一圈包络，证明散点是聚出来的 */
-export function convexHull(points: { x: number; y: number }[]): { x: number; y: number }[] {
-  if (points.length < 3) return points;
-  const sorted = [...points].sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x));
-  const cross = (o: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) =>
-    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
-  const lower: { x: number; y: number }[] = [];
-  sorted.forEach((point) => {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], point) <= 0) lower.pop();
-    lower.push(point);
+export type TokenGraph = {
+  /** 节点 3D 坐标，已归一化到 [-1,1]；下标 = 节点序号 × 3 */
+  positions: Float64Array;
+  edges: TokenEdge[];
+  /** 每个节点的邻居序号，按相似度降序（悬停 / 选中时高亮用） */
+  neighbors: number[][];
+  /** 节点权重 = 相连边的相似度之和，用来定节点半径 */
+  weights: number[];
+  stats: {
+    nodes: number;
+    edges: number;
+    simMin: number;
+    simMax: number;
+    simAvg: number;
+    iterations: number;
+    layoutMs: number;
+    /** 最后一次迭代的平均位移：越小说明布局越稳 */
+    settle: number;
+  };
+};
+
+/**
+ * 由 768 维向量真算一张关系链图：
+ *   1. 逐对算余弦相似度（入库向量已归一化，余弦 = 点积）
+ *   2. 每点连到最相似的 KNN_K 个点，无向去重 —— 这一步是 O(n²·d)，n 是分块数
+ *   3. 以 PCA 前三个主成分的投影为初值，跑 3D 力导向（斥力 + 边弹簧 + 向心）
+ *
+ * 全程没有随机数：初值来自 PCA，迭代只做确定性算术，
+ * 所以同一份知识库每次刷新得到完全相同的布局。
+ */
+export function buildTokenGraph(vectors: Float64Array[], pca: PcaResult): TokenGraph {
+  const started = performance.now();
+  const nodes = vectors.length;
+  const dims = pca.dims;
+  const empty: TokenGraph = {
+    positions: new Float64Array(0),
+    edges: [],
+    neighbors: [],
+    weights: [],
+    stats: { nodes: 0, edges: 0, simMin: 0, simMax: 0, simAvg: 0, iterations: 0, layoutMs: 0, settle: 0 },
+  };
+  if (nodes === 0 || dims === 0) return empty;
+
+  // 兜底归一化：buildEmbedding 已经归一化过，这里防止调用方传入未归一化的向量
+  const unit = vectors.map((vec) => {
+    let norm = 0;
+    for (let i = 0; i < dims; i += 1) norm += vec[i] * vec[i];
+    norm = Math.sqrt(norm) || 1;
+    const out = new Float64Array(dims);
+    for (let i = 0; i < dims; i += 1) out[i] = vec[i] / norm;
+    return out;
   });
-  const upper: { x: number; y: number }[] = [];
-  [...sorted].reverse().forEach((point) => {
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], point) <= 0) upper.pop();
-    upper.push(point);
+
+  /* ---- 1 + 2：余弦 kNN 边 ---- */
+  const degree = Math.min(KNN_K, Math.max(0, nodes - 1));
+  const edgeMap = new Map<number, TokenEdge>();
+  const neighbors: number[][] = [];
+  for (let i = 0; i < nodes; i += 1) {
+    const scored: { index: number; similarity: number }[] = [];
+    for (let j = 0; j < nodes; j += 1) {
+      if (i === j) continue;
+      let dot = 0;
+      for (let d = 0; d < dims; d += 1) dot += unit[i][d] * unit[j][d];
+      scored.push({ index: j, similarity: dot });
+    }
+    // 相似度相同时按序号定序，保证结果可复现
+    scored.sort((left, right) => right.similarity - left.similarity || left.index - right.index);
+    const top = scored.slice(0, degree);
+    neighbors.push(top.map((entry) => entry.index));
+    top.forEach((entry) => {
+      const a = Math.min(i, entry.index);
+      const b = Math.max(i, entry.index);
+      const key = a * nodes + b;
+      const existing = edgeMap.get(key);
+      // 两个方向都可能选中同一条边，保留相似度更大的那次读数
+      if (!existing || existing.similarity < entry.similarity) {
+        edgeMap.set(key, { a, b, similarity: entry.similarity });
+      }
+    });
+  }
+  const edges = [...edgeMap.values()].sort((left, right) => left.a - right.a || left.b - right.b);
+
+  const weights = new Array<number>(nodes).fill(0);
+  edges.forEach((edge) => {
+    weights[edge.a] += edge.similarity;
+    weights[edge.b] += edge.similarity;
   });
-  lower.pop();
-  upper.pop();
-  return [...lower, ...upper];
+
+  /* ---- 3：力导向布局，初值是 PCA 前三个主成分 ---- */
+  const positions = new Float64Array(nodes * 3);
+  let maxAbs = 0;
+  for (let i = 0; i < nodes; i += 1) {
+    const coord = [0, 0, 0];
+    for (let axis = 0; axis < 3; axis += 1) {
+      let sum = 0;
+      for (let d = 0; d < dims; d += 1) sum += (vectors[i][d] - pca.mean[d]) * pca.axes[axis][d];
+      coord[axis] = sum;
+      maxAbs = Math.max(maxAbs, Math.abs(sum));
+    }
+    // 每个轴上叠一个按序号定死的极小偏移，纯粹为了拆开坐标完全重合的点
+    for (let axis = 0; axis < 3; axis += 1) {
+      const jitter = (((i * 3 + axis) * 2654435761) % 1000) / 1000 - 0.5;
+      positions[i * 3 + axis] = coord[axis] + jitter * 1e-3;
+    }
+  }
+  const scale = maxAbs || 1;
+  for (let i = 0; i < positions.length; i += 1) positions[i] /= scale;
+
+  const simMin = edges.length ? Math.min(...edges.map((edge) => edge.similarity)) : 0;
+  const simMax = edges.length ? Math.max(...edges.map((edge) => edge.similarity)) : 0;
+  const simSpan = simMax - simMin;
+
+  const iterations = nodes > 320 ? 160 : 320;
+  // 理想边长：节点越多，单个节点该占的空间越小
+  const ideal = 1.35 / Math.cbrt(Math.max(2, nodes));
+  const gravity = 0.05;
+  const disp = new Float64Array(nodes * 3);
+  let settle = 0;
+
+  for (let step = 0; step < iterations; step += 1) {
+    disp.fill(0);
+
+    // 斥力：所有点对，k²/d
+    for (let i = 0; i < nodes; i += 1) {
+      for (let j = i + 1; j < nodes; j += 1) {
+        let dx = positions[i * 3] - positions[j * 3];
+        let dy = positions[i * 3 + 1] - positions[j * 3 + 1];
+        let dz = positions[i * 3 + 2] - positions[j * 3 + 2];
+        const dist = Math.max(Math.hypot(dx, dy, dz), 1e-4);
+        const force = (ideal * ideal) / dist;
+        dx /= dist;
+        dy /= dist;
+        dz /= dist;
+        disp[i * 3] += dx * force;
+        disp[i * 3 + 1] += dy * force;
+        disp[i * 3 + 2] += dz * force;
+        disp[j * 3] -= dx * force;
+        disp[j * 3 + 1] -= dy * force;
+        disp[j * 3 + 2] -= dz * force;
+      }
+    }
+
+    // 引力：只作用在边上，d²/k；越相似的边拉得越紧
+    edges.forEach((edge) => {
+      const weight = simSpan > 1e-9 ? (edge.similarity - simMin) / simSpan : 0.5;
+      let dx = positions[edge.b * 3] - positions[edge.a * 3];
+      let dy = positions[edge.b * 3 + 1] - positions[edge.a * 3 + 1];
+      let dz = positions[edge.b * 3 + 2] - positions[edge.a * 3 + 2];
+      const dist = Math.max(Math.hypot(dx, dy, dz), 1e-4);
+      const force = ((dist * dist) / ideal) * (0.55 + 0.9 * weight);
+      dx /= dist;
+      dy /= dist;
+      dz /= dist;
+      disp[edge.a * 3] += dx * force;
+      disp[edge.a * 3 + 1] += dy * force;
+      disp[edge.a * 3 + 2] += dz * force;
+      disp[edge.b * 3] -= dx * force;
+      disp[edge.b * 3 + 1] -= dy * force;
+      disp[edge.b * 3 + 2] -= dz * force;
+    });
+
+    // 向心：不让孤立点被斥力推到视口外
+    const temperature = 0.14 * (1 - step / iterations) + 0.002;
+    settle = 0;
+    for (let i = 0; i < nodes; i += 1) {
+      disp[i * 3] -= positions[i * 3] * gravity;
+      disp[i * 3 + 1] -= positions[i * 3 + 1] * gravity;
+      disp[i * 3 + 2] -= positions[i * 3 + 2] * gravity;
+
+      const length = Math.max(Math.hypot(disp[i * 3], disp[i * 3 + 1], disp[i * 3 + 2]), 1e-6);
+      const move = Math.min(length, temperature);
+      positions[i * 3] += (disp[i * 3] / length) * move;
+      positions[i * 3 + 1] += (disp[i * 3 + 1] / length) * move;
+      positions[i * 3 + 2] += (disp[i * 3 + 2] / length) * move;
+      settle += move;
+    }
+    settle /= nodes;
+  }
+
+  // 收尾：把包围盒中心挪到原点 + 等比缩放到半径 1。
+  // 用包围盒中心而不是质心：视图会绕 Y 轴自转，偏心的话转起来会甩出画面。
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  for (let i = 0; i < nodes; i += 1) {
+    minX = Math.min(minX, positions[i * 3]);
+    maxX = Math.max(maxX, positions[i * 3]);
+    minY = Math.min(minY, positions[i * 3 + 1]);
+    maxY = Math.max(maxY, positions[i * 3 + 1]);
+    minZ = Math.min(minZ, positions[i * 3 + 2]);
+    maxZ = Math.max(maxZ, positions[i * 3 + 2]);
+  }
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const cz = (minZ + maxZ) / 2;
+  let reach = 0;
+  for (let i = 0; i < nodes; i += 1) {
+    positions[i * 3] -= cx;
+    positions[i * 3 + 1] -= cy;
+    positions[i * 3 + 2] -= cz;
+    reach = Math.max(reach, Math.hypot(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]));
+  }
+  const fit = reach || 1;
+  for (let i = 0; i < positions.length; i += 1) positions[i] /= fit;
+
+  const simAvg = edges.length ? edges.reduce((total, edge) => total + edge.similarity, 0) / edges.length : 0;
+  return {
+    positions,
+    edges,
+    neighbors,
+    weights,
+    stats: {
+      nodes,
+      edges: edges.length,
+      simMin: Number(simMin.toFixed(4)),
+      simMax: Number(simMax.toFixed(4)),
+      simAvg: Number(simAvg.toFixed(4)),
+      iterations,
+      layoutMs: Number((performance.now() - started).toFixed(1)),
+      settle: Number(settle.toFixed(5)),
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ *
@@ -988,8 +1226,6 @@ export type KbSearchResult = {
   filtered: number;
   total: number;
   queryTokens: number;
-  /** 命中分块在向量空间里的坐标，用来和散点图互相印证 */
-  points: { chunkId: string; similarity: number; x: number; y: number; category: string }[];
 };
 
 export function toLibChunks(chunks: KbChunk[]): LibKnowledgeChunk[] {
@@ -1011,40 +1247,35 @@ export function runSearch(
   query: string,
   topK: number,
   filters: { category?: string; from?: string; to?: string },
-  projection: Map<string, { x: number; y: number }>,
 ): KbSearchResult {
-  const result = searchKnowledge(toLibChunks(chunks), query, topK, KNOWLEDGE_META.noHitThreshold, filters);
-  return {
-    ...result,
-    points: result.hits.map((hit) => {
-      const point = projection.get(hit.chunkId);
-      return {
-        chunkId: hit.chunkId,
-        similarity: hit.similarity,
-        x: point?.x ?? 0,
-        y: point?.y ?? 0,
-        category: hit.category,
-      };
-    }),
-  };
+  return searchKnowledge(toLibChunks(chunks), query, topK, KNOWLEDGE_META.noHitThreshold, filters);
 }
 
 /* ------------------------------------------------------------------ *
- * 9. 向量空间（散点图数据源）
+ * 9. 向量空间（Token 关系链数据源）
  * ------------------------------------------------------------------ */
 
 export type VectorSpace = {
   dims: number;
   chunkCount: number;
-  /** 幂迭代收敛后前两个主成分解释的方差占比（真算） */
-  explained: [number, number];
+  /** 前三个主成分各自的解释方差比（分母是去中心化总方差，真算） */
+  explained: [number, number, number];
+  /** 前三个主成分的累计解释方差比 */
+  explainedTotal: number;
   totalVariance: number;
   points: {
     chunkId: string;
+    /** 力导向布局后的三维坐标，已归一化到 [-1,1] */
     x: number;
     y: number;
+    z: number;
+    /** PCA 三轴上的原始投影值，未归一化，供详情显示 */
     rawX: number;
     rawY: number;
+    rawZ: number;
+    /** 邻居数与相连边的相似度之和 */
+    degree: number;
+    weight: number;
     docId: string;
     docTitle: string;
     category: string;
@@ -1054,17 +1285,16 @@ export type VectorSpace = {
     chars: number;
     index: number;
   }[];
-  hulls: { category: string; points: { x: number; y: number }[] }[];
-  /** 每篇文档的质心（用于「文档簇」标注） */
-  centroids: { docId: string; docTitle: string; category: string; x: number; y: number; count: number }[];
+  graph: TokenGraph;
   buildMs: number;
 };
 
 const MONTH_LABEL = (date: string) => date.slice(0, 7);
 
 /**
- * 真算整条链路：分块文本 → TF-IDF → 768 维向量 → PCA 前两个主成分 → 2D 坐标。
- * 不是随机撒点：同一份知识库每次得到完全相同的坐标。
+ * 真算整条链路：分块文本 → TF-IDF → 768 维向量 → PCA 前三个主成分
+ * → 余弦 kNN 关系边 → 3D 力导向布局。
+ * 不是随机撒点：同一份知识库每次得到完全相同的坐标与边。
  */
 export function buildVectorSpace(chunks: KbChunk[]): VectorSpace {
   const started = performance.now();
@@ -1072,11 +1302,17 @@ export function buildVectorSpace(chunks: KbChunk[]): VectorSpace {
     return {
       dims: KNOWLEDGE_PIPELINE.embeddingDims,
       chunkCount: 0,
-      explained: [0, 0],
+      explained: [0, 0, 0],
+      explainedTotal: 0,
       totalVariance: 0,
       points: [],
-      hulls: [],
-      centroids: [],
+      graph: {
+        positions: new Float64Array(0),
+        edges: [],
+        neighbors: [],
+        weights: [],
+        stats: { nodes: 0, edges: 0, simMin: 0, simMax: 0, simAvg: 0, iterations: 0, layoutMs: 0, settle: 0 },
+      },
       buildMs: 0,
     };
   }
@@ -1092,25 +1328,30 @@ export function buildVectorSpace(chunks: KbChunk[]): VectorSpace {
     ),
   );
 
-  const pca = pcaTop2(vectors);
-  const projected = project2dWithIds(vectors, pca, chunks.map((chunk) => chunk.chunkId));
-  const totalVariance = sum(vectors.map((vec) => {
-    let norm = 0;
-    for (let i = 0; i < vec.length; i += 1) norm += vec[i] * vec[i];
-    return norm;
-  }));
-  const explainedTotal = pca.variance[0] + pca.variance[1];
-  const explained: [number, number] = [
-    explainedTotal ? pca.variance[0] / explainedTotal : 0,
-    explainedTotal ? pca.variance[1] / explainedTotal : 0,
-  ];
+  const pca = pcaTop3(vectors);
+  const graph = buildTokenGraph(vectors, pca);
+  const share = (index: number) => (pca.totalVariance ? pca.variance[index] / pca.totalVariance : 0);
+  const explained: [number, number, number] = [share(0), share(1), share(2)];
+
+  /** PCA 三轴上的原始投影：布局坐标是给眼睛看的，这三个值才是可核对的数据 */
+  const rawProjection = vectors.map((vec) =>
+    pca.axes.map((axis) => {
+      let sum = 0;
+      for (let i = 0; i < vec.length; i += 1) sum += (vec[i] - pca.mean[i]) * axis[i];
+      return Number(sum.toFixed(4));
+    }),
+  );
 
   const points = chunks.map((chunk, index) => ({
     chunkId: chunk.chunkId,
-    x: projected[index].x,
-    y: projected[index].y,
-    rawX: projected[index].rawX,
-    rawY: projected[index].rawY,
+    x: Number(graph.positions[index * 3].toFixed(4)),
+    y: Number(graph.positions[index * 3 + 1].toFixed(4)),
+    z: Number(graph.positions[index * 3 + 2].toFixed(4)),
+    rawX: rawProjection[index][0],
+    rawY: rawProjection[index][1],
+    rawZ: rawProjection[index][2],
+    degree: graph.neighbors[index].length,
+    weight: Number(graph.weights[index].toFixed(4)),
     docId: chunk.docId,
     docTitle: chunk.docTitle,
     category: chunk.category,
@@ -1121,65 +1362,16 @@ export function buildVectorSpace(chunks: KbChunk[]): VectorSpace {
     index,
   }));
 
-  const categories = [...new Set(points.map((point) => point.category))];
-  const hulls = categories.map((category) => ({
-    category,
-    points: convexHull(points.filter((point) => point.category === category).map((point) => ({ x: point.x, y: point.y }))),
-  }));
-
-  const docIds = [...new Set(points.map((point) => point.docId))];
-  const centroids = docIds.map((docId) => {
-    const own = points.filter((point) => point.docId === docId);
-    return {
-      docId,
-      docTitle: own[0]?.docTitle ?? docId,
-      category: own[0]?.category ?? "",
-      x: own.reduce((acc, point) => acc + point.x, 0) / own.length,
-      y: own.reduce((acc, point) => acc + point.y, 0) / own.length,
-      count: own.length,
-    };
-  });
-
   return {
     dims: KNOWLEDGE_PIPELINE.embeddingDims,
     chunkCount: chunks.length,
     explained,
-    totalVariance,
+    explainedTotal: explained[0] + explained[1] + explained[2],
+    totalVariance: Number(pca.totalVariance.toFixed(4)),
     points,
-    hulls,
-    centroids,
+    graph,
     buildMs: Number((performance.now() - started).toFixed(1)),
   };
-}
-
-function project2dWithIds(
-  vectors: Float64Array[],
-  pca: PcaResult,
-  ids: string[],
-): ProjectedPoint[] {
-  const raw = vectors.map((vec) => {
-    let x = 0;
-    let y = 0;
-    for (let i = 0; i < vec.length; i += 1) {
-      const value = vec[i] - pca.mean[i];
-      x += value * pca.axisU[i];
-      y += value * pca.axisV[i];
-    }
-    return { x, y };
-  });
-  const xs = raw.map((point) => point.x);
-  const ys = raw.map((point) => point.y);
-  const spanX = Math.max(...xs) - Math.min(...xs) || 1;
-  const spanY = Math.max(...ys) - Math.min(...ys) || 1;
-  const minX = Math.min(...xs);
-  const minY = Math.min(...ys);
-  return raw.map((point, index) => ({
-    chunkId: ids[index],
-    x: Number(((point.x - minX) / spanX).toFixed(4)),
-    y: Number(((point.y - minY) / spanY).toFixed(4)),
-    rawX: Number(point.x.toFixed(4)),
-    rawY: Number(point.y.toFixed(4)),
-  }));
 }
 
 /* ------------------------------------------------------------------ *
@@ -1248,7 +1440,7 @@ export const KB_DEMO_NOTES = {
   embedding:
     "768 维「入库向量」是把 TF-IDF 权重按确定性哈希投影到 768 维再归一化得到的，形状用于演示向量库，语义不等于真实嵌入模型。",
   projection:
-    "散点图坐标是对这 768 维向量做一次真的 PCA（幂迭代求前两个主成分）后投影出来的；坐标由数据算出，不是随机撒点。",
+    "关系链的边是 768 维空间里真算的余弦相似度（每个块连最相似的 4 个块），坐标是对同一批向量做真 PCA 后跑 3D 力导向布局得到的；两者都由数据算出，不是随机撒点。",
   search:
     "检索演示复用 lib.searchKnowledge：中文 2–4 元 TF-IDF + 余弦相似度，先按类别 / 日期过滤候选，再取 Top K；无命中时回答「当前资料未检索到」。",
   incremental: "增量更新只处理新增与变更文档，未变更文档沿用既有向量；全量重建会清空索引重算全部向量。两者的最终条目数一致。",

@@ -678,11 +678,211 @@
    4. 向量库可视化（三个页签）
    ------------------------------------------------------------------ */
 
-.kb-viz {
-  min-height: 0;
+/*
+   Token 关系链：三维视图铺满整个面板主体，统计 / 图例 / 读数做成浮层压在画布上，
+   不再像散点图那样各占一行 —— 面板主体只有 250px 高，让给画布才看得清结构。
+   浮层一律 pointer-events: none，否则会挡住 OrbitControls 的拖拽。
+*/
+.kb3d {
+  position: relative;
+  height: 100%;
+  min-height: 200px;
+  background: var(--bg-page);
+}
+
+.kb3d canvas {
+  display: block;
+  cursor: grab;
+}
+
+.kb3d canvas:active {
+  cursor: grabbing;
+}
+
+.kb3d__hud,
+.kb3d__legend,
+.kb3d__readout {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  padding: 2px var(--space-2);
+}
+
+/*
+   只有读数条要暗底：它长在图的中右侧，一定会压到节点和边上，薄薄一层会读不清。
+   HUD 与图例在四角、压不到图上，就不加底 —— 加底得多一个色值，而这一页的背景色
+   已经到预算上限了。底色直接用面板自身的 --panel-surface，不引入新色。
+*/
+.kb3d__readout {
+  background: var(--panel-surface);
+}
+
+.kb3d__hud {
+  top: var(--space-2);
+  left: var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--space-4);
+  max-width: calc(100% - 72px);
+}
+
+.kb3d__hud span {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+  white-space: nowrap;
+}
+
+.kb3d__hud b {
+  color: var(--text-primary);
+  font-family: var(--font-data-mixed);
+  font-weight: 600;
+  font-size: var(--fs-sub);
+}
+
+.kb3d__expand {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 3;
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-default);
+  background: var(--panel-surface);
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: var(--fs-aux);
+  cursor: pointer;
+  transition: color var(--motion-fast), border-color var(--motion-fast);
+}
+
+.kb3d__expand:hover {
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+}
+
+.kb3d__legend {
+  bottom: var(--space-2);
+  left: var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--space-3);
+  max-width: 46%;
+}
+
+.kb3d__legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.kb3d__legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* 焦点读数：悬停 / 点选哪个块，就把它的邻居和相似度写出来 */
+.kb3d__readout {
+  right: var(--space-2);
+  bottom: var(--space-2);
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-3);
+  gap: 2px;
+  justify-items: end;
+  max-width: 50%;
+  text-align: right;
+}
+
+.kb3d__readout > b {
+  color: var(--text-primary);
+  font-size: var(--fs-aux);
+  font-weight: 500;
+}
+
+.kb3d__readout code {
+  color: var(--text-accent);
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.kb3d__readout > span {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.kb3d__readout p {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+}
+
+/* 块摘要：面板里最多两行，全文在「放大」弹窗里看 */
+.kb3d__excerpt {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.kb3d__hint {
+  color: var(--text-disabled);
+  font-size: var(--fs-aux);
+}
+
+/*
+   邻居按钮：读数条里的邻居要能互相跳。
+   pointer-events 在这一层单独打开 —— 父层是 none，否则画布收不到拖拽。
+*/
+.kb3d__links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  pointer-events: auto;
+}
+
+.kb3d__links button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: var(--fs-aux);
+  cursor: pointer;
+  transition: color var(--motion-fast), border-color var(--motion-fast);
+}
+
+.kb3d__links button:hover {
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+}
+
+.kb3d__links button em {
+  color: var(--text-accent);
+  font-style: normal;
+  font-family: var(--font-data-mixed);
+}
+
+/* 放大到弹窗：这是给人看结构用的，给足画幅 */
+.kb3d--large {
+  height: 520px;
+  border: 1px solid var(--border-subtle);
+}
+
+.kb3d--large .kb3d__hud,
+.kb3d--large .kb3d__legend,
+.kb3d--large .kb3d__readout {
+  padding: var(--space-1) var(--space-2);
+}
+
+.kb3d--large .kb3d__readout {
+  max-width: 44%;
 }
 
 .kb-scrollpanel {
@@ -709,10 +909,6 @@
   margin-top: var(--space-3);
 }
 
-.kb-viz .tech-panel__body {
-  min-height: 0;
-}
-
 .kb-chart {
   width: 100%;
   min-height: 0;
@@ -735,58 +931,6 @@
   font-family: var(--font-data-mixed);
   font-weight: 600;
   font-size: var(--fs-sub);
-}
-
-.kb-picked {
-  margin-top: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-left: 2px solid var(--border-active);
-  background: var(--bg-page);
-}
-
-.kb-picked b {
-  display: block;
-  color: var(--text-primary);
-  font-size: var(--fs-table);
-}
-
-.kb-picked span {
-  color: var(--text-tertiary);
-  font-size: var(--fs-aux);
-}
-
-.kb-picked p {
-  margin: var(--space-1) 0 0;
-  color: var(--text-secondary);
-  font-size: var(--fs-table);
-  line-height: var(--lh-table);
-}
-
-.kb-picked code {
-  color: var(--text-accent);
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: var(--fs-aux);
-}
-
-.kb-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
-  margin-top: var(--space-1);
-}
-
-.kb-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  color: var(--text-tertiary);
-  font-size: var(--fs-aux);
-}
-
-.kb-legend i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
 }
 
 /* 相似度检索演示 */
@@ -1138,6 +1282,14 @@
 
   .kb-chart {
     height: 190px !important;
+  }
+
+  .kb3d--large {
+    height: 400px;
+  }
+
+  .kb3d__legend {
+    max-width: 38%;
   }
 
   .kb-bottom > .tech-panel {

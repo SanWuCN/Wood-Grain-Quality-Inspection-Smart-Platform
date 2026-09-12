@@ -5,6 +5,7 @@
  *   node tools/shot.mjs --url http://localhost:5173/ --out tmp-shot/ov-china.png --wait 7000
  *   node tools/shot.mjs --url ... --eval "window.dispatchEvent(new CustomEvent('mumai:request-mode',{detail:'shanghai'}))" --wait 4000
  *   node tools/shot.mjs --url ... --drag 160,0
+ *   node tools/shot.mjs --url ... --move 577,760 --click 577,760   # 指定坐标悬停 / 点击
  */
 
 import { spawn } from "node:child_process";
@@ -263,6 +264,45 @@ if (drag) {
     clickCount: 1,
   });
   await sleep(Number(arg("dragWait", "1600")));
+}
+
+/**
+ * --move x,y / --click x,y：在指定坐标上移动 / 点击。
+ *
+ * `--drag` 只能从画面正中开始，而三维视图（知识库的 Token 关系链、孪生页）
+ * 既不铺满整页、又必须靠指针拾取才有反应 —— 没有指定坐标的指针事件，
+ * 就只能靠肉眼猜「点上去到底有没有用」。
+ */
+const move = arg("move", "");
+if (move) {
+  const [mx, my] = move.split(",").map(Number);
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: mx, y: my, button: "none", buttons: 0 });
+  await sleep(Number(arg("moveWait", "1200")));
+}
+
+const click = arg("click", "");
+if (click) {
+  const [kx, ky] = click.split(",").map(Number);
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: kx, y: ky, button: "none", buttons: 0 });
+  await sleep(400);
+  await send("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: kx,
+    y: ky,
+    button: "left",
+    buttons: 1,
+    clickCount: 1,
+  });
+  await sleep(80);
+  await send("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x: kx,
+    y: ky,
+    button: "left",
+    buttons: 0,
+    clickCount: 1,
+  });
+  await sleep(Number(arg("clickWait", "1400")));
 }
 
 if (evalAfter) {

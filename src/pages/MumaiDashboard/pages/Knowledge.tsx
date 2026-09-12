@@ -24,7 +24,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useMumai } from "../context";
 import { Panel } from "../Panel";
-import { Btn, SourceTag, StateBlock, StatusChip } from "../ui";
+import { Btn, Modal, SourceTag, StateBlock, StatusChip } from "../ui";
 import {
   CURRENT_RISKS,
   HISTORY_STATS,
@@ -35,6 +35,7 @@ import {
 } from "../seed/scenario";
 import { nowStamp } from "../lib";
 import { EChart } from "../knowledge/KnowledgeCharts";
+import { TokenGraph3D } from "../knowledge/TokenGraph3D";
 import {
   KB_CATEGORIES,
   KB_CHART,
@@ -241,6 +242,8 @@ export default function Knowledge() {
   const [tab, setTab] = useState<"space" | "dist" | "search">("space");
   const [distDim, setDistDim] = useState<"doc" | "category" | "month">("doc");
   const [picked, setPicked] = useState<string | null>(null);
+  /** 关系链放大到弹窗看：面板里这块只有 250px 高，三维图需要更多画幅 */
+  const [graphExpanded, setGraphExpanded] = useState(false);
   const [query, setQuery] = useState("五月巡检 Z04 渗水");
   const [submitted, setSubmitted] = useState("五月巡检 Z04 渗水");
   const [filterCategory, setFilterCategory] = useState("全部");
@@ -704,28 +707,23 @@ export default function Knowledge() {
     [appendLog, toast, versions],
   );
 
-  /* ---------------- 向量空间（真算：TF-IDF → 768 维 → PCA 前两个主成分） ---------------- */
+  /* ---------------- 向量空间（真算：TF-IDF → 768 维 → PCA 前三主成分 → 余弦关系链） ---------------- */
 
   const deferredChunks = useDeferredValue(kb.chunks);
   const space = useMemo(() => buildVectorSpace(deferredChunks), [deferredChunks]);
-  const projection = useMemo(() => {
-    const map = new Map<string, { x: number; y: number }>();
-    space.points.forEach((point) => map.set(point.chunkId, { x: point.x, y: point.y }));
-    return map;
-  }, [space]);
+  /** 悬停只看，选中才落到 kb-picked；两者都算「焦点」，邻居边一起高亮 */
+  const [hovered, setHovered] = useState<number | null>(null);
 
   /* ---------------- 检索（复用 lib.searchKnowledge） ---------------- */
 
   const search = useMemo(
     () =>
-      runSearch(
-        kb.chunks,
-        submitted,
-        KNOWLEDGE_META.topK,
-        { category: filterCategory, from: filterFrom, to: filterTo },
-        projection,
-      ),
-    [filterCategory, filterFrom, filterTo, kb.chunks, projection, submitted],
+      runSearch(kb.chunks, submitted, KNOWLEDGE_META.topK, {
+        category: filterCategory,
+        from: filterFrom,
+        to: filterTo,
+      }),
+    [filterCategory, filterFrom, filterTo, kb.chunks, submitted],
   );
 
   const hitKey = useMemo(
@@ -733,12 +731,11 @@ export default function Knowledge() {
     [search.hits],
   );
   /**
-   * 命中集合与「块 → 相似度」表都从指纹解析出来：
-   * 这样图表的依赖是字符串，命中没变就不会重建 option，也不会每帧 setOption。
+   * 命中集合从指纹解析出来：依赖是字符串，命中没变就不会重建 Set，
+   * 也不会每帧重刷关系链的颜色。
    */
-  const { hitIds, hitScore } = useMemo(() => {
+  const hitIds = useMemo(() => {
     const ids = new Set<string>();
-    const scores = new Map<string, number>();
     hitKey
       .split("|")
       .filter(Boolean)
@@ -746,121 +743,47 @@ export default function Knowledge() {
         const separator = entry.lastIndexOf(":");
         if (separator <= 0) return;
         ids.add(entry.slice(0, separator));
-        scores.set(entry.slice(0, separator), Number(entry.slice(separator + 1)));
       });
-    return { hitIds: ids, hitScore: scores };
+    return ids;
   }, [hitKey]);
   const activeHit = search.hits.find((hit) => hit.chunkId === picked) ?? search.hits[0] ?? null;
 
-  /* ---------------- 图表 option ---------------- */
+  /* ---------------- 关系链：节点序号 ↔ 分块 ---------------- */
 
-  const scatterOption = useMemo(() => {
-    const categories = KB_CATEGORIES.filter((category) => space.points.some((point) => point.category === category));
-    const searching = submitted.trim().length > 0;
-    return {
-      backgroundColor: "transparent",
-      animationDuration: 320,
-      grid: { left: 42, right: 18, top: 28, bottom: 32 },
-      tooltip: {
-        trigger: "item",
-        backgroundColor: KB_CHART.tooltipBg,
-        borderColor: KB_CHART.tooltipBorder,
-        borderWidth: 1,
-        padding: [6, 8],
-        textStyle: {
-          color: KB_CHART.textSecondary,
-          fontSize: 11,
-          fontFamily: 'ui-monospace, "Cascadia Mono", Consolas, monospace',
-        },
-        formatter: (params: unknown) => {
-          const payload = params as { data?: unknown };
-          const data = payload.data as (string | number)[] | undefined;
-          if (!data || data.length < 10) return "";
-          const x = Number(data[0]);
-          const y = Number(data[1]);
-          const similarity = Number(data[8]);
-          return [
-            `<b style="color:${KB_CHART.textPrimary}">${String(data[4])}</b>`,
-            `类别 ${String(data[6])} · ${String(data[9])}`,
-            `分块 ${String(data[2])} · ${String(data[7])} 字`,
-            "",
-            String(data[5]),
-            "",
-            `PCA 投影 x=${x.toFixed(4)} y=${y.toFixed(4)}`,
-            similarity > 0 ? `检索相似度 ${similarity.toFixed(4)}` : "未进入本次 Top K",
-          ].join("<br/>");
-        },
-      },
-      legend: { show: false },
-      xAxis: {
-        type: "value",
-        min: -0.04,
-        max: 1.04,
-        name: "主成分 1",
-        nameTextStyle: { color: KB_CHART.axisText, fontSize: 11 },
-        axisLine: { lineStyle: { color: KB_CHART.axisLine } },
-        axisLabel: { color: KB_CHART.axisText, fontSize: 11, formatter: (value: number) => value.toFixed(1) },
-        splitLine: { lineStyle: { color: KB_CHART.grid } },
-      },
-      yAxis: {
-        type: "value",
-        min: -0.04,
-        max: 1.04,
-        name: "主成分 2",
-        nameTextStyle: { color: KB_CHART.axisText, fontSize: 11 },
-        axisLine: { lineStyle: { color: KB_CHART.axisLine } },
-        axisLabel: { color: KB_CHART.axisText, fontSize: 11, formatter: (value: number) => value.toFixed(1) },
-        splitLine: { lineStyle: { color: KB_CHART.grid } },
-      },
-      series: [
-        // 每个类别的凸包：用 scatter 的 lineStyle 画包络（不额外引入 LineChart 组件），
-        // 点不足 3 个时画不出面，直接跳过。
-        ...space.hulls
-          .filter((hull) => hull.points.length >= 3)
-          .map((hull) => ({
-            name: `${hull.category}-hull`,
-            type: "scatter",
-            symbol: "none",
-            silent: true,
-            lineStyle: { width: 1, color: categoryColor(hull.category), opacity: 0.35, type: "dashed" },
-            itemStyle: { color: categoryColor(hull.category), opacity: 0.2 },
-            data: [...hull.points, hull.points[0]].map((point) => [point.x, point.y]),
-            z: 1,
-          })),
-        ...categories.map((category) => {
-          const own = space.points
-            .map((point, index) => ({ point, index }))
-            .filter((entry) => entry.point.category === category);
-          return {
-            name: category,
-            type: "scatter",
-            symbolSize: 9,
-            itemStyle: {
-              color: categoryColor(category),
-              opacity: searching && !hitIds.size ? 0.35 : 0.82,
-              borderColor: "rgba(3,8,18,0.9)",
-              borderWidth: 1,
-            },
-            emphasis: { itemStyle: { opacity: 1, borderColor: KB_CHART.textPrimary, borderWidth: 2 } },
-            data: own.map(({ point }) => [
-              point.x,
-              point.y,
-              point.chunkId,
-              point.index,
-              point.docTitle,
-              point.excerpt,
-              point.category,
-              point.chars,
-              hitIds.has(point.chunkId) ? hitScore.get(point.chunkId) ?? 0 : 0,
-              point.date,
-            ]),
-            z: 3,
-          };
-        }),
-      ],
-    } as unknown as Record<string, unknown>;
-    // hitIds / hitScore 都由命中指纹 memo 而来，命中没变就不会重建 option
-  }, [hitIds, hitScore, space, submitted]);
+  const focusIndex = hovered ?? (picked ? space.points.findIndex((point) => point.chunkId === picked) : -1);
+  const focusPoint = focusIndex >= 0 ? space.points[focusIndex] : null;
+
+  /** 检索命中的块在关系链里的序号：有命中时非命中节点压暗 */
+  const hitIndices = useMemo(() => {
+    const indices = new Set<number>();
+    if (!hitIds.size) return indices;
+    space.points.forEach((point, index) => {
+      if (hitIds.has(point.chunkId)) indices.add(index);
+    });
+    return indices;
+  }, [hitIds, space]);
+
+  /**
+   * 焦点节点的邻居及相似度：读数条里要写清「这条边为什么连上」，
+   * 直接从 graph.edges 反查，不另存一份。
+   */
+  const focusLinks = useMemo(() => {
+    if (focusIndex < 0) return [];
+    return space.graph.edges
+      .filter((edge) => edge.a === focusIndex || edge.b === focusIndex)
+      .map((edge) => ({
+        index: edge.a === focusIndex ? edge.b : edge.a,
+        similarity: edge.similarity,
+      }))
+      .sort((left, right) => right.similarity - left.similarity);
+  }, [focusIndex, space.graph.edges]);
+
+  const graphFocus = useMemo(
+    () => ({ index: focusIndex >= 0 ? focusIndex : null, hitIndices }),
+    [focusIndex, hitIndices],
+  );
+
+  /* ---------------- 图表 option ---------------- */
 
   const distRows = useMemo(() => {
     if (distDim === "category") return distributionByCategory(kb.chunks, kb.docs);
@@ -936,7 +859,6 @@ export default function Knowledge() {
   ];
 
   const readyCount = queue.filter((item) => item.status === "已向量化").length;
-  const pickedPoint = space.points.find((point) => point.chunkId === picked) ?? null;
   const totalChars = kb.chunks.reduce((total, chunk) => total + chunk.chars, 0);
 
   return (
@@ -1247,78 +1169,99 @@ export default function Knowledge() {
         {/* ============ 辅助：向量库可视化（三个视图）+ 索引状态 ============ */}
         <div className="kb-side">
           <Panel
-            title={tab === "space" ? "向量库可视化 · 向量空间散点图" : tab === "dist" ? "向量库可视化 · 分块分布" : "向量库可视化 · 相似度检索演示"}
+            title={tab === "space" ? "向量库可视化 · Token 关系链" : tab === "dist" ? "向量库可视化 · 分块分布" : "向量库可视化 · 相似度检索演示"}
             extra={
               <>
                 {(["space", "dist", "search"] as const).map((key) => (
                   <Btn key={key} active={tab === key} onClick={() => setTab(key)}>
-                    {key === "space" ? "向量空间" : key === "dist" ? "分块分布" : "相似度检索"}
+                    {key === "space" ? "Token 关系链" : key === "dist" ? "分块分布" : "相似度检索"}
                   </Btn>
                 ))}
               </>
             }>
             {tab === "space" ? (
               <>
-                <div className="kb-viz__stats">
-                  <span>
-                    分块 <b>{space.chunkCount}</b>
-                  </span>
-                  <span>
-                    维度 <b>{space.dims}</b>
-                  </span>
-                  <span>
-                    前两个主成分解释方差比{" "}
-                    <b>
-                      {(space.explained[0] * 100).toFixed(1)}% + {(space.explained[1] * 100).toFixed(1)}%
-                    </b>
-                  </span>
-                  <span>
-                    PCA 耗时 <b>{space.buildMs} ms</b>
-                  </span>
-                  <span>
-                    坐标来源 <b>真算</b>
-                  </span>
-                </div>
                 {space.chunkCount ? (
-                  <EChart
-                    option={scatterOption}
-                    height={228}
-                    onPick={(seriesName, dataIndex) => {
-                      if (seriesName.endsWith("-hull")) return;
-                      const chunk = space.points[dataIndex];
-                      if (chunk) setPicked(chunk.chunkId);
-                    }}
-                  />
-                ) : (
-                  <StateBlock
-                    kind="empty"
-                    title="向量库为空"
-                    hint="全量重建将清空现有索引。"
-                  />
-                )}
-                <div className="kb-legend">
-                  {KB_CATEGORIES.filter((category) => space.points.some((point) => point.category === category)).map(
-                    (category) => (
-                      <span key={category}>
-                        <i style={{ background: categoryColor(category) }} />
-                        {category}（{space.points.filter((point) => point.category === category).length}）
+                  <div className="kb3d">
+                    <TokenGraph3D
+                      graph={space.graph}
+                      categories={space.points.map((point) => point.category)}
+                      focus={graphFocus}
+                      onHover={setHovered}
+                      onPick={(index) => {
+                        const chunk = space.points[index];
+                        if (chunk) setPicked(chunk.chunkId);
+                      }}
+                    />
+
+                    {/* 左上：这张图是怎么算出来的，用数字说话 */}
+                    <div className="kb3d__hud">
+                      <span>
+                        节点 <b>{space.graph.stats.nodes}</b>
                       </span>
-                    ),
-                  )}
-                </div>
-                {pickedPoint ? (
-                  <div className="kb-picked">
-                    <b>{pickedPoint.docTitle}</b>
-                    <span>
-                      {pickedPoint.category} · {pickedPoint.section} · <code>{pickedPoint.chunkId}</code> ·{" "}
-                      {pickedPoint.chars} 字 · 投影 ({pickedPoint.rawX}, {pickedPoint.rawY})
-                    </span>
-                    <p>{pickedPoint.excerpt}</p>
+                      <span>
+                        关系边 <b>{space.graph.stats.edges}</b>
+                      </span>
+                      <span>
+                        平均余弦 <b>{space.graph.stats.simAvg.toFixed(3)}</b>
+                      </span>
+                      <span>
+                        三主成分累计 <b>{(space.explainedTotal * 100).toFixed(1)}%</b>
+                      </span>
+                    </div>
+
+                    {/* 右上：放大到弹窗看，面板里这块只有 250px 高 */}
+                    <button type="button" className="kb3d__expand" onClick={() => setGraphExpanded(true)}>
+                      放大
+                    </button>
+
+                    {/* 左下：类别图例 */}
+                    <div className="kb3d__legend">
+                      {KB_CATEGORIES.filter((category) =>
+                        space.points.some((point) => point.category === category),
+                      ).map((category) => (
+                        <span key={category}>
+                          <i style={{ background: categoryColor(category) }} />
+                          {category}（{space.points.filter((point) => point.category === category).length}）
+                        </span>
+                      ))}
+                    </div>
+
+                    {/* 右下：焦点读数。悬停看邻居，点选后把块摘要也带出来 */}
+                    <div className="kb3d__readout">
+                      {focusPoint ? (
+                        <>
+                          <b>
+                            <code>{focusPoint.chunkId}</code> · {focusPoint.docTitle}
+                          </b>
+                          <span>
+                            {focusPoint.category} · {focusPoint.section} · {focusPoint.chars} 字 ·{" "}
+                            {focusPoint.degree} 条关系 · 权重 {focusPoint.weight.toFixed(3)}
+                          </span>
+                          <span className="kb3d__links">
+                            {focusLinks.map((link) => (
+                              <button
+                                key={link.index}
+                                type="button"
+                                onMouseEnter={() => setHovered(link.index)}
+                                onMouseLeave={() => setHovered(null)}
+                                onClick={() => setPicked(space.points[link.index].chunkId)}>
+                                {space.points[link.index].chunkId}
+                                <em>{link.similarity.toFixed(3)}</em>
+                              </button>
+                            ))}
+                          </span>
+                          {picked === focusPoint.chunkId ? (
+                            <p className="kb3d__excerpt">{focusPoint.excerpt}</p>
+                          ) : null}
+                        </>
+                      ) : (
+                        <span className="kb3d__hint">拖动旋转 · 滚轮缩放 · 悬停看点，点选看块摘要</span>
+                      )}
+                    </div>
                   </div>
                 ) : (
-                  <p className="kb-actions__hint">
-                    悬停查看所属文档与块摘要，点选任意点高亮。{KB_DEMO_NOTES.projection}
-                  </p>
+                  <StateBlock kind="empty" title="向量库为空" hint="全量重建将清空现有索引。" />
                 )}
               </>
             ) : null}
@@ -1658,6 +1601,75 @@ export default function Knowledge() {
           </Panel>
         </div>
       </div>
+
+      {graphExpanded && space.chunkCount ? (
+        <Modal
+          wide
+          title="向量库可视化 · Token 关系链"
+          subtitle={KB_DEMO_NOTES.projection}
+          onClose={() => setGraphExpanded(false)}>
+          <div className="kb3d kb3d--large">
+            <TokenGraph3D
+              graph={space.graph}
+              categories={space.points.map((point) => point.category)}
+              focus={graphFocus}
+              onHover={setHovered}
+              onPick={(index) => {
+                const chunk = space.points[index];
+                if (chunk) setPicked(chunk.chunkId);
+              }}
+            />
+            <div className="kb3d__hud">
+              <span>
+                节点 <b>{space.graph.stats.nodes}</b>
+              </span>
+              <span>
+                关系边 <b>{space.graph.stats.edges}</b>
+              </span>
+              <span>
+                平均余弦 <b>{space.graph.stats.simAvg.toFixed(3)}</b>
+              </span>
+              <span>
+                最强边 <b>{space.graph.stats.simMax.toFixed(3)}</b>
+              </span>
+              <span>
+                维度 <b>{space.dims}</b>
+              </span>
+              <span>
+                三主成分 <b>{(space.explained[0] * 100).toFixed(1)}% / {(space.explained[1] * 100).toFixed(1)}% / {(space.explained[2] * 100).toFixed(1)}%</b>
+              </span>
+              <span>
+                布局 <b>{space.graph.stats.iterations} 次迭代 · {space.graph.stats.layoutMs} ms</b>
+              </span>
+            </div>
+            <div className="kb3d__legend">
+              {KB_CATEGORIES.filter((category) => space.points.some((point) => point.category === category)).map(
+                (category) => (
+                  <span key={category}>
+                    <i style={{ background: categoryColor(category) }} />
+                    {category}（{space.points.filter((point) => point.category === category).length}）
+                  </span>
+                ),
+              )}
+            </div>
+            <div className="kb3d__readout">
+              {focusPoint ? (
+                <>
+                  <b>
+                    <code>{focusPoint.chunkId}</code> · {focusPoint.docTitle}
+                  </b>
+                  <span>
+                    {focusPoint.section} · {focusPoint.chars} 字 · {focusPoint.degree} 条关系
+                  </span>
+                  <p>{focusPoint.excerpt}</p>
+                </>
+              ) : (
+                <span className="kb3d__hint">拖动旋转 · 滚轮缩放 · 悬停看点</span>
+              )}
+            </div>
+          </div>
+        </Modal>
+      ) : null}
     </div>
   );
 }
