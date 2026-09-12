@@ -2792,6 +2792,44 @@
    算法阈值与逐条核验在弹窗里。
    ------------------------------------------------------------------ */
 
+/*
+   启动检查在一级页面只留状态：每条一行「名称 + 已签署/待谁确认」，
+   完整清单（核对项、不通过会怎样、签署按钮）在弹窗里。
+*/
+.boot-summary ul {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.boot-summary li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: 4px 8px;
+  border-left: 2px solid var(--border-subtle);
+  background: var(--bg-page);
+  font-size: var(--fs-aux);
+}
+
+.boot-summary li.is-ok {
+  border-left-color: var(--success);
+}
+
+.boot-summary b {
+  min-width: 140px;
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 500;
+}
+
+.boot-summary span {
+  color: var(--text-tertiary);
+}
+
 .dc-track {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));

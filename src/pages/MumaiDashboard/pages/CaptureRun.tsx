@@ -21,7 +21,7 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { Panel } from "../Panel";
-import { Btn, DataTable, SourceTag, StateBlock, StatusChip, WaveChart } from "../ui";
+import { Btn, DataTable, Modal, SourceTag, StateBlock, StatusChip, WaveChart } from "../ui";
 import { useMumai } from "../context";
 import {
   BOOT_CHECKS,
@@ -54,29 +54,43 @@ const GROUP_ORDER: BootCheckItem["group"][] = ["设备", "链路", "测区"];
  * 只给一个「通过」按钮，签了等于没签。
  * 签署人取检查项自带的 owner —— 设备类归硬件工程师（饶），测区类归具身（马），
  * 这跟 PRD 2.1 的角色分工一致，不是让同一个人把所有项都签了。
+ *
+ * **这份检查单在弹窗里，不在页面上。** 用户的原话是「比如那个启动采集，
+ * 需要确认并参数，就可以弹出一个弹窗窗口，来让我确认和签署啊，而不是在平台
+ * 一级页面上生成并堆元素，排版就乱了」—— 原来点一下按钮就往页面里挂一整块
+ * 检查单，左列被撑高、右列跟着错位。
  */
-function BootCheckPanel({
+function BootCheckModal({
   signed,
   onSign,
-  disabled,
+  onClose,
+  onStart,
 }: {
   signed: Record<string, string>;
   onSign: (item: BootCheckItem) => void;
-  disabled: boolean;
+  onClose: () => void;
+  onStart: () => void;
 }) {
   const done = Object.keys(signed).length;
+  const allDone = done === BOOT_CHECKS.length;
 
   return (
-    <Panel
+    <Modal
+      wide
       title="设备启动检查"
-      extra={
-        <StatusChip
-          text={`${done}/${BOOT_CHECKS.length} 已签署`}
-          tone={done === BOOT_CHECKS.length ? "ok" : "warn"}
-          dot
-        />
-      }
-      className="cap-panel">
+      subtitle={`${done}/${BOOT_CHECKS.length} 项已签署 · 全部签署后才能开始采集`}
+      onClose={onClose}
+      footer={
+        <>
+          <span className="muted">
+            {allDone ? "全部签署完成，可以开始采集" : `还有 ${BOOT_CHECKS.length - done} 项未签署`}
+          </span>
+          <Btn onClick={onClose}>取消</Btn>
+          <Btn tone="primary" disabled={!allDone} onClick={onStart}>
+            开始采集
+          </Btn>
+        </>
+      }>
       {GROUP_ORDER.map((group) => (
         <section key={group} className="boot-group">
           <h4 className="sub">{group}</h4>
@@ -104,7 +118,7 @@ function BootCheckPanel({
                     </div>
                   </dl>
                   {signer ? null : (
-                    <Btn tone="primary" disabled={disabled} onClick={() => onSign(item)}>
+                    <Btn tone="primary" onClick={() => onSign(item)}>
                       确认并签署（{item.owner}）
                     </Btn>
                   )}
@@ -114,7 +128,7 @@ function BootCheckPanel({
           </ul>
         </section>
       ))}
-    </Panel>
+    </Modal>
   );
 }
 
@@ -186,6 +200,8 @@ export function CaptureTab() {
 
   const [phase, setPhase] = useState<CapturePhase>("idle");
   const [signed, setSigned] = useState<Record<string, string>>({});
+  /** 启动检查弹窗：清单与签署在二级窗口里，一级页面只留状态 */
+  const [checkOpen, setCheckOpen] = useState(false);
 
   const selectBatch = (nextBatchId: string) => {
     const next = new URLSearchParams(params);
@@ -195,28 +211,35 @@ export function CaptureTab() {
     // 换批次等于换一次作业，检查单必须重签 —— 上一批的签署不能带到下一批
     setPhase("idle");
     setSigned({});
+    setCheckOpen(false);
   };
 
   const allSigned = Object.keys(signed).length === BOOT_CHECKS.length;
 
+  /**
+   * 签署一项。
+   *
+   * 先把下一份签署算出来再一次性提交：不能在 setSigned 的 updater 里调
+   * setPhase / pushEvent / toast —— updater 会在渲染期间执行，在里面改别的组件状态
+   * 会报「Cannot update a component while rendering a different component」，
+   * 而且 StrictMode 下 updater 会被调用两次，事件会被推两遍。
+   *
+   * 签完最后一项**不再自动开始**：进入采集是一次正式动作，由弹窗页脚的
+   * 「开始采集」按钮触发，签署与开始分开（用户要求重要操作要有人确认）。
+   */
   const sign = (item: BootCheckItem) => {
     if (signed[item.id]) return;
-    // 先把下一份签署算出来再一次性提交。
-    // 不能在 setSigned 的 updater 里调 setPhase / pushEvent / toast ——
-    // updater 会在渲染期间执行，在里面改别的组件状态会报
-    // 「Cannot update a component while rendering a different component」，
-    // 而且 StrictMode 下 updater 会被调用两次，事件会被推两遍。
-    const next = { ...signed, [item.id]: item.owner };
-    setSigned(next);
-    // 签完最后一项就地进入采集：不用再点一次「开始」，状态机只有一条前进路径
-    if (Object.keys(next).length === BOOT_CHECKS.length) {
-      setPhase("running");
-      pushEvent(
-        `设备启动检查 ${BOOT_CHECKS.length} 项全部签署，批次 ${batch?.batchId ?? ""} 开始采集`,
-        "ok",
-      );
-      toast("启动检查完成，采集已开始", "ok");
-    }
+    setSigned({ ...signed, [item.id]: item.owner });
+  };
+
+  const finishBootCheck = () => {
+    if (!allSigned) return;
+    setPhase("running");
+    pushEvent(
+      `设备启动检查 ${BOOT_CHECKS.length} 项全部签署，批次 ${batch?.batchId ?? ""} 开始采集`,
+      "ok",
+    );
+    toast("设备启动检查完成，采集已开始", "ok");
   };
 
   const receiveRows = (["radar", "image", "result"] as const).map((key) => {
@@ -299,10 +322,8 @@ export function CaptureTab() {
             <Btn
               tone="primary"
               disabled={phase !== "idle"}
-              onClick={() => {
-                setPhase("checking");
-                toast(`开始设备启动检查，共 ${BOOT_CHECKS.length} 项`, "info");
-              }}>
+              onClick={() => setCheckOpen(true)}
+              title="打开设备启动检查，逐条核对并签署后开始采集">
               {phase === "idle" ? "启动采集" : "已启动"}
             </Btn>
             <Btn
@@ -313,11 +334,6 @@ export function CaptureTab() {
               }}>
               暂停采集
             </Btn>
-            {phase === "checking" ? (
-              <span className="muted">
-                逐条确认并签署后开始采集（{Object.keys(signed).length}/{BOOT_CHECKS.length}）
-              </span>
-            ) : null}
           </div>
 
           {batch.frozen ? (
@@ -329,17 +345,59 @@ export function CaptureTab() {
           ) : null}
         </Panel>
 
-        {phase !== "idle" ? (
-          <BootCheckPanel signed={signed} onSign={sign} disabled={allSigned} />
-        ) : (
-          <Panel title="设备启动检查" className="cap-panel">
-            <StateBlock
-              kind="empty"
-              title="尚未开始启动检查"
-              hint="点「启动采集」后逐条核对并签署。"
+        {/*
+          设备启动检查在一级页面只留**状态**（签了几项、能不能开始），
+          清单本体在弹窗里。原来点一下按钮就往这一列挂一整块检查单，
+          左列被撑高、右列跟着错位 —— 用户点名过这个问题。
+        */}
+        <Panel
+          title="设备启动检查"
+          extra={
+            <StatusChip
+              text={
+                phase === "idle"
+                  ? "未开始"
+                  : allSigned
+                    ? `已签署 ${BOOT_CHECKS.length}/${BOOT_CHECKS.length}`
+                    : `${Object.keys(signed).length}/${BOOT_CHECKS.length} 已签署`
+              }
+              tone={allSigned ? "ok" : phase === "idle" ? "muted" : "warn"}
+              dot
             />
-          </Panel>
-        )}
+          }
+          className="cap-panel">
+          {phase === "idle" ? (
+            <StateBlock kind="empty" title="尚未开始启动检查" hint="点「启动采集」逐条核对并签署。" />
+          ) : (
+            <div className="boot-summary">
+              <ul>
+                {BOOT_CHECKS.map((item) => (
+                  <li key={item.id} className={signed[item.id] ? "is-ok" : ""}>
+                    <b>{item.label}</b>
+                    <span>{signed[item.id] ? `已签署 ${signed[item.id]}` : `待 ${item.owner} 确认`}</span>
+                  </li>
+                ))}
+              </ul>
+              {allSigned ? null : (
+                <Btn tone="primary" onClick={() => setCheckOpen(true)}>
+                  继续签署（{Object.keys(signed).length}/{BOOT_CHECKS.length}）
+                </Btn>
+              )}
+            </div>
+          )}
+        </Panel>
+
+        {checkOpen ? (
+          <BootCheckModal
+            signed={signed}
+            onSign={sign}
+            onClose={() => setCheckOpen(false)}
+            onStart={() => {
+              setCheckOpen(false);
+              finishBootCheck();
+            }}
+          />
+        ) : null}
       </div>
 
       <div className="cap-col">
