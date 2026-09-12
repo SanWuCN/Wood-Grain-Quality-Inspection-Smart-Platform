@@ -39,6 +39,20 @@ import {
 import { clockStamp } from "./lib";
 import { isOnline, useSharedStore, type ConnectionStatus } from "./store/shared";
 
+/** 新建工单的输入：一级页面不填，全部来自二级弹窗 */export type NewOrderInput = {
+  id: string;
+  title: string;
+  site: string;
+  district: string;
+  location: string;
+  scope: string;
+  componentIds: string[];
+  owner: string;
+  level: Order["level"];
+  sourceRiskIds: string[];
+  createdAt: string;
+};
+
 export type NavKey = "overview" | "orders" | "mapping" | "twin" | "adapt" | "knowledge" | "archive";
 
 export type SessionEvent = {
@@ -82,6 +96,8 @@ export type MumaiState = {
   /** 按构件编号取档案（Z01–Z04），所有页面共用同一份 */
   componentById: (id: string) => (typeof COMPONENTS)[number] | undefined;
   confirmDraftOrder: () => void;
+  /** 经理在二级弹窗确认后新建工单；一级页面不放建单表单 */
+  createOrder: (input: NewOrderInput) => Order;
   setOrderStatus: (id: string, status: Order["status"]) => void;
 
   envRecord: EnvRecord;
@@ -208,6 +224,39 @@ export function MumaiProvider({ children }: PropsWithChildren) {
     });
   }, []);
 
+  /**
+   * 由经理在二级弹窗里确认后**新建一张工单**。
+   *
+   * 原来只有「确认草稿工单」—— 确认的是种子里那张预置草稿，用户没法真的建单。
+   * 表单在弹窗里填（地点、范围、构件、等级、负责人），确认后落到 orders 列表，
+   * 一级页面不为这一次操作堆任何输入控件。
+   */
+  const createOrder = useCallback((input: NewOrderInput): Order => {
+    const order: Order = {
+      id: input.id,
+      title: input.title,
+      site: input.site,
+      district: input.district,
+      location: input.location,
+      scope: input.scope,
+      componentIds: input.componentIds,
+      status: "待复核",
+      current: false,
+      createdAt: input.createdAt,
+      discoveredAt: input.createdAt,
+      owner: input.owner,
+      level: input.level,
+      sourceRiskIds: input.sourceRiskIds,
+      // 新建单还没有附件，留空而不是塞占位项
+      attachments: [],
+      acceptanceNote: "待现场复扫后填写验收结论",
+      revisitPlanId: null,
+      sourceMode: "simulation",
+    };
+    setOrders((list) => [order, ...list]);
+    return order;
+  }, []);
+
   const setOrderStatus = useCallback((id: string, status: Order["status"]) => {
     setOrders((list) => list.map((item) => (item.id === id ? { ...item, status } : item)));
   }, []);
@@ -277,6 +326,7 @@ export function MumaiProvider({ children }: PropsWithChildren) {
       draftOrder,
       componentById: (id: string) => COMPONENTS.find((item) => item.id === id || item.name === id),
       confirmDraftOrder,
+      createOrder,
       setOrderStatus,
       envRecord,
       setEnvRecord,
@@ -306,7 +356,7 @@ export function MumaiProvider({ children }: PropsWithChildren) {
     };
   }, [
     accountId, accountLogin, askAssistant, assistantOpen, assistantSeed, can, changeAccount, channels,
-    confirmDraftOrder, deviceAck, deviceSource, dismissToast, domainPending, draftOrder, envRecord,
+    confirmDraftOrder, createOrder, deviceAck, deviceSource, dismissToast, domainPending, draftOrder, envRecord,
     events, logout, mission, navCollapsed, orders, patchMission, permissions, presetAnnotation,
     publishConfig, publishedConfig, pushEvent, resetDemo, setOrderStatus, sharedError, sharedOnline,
     sharedSessionId, sharedStatus, stage, toast, toasts,

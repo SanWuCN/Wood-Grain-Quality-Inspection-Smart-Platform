@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useMumai } from "../context";
 import { isReadOnlyPath, permissionHint } from "../auth";
+import { WorkOrderCreateModal } from "./WorkOrderCreate";
 import { Panel } from "../Panel";
 import { Icon } from "../icons";
 import { Btn, DataTable, KV, PermNote, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
@@ -91,6 +92,7 @@ export default function Orders() {
     componentById,
     setOrderStatus,
     confirmDraftOrder,
+    createOrder,
     toast,
     pushEvent,
     can,
@@ -99,6 +101,23 @@ export default function Orders() {
 
   /** 只读查阅：能进这一页，但本页没有任何可执行动作（评审 F04 的放权口径） */
   const readOnly = isReadOnlyPath(accountId, "/orders");
+
+  /** 建单弹窗：表单在二级，一级页面只放一个「生成工单」按钮 */
+  const [createOpen, setCreateOpen] = useState(false);
+  /**
+   * 工单号由**已有列表 + 草稿单**一起推导，弹窗不自己编。
+   *
+   * 只扫 `orders` 会漏掉种子里那张还没确认的草稿 WO-2026-0912，
+   * 于是第一张新建单会拿到 WO-2026-0001 —— 编号看着像倒退了。
+   */
+  const nextOrderId = useMemo(() => {
+    const numbers = [...orders.map((item) => item.id), draftOrder.id]
+      .map((id) => /^WO-(\d{4})-(\d{4})$/.exec(id))
+      .filter((match): match is RegExpExecArray => match !== null)
+      .map((match) => Number(match[2]));
+    const next = (numbers.length ? Math.max(...numbers) : 0) + 1;
+    return `WO-2026-${String(next).padStart(4, "0")}`;
+  }, [draftOrder.id, orders]);
 
   const [params, setParams] = useSearchParams();
   const selectedId = params.get("order") ?? currentOrder.id;
@@ -237,9 +256,15 @@ export default function Orders() {
             )}
           </>
         }>
-        {/* PRD 2.1：工单审核（确认草稿、暂停、归档）属于项目经理的职责 */}
+        {/* PRD 2.1：工单审核（建单、确认草稿、暂停、归档）属于项目经理的职责 */}
         <Btn
           tone="primary"
+          disabled={!can("order:review")}
+          title={can("order:review") ? "打开建单窗口，填地点、构件与来源风险后生成" : permissionHint("order:review")}
+          onClick={() => setCreateOpen(true)}>
+          生成工单
+        </Btn>
+        <Btn
           disabled={!can("order:review")}
           title={can("order:review") ? "确认后进入待复核" : permissionHint("order:review")}
           onClick={() => {
@@ -579,6 +604,23 @@ export default function Orders() {
           </Panel>
         </div>
       </div>
+
+      {/*
+        建单表单在二级弹窗里。一级页面只有一个「生成工单」按钮 ——
+        用户的要求是重要操作先弹确认/配置窗口，不要为一次操作在页面上堆表单。
+      */}
+      {createOpen ? (
+        <WorkOrderCreateModal
+          nextId={nextOrderId}
+          onClose={() => setCreateOpen(false)}
+          onConfirm={(input) => {
+            const created = createOrder(input);
+            toast(`工单 ${created.id} 已生成，进入待复核`, "ok");
+            pushEvent(`生成工单 ${created.id}（${created.site} · ${created.componentIds.join("/")}）`, "ok");
+            return created;
+          }}
+        />
+      ) : null}
     </div>
   );
 }
