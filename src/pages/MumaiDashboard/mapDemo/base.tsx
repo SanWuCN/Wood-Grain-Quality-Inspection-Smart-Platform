@@ -401,7 +401,18 @@ export default function Base(props: BaseProps) {
      * 现在门控在 `mapTexture` 上：贴图就绪的那一帧才开始推镜头，
      * 遮罩同时撤掉，观众看到的是完整开场。
      */
-    if (!mapTexture || !introArmed) return;
+    /*
+     * **不要等贴图。**
+     *
+     * 之前门控写成 `mapTexture && introArmed`，实测 DEM 贴图要 ~17 秒才到，
+     * 于是时间线一直没跑、所有材质的 opacity 停在 0 —— 顶面全透明，
+     * 屏幕上只剩侧壁与白线（材质探针实测 opacity:0 / hasMap:false）。
+     * 这正是用户看到的「只有蓝色背景 / 地图出不来」。
+     *
+     * 顶面本来就有兜底色 #28486e，贴图到位再换上去即可 ——
+     * 「先出一块冷灰蓝的地图、后补地形纹理」远好过「等 17 秒什么都没有」。
+     */
+    if (!introArmed) return;
 
     const tl = gsap.timeline();
     tl.to(group.position, { x: 0, y: 0, z: 0, duration: 1 }, MAP_PUSH_DURATION);
@@ -489,7 +500,7 @@ export default function Base(props: BaseProps) {
     // 不能再带上 fitDistance —— 画布尺寸一确定 fitDistance 就变，
     // 时间线会被 kill 重建，而各材质 opacity 起点是 0，重建没跑完地图就整幅透明。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapTexture, introArmed]);
+  }, [introArmed]);
 
   /** 贴图就绪 = 遮罩可以撤了；与开场动画同帧发生，中间不留黑屏 */
   const sceneReadyRef = useRef(props.onSceneReady);
