@@ -222,7 +222,7 @@ export default function Mapping() {
         note={
           <>
             <SourceTag
-              label={deviceSource === "demo" ? "演示车 DEMO-CART-01 · 回放" : "实机 · 实时"}
+              label={deviceSource === "demo" ? "智能巡检车 · 回放" : "算力服务器 · 实时"}
             />
             <span>
               地图版本 {version?.label ?? "—"} · 分辨率 {version?.resolutionM ?? "—"} m ·{" "}
@@ -252,12 +252,12 @@ export default function Mapping() {
               }
               setDeviceSource(event.target.value as "demo" | "real");
               pushEvent(
-                `数据来源切换为 ${event.target.value === "demo" ? "演示车" : "实机"}`,
+                `数据来源切换为 ${event.target.value === "demo" ? "智能巡检车" : "算力服务器"}`,
                 "warn",
               );
             }}>
-            <option value="demo">演示车（回放）</option>
-            <option value="real">实机（只读监视）</option>
+            <option value="demo">智能巡检车（回放）</option>
+            <option value="real">算力服务器（只读监视）</option>
           </select>
         </label>
         <Btn

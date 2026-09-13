@@ -31,6 +31,7 @@ import {
   TooltipComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
+import { CHART_ANIMATION_DELAY_MS } from "./useEntranceSettled";
 
 /* 只注册用到的模块：整包 echarts 会明显拖慢总览页首屏 */
 echarts.use([
@@ -44,20 +45,47 @@ echarts.use([
   CanvasRenderer,
 ]);
 
+/**
+ * 给 option 装上动画参数。
+ *
+ * `animate=false` 时把 animation 全关（含数据更新动画）：用于「入场已经结束
+ * 才挂上来的图」，此时再长一遍会让页面看起来在抽搐。
+ */
+function optionFor(option: echarts.EChartsCoreOption, animate: boolean): echarts.EChartsCoreOption {
+  return {
+    ...option,
+    animation: animate,
+    animationDuration: 900,
+    animationEasing: "cubicOut",
+    animationDelay: (index: number) => CHART_ANIMATION_DELAY_MS + index * 40,
+  };
+}
+
 export default function Chart({
   option,
   className,
   ariaLabel,
+  animate = true,
 }: {
   option: echarts.EChartsCoreOption;
   className?: string;
   /** 图表是「一眼看懂」的图形，仍然给屏幕阅读器一句话说明 */
   ariaLabel?: string;
+  /**
+   * 是否播放入场动画。
+   *
+   * 默认开启，由调用方在**面板入场动画播完之后**才置为 true
+   * （见 `useEntranceSettled`）：扇区/柱子在面板还没滑到位时就长出来，
+   * 看起来像页面在抽搐。关掉时直接以终态呈现（减少动效偏好也走这条）。
+   */
+  animate?: boolean;
 }) {
   const box = useRef<HTMLDivElement | null>(null);
   const instance = useRef<echarts.EChartsType | null>(null);
   /** 最新一份 option：实例晚于 effect 建起来时用它补画（见下面 init 分支的注释） */
   const latest = useRef<echarts.EChartsCoreOption>(option);
+  const animateRef = useRef(animate);
+  animateRef.current = animate;
 
   useEffect(() => {
     const node = box.current;
@@ -80,7 +108,8 @@ export default function Chart({
       if (width === 0 || height === 0) return;
       if (!instance.current) {
         instance.current = echarts.init(node, undefined, { renderer: "canvas" });
-        instance.current.setOption(latest.current, { notMerge: true });
+        /* 建实例时按当前状态决定要不要动画：入场已经播完的就直接终态 */
+        instance.current.setOption(optionFor(latest.current, animateRef.current), { notMerge: true });
         return;
       }
       /* resize 合并到下一帧：面板高度由 grid 轨道算出，连续触发时只画一次 */
@@ -100,8 +129,8 @@ export default function Chart({
   /* 实例已存在时，option 变化走这里；实例还没起来就只更新 ref，等 init 时补画 */
   useEffect(() => {
     latest.current = option;
-    instance.current?.setOption(option, { notMerge: true, lazyUpdate: true });
-  }, [option]);
+    instance.current?.setOption(optionFor(option, animate), { notMerge: true, lazyUpdate: true });
+  }, [option, animate]);
 
   return <div ref={box} className={className} role="img" aria-label={ariaLabel} />;
 }

@@ -45,6 +45,7 @@ import { preflightDetail } from "../fixtures/preflight.mjs";
 import { parseJson } from "../storage/db.mjs";
 import { proxyScreen, screenStatus } from "../services/capture-screen.mjs";
 import { createSensorService } from "../services/sensortag.mjs";
+import { createPlatformResources } from "../services/platform-resources.service.mjs";
 
 /** 归档副本的补传 / 重选属于「交付摘要校验」的写入侧，与前端 archive:verify 同一个权限 */
 function hasAssetPermission(actorId) {
@@ -130,6 +131,10 @@ export function createApi({ db, hub, bridge, devices = null, staticRoot = null, 
     新请求会先命中上一个实例注册的处理器 —— 那些闭包指着上一个已经关掉的库，
     表现为「database is not open」，排查起来离现场很远。
   */
+  /* 平台资源：采集 + 映射，进程内单例（所有浏览器共用一份快照） */
+  const platform = createPlatformResources();
+  void platform.start().catch((error) => logger.warn?.("平台资源采集启动失败", error));
+
   const ROUTES = [];
   const route = (method, pattern, handler, { auth = true, rawBody = false } = {}) => {
     // pattern 里的 :name 段编译成正则，顺序敏感（先注册的先生效）
@@ -729,6 +734,29 @@ export function createApi({ db, hub, bridge, devices = null, staticRoot = null, 
     requireSession(sessionId);
     return diagnosticsBundle(db, sessionId, preflightDetail(db, sessionId));
   });
+
+  /* ---- 平台资源（总览「平台数据」与资源弹窗的唯一数据源，PRD §10.2） ---- */
+
+  /*
+   * 只读、不需要权限：这一屏是给大屏看的资源占用，前端每 2 秒轮询一次，
+   * 落在权限校验后面只会白跑一趟鉴权。
+   *
+   * 夹具只允许在开发环境用（`?fixture=f1`）：验收要拿 F1–F4 验算映射公式，
+   * 但夹具是**假输入**，生产构建里必须忽略，不能让夹具冒充真实采集。
+   */
+  const fixtureAllowed = process.env.NODE_ENV !== "production" || process.env.MUMAI_ALLOW_FIXTURE === "1";
+  route(
+    "GET",
+    "/api/platform/resources",
+    async (ctx) => platform.snapshot(fixtureAllowed ? ctx.query.fixture ?? null : null),
+    { auth: false },
+  );
+  route(
+    "GET",
+    "/api/platform/resources/history",
+    async (ctx) => platform.history(Number(ctx.query.windowSec ?? 60)),
+    { auth: false },
+  );
 
   /* ---- 健康与预检（PRD §11 预检清单） ---- */
 

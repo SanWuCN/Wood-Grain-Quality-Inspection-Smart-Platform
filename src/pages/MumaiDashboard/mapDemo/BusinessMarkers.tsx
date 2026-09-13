@@ -39,7 +39,7 @@ export interface SiteMarkersProps {
   slabDepth: number;
 }
 
-/** 当前巡检位置：演示车正在示例寺松江区作业 */
+/** 当前巡检位置：智能巡检车正在示例寺松江区作业 */
 const CURRENT_SITE_ID = "sh";
 
 /**

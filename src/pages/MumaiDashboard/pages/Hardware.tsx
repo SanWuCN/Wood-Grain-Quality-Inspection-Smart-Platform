@@ -2,7 +2,7 @@
  * 硬件详情（`/hardware`）
  *
  * 由原「检测适配」页拆出：把**设备侧**的三件事收在一页 ——
- *   1. 采集作业：手持毫米波扫描枪按测区采集，落盘与接收状态
+ *   1. 采集作业：毫米波扫描仪按测区采集，落盘与接收状态
  *   2. 异常排查：设备 / 信号 / 测区 / 适用域四项排查与签名
  *   3. 硬件监看：扫描枪的固件、配置、连接与实时读数，四路通道，
  *      以及采集批次的逐路接收进度
@@ -61,6 +61,7 @@ import {
   SCANNER_TELEMETRY_AT,
 } from "../seed/scenario";
 import { VERSION_ITEMS } from "../seed/versions";
+import { LOAD_TEXT, bytesPerSec, gib, percent, power, tb, usePlatformResources } from "./usePlatformResources";
 import type { ChannelStatus, DeviceReading, ScanBatch } from "../seed/types";
 import type { Tone } from "../lib";
 
@@ -986,6 +987,78 @@ function PreviewPanel({ link, deviceId }: { link: DeviceLink; deviceId: string }
 }
 
 /* ------------------------------------------------------------------ *
+ * 算力占用（真实采集）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 平台算力占用。
+ *
+ * 这一块的数据**不是种子**：来自 `/api/system/metrics`，采集的是运行后端
+ * 那台机器的实际占用（磁盘 / 内存 / GPU / 功耗 / 网络），服务端按平台展示
+ * 口径映射后回传（总存储 24.35TB、总内存 672G、每台一张 4090、600–1100W）。
+ *
+ * 为什么放在硬件监看而不是另开一页：这一页回答的就是「设备与平台现在
+ * 是什么状态」，算力属于同一层问题；而且它有真实接口，放在这里能被看见。
+ */
+function ComputePanel({ state }: { state: ReturnType<typeof usePlatformResources> }) {
+  const { data, error } = state;
+  const summary = data?.summary;
+  return (
+    <Panel
+      title="算力占用"
+      extra={
+        <StatusChip
+          text={error ? "读取失败" : data ? `${data.serverCount} 台 · ${data.mappingExplain.gpuModel}` : "读取中"}
+          tone={error ? "warn" : data ? "ok" : "muted"}
+          dot
+        />
+      }
+      className="hw-panel">
+      <ul className="hw-compute">
+        <li>
+          <span>GPU 基准占用</span>
+          <b>
+            {percent(summary?.gpuBasePercent)}
+            {summary ? <em>{LOAD_TEXT[summary.loadState]}</em> : null}
+          </b>
+        </li>
+        <li>
+          <span>显存（单台配置）</span>
+          <b>{data ? `${data.mappingExplain.vramTotalGiB} GiB / 台` : "—"}</b>
+        </li>
+        <li>
+          <span>内存占用</span>
+          <b>
+            {summary ? `${gib(summary.memoryUsedGiB, 1)} / ${gib(summary.memoryTotalGiB, 1)}` : "—"}
+          </b>
+        </li>
+        <li>
+          <span>存储占用</span>
+          <b>{summary ? `${tb(summary.storageUsedTB)} / ${summary.storageTotalTB} TB` : "—"}</b>
+        </li>
+        <li>
+          <span>集群功耗</span>
+          <b>{summary ? power(summary.powerTotalW).w : "—"}</b>
+        </li>
+        <li>
+          <span>网络 UP / DOWN</span>
+          <b>
+            {summary ? `${bytesPerSec(summary.uploadBytesPerSec)} / ${bytesPerSec(summary.downloadBytesPerSec)}` : "—"}
+          </b>
+        </li>
+      </ul>
+      <p className="note">
+        {error
+          ? `读取失败：${error}（显示的是上一次成功读数）`
+          : data
+            ? `采集自 ${data.hostId} · 上游采集源 ${data.mappingExplain.gpuSource ?? "—"} · 网络按真实速率 ×${data.mappingExplain.networkScale} 展示（十进制 B/s）`
+            : "正在读取平台资源…"}
+      </p>
+    </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 硬件监看
  * ------------------------------------------------------------------ */
 
@@ -998,9 +1071,13 @@ function PreviewPanel({ link, deviceId }: { link: DeviceLink; deviceId: string }
  * 阈值判定是例外：采集条件属于设备侧，且 SOP 就要求采集前核对。
  */
 function MonitorTab({ link, deviceId }: { link: DeviceLink; deviceId: string }) {
+  /* 平台算力的真实读数：只在这个页签里轮询，切走就停 */
+  const compute = usePlatformResources(true);
+
   return (
     <div className="hw-monitor">
       <DeviceStatusPanel link={link} deviceId={deviceId} />
+      <ComputePanel state={compute} />
       <ReadingsPanel link={link} />
       <ChannelsPanel link={link} />
       <ReceivePanel link={link} deviceId={deviceId} />

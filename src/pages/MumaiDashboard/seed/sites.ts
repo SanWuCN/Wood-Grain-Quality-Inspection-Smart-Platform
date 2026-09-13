@@ -103,7 +103,7 @@ export const CHINA_SITES: Site[] = [
     missionId: MISSION.id,
     survey: {
       at: "2026-09-11 14:22", by: "马 · 具身智能工程师",
-      items: ["SLAM 建图 MAP-SH-06", "四柱关键帧对比", "Z04 下部手持毫米波精扫", "环境记录 CFG-02"],
+      items: ["SLAM 建图 MAP-SH-06", "四柱关键帧对比", "Z04 下部毫米波扫描仪精扫", "环境记录 CFG-02"],
       conclusion: "Z04 下部疑似严重受潮与两处疑似虫蛀空洞，已建工单 SH-2026-0901 并安排复核。",
     },
   },
@@ -344,7 +344,7 @@ export const SHANGHAI_SITES: Site[] = [
     risk: "Z04 下部疑似空洞", orderId: "SH-2026-0901", missionId: MISSION.id,
     survey: {
       at: "2026-09-11 14:22", by: "马 · 具身智能工程师",
-      items: ["SLAM 建图 MAP-SH-06", "四柱关键帧对比", "Z04 下部手持毫米波精扫", "环境记录 CFG-02"],
+      items: ["SLAM 建图 MAP-SH-06", "四柱关键帧对比", "Z04 下部毫米波扫描仪精扫", "环境记录 CFG-02"],
       conclusion: "Z04 下部疑似严重受潮与两处疑似虫蛀空洞，已建工单 SH-2026-0901 并安排复核。",
     },
   },

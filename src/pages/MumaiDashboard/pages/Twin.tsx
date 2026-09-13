@@ -1079,7 +1079,7 @@ export default function Twin() {
               <StateBlock
                 kind="empty"
                 title="该构件未采集回波"
-                hint="只有做过手持毫米波扫描的构件才有频谱。"
+                hint="只有用毫米波扫描仪做过的构件才有频谱。"
               />
             )}
 
