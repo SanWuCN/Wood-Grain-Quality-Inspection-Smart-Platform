@@ -6418,6 +6418,145 @@
   font-size: var(--fs-aux);
 }
 
+/* ---- 真机接入（设备网关）：链路说明条 / 读数来源 / 事件 / 预览 ----
+   这一组是「硬件页接真机」时新增的：数据是不是真的、新不新、从哪来，
+   必须在版面上直接回答，不能让人从数字里猜。 */
+
+/* 整块退回种子数据、或真机数据已经旧了时的说明条 */
+.hw-notice {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-left: 2px solid var(--ma-info);
+  background: var(--fill-soft);
+  font-size: var(--fs-aux);
+}
+
+.hw-notice b {
+  color: var(--ma-text-1);
+  white-space: nowrap;
+}
+
+.hw-notice span {
+  color: var(--ma-text-3);
+}
+
+.hw-notice.is-warn {
+  border-left-color: var(--ma-warn);
+}
+
+.hw-notice.is-danger {
+  border-left-color: var(--ma-danger);
+}
+
+/* 读数的来源标记（实测 / 推算 / 估算）：小、靠左、不抢数值的位置 */
+.hw-readings__src {
+  padding: 0 4px;
+  border: 1px solid var(--border-subtle);
+  color: var(--ma-text-3);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.hw-readings__src[data-source="estimated"] {
+  border-color: var(--ma-warn);
+  color: var(--ma-warn);
+}
+
+.hw-readings__src[data-source="derived"] {
+  border-color: var(--ma-info);
+  color: var(--ma-info);
+}
+
+/* 设备卡脚下的系统信息与设备指令 */
+.hw-device__meta {
+  margin-top: calc(var(--space-2) * -1);
+}
+
+.hw-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.hw-actions .muted {
+  font-size: var(--fs-aux);
+}
+
+/* 设备事件流水：一行一条，时间 / 事件 / 摘要 / 距今 */
+.hw-events,
+.hw-commands {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-aux);
+}
+
+.hw-events li,
+.hw-commands li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.hw-events__at {
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hw-events b {
+  color: var(--ma-text-1);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hw-events .muted,
+.hw-commands .muted {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hw-events em {
+  margin-left: auto;
+  color: var(--ma-text-3);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.hw-commands code {
+  color: var(--ma-text-1);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+}
+
+.hw-commands {
+  margin-bottom: var(--space-3);
+}
+
+/* 低帧率预览：保持宽高比、不拉伸，且明确不是归档图像 */
+.hw-preview {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  background: var(--fill-soft);
+}
+
 /* ---- 版本配置矩阵 ---- */
 
 .fw-group + .fw-group {

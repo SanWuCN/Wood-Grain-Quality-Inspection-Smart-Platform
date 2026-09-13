@@ -13,6 +13,7 @@
  */
 
 import { readSession } from "../auth";
+import type { DeviceEvent, DeviceHardwareView, DeviceLedgerEntry } from "../device/types";
 
 /* ------------------------------------------------------------------ *
  * 类型（与服务端 contracts 对应）
@@ -532,6 +533,36 @@ export const api = {
   /** 导出诊断包：会话 + 实体 + 快照 + 事件 + 预检，一份 JSON */
   consoleDiagnostics(sessionId: string) {
     return request<Record<string, unknown>>(`/api/console/diagnostics?sessionId=${encodeURIComponent(sessionId)}`);
+  },
+
+  /* ---- 手持终端（树莓派 / woodpulse）设备网关 ---- */
+
+  /**
+   * 硬件页数据：终端最后一次上报 + 平台算出来的链路状态。
+   *
+   * 读不到（设备从没上报过 / 服务不可达）时由调用方兜底 —— 硬件页在设备离线时
+   * 要退回种子数据继续演示，而不是整页报错。
+   */
+  deviceHardware(deviceId: string) {
+    return request<DeviceHardwareView>(`/api/devices/${encodeURIComponent(deviceId)}/hardware`);
+  },
+
+  deviceEvents(deviceId: string, limit = 40) {
+    return request<{ deviceId: string; events: DeviceEvent[] }>(
+      `/api/devices/${encodeURIComponent(deviceId)}/events?limit=${limit}`,
+    );
+  },
+
+  deviceLedger() {
+    return request<{ devices: DeviceLedgerEntry[]; status: Record<string, unknown>; serverTime: string }>("/api/devices");
+  },
+
+  /** 下发设备命令。终端的回执是异步的（accepted → executed），这里只负责发出去 */
+  deviceCommand(deviceId: string, type: string, args: Record<string, unknown> = {}) {
+    return request<{ command: { commandId: string; state: string; action: string }; pushed: boolean; hint: string }>(
+      `/api/devices/${encodeURIComponent(deviceId)}/commands`,
+      { method: "POST", body: JSON.stringify({ type, args }) },
+    );
   },
 };
 

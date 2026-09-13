@@ -81,10 +81,22 @@ export type DeviceReading = {
    * 手持设备在采集中读数本来就会小幅摆动，一条钉死的数字反而假。
    * 界面按这个幅度做确定性摆动（围绕 value，不产生超出幅度的漂移），
    * 幅度缺省表示该项不摆动 —— 版本号、采样时间这类不该抖。
+   *
+   * 只在**种子兜底**时用：真机上报的读数不做摆动，设备说多少就是多少。
    */
   drift?: number;
   /** 摆动周期（秒），不同项给不同周期，避免所有数字同频一起跳 */
   driftPeriod?: number;
+  /**
+   * 读数来源（终端上报才有这一项）。
+   *
+   * 终端把来源分成三档：`real` 本机实测 / `derived` 由实测推算 /
+   * `estimated` 本机没有该采集接口时的估算。页面必须原样显示这三档，
+   * 不能一律当实测值 —— 这是终端文档 §2.5 的硬口径。
+   */
+  source?: "real" | "derived" | "estimated";
+  /** 采集口径（如 `/var/lib/woodpulse`、`psutil`、`vcgencmd`），Tooltip 用 */
+  origin?: string;
 };
 
 /** 环境记录（PRD 3.1 / 12：温度℃、湿度 0–100、风速非负、仪表、位置、测量时间） */
@@ -294,7 +306,7 @@ export type ScanBatch = {
   batchId: string;
   componentId: string;
   zoneId: string;
-  round: "初扫" | "复扫" | "补扫";
+  round: "初扫" | "复扫" | "补扫" | "参考";
   configVersion: string;
   modelVersion: string;
   rawLevel: "ADC" | "IQ" | "spectrum" | "features" | "result_only" | "opaque";
