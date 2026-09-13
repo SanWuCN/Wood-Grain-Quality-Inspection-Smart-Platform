@@ -66,12 +66,6 @@
   flex-wrap: nowrap;
   max-width: min(46vw, 640px);
   overflow: hidden;
-  /*
-    与左侧药丸导航垂直居中对齐：药丸高 40px、状态项约 28px，两者都贴着
-    底边 6px 时状态项会明显偏下（药丸中心在 26px，状态项中心在 20px）。
-    上提 6px 让两行的中线落在同一条轴上。
-  */
-  transform: translateY(-6px);
 }
 
 .appshell__channels button {
@@ -393,19 +387,10 @@
    之后，同权重会盖过本文件，所以这里用 !important 强制把顶栏的字号、颜色和
    旧主色（#3061DB 的按钮底色）收敛到设计系统。顶栏改成引用 token 后，
    这一整块可以删掉。
-
-   一级导航换成药丸导航（DemoHeader 里的 NavLayer → PillNav）之后，
-   原来针对 `nav button` 的四条规则已经删掉：
-
-     · `font-size: var(--fs-body) !important` —— 药丸导航自带
-       `--pill-font`（14px，窄屏降到 13px），字号由组件按档位自己给，
-       外面再压一条 !important 只会把窄屏那一档顶掉。
-     · `color / hover / .is-active` —— 药丸的默认、悬停、选中三态颜色
-       由组件按 token 定义（悬停还要和填色圆的动画配合），
-       外面用 !important 覆盖会和圆里的深色文字打架。
-     · `background: none !important`（hover）—— 会直接盖掉悬停底色。
-
-   其余几条（纯装饰 SVG 层、时间与设备状态、顶栏两个按钮）继续保留。
+   - 字号只允许 28（Logo）/ 13（正文）/ 11（辅助）
+   - 导航默认 --text-tertiary ≈ 规范 §7.1 的 #73869D，Hover --text-secondary，
+     Active --text-primary；只留一条 2px --primary 指示线，不画框
+   - 纯装饰的 SVG 框线（1920x85 那一层）整层隐藏，对应 §7.1「不要每个导航都画框」
    ------------------------------------------------------------------ */
 
 .appshell__header {
@@ -429,6 +414,23 @@
   font-size: var(--fs-aux) !important;
   letter-spacing: 0.16em !important;
   color: var(--text-tertiary) !important;
+}
+
+.appshell__header--native nav button {
+  font-size: var(--fs-body) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.03em !important;
+  color: var(--text-tertiary) !important;
+  text-shadow: none !important;
+}
+
+.appshell__header--native nav button:hover {
+  color: var(--text-secondary) !important;
+  background: none !important;
+}
+
+.appshell__header--native nav button.is-active {
+  color: var(--text-primary) !important;
 }
 
 .appshell__header--native time,
@@ -475,31 +477,6 @@
   .appshell__channels { gap: var(--space-3); }
   .appshell__source { display: none; }
   .appshell__login em { display: none; }
-}
-
-/* ------------------------------------------------------------------
-   顶部第二行：药丸导航与状态区的共存
-   ------------------------------------------------------------------
-   一级导航（左，药丸）与状态区（右，平台 / 智能车 / 扫描仪 / 模型）
-   同在顶栏第二行，两者都是绝对定位。药丸比原来的纯文字导航宽，
-   1280–1600 这一档如果两边都完整铺开就会叠在一起 ——
-   评审 V09 / R01 明确不允许「正文截断、遮挡」。
-
-   收缩顺序按信息优先级排：
-     ① 收状态区（辅助信息，设备状态在硬件页与硬件入口里都有完整版）
-     ② 再收导航图标（中文标签完整保留，八项一个不藏）
-   字号与标签始终不动，1366 下八个中文标签仍然完整可读。
-   ------------------------------------------------------------------ */
-
-@media (max-width: 1600px) {
-  /* 四格状态收成图标态：只留状态点与状态词，标签隐藏 */
-  .appshell__channels .appshell__channels-label { display: none; }
-  .appshell__channels { max-width: min(34vw, 360px); gap: var(--space-2); }
-}
-
-@media (max-width: 1400px) {
-  /* 这一档开始只留导航：状态区让位（状态在硬件详情页与 4/4 计数里仍可读到） */
-  .appshell__channels { display: none; }
 }
 
 @media (max-height: 800px) {
