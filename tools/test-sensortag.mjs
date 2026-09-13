@@ -91,3 +91,42 @@ test('stationary gyro calibration persists per device and survives collector res
   const next=svc.ingest('session-a',{...base,streamId:'run-2',sampledAt:at+2200,seq:1});assert.equal(next.gyroCalibration,'ready');near(next.gyroBias[1],9.6);
   assert.equal(db.prepare('SELECT count(*) as n FROM sensor_calibration_events').get().n,1);db.close();
 });
+
+test('adaptive pose smoothing suppresses rest jitter without hiding deliberate motion',async()=>{
+  const { PoseSmoother }=await import('../shared/sensortag.mjs');
+  const quat=(deg)=>[Math.sin(deg*Math.PI/360),0,0,Math.cos(deg*Math.PI/360)];
+  const angle=(q)=>2*Math.atan2(q[0],q[3])*180/Math.PI;
+  const smoother=new PoseSmoother();smoother.update(quat(0),0);
+  const values=[];
+  for(let i=1;i<=100;i++) values.push(angle(smoother.update(quat(i%2?.4:-.4),i*100)));
+  const rms=Math.sqrt(values.slice(20).reduce((s,v)=>s+v*v,0)/80);
+  assert.ok(rms<.2,`rest jitter RMS ${rms}°`);
+  // A 90°/s turn remains responsive; no hard gyro dead zone suppresses slow motion.
+  const turn=new PoseSmoother();turn.update(quat(0),0);
+  for(let i=1;i<=10;i++)turn.update(quat(i*9),i*100);
+  assert.ok(angle(turn.q)>86,`turn lag ${90-angle(turn.q)}°`);
+  const slow=new PoseSmoother();slow.update(quat(0),0);
+  for(let i=1;i<=100;i++)slow.update(quat(i*.02),i*100);
+  assert.ok(angle(slow.q)>1.8);
+  const before=[...turn.q];const opposite=turn.update(turn.q.map(v=>-v),1100);
+  near(Math.abs(opposite.reduce((sum,v,i)=>sum+v*before[i],0)),1,1e-9);
+});
+
+test('brief BLE or upload interruptions preserve pose, zero epoch and old field freshness',()=>{
+  const db=new DatabaseSync(':memory:');const svc=createSensorService(db,{broadcastSensor:()=>{}});
+  const at=Date.now()-25000;
+  const base={deviceId:'reconnect-tag',batchId:'scan-1',streamId:'run-a',seq:1,sampledAt:at,readings:{accel:[0,0,1],gyro:[0,0,90],light:500}};
+  let frame=svc.ingest('session-a',base);
+  for(let i=1;i<=50;i++)frame=svc.ingest('session-a',{...base,sampledAt:at+i*20,seq:i+1,readings:{accel:[0,0,1],gyro:[0,0,90]}});
+  const before=frame;
+  const restored=svc.ingest('session-a',{...base,streamId:'run-b',sampledAt:at+4500,seq:1,readings:{accel:[0,0,1],gyro:[0,0,0]}});
+  assert.equal(restored.poseEpoch,before.poseEpoch);
+  assert.deepEqual(restored.rawQuaternion,before.rawQuaternion);
+  assert.equal(restored.fieldAt.light,before.fieldAt.light);
+  assert.equal(restored.readings.light,500);
+  const longGap=svc.ingest('session-a',{...base,streamId:'run-b',sampledAt:at+19000,seq:2,readings:{accel:[0,0,1],gyro:[0,0,0]}});
+  assert.notEqual(longGap.poseEpoch,before.poseEpoch);
+  assert.equal(longGap.readings.light,undefined);
+  assert.deepEqual(longGap.quaternion,[0,0,0,1]);
+  db.close();
+});

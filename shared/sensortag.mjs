@@ -1,7 +1,7 @@
 /** TI SensorTag 2 BLE profile; units: g, deg/s, µT, °C, %RH, hPa, lx. */
 export const tiUuid = (id) => `f000${id.toLowerCase()}-0451-4000-b000-000000000000`;
 export const PROFILES = [
-  { key: 'motion', service: 'aa80', data: 'aa81', config: 'aa82', period: 'aa83', enable: [0x7f, 0x02], interval: 5 },
+  { key: 'motion', service: 'aa80', data: 'aa81', config: 'aa82', period: 'aa83', enable: [0x3f, 0x02], interval: 10 },
   { key: 'temperature', service: 'aa00', data: 'aa01', config: 'aa02', period: 'aa03', enable: [1], interval: 100 },
   { key: 'humidity', service: 'aa20', data: 'aa21', config: 'aa22', period: 'aa23', enable: [1], interval: 100 },
   { key: 'pressure', service: 'aa40', data: 'aa41', config: 'aa42', period: 'aa44', enable: [1], interval: 100 },
@@ -52,12 +52,14 @@ export class AttitudeFilter {
         this.samples=[];
       }
     }
-    if (this.at === null || at - this.at > 1000) {
+    if (this.at === null) {
       const roll = Math.atan2(ay,az), pitch = Math.atan2(-ax,Math.hypot(ay,az));
       this.q = multiply([0,Math.sin(pitch/2),0,Math.cos(pitch/2)], [Math.sin(roll/2),0,0,Math.cos(roll/2)]);
       this.at = at;
       return this.q;
     }
+    // Missing motion cannot be reconstructed: preserve heading and restart the integration clock.
+    if (at-this.at>1000) { this.at=at; return [...this.q]; }
     const dt = Math.max(0,Math.min(.2,(at-this.at)/1000));
     this.at = at;
     const [x,y,z,w] = this.q;
@@ -72,5 +74,33 @@ export class AttitudeFilter {
     const derivative = multiply(this.q,[...omega,0]);
     this.q = normalize(this.q.map((v,i) => v+derivative[i]*dt/2));
     return this.q;
+  }
+}
+
+/** Quaternion low-pass: stronger at rest, faster while turning; q and -q are equivalent. */
+export class PoseSmoother {
+  q = null;
+  raw = null;
+  at = null;
+  speed = 0;
+  update(input, at) {
+    const target = normalize(input);
+    if (!this.q) { this.q=target; this.raw=target; this.at=at; return [...this.q]; }
+    const dt = Math.max(.001, Math.min(.2, (at-this.at)/1000));
+    const dot = (a,b) => a.reduce((sum,v,i)=>sum+v*b[i],0);
+    const angle = (a,b) => 2*Math.acos(Math.min(1,Math.abs(dot(a,b))));
+    const velocity = angle(this.raw,target)/dt*180/Math.PI;
+    this.speed += (velocity-this.speed)*(1-Math.exp(-2*Math.PI*dt));
+    this.raw=target; this.at=at;
+    const error = angle(this.q,target);
+    // Hold sub-pixel noise, but compare against the held output so slow turns still accumulate.
+    if (error < .12*Math.PI/180) return [...this.q];
+    const alpha = 1-Math.exp(-2*Math.PI*(.65+.08*this.speed)*dt);
+    const sign = dot(this.q,target)<0 ? -1 : 1;
+    const half = error/2;
+    const a = half<1e-6 ? 1-alpha : Math.sin((1-alpha)*half)/Math.sin(half);
+    const b = half<1e-6 ? alpha : Math.sin(alpha*half)/Math.sin(half);
+    this.q=normalize(this.q.map((v,i)=>a*v+b*sign*target[i]));
+    return [...this.q];
   }
 }

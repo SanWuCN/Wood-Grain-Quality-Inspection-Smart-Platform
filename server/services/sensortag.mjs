@@ -1,4 +1,4 @@
-import { AttitudeFilter } from '../../shared/sensortag.mjs';
+import { AttitudeFilter, PoseSmoother } from '../../shared/sensortag.mjs';
 import { WorkflowError } from './workflow.mjs';
 
 const fail = (message) => { throw new WorkflowError(422, 'BAD_SENSOR_FRAME', message); };
@@ -62,8 +62,8 @@ export function createSensorService(db, hub) {
       if (prior && (input.sampledAt <= prior.sampledAt || (input.streamId === prior.streamId && input.seq <= prior.seq))) {
         throw new WorkflowError(409,'OLD_SENSOR_FRAME','重复或乱序的传感器帧');
       }
-      if (!state || state.frame.streamId !== input.streamId || input.sampledAt-state.frame.sampledAt > 1000) {
-        state = { filter: new AttitudeFilter(), frame: null };
+      if (!state || input.sampledAt-state.frame.sampledAt > 10000) {
+        state = { filter: new AttitudeFilter(), smoother: new PoseSmoother(), frame: null, poseEpoch: `${input.streamId}:${input.sampledAt}` };
         const savedBias=JSON.parse(db.prepare('SELECT value FROM sensor_settings WHERE key=?').get(`gyro:${input.deviceId}`)?.value ?? 'null');
         if (savedBias && Array.isArray(savedBias.bias) && savedBias.bias.length===3 && savedBias.bias.every(Number.isFinite)) {
           state.filter.bias=savedBias.bias;
@@ -77,7 +77,8 @@ export function createSensorService(db, hub) {
       for (const field of Object.keys(input.readings)) fieldAt[field] = receivedAt;
       const motion = input.readings.accel && input.readings.gyro;
       const wasCalibrating=state.filter.calibration==='collecting';
-      const quaternion = motion ? state.filter.update(input.readings.accel,input.readings.gyro,input.sampledAt) : previous?.quaternion ?? null;
+      const rawQuaternion = motion ? state.filter.update(input.readings.accel,input.readings.gyro,input.sampledAt) : previous?.rawQuaternion ?? null;
+      const quaternion = motion ? state.smoother.update(rawQuaternion,input.sampledAt) : previous?.quaternion ?? null;
       if (wasCalibrating && state.filter.calibration==='ready') {
         const record={bias:state.filter.bias,at:receivedAt,method:'100 stationary samples'};
         db.prepare('INSERT OR REPLACE INTO sensor_settings(key,value) VALUES(?,?)').run(`gyro:${input.deviceId}`,JSON.stringify(record));
@@ -88,7 +89,7 @@ export function createSensorService(db, hub) {
         ...(typeof readings.ambientTemp==='number' ? { ambientTemp:readings.ambientTemp+(calibration?.temperatureOffset ?? 0) } : {}),
         ...(typeof readings.light==='number' ? { light:Math.max(0,readings.light*(calibration?.lightScale ?? 1)+(calibration?.lightOffset ?? 0)) } : {}),
       };
-      const frame = { ...input, sessionId, readings, calibrated, calibration, gyroCalibration:state.filter.calibration, gyroBias:state.filter.bias, fieldAt, receivedAt, quaternion, poseAt: motion ? receivedAt : previous?.poseAt ?? null, source: 'ble:sensortag', simulated:false, heading: 'relative' };
+      const frame = { ...input, sessionId, readings, calibrated, calibration, gyroCalibration:state.filter.calibration, gyroBias:state.filter.bias, fieldAt, receivedAt, quaternion, rawQuaternion, poseEpoch:state.poseEpoch, poseAt: motion ? receivedAt : previous?.poseAt ?? null, source: 'ble:sensortag', simulated:false, heading: 'relative' };
       // Push every frame; persist one raw/calibrated snapshot per second for seven days.
       if (!state.savedAt || receivedAt-state.savedAt>=1000) {
         const result = db.prepare('INSERT INTO sensor_frames(session_id,batch_id,device_id,stream_id,seq,sampled_at,frame) VALUES(?,?,?,?,?,?,?)').run(sessionId,input.batchId,input.deviceId,input.streamId,input.seq,input.sampledAt,JSON.stringify(frame));
