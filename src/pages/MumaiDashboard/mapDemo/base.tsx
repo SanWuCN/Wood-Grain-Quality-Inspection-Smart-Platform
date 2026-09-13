@@ -8,6 +8,7 @@ import {
   Shape,
   Vector2,
   Vector3,
+  Box3,
   type Group,
   type Texture,
 } from "three";
@@ -274,7 +275,16 @@ export default function Base(props: BaseProps) {
     const vFov = (cameraFov * Math.PI) / 180;
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
     const halfAngle = Math.min(vFov, hFov) / 2;
-    return Math.max((sphereRadius / Math.sin(halfAngle)) * fitPadding, 2);
+    /*
+     * 标定用：`?fit=0.8` 直接缩放取景距离（正常运行时为 1）。
+     * 地图是斜置平面，投影尺寸与「包围球半径」差得远，公式推不准，
+     * 只能量出来再定；量的时候也用这个参数逐档对比。
+     */
+    const fitScale =
+      typeof window === "undefined"
+        ? 1
+        : Number(new URLSearchParams(window.location.search).get("fit") ?? "1") || 1;
+    return Math.max((sphereRadius / Math.sin(halfAngle)) * fitPadding * fitScale, 2);
   }, [bbox, slabDepth, camera, canvasSize.width, canvasSize.height, fitPadding]);
 
   /**
@@ -364,6 +374,37 @@ export default function Base(props: BaseProps) {
         );
       }
     });
+
+    /*
+     * 临时诊断（?fitprobe=1）：把地图的世界包围盒投影到屏幕，量出实际占比。
+     * 取景不能靠公式猜 —— 地图是斜置的平面，透视下的投影尺寸与「包围球半径」
+     * 差得远。量出来再标定 fitPadding。
+     */
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("fitprobe")) {
+      window.setTimeout(() => {
+        const box = new Box3().setFromObject(group);
+        const w = window as unknown as Record<string, unknown>;
+        const pts: [number, number][] = [];
+        for (const x of [box.min.x, box.max.x])
+          for (const y of [box.min.y, box.max.y])
+            for (const z of [box.min.z, box.max.z]) {
+              const v = new Vector3(x, y, z).project(camera);
+              pts.push([v.x, v.y]);
+            }
+        const xs = pts.map((q) => q[0]);
+        const ys = pts.map((q) => q[1]);
+        w.__fit = {
+          widthPct: Math.round(((Math.max(...xs) - Math.min(...xs)) / 2) * 100),
+          heightPct: Math.round(((Math.max(...ys) - Math.min(...ys)) / 2) * 100),
+          fitDistance: Math.round(fitDistance),
+          box: {
+            x: Math.round(box.max.x - box.min.x),
+            y: Math.round(box.max.y - box.min.y),
+            z: Math.round(box.max.z - box.min.z),
+          },
+        };
+      }, 4200);
+    }
 
     const settle = () => {
       group.position.set(0, 0, 0);
