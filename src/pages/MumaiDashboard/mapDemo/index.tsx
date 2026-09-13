@@ -257,7 +257,25 @@ export default function Map(props: MapProps) {
           fov: 70,
           position: [3, 20, 10],
         }}
-        dpr={[1, 2]}>
+        dpr={[1, 2]}
+        /*
+         * 标定模式（?fit= / ?fitprobe=）下保留绘制缓冲。
+         *
+         * WebGL 默认在每帧提交后清掉缓冲，于是 `ctx.drawImage(glCanvas)` 有一半概率
+         * 读到**全黑** —— 实测同一个 fit 连采两次，一次读到 69% 宽、一次 0 个亮像素。
+         * 取景标定全靠这个回读，读数不稳就没法定值。
+         *
+         * `preserveDrawingBuffer` 有性能代价，所以只在标定模式下打开，
+         * 正常运行时行为与之前完全一致。
+         */
+        gl={{
+          antialias: true,
+          alpha: false,
+          preserveDrawingBuffer:
+            typeof window !== "undefined" &&
+            (new URLSearchParams(window.location.search).has("fit") ||
+              new URLSearchParams(window.location.search).has("fitprobe")),
+        }}>
         <color attach="background" args={["#000000"]} />
         {on("lights") ? <Lights /> : null}
         <Suspense fallback={null}>
