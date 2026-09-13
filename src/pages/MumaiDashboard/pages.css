@@ -1422,40 +1422,6 @@
   color: var(--text-primary);
 }
 
-/* 四路通道：一行一条 = 通道名 · 连接状态 · 更新时间。
-   `li` 必须自己排成一行（名称定宽、时间右对齐），否则 span / .chip / em
-   都是行内元素，会连成「地图●正常14:22:31」这种连读不出来的一坨。 */
-.ov-channels {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.ov-channels li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--fs-aux);
-}
-
-/* 通道名定宽成列，四个通道的状态词因此竖直对齐，能一眼扫下来 */
-.ov-channels li > span:first-child {
-  flex: 0 0 46px;
-  color: var(--ma-text-3);
-}
-
-/* 更新时间是右端锚点：等宽数字，避免 14:22:31 / 14:22:24 宽度跳动 */
-.ov-channels li > em {
-  margin-left: auto;
-  color: var(--ma-text-3);
-  font-family: var(--font-data);
-  font-style: normal;
-  font-variant-numeric: tabular-nums;
-}
-
 /* 风险与工单：三个计数排一行，靠留白与字号分层，不各自包一张边框卡（§4.3） */
 .ov-counts {
   display: flex;
@@ -1684,12 +1650,6 @@
   width: var(--mumai-icon-size, 14px);
 }
 
-/* 面板内最后一块：面板高度是固定的两行 grid（与地图留白对齐），
-   内容变薄后剩下的留白交给这一块吸收，避免面板底部出现一片空白 */
-.ov__panel--todo .ov-stats {
-  margin-top: auto;
-}
-
 /* 面板内的状态块压缩一点，避免和上面的列表争高度 */
 .ov__panel .state-block {
   margin-top: 7px;
@@ -1768,30 +1728,6 @@
   margin-right: 7px;
   color: var(--ma-text-3);
   font-family: var(--font-data);
-}
-
-/* 历史风险口径：标签在文字节点里，数字单独上色 */
-.ov-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4);
-  margin-top: var(--space-3);
-  font-size: var(--fs-aux);
-  color: var(--text-tertiary);
-}
-
-.ov-stats b {
-  margin-left: 4px;
-  color: var(--ma-text);
-  font-family: var(--font-data);
-}
-
-.ov-stats b.is-ok {
-  color: var(--ma-ok);
-}
-
-.ov-stats b.is-danger {
-  color: var(--ma-danger);
 }
 
 /* ------------------------------------------------------------------
@@ -7017,33 +6953,79 @@
   background: var(--primary);
 }
 
-.ov-tally__bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-  margin: 0;
-  padding: 0;
-  list-style: none;
+/* ------------------------------------------------------------------
+   总览页图表（ECharts）
+   ------------------------------------------------------------------
+   四张图共用一个高度档位，图本身不吃边框、不加发光（规范 §6.1：Glow 只给
+   地图 / 当前焦点 / 关键风险，普通 Panel 与正文都不发光）。
+   高度写死而不是 flex:1：ECharts 在 0 高度上 init 会画出空白，
+   由 ResizeObserver 拿到真实高度后再画；给固定高度是为了首帧就有尺寸。
+   ------------------------------------------------------------------ */
+.ov-chart {
+  width: 100%;
+  flex: 0 0 auto;
 }
 
-.ov-tally__bar li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-aux);
+/* 巡检概览的环形图：与右侧图例一行读完，占面板中段 */
+.ov-chart--donut {
+  height: 132px;
+  margin: var(--space-2) 0 var(--space-3);
+}
+
+/* 设备状态的四路通道条：4 条 + 阈值线 + 右侧数值 */
+.ov-chart--bars {
+  height: 112px;
+  margin-bottom: var(--space-2);
+}
+
+/* 待办面板底部的历史风险环图：最后一块，贴底吃掉剩余留白 */
+.ov-chart--donut-sm {
+  height: 104px;
+  margin: auto 0 0;
+}
+
+/* 「数据通道」标题右侧的口径说明：说明图怎么读，取代原来每行里的时间列 */
+.ov-sec__note {
+  margin-left: auto;
   color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
-.ov-tally__bar i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+/* 风险与工单：三档计数的占比条。
+   一根横条按档切段，宽度 = 该档数量 / 最大档数量（口径见 Overview.tsx 注释）。
+   段与段之间留 2px 缝，避免两个语义色直接相接看不出分界。 */
+.ov-counts__bar {
+  display: flex;
+  gap: 2px;
+  height: 3px;
+  margin: calc(-1 * var(--space-2)) 0 0;
 }
 
-.ov-tally__bar b {
-  color: var(--ma-text-2);
-  font-family: var(--font-data);
-  font-weight: 500;
+/* 占比条的口径说明：三档互斥，三段之和就是条的总长。写一行小字说明
+   这条在表达什么，不留给人猜 */
+.ov-counts__note {
+  margin: var(--space-1) 0 var(--space-3);
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.ov-counts__bar i {
+  display: block;
+  background: var(--fill-soft);
+}
+
+.ov-counts__bar i.is-danger {
+  background: var(--danger);
+}
+
+.ov-counts__bar i.is-warn {
+  background: var(--warning);
+}
+
+.ov-counts__bar i.is-info {
+  background: var(--primary);
 }
 
 /* 「本轮任务」脚注贴到面板底部（与 .ov__panel--todo .ov-stats 同一个手法）：
@@ -7054,6 +7036,23 @@
   padding-top: var(--space-3);
   color: var(--ma-text-3);
   font-size: var(--fs-aux);
+}
+
+/* 小屏用的设备摘要行：默认不显示，只在 ≤800px 高那一档替代三行设备列表 */
+.ov-devices__brief {
+  display: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-3);
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.ov-devices__brief b {
+  color: var(--ma-text-2);
+  font-family: var(--font-data);
+  font-weight: 500;
 }
 
 /* 设备列表：左侧名称 + 编号，右侧状态；两行之间用留白分隔 */
@@ -7671,4 +7670,50 @@
 .twin-view.is-hidden {
   visibility: hidden;
   pointer-events: none;
+}
+
+/* ------------------------------------------------------------------
+   小屏（≤800px 高，1366×768 就在这一档）的图表收敛
+   ------------------------------------------------------------------
+   这一档面板只有 ~292px 高，三张图按桌面尺寸排会把设备面板的通道条顶出可视区。
+   整档收一档高度，并隐藏占地方的设备插图 —— 规范 §8：小屏优先「减少内容」，
+   而不是把内容挤出屏幕。
+
+   ⚠️ 必须写在这里（基础样式**之后**）：同权重下 CSS 按出现顺序取胜，
+   把这段放到文件前半部分的 @media (max-height:800px) 里会被
+   `.ov-chart--bars { height:112px }` 反过来盖掉，调了半天没有效果。
+   ------------------------------------------------------------------ */
+@media (max-height: 800px) {
+  .ov-chart--donut {
+    height: 104px;
+    margin: var(--space-1) 0 var(--space-2);
+  }
+
+  .ov-chart--bars {
+    height: 84px;
+    margin-bottom: 0;
+  }
+
+  .ov-chart--donut-sm {
+    height: 84px;
+  }
+
+  .ov__panel .mumai-device-figure {
+    display: none;
+  }
+
+  /*
+    设备列表在小屏让位：三行「设备名 / 设备号 / 来源」占掉 ~150px，
+    而这一档面板总共只有 ~292px —— 让完之后通道条还是被顶出可视区（实测差 51px）。
+    所以这里不是压缩，而是**只留一行摘要**：三台设备的编号一行读完
+    （编号本身就是这三台设备的区分点，名称与「待接入」结论在硬件详情页有全量）。
+    数据（通道条）留在可视区，说明性文字让位 —— 规范 §8 的口径。
+  */
+  .ov-devices {
+    display: none;
+  }
+
+  .ov-devices__brief {
+    display: flex;
+  }
 }

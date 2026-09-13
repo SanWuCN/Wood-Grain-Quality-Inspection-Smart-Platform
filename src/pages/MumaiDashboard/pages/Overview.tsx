@@ -41,6 +41,8 @@ import { DeviceFigure } from "../illustrations";
 import { StatusChip } from "../ui";
 import { useMumai } from "../context";
 import { STATUS_ACTION, STATUS_COLOR, STATUS_TEXT } from "../map/status";
+import Chart from "./OverviewCharts";
+import { CHART } from "../design";
 import SiteDetailCard from "../map/SiteDetailCard";
 import {
   CHINA_PROVINCE_COUNT,
@@ -69,11 +71,19 @@ import {
   ORDER_PREVIEW_ROWS,
   ORDER_STATUS_TONE,
   OVERVIEW_SLOGAN,
+  STATUS_KEY_BY_TEXT,
+  CHART_BASE,
   TODO_PREVIEW_ITEMS,
 } from "./overview.constants";
 
 /** 首页工单列表：本轮工单 + 历史工单，共 6 条（设计稿「工单列表」） */
 const OVERVIEW_ORDERS = [WORK_ORDER, ...HISTORIC_ORDERS];
+
+/**
+ * 巡检概览环形图的状态顺序：已检测 → 有工单 → 有风险 → 已勘察。
+ * 提到模块级是为了让 `useMemo` 的依赖稳定（写在组件里每次渲染都是新数组）。
+ */
+const SITE_STATUS_ORDER = ["inspected", "workorder", "risk", "collected"] as const;
 
 /**
  * 图例里的计数。`pages.css` 已有 `.ov__actions .legend i`（色点）的样式，
@@ -118,21 +128,88 @@ function MoreButton({
 
 /** 三角色通道一行（PRD 3.1：地图 / 场景 / 手持采集三个通道） */
 /**
- * 全国巡检态势
+ * 全国巡检态势 → **巡检概览**
  *
  * 首页左栏第一块，回答「这轮覆盖了多少地方、做到哪一步」。
  * 数字全部由 seed/sites 现算，不写死。
+ *
+ * ⚠️ 面板标题叫「巡检概览」而不是「巡检态势」：后者是评审点名的 AI 腔命名
+ * （见 `docs/design/视觉重构验收报告.md` 对文案口径的要求），而且这一块本来
+ * 就是「概览」——四个 KPI + 一张状态分布图，没有推演、没有态势判断。
+ *
+ * 视觉（规范 §10「减少首页字段，采用渐进披露」+ §5.1 图表口径）：
+ *   · 上半：四个 KPI 数字，只靠字号/颜色分层，不各自包框（§4.3）
+ *   · 中段：状态分布**环形图**，中心写点位数 —— 原来这里是四行「色点 + 文字 +
+ *     数字」，既和上面 KPI 抢注意力，也把面板下半部留成一大片空白
+ *   · 下半：完成率细条 + 本轮任务脚注，贴到面板底部
+ * 图例不再单独一行文字：状态名与数量直接进 ECharts 图例，颜色即语义
+ * （绿=已检测 / 黄=有工单 / 红=有风险 / 蓝=已勘察，取自 `map/status.ts`）。
  */
 function SituationPanel() {
   const summary = useMemo(() => summariseSites(CHINA_SITES), []);
   const done = summary.byStatus.inspected + summary.byStatus.workorder;
   const rate = Math.round((done / Math.max(1, summary.total)) * 100);
 
-  const order = ["inspected", "workorder", "risk", "collected"] as const;
+  /**
+   * 状态分布环形图。
+   *
+   * 顺序按 `SITE_STATUS_ORDER`（已检测 → 有工单 → 有风险 → 已勘察），
+   * 颜色逐个取自 `STATUS_COLOR` —— 和地图点位、页面图例是同一份色源，
+   * 不在这里另配一套色。
+   */
+  const option = useMemo(
+    () => ({
+      ...CHART_BASE,
+      /* 图例在右，状态名 + 数量一行读完；不占纵向空间 */
+      legend: {
+        orient: "vertical",
+        right: 0,
+        top: "middle",
+        itemWidth: 8,
+        itemHeight: 8,
+        itemGap: 10,
+        icon: "circle",
+        textStyle: { color: CHART.axisText, fontSize: 13 },
+        formatter: (name: string) =>
+          `${name}  ${summary.byStatus[STATUS_KEY_BY_TEXT[name]] ?? ""}`,
+      },
+      series: [
+        {
+          type: "pie",
+          radius: ["54%", "78%"],
+          center: ["31%", "50%"],
+          avoidLabelOverlap: true,
+          /*
+            中心是**点位数总量**，不是当前扇区的值 —— 默认 formatter 的 `{c}`
+            取的是扇区值，直接用会显示成「已勘察 9」那一块的数量，
+            和「古建点位」四个字对不上。这里写死总量 + 单位。
+          */
+          label: {
+            show: true,
+            position: "center",
+            formatter: `{v|${summary.total}}{u| 处}\n{t|古建点位}`,
+            rich: {
+              v: { color: CHART.palette[0], fontSize: 24, fontWeight: 600, lineHeight: 30 },
+              u: { color: CHART.axisText, fontSize: 12, lineHeight: 30 },
+              t: { color: CHART.axisText, fontSize: 12, lineHeight: 16 },
+            },
+          },
+          labelLine: { show: false },
+          itemStyle: { borderColor: "transparent", borderWidth: 2 },
+          data: SITE_STATUS_ORDER.map((key) => ({
+            name: STATUS_TEXT[key],
+            value: summary.byStatus[key],
+            itemStyle: { color: STATUS_COLOR[key] },
+          })),
+        },
+      ],
+    }),
+    [summary],
+  );
 
   return (
     <Panel
-      title="巡检态势"
+      title="巡检概览"
       extra={<span className="muted">全国 {CHINA_PROVINCE_COUNT} 个省级区域</span>}
       className="ov__panel">
       <div className="ov-tally">
@@ -157,21 +234,18 @@ function SituationPanel() {
         </div>
       </div>
 
-      {/* 完成率进度条：设计稿里「完成率」带一条横向进度条，这里补上。
-          宽度就是上面算出的 rate，不引入任何新数字 */}
+      <Chart
+        className="ov-chart ov-chart--donut"
+        option={option}
+        ariaLabel={`全国古建点位状态分布：共 ${summary.total} 处，${SITE_STATUS_ORDER
+          .map((key) => `${STATUS_TEXT[key]} ${summary.byStatus[key]} 处`)
+          .join("，")}`}
+      />
+
+      {/* 完成率进度条：细横条只表达「已完成 / 总量」这一个比例（规范 §4.3） */}
       <div className="ov-tally__rate" title={`完成率 ${rate}%`}>
         <i style={{ width: `${rate}%` }} />
       </div>
-
-      <ul className="ov-tally__bar">
-        {order.map((key) => (
-          <li key={key}>
-            <i style={{ background: STATUS_COLOR[key] }} />
-            <span>{STATUS_TEXT[key]}</span>
-            <b>{summary.byStatus[key]}</b>
-          </li>
-        ))}
-      </ul>
 
       <p className="ov-tally__foot">
         本轮任务 {WORK_ORDER.id} · {WORK_ORDER.site}
@@ -185,6 +259,11 @@ function SituationPanel() {
  *
  * 硬件侧一眼可见：三台设备各自的数据来源与状态，加四路通道的更新时间。
  * 不在这里给检测结论 —— 设备状态与结果判定是两条线（PRD 3.2）。
+ *
+ * 视觉：四路通道原来是一列「名字 + 标签 + 时间」，读起来要逐行比；
+ * 改成**横向条形图**，条长就是「距上次更新多少秒」，一眼看出谁在掉队。
+ * 颜色按通道状态取语义色（正常=绿 / 延迟=黄 / 断开=红），并在 10 秒处画一条
+ * 阈值线 —— 规范 §3.4 里超过 10 秒算离线，这条线就是那个口径本身。
  */
 function DevicePanel() {
   const { channels } = useMumai();
@@ -195,16 +274,87 @@ function DevicePanel() {
     { ...DEVICES.realCart, source: "只读监视", tone: "muted" as const },
   ];
 
-  const channelTone = (state: string) =>
-    state === "online" ? ("ok" as const) : state === "stale" ? ("warn" as const) : ("danger" as const);
   const channelText = (state: string) =>
     state === "online" ? "正常" : state === "stale" ? "延迟" : "断开";
+  const channelColor = (state: string) =>
+    state === "online" ? STATUS_COLOR.inspected : state === "stale" ? STATUS_COLOR.workorder : STATUS_COLOR.risk;
+
+  /**
+   * 通道新鲜度条形图。
+   *
+   * 只有 4 个通道、量纲是「秒」，横向条 + 阈值线最直观：条越短越好。
+   * 轴从 0 起，不截断 —— 截断会让 9 秒看起来和 1 秒一样长，反而失真。
+   */
+  const option = useMemo(() => {
+    const rows = [...channels].sort((a, b) => a.ageSec - b.ageSec);
+    return {
+      ...CHART_BASE,
+      grid: { left: 0, right: 42, top: 6, bottom: 2, containLabel: true },
+      xAxis: {
+        type: "value" as const,
+        max: 12,
+        splitLine: { lineStyle: { color: CHART.grid } },
+        axisLabel: { color: CHART.axisText, fontSize: 12, margin: 10, formatter: "{value}s" },
+      },
+      yAxis: {
+        type: "category" as const,
+        inverse: true,
+        data: rows.map((channel) => channel.label),
+        axisLine: { lineStyle: { color: CHART.axisLine } },
+        axisTick: { show: false },
+        axisLabel: { color: CHART.axisText, fontSize: 13 },
+      },
+      series: [
+        {
+          type: "bar",
+          barWidth: 10,
+          /* 阈值线：规范 §3.4「超过 10 秒标记离线」，与前端 freshness 同一口径 */
+          markLine: {
+            silent: true,
+            symbol: "none",
+            /* 文字只写「离线」：横轴上已经有 10s，不必再写一遍，也就不会和刻度压字 */
+            label: {
+              formatter: "离线",
+              color: CHART.axisText,
+              fontSize: 11,
+              position: "insideEndTop",
+            },
+            lineStyle: { color: CHART.axisLine, type: "dashed" as const },
+            data: [{ xAxis: 10 }],
+          },
+          label: {
+            show: true,
+            position: "right" as const,
+            color: CHART.axisText,
+            fontSize: 12,
+            formatter: "{c}s",
+          },
+          data: rows.map((channel) => ({
+            value: channel.ageSec,
+            itemStyle: { color: channelColor(channel.state) },
+          })),
+        },
+      ],
+    };
+  }, [channels]);
 
   return (
     <Panel
       title="设备状态"
       extra={<span className="muted">{MISSION.mapVersion}</span>}
       className="ov__panel">
+      {/*
+        小屏（≤800px 高）专用的设备摘要行：三行设备列表在这一档放不下，
+        由 CSS 换成这一行（编号是这三台设备的区分点）。大屏不显示这一行。
+      */}
+      <p className="ov-devices__brief">
+        {devices.map((device) => (
+          <span key={device.id}>
+            <b>{device.id}</b> {device.source}
+          </span>
+        ))}
+      </p>
+
       {/*
         PRD §5 任务总览：「插图限设备摘要，不覆盖地图和任务信息」——
         所以插图只出现在左栏这张设备摘要卡里，地图与右侧工单区完全不受影响。
@@ -225,22 +375,24 @@ function DevicePanel() {
         ))}
       </ul>
 
-      <DeviceFigure id="i02-cart-concept" caption="巡检车（待接入）" height={104} />
+      {/*
+        数据通道图放在插图**之前**：面板高度是固定的（两行 grid 各 435px），
+        图在下面时会被「巡检车待接入」那张概念图挤出可视区，图表就成了看不见的装饰。
+        图先、图后是唯一顺序差别，但决定了这一页最该被看到的东西在不在屏幕里。
+      */}
+      <h4 className="ov-sec">
+        数据通道
+        <span className="ov-sec__note">条长 = 距上次更新</span>
+      </h4>
+      <Chart
+        className="ov-chart ov-chart--bars"
+        option={option}
+        ariaLabel={`四路数据通道距上次更新秒数：${channels
+          .map((channel) => `${channel.label} ${channel.ageSec} 秒（${channelText(channel.state)}）`)
+          .join("，")}；超过 10 秒算离线`}
+      />
 
-      <h4 className="ov-sec">数据通道</h4>
-      <ul className="ov-channels">
-        {channels.map((channel) => (
-          <li key={channel.key}>
-            <span>{channel.label}</span>
-            <StatusChip
-              text={channelText(channel.state)}
-              tone={channelTone(channel.state)}
-              dot
-            />
-            <em>{channel.updatedAt}</em>
-          </li>
-        ))}
-      </ul>
+      <DeviceFigure id="i02-cart-concept" caption="巡检车（待接入）" height={72} />
     </Panel>
   );
 }
@@ -274,6 +426,19 @@ function RiskOrderPanel() {
   const counts = useMemo(
     () => ORDER_COUNTERS.map((counter) => ({ ...counter, value: OVERVIEW_ORDERS.filter(counter.match).length })),
     [],
+  );
+
+  /**
+   * 占比条的分母 = 三档计数之和。
+   *
+   * 实测过种子的口径：高风险 1 + 待处理 1 + 处理中 4 = 6 = 工单总数，
+   * 三档互斥（一条工单只会落在其中一档），所以这里可以直接按数量切段。
+   * 不除 `OVERVIEW_ORDERS.length` 是为了让这条与上面三个数字永远自洽 ——
+   * 数字来自 `counts`，条也来自 `counts`，只有一个来源。
+   */
+  const orderTotal = useMemo(
+    () => counts.reduce((sum, counter) => sum + counter.value, 0),
+    [counts],
   );
 
   /**
@@ -311,7 +476,13 @@ function RiskOrderPanel() {
 
   return (
     <>
-      {/* 第二层：三条计数只做数字 + 标签，不各自包一张边框卡（§4.3） */}
+      {/*
+        第二层：三档计数 —— 数字 + 标签，不各自包一张边框卡（§4.3）。
+        数字下面加一条**占比条**（一根横条按风险档切段，橙/黄/蓝取自
+        `ORDER_COUNTERS` 的语义 tone）：原来这里只有三个孤立数字，
+        看不出「6 条工单里高风险占多少」；有了这条，比例一眼可读，
+        也不用为此再塞一张饼图（面板还要留给工单表与当前工单卡）。
+      */}
       <div className="ov-counts">
         {counts.map((counter) => (
           <div key={counter.key} className={`ov-count ov-count--${counter.tone}`}>
@@ -322,6 +493,25 @@ function RiskOrderPanel() {
           </div>
         ))}
       </div>
+      {orderTotal > 0 ? (
+        <>
+          <div
+            className="ov-counts__bar"
+            role="img"
+            aria-label={`工单按风险档构成：${counts
+              .map((counter) => `${counter.label} ${counter.value} 条`)
+              .join("，")}，共 ${orderTotal} 条`}>
+            {counts.map((counter) => (
+              <i
+                key={counter.key}
+                className={`is-${counter.tone}`}
+                style={{ width: `${(counter.value / orderTotal) * 100}%` }}
+              />
+            ))}
+          </div>
+          <p className="ov-counts__note">共 {orderTotal} 条 · 按风险档构成</p>
+        </>
+      ) : null}
 
       <h4 className="ov-sec">
         工单列表
@@ -424,6 +614,54 @@ function TodoEventPanel() {
   const todos = todoOpen ? TODO_ITEMS : TODO_ITEMS.slice(0, TODO_PREVIEW_ITEMS);
   const events = eventOpen ? RECENT_EVENTS : RECENT_EVENTS.slice(0, EVENT_PREVIEW_ITEMS);
 
+  /**
+   * 第三层：历史风险口径。
+   *
+   * 原来是三个「标签 + 数字」的并排文字（历史风险 28 / 已关闭 21 / 未关闭 7），
+   * 和上面的待办、事件挤在一起，还得自己心算关闭率。改成**环形图**：
+   * 中心直接写关闭率，图例给两个绝对数 —— 同一份种子数据，少一行文字。
+   * 绿=已关闭 / 红=未关闭，是规范 §1.3 里的明确业务状态语义。
+   */
+  const closeRate = Math.round((HISTORY_STATS.closed / Math.max(1, HISTORY_STATS.total)) * 100);
+  const option = useMemo(
+    () => ({
+      ...CHART_BASE,
+      legend: {
+        orient: "vertical" as const,
+        right: 0,
+        top: "middle" as const,
+        itemWidth: 8,
+        itemHeight: 8,
+        itemGap: 8,
+        icon: "circle",
+        textStyle: { color: CHART.axisText, fontSize: 13 },
+      },
+      series: [
+        {
+          type: "pie",
+          radius: ["58%", "80%"],
+          center: ["30%", "50%"],
+          label: {
+            show: true,
+            position: "center",
+            formatter: `{v|${closeRate}%}\n{t|已关闭}`,
+            rich: {
+              v: { color: CHART.palette[2], fontSize: 24, fontWeight: 600, lineHeight: 28 },
+              t: { color: CHART.axisText, fontSize: 12, lineHeight: 16 },
+            },
+          },
+          labelLine: { show: false },
+          itemStyle: { borderColor: "transparent", borderWidth: 2 },
+          data: [
+            { name: `已关闭 ${HISTORY_STATS.closed}`, value: HISTORY_STATS.closed, itemStyle: { color: CHART.palette[2] } },
+            { name: `未关闭 ${HISTORY_STATS.open}`, value: HISTORY_STATS.open, itemStyle: { color: CHART.palette[4] } },
+          ],
+        },
+      ],
+    }),
+    [closeRate],
+  );
+
   return (
     <Panel title="待办与最近事件" className="ov__panel ov__panel--todo">
       <h4 className="ov-sec">
@@ -468,18 +706,12 @@ function TodoEventPanel() {
         ))}
       </ol>
 
-      {/* 第三层：历史风险口径（数字由种子算出，不写死） */}
-      <div className="ov-stats">
-        <span>
-          历史风险<b>{HISTORY_STATS.total}</b>
-        </span>
-        <span>
-          已关闭<b className="is-ok">{HISTORY_STATS.closed}</b>
-        </span>
-        <span>
-          未关闭<b className="is-danger">{HISTORY_STATS.open}</b>
-        </span>
-      </div>
+      <h4 className="ov-sec">历史风险</h4>
+      <Chart
+        className="ov-chart ov-chart--donut-sm"
+        option={option}
+        ariaLabel={`历史风险 ${HISTORY_STATS.total} 条：已关闭 ${HISTORY_STATS.closed} 条，未关闭 ${HISTORY_STATS.open} 条，关闭率 ${closeRate}%`}
+      />
     </Panel>
   );
 }
