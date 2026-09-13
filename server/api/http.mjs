@@ -43,6 +43,8 @@ import {
 } from "../services/rehearsal.mjs";
 import { preflightDetail } from "../fixtures/preflight.mjs";
 import { parseJson } from "../storage/db.mjs";
+import { proxyScreen, screenStatus } from "../services/capture-screen.mjs";
+import { createSensorService } from "../services/sensortag.mjs";
 
 /** 归档副本的补传 / 重选属于「交付摘要校验」的写入侧，与前端 archive:verify 同一个权限 */
 function hasAssetPermission(actorId) {
@@ -120,8 +122,52 @@ const route = (method, pattern, handler, { auth = true, rawBody = false } = {}) 
   ROUTES.push({ method, regex, keys, handler, auth, rawBody });
 };
 
-export function createApi({ db, hub, staticRoot = null, logger = console }) {
+export function createApi({ db, hub, bridge, staticRoot = null, logger = console }) {
   ensureAssetsRoot();
+  const sensors = createSensorService(db, hub);
+  route("GET", "/api/capture/screen/status", () => screenStatus());
+  route("GET", "/api/capture/screen/stream", ({ req, res }) => proxyScreen(req, res));
+  const requireSensorControl = (ctx) => {
+    if (!allows(ctx.actor, "scan:capture") && !allows(ctx.actor, "console:admin")) throw new WorkflowError(403,"FORBIDDEN","此账号没有传感器采集权限");
+  };
+  route("GET", "/api/sensors/bridge", async () => bridge.status());
+  route("POST", "/api/sensors/gyro-calibrate", async (ctx) => {
+    requireSensorControl(ctx);
+    const session=requireSession(ctx.body.sessionId);
+    return sensors.calibrateGyro(session.id,ctx.body.batchId,ctx.body.deviceId);
+  });
+  route("GET", "/api/sensors/calibration/:id", async (ctx) => ({ calibration:sensors.calibration(ctx.params.id) }));
+  route("POST", "/api/sensors/calibration/:id", async (ctx) => {
+    requireSensorControl(ctx);
+    return { calibration:sensors.calibrate(ctx.params.id,ctx.body,ctx.actor) };
+  });
+  route("POST", "/api/sensors/scan", async (ctx) => { requireSensorControl(ctx); return bridge.scan(); });
+  route("POST", "/api/sensors/connect", async (ctx) => {
+    requireSensorControl(ctx);
+    const session = requireSession(ctx.body.sessionId);
+    return bridge.start({ ...ctx.body, sessionId: session.id },ctx.actor);
+  });
+  route("POST", "/api/sensors/disconnect", async (ctx) => { requireSensorControl(ctx); bridge.stop(); return bridge.status(); });
+
+  route("POST", "/api/sensors/frames", async (ctx) => {
+    if (!allows(ctx.actor, "scan:capture") && !allows(ctx.actor, "console:admin")) {
+      throw new WorkflowError(403, "FORBIDDEN", "此账号没有传感器采集权限");
+    }
+    const session = requireSession(ctx.body.sessionId);
+    return { frame: sensors.ingest(session.id, ctx.body) };
+  });
+  route("GET", "/api/sensors/latest", async (ctx) => {
+    const session = requireSession(ctx.query.sessionId);
+    return { frame: sensors.latest(session.id, ctx.query.batchId ?? "", ctx.query.deviceId ?? null), serverTime: Date.now() };
+  });
+  route("GET", "/api/sensors/history", async (ctx) => {
+    const session = requireSession(ctx.query.sessionId);
+    const after = Number(ctx.query.after ?? 0);
+    const from = Number(ctx.query.from ?? 0);
+    if (!Number.isSafeInteger(after) || after < 0) throw new WorkflowError(422,"BAD_CURSOR","无效的历史游标");
+    if (!Number.isFinite(from) || from < 0) throw new WorkflowError(422,"BAD_TIME","无效的历史起始时间");
+    return { frames: sensors.history(session.id,ctx.query.batchId ?? "",ctx.query.deviceId ?? null,after,from) };
+  });
 
   const requireSession = (sessionId) => {
     const session = getSession(db, sessionId ?? DEFAULT_SESSION_ID);

@@ -82,6 +82,12 @@ export function createHub({ server, db, path = "/ws" }) {
   heartbeat.unref?.();
 
   return {
+    broadcastSensor(sessionId, frame) {
+      const payload = JSON.stringify({ kind: "sensor", sessionId, frame });
+      for (const socket of rooms.get(sessionId) ?? []) {
+        if (socket.readyState === socket.OPEN && socket.bufferedAmount < 256 * 1024) socket.send(payload);
+      }
+    },
     broadcast(sessionId, event) {
       const room = rooms.get(sessionId);
       if (!room?.size) return 0;
@@ -102,6 +108,7 @@ export function createHub({ server, db, path = "/ws" }) {
     },
     close() {
       clearInterval(heartbeat);
+      for (const socket of wss.clients) socket.terminate();
       wss.close();
     },
   };

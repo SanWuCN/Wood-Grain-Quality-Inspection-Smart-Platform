@@ -5,6 +5,9 @@
  *
  * 真件是 `./DemoHeader`（视觉照抄 Demo2 的 panel/headder.tsx，viewBox 1920x85）。
  * 这里只做接线：把导航、账号、通道状态、时间喂给它，不再自己画一套顶栏。
+ *
+ * 右上角的账号入口只有一处（本文件的 `.appshell__logout`：账号身份图标 + 姓名 +
+ * 角色 + 退出），DemoHeader 自己不再画账号框 —— 理由见下面 actions 里的注释。
  */
 
 import { useEffect, useState, type ReactNode } from "react";
@@ -61,10 +64,10 @@ export interface HeaderProps {
   /** 权限判断：排练控制台入口按 console:admin 显示 */
   can: (permission: Permission) => boolean;
   /**
-   * 退出登录。
+   * 退出登录。右上角那一块账号入口（图标 + 姓名 + 角色 + 退出）点下去就是它。
    *
-   * 这里**不再传 onAccountChange**：账号只能从登录页进入，
-   * 顶栏提供角色下拉就等于绕开角色权限（PRD 2.1 把角色限制放在后端，演示版
+   * 这里**不传 onAccountChange**：账号只能从登录页进入，
+   * 顶栏提供角色下拉就等于绕开角色权限（PRD 2.1 把角色限制在后端，演示版
    * 至少要做到「换角色必须重新登录」）。
    */
   onLogout?: () => void;
@@ -145,6 +148,18 @@ export default function Header({
               <Icon name="arrow" size={20} aria-hidden />
               投到展示窗口
             </button>
+            {/*
+              账号入口：顶栏右上角**只此一个**（评审 V09 / P1「合并账号入口」）。
+
+              原来这里是「退出登录」按钮，而 DemoHeader 在没有 onAccountChange 时
+              还会自己画一个「账号名 + 角色」的只读按钮，于是同一个人名并排出现两次、
+              两个框，其中一个还是不可点的装饰 —— 既重复又容易误点。
+              现在那个只读按钮已从 DemoHeader 删除，账号信息全部收进这一个按钮：
+              图标（账号身份） + 姓名 + 角色 + 分隔线 + 退出。
+
+              整块可点即退出登录：原来「退出」只是这个按钮里的一小段文字，
+              现在它旁边那个只读框没了，退出就是这个账号入口本身的行为。
+            */}
             <button
               type="button"
               className="appshell__logout"

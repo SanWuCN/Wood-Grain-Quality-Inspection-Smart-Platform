@@ -397,9 +397,9 @@ export default function Hardware() {
       <Toolbar
         note={
           <>
-            <SourceTag label="演示回放" />
+            <SourceTag label={tab === "capture" ? "采集工作台" : "演示回放"} />
             <span>当前批次 {batch}</span>
-            <span>只读</span>
+            <span>{tab === "capture" ? "扫描枪实时接入" : "只读"}</span>
           </>
         }>
         {TABS.map((item) => (
@@ -410,7 +410,7 @@ export default function Hardware() {
         ))}
       </Toolbar>
 
-      {frozen ? (
+      {frozen && tab !== "capture" ? (
         <StateBlock
           kind="partial"
           title="该批次已冻结诊断输出"
@@ -418,6 +418,7 @@ export default function Hardware() {
         />
       ) : null}
 
+      {frozen && tab === "capture" ? <div className="capture-freeze-note"><b>诊断输出已冻结</b><span>该批次缺少有效标定记录，等待专业复核；仍可监看采集画面和传感器数据。</span></div> : null}
       <div className="adapt-body">
         {tab === "capture" ? <CaptureTab /> : null}
         {tab === "triage" ? <TriageTab /> : null}

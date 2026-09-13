@@ -182,7 +182,7 @@ const NavLayer = styled.nav`
   }
 `;
 
-/** 右上：设备在线 / 时间 / 投屏 / 账号 */
+/** 右上：设备在线 / 时间 / 投屏 / 账号（账号入口由调用方在 actions 里给） */
 const TopRight = styled.div`
   position: absolute;
   right: 22px;
@@ -293,12 +293,32 @@ export interface DemoHeaderProps extends ComponentProps<typeof TitleWrapper> {
   navItems: readonly { readonly key: string; readonly label: string; readonly icon: IconName }[];
   activeNav: string;
   onNav: (name: string) => void;
+  /**
+   * 当前账号。
+   *
+   * 只在渲染下拉选账号时用到（不提供 `onAccountChange` 时本组件不画账号）。
+   * 必填是有意的：账号是顶栏的固定信息，调用方不该因为这里不再画它就把账号忘了传。
+   */
   account: { name: string; role: string };
+  /**
+   * 提供时才渲染下拉选账号。
+   *
+   * 旧版总览页（`./index`，已不在路由表里）用它在顶栏切账号。
+   * **不提供时这里什么都不渲染** —— 原来会给一个「账号名 + 角色」的只读按钮，
+   * 而 Header 传进来的 `actions` 里已经有带账号名和角色的退出按钮，
+   * 两个框并排出现就是「账号入口重复」（评审 V09 / P1「合并账号入口」），
+   * 所以那个兜底按钮已删除。
+   */
   onAccountChange?: (id: string) => void;
   time: Date;
   /** 设备通道状态等，挂在右侧状态区最前面 */
   statusExtra?: ReactNode;
-  /** 「投到展示窗口」等附加动作，挂在账号按钮前 */
+  /**
+   * 「投到展示窗口」「退出登录」等动作按钮。
+   *
+   * 账号入口也在这里：`Shell` → `Header` 给的是**唯一**的账号按钮
+   * （图标 + 姓名 + 角色 + 退出），本组件不再自己画一个。
+   */
   actions?: ReactNode;
 }
 
@@ -348,12 +368,7 @@ export default function DemoHeader(props: DemoHeaderProps) {
               ))}
             </select>
           </label>
-        ) : (
-          <button type="button">
-            <b>{account.name}</b>
-            <small>{account.role}</small>
-          </button>
-        )}
+        ) : null}
       </TopRight>
 
       <NavLayer aria-label="主导航">

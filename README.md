@@ -2,7 +2,7 @@
 
 面向**古建筑木构无损检测**的智能巡检演示平台。以三维地图为主入口，把古建采集点、巡检风险、工单与设备通道放在同一空间语境里，支持从**全国省级地图**平滑下钻到**上海市 district 级地图**，并内置一个可执行平台操作、可多步编排任务的语音语义智能体「小木」。
 
-> 演示内容为**种子数据回放**（`source_mode = replay / simulation`），不含真实设备接入。
+> 业务批次、诊断与雷达流程仍使用**种子数据回放**。硬件详情现已支持真实扫描枪姿态与环境数据，以及树莓派桌面串流；真实数据与演示回放分别标识。
 > 地图边界文件仅用于界面原型，正式部署时应替换为项目确认的合规地图数据与审图号版本。
 
 ---
@@ -10,6 +10,7 @@
 ## 目录
 
 - [界面与功能](#界面与功能)
+- [采集工作台与真实设备](#采集工作台与真实设备)
 - [核心演示路径](#核心演示路径)
 - [三维地图实现](#三维地图实现)
 - [视觉设计系统](#视觉设计系统)
@@ -26,7 +27,7 @@
 
 ## 界面与功能
 
-平台共 **9 个路由**，顶栏 **8 项一级导航**（另有 presentation 角色的独立演示窗口）。
+平台包含 **10 个业务路由及登录页**，顶栏 **8 项一级导航**，按账号权限显示。
 
 | 路由 | 导航 | 内容 |
 | --- | --- | --- |
@@ -34,7 +35,8 @@
 | `/orders` | 工单档案 | 工单核心信息、构件清单、环境记录与配置校验、环境补偿与差异、人员分工与操作记录 |
 | `/mapping` | 建图巡检 | 占据栅格地图、机器人轨迹、航点序列、设备通道状态 |
 | `/twin` | 数字孪生 | 示例寺场景、Z01–Z04 构件标签、表面疑点、回波与历史记录 |
-| `/adapt` | 检测适配 | 6 个页签：采集 / 异常排查 / 数据集 / 训练验证 / 更新交付 / 融合分析 |
+| `/hardware` | 硬件详情 | 采集作业 / 异常排查 / 硬件监看；支持真实屏幕、姿态与环境读数 |
+| `/firmware` | 固件及模型 | 数据集、训练验证、更新交付与融合分析 |
 | `/knowledge` | 知识库 | 本地资料检索（TF-IDF + 余弦相似度），检索来源与业务状态分开呈现 |
 | `/archive` | 报告归档 | 交付清单与 **真实 SHA-256 校验**，可下载校验报告 |
 | `/console` | 演示控制 | 按第二章剧本时间轴推进演示，触发预置异常事件 |
@@ -43,6 +45,20 @@
 顶栏固定显示四路设备通道（地图 / 位姿 / 视频 / 车辆）的**独立状态与更新时间**——任一路断流只影响该通道，不影响其它页面。
 
 **四种账号**（沈 · 项目经理 / 史 · 人工智能架构师 / 饶 · 全栈开发工程师 / 马 · 具身智能工程师）可切换，切换后进入各自默认工作区。
+
+---
+
+## 采集工作台与真实设备
+
+入口：`#/hardware?tab=capture`。采集配置集中在顶部，下面并排显示三个窗口：
+
+- **采集设备画面**：树莓派桌面按 1024×600 原比例显示，实测约 10 FPS；支持放大监看、断流提示与自动重连。
+- **扫描枪姿态**：窄竖向窗口，透明背景 GLB 直接展示，实时同步旋转；初始模型尺寸调整为此前版本的 **75%（缩小 25%）**。滚轮缩放、姿态归零、暂停跟随与恢复视角均保留。
+- **实时数据**：环境温度、光照、湿度、气压及电量各自显示状态；提供原始数据、趋势与 CSV 导出。实际未提供的字段保持“未接入”。
+
+SensorTag 由后端电脑通过 Python Bleak 连接，Node 解算六轴姿态并通过 WebSocket 推送；原始/校准数据写入 SQLite。当前实测设备是 CC2650 SensorTag、固件 1.20，姿态约 10 Hz；温度、光照、气压可用，湿度服务报错、电量不可用。航向为相对角，最终安装后需要核对坐标轴并归零。
+
+部署说明：[SensorTag 接入与验收](docs/SensorTag接入与验收.md)、[树莓派屏幕串流](tools/capture-screen/README.md)。真实设备需要单独安装与绑定，克隆仓库不会自动获得本机设备配置或登录密钥。
 
 ---
 
@@ -137,6 +153,8 @@ import { AgentHost } from "./agent/AgentHost";
 | 几何 / 投影 | d3-geo（墨卡托投影）、three `ExtrudeGeometry` |
 | 动画 | GSAP |
 | 状态 | zustand |
+| 后端与存储 | Node.js HTTP / WebSocket + SQLite |
+| 设备采集 | Python Bleak（BLE）；FFmpeg + Python（X11 桌面） |
 | 样式 | styled-components 6 + 原生 CSS 变量（`tokens.css`） |
 | 路由 | react-router 7（HashRouter） |
 | 图表 | ECharts 6 |
@@ -150,10 +168,19 @@ Windows 可直接双击项目根目录的 `start-demo.cmd`。
 
 ```bash
 pnpm install
-pnpm dev          # 开发服务器，默认 5199
+pnpm dev          # 开发服务器，默认 5173；另开终端运行 pnpm server
 pnpm build        # 生产构建
 pnpm lint         # ESLint
 ```
+
+完整平台（前端构建 + HTTP/WebSocket 后端）：
+
+```bash
+pnpm build
+pnpm server:static  # 默认 http://localhost:8000
+```
+
+后端需支持 `node:sqlite` 的 Node 版本（本次验证 22.22.1）。设备采集运行时安装步骤见上方接入说明。
 
 类型检查：
 
@@ -189,13 +216,14 @@ src/
 │   ├── china.json / shanghai.json    # 区域轮廓（DataV）
 │   └── map/                          # 构建产物：区域数据 + DEM 地形贴图
 └── pages/MumaiDashboard/
-    ├── routes.tsx                    # 9 个路由
+    ├── routes.tsx                    # 登录与业务路由
     ├── Shell.tsx                     # 外壳：顶栏 / 内容区 / 底栏 / 断线态
     ├── entrance.ts                   # 页面与面板入场编排（对齐 Demo2 时序）
     ├── DemoHeader.tsx                # 顶栏（沿用 Demo2 的 1920×85 SVG 折角）
     ├── Panel.tsx / ui.tsx / design.ts
-    ├── seed/                         # 演示种子数据与类型（唯一数据来源）
-    ├── pages/                        # 九个业务页面
+    ├── seed/                         # 演示种子数据与类型
+    ├── sensors/                      # 扫描枪姿态、环境读数与桌面串流
+    ├── pages/                        # 业务页面
     ├── agent/                        # 小木语音语义智能体
     ├── mapDemo/                      # 三维地图（由 Demo2 迁移并适配双模式）
     └── map/                          # 早期地图实现，现为死代码
@@ -210,7 +238,9 @@ src/
 | 区域轮廓 GeoJSON | [DataV.GeoAtlas](https://datav.aliyun.com/portal/school/atlas/area_selector) |
 | 地形高程 | [Mapzen Terrain Tiles](https://registry.opendata.aws/terrain-tiles/)（terrarium 编码，AWS Open Data，无需密钥） |
 | 三维地图骨架、着色器、动效 | 上游 [`knight-L/sc-datav`](https://github.com/knight-L/sc-datav) 的 Demo2，见下方归属声明 |
-| 业务数据 | 仓库内 `src/pages/MumaiDashboard/seed/scenario.ts`，全部为演示种子 |
+| 演示业务数据 | 仓库内 `src/pages/MumaiDashboard/seed/scenario.ts` |
+| 真实设备数据 | 已绑定扫描枪 BLE 通知、树莓派 X11 桌面；仅安装并连接后可用 |
+| 扫描枪 GLB | 用户提供的扫描枪模型，`public/model/scanner/scanner.glb` |
 
 **上游归属声明**：本项目的三维地图部分（`src/pages/MumaiDashboard/mapDemo/`）是从 `sc-datav` 的 Demo2 迁移而来，并在其上做了双模式适配（中国 / 上海）、取景与光照修正、地表贴图重制、标签与业务点位层扩展。仓库保留了上游的 Apache-2.0 许可证文件 `LICENSE`。上游 Demo 源码也一并保留在 `src/pages/Demo0` ~ `src/pages/Demo3`，以便对照。
 
@@ -224,8 +254,8 @@ node tools/build-map-json.mjs     # 转成地图渲染用的区域数据
 node tools/build-terrain.mjs      # 真实 DEM → 地表贴图 / 法线贴图
 node tools/build-map-texture.mjs  # 合成最终地图贴图
 
-node tools/shot.mjs --url "http://localhost:5199/#/" --out tmp-shot/a.png --wait 12000
-node tools/shot.mjs --audit --url "http://localhost:5199/#/" --out tmp-shot/a.png   # 设计规范量化探针
+node tools/shot.mjs --url "http://localhost:5173/#/" --out tmp-shot/a.png --wait 12000
+node tools/shot.mjs --audit --url "http://localhost:5173/#/" --out tmp-shot/a.png   # 设计规范量化探针
 node tools/accept.mjs             # 9 路由全量验收（截图 + 探针 + console error）
 ```
 
@@ -239,7 +269,7 @@ node tools/accept.mjs             # 9 路由全量验收（截图 + 探针 + con
 
 ## 验收
 
-当前状态：
+早期地图与页面验收记录（不代表本轮全站复验）：
 
 ```text
 tsc  -p tsconfig.app.json   → 0 错误
@@ -272,4 +302,4 @@ vite build                  → 通过
 2. **真实麦克风 ASR 未做实机验证**（无头环境无麦克风权限），已验证的是脚本化降级路径；真实分支的代码逻辑已实现但未经实机运行。
 3. 字体文件 HarmonyOS Sans SC 两个字重各约 8MB（共约 16MB）。本地演示无影响，若要部署到服务器建议做子集化。
 4. `src/pages/MumaiDashboard/map/` 是早期地图实现，已被 `mapDemo/` 取代，目前是死代码，保留仅供对照。
-5. 演示数据全部为种子回放，未接入真实设备、ROS 或后端服务。
+5. 雷达批次流程和车辆运动仍为演示/只读路径；已接入的扫描枪 BLE 与树莓派桌面不代表已经实现真实远程采集控制。

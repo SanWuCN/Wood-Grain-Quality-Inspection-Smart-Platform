@@ -41,3 +41,7 @@ tmp-shot/
 # 入库会把「本机演示到哪一步了」带进仓库，换台机器反而对不上。
 server/data/
 server/assets/
+
+# Local SensorTag BLE runtime
+.venv-sensortag/
+__pycache__/

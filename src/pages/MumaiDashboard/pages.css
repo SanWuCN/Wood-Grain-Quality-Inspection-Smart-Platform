@@ -4973,11 +4973,15 @@
 }
 
 /* ------------------------------------------------------------------
-   顶栏 · 当前账号与退出登录（PRD 2.2：设备状态与个人账号放在顶部）
+   顶栏 · 账号入口（PRD 2.2：设备状态与个人账号放在顶部）
    ------------------------------------------------------------------
    样式落在本文件而不是 appshell.css，与上面 .appshell__present 的
    覆盖规则同级（0,2,0），因此 !important 的量级一致。
    账号只能从登录页进入，这里只显示当前角色，不提供角色下拉。
+
+   一块顶两块（评审 V09 / P1「合并账号入口」）：右上角原来并排两个框 ——
+   一个「图标 + 姓名 + 角色 + 退出」，一个「姓名 + 角色」只读装饰，同一个人名
+   出现两次。现在只剩这一个按钮，账号信息在左、退出在右，中间用分隔线断句。
    ------------------------------------------------------------------ */
 .appshell__header--native .appshell__logout {
   border: 1px solid var(--border-hover) !important;
@@ -4988,6 +4992,19 @@
 .appshell__header--native .appshell__logout:hover {
   border-color: var(--border-active) !important;
   background: var(--fill-strong) !important;
+}
+
+/*
+  键盘焦点（PRD §4）
+  ------------------------------------------------------------------
+  用内阴影的 2px 环，而不是 outline：这块按钮在 top:8px，顶栏自己又是
+  overflow:hidden，向外扩的 outline 上半圈会被顶栏裁掉（实测只看得见左、右、下三边）。
+  内阴影画在按钮自己的盒子里，四条边在任何尺寸下都完整，也不会有布局位移。
+  颜色与导航项的焦点环同一个 token。
+*/
+.appshell__header--native .appshell__logout:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--mumai-focus, #8ad9e9);
 }
 
 .appshell__header--native .appshell__logout b {
@@ -5001,12 +5018,24 @@
   color: var(--text-tertiary);
 }
 
+/*
+  「退出」段：与账号信息之间留一道分隔线，并给点击区一点左右呼吸。
+  左内边距比 DemoHeader 的通用按钮大，是为了让这条竖线真的起到分段作用
+  （分不开就等于又回到「一串小字里藏着一个小按钮」）。
+*/
 .appshell__header--native .appshell__logout em {
-  padding-left: var(--space-2);
+  margin-left: var(--space-2);
+  padding-left: 14px;
   border-left: 1px solid var(--border-subtle);
   font-size: var(--fs-aux);
   font-style: normal;
   color: var(--text-accent);
+}
+
+/* 悬停时整块已经变亮，退出段不再单独变色，避免一块按钮里出现两种高亮 */
+.appshell__header--native .appshell__logout:hover em {
+  border-left-color: var(--border-hover);
+  color: var(--text-primary);
 }
 
 /* ------------------------------------------------------------------

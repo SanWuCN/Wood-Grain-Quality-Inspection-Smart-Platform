@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { openDatabase } from "./storage/db.mjs";
 import { createApi } from "./api/http.mjs";
 import { createHub } from "./services/hub.mjs";
+import { createBleBridge } from "./services/ble-bridge.mjs";
 import { DEFAULT_SESSION_ID, createSession, getSession, listSessions, snapshot } from "./services/session.mjs";
 import { ASSETS_ROOT, ensureAssetsRoot } from "./services/assets.mjs";
 import { ensureDemoPackage } from "./fixtures/preflight.mjs";
@@ -46,7 +47,8 @@ export function startService({
 
   const server = createServer();
   const hub = createHub({ server, db });
-  const handle = createApi({ db, hub, staticRoot: staticDir ? resolve(staticDir) : null });
+  const bridge = createBleBridge(db);
+  const handle = createApi({ db, hub, bridge, staticRoot: staticDir ? resolve(staticDir) : null });
   server.on("request", handle);
 
   const log = quiet ? () => {} : (...args) => console.log(...args);
@@ -54,6 +56,7 @@ export function startService({
   return new Promise((resolvePromise) => {
     server.listen(port, host, () => {
       const actualPort = server.address().port;
+      bridge.ready(`http://127.0.0.1:${actualPort}`);
       log(`木脉智检 · 共享服务已启动`);
       log(`  HTTP      http://${host === "0.0.0.0" ? "localhost" : host}:${actualPort}/api`);
       log(`  WebSocket ws://${host === "0.0.0.0" ? "localhost" : host}:${actualPort}/ws`);
@@ -71,11 +74,14 @@ export function startService({
         url: `http://localhost:${actualPort}`,
         close: () =>
           new Promise((done) => {
+            bridge.close();
             hub.close();
             server.close(() => {
               db.close();
               done();
             });
+            // Long-lived desktop streams must not keep a shutdown waiting indefinitely.
+            server.closeAllConnections();
           }),
       });
     });
@@ -120,6 +126,18 @@ if (isMain) {
     staticDir: staticArgIndex >= 0 ? process.argv[staticArgIndex + 1] : null,
     dbFile: dbArgIndex >= 0 ? process.argv[dbArgIndex + 1] : undefined,
   }).then((service) => {
+    let stopping = false;
+    const shutdown = async () => {
+      if (stopping) return;
+      stopping = true;
+      const deadline = setTimeout(() => process.exit(1), 4000);
+      deadline.unref();
+      await service.close();
+      clearTimeout(deadline);
+      process.exit(0);
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
     const snap = snapshot(service.db, service.sessionId);
     console.log(`  实体      ${Object.entries(snap.entities).map(([kind, list]) => `${kind}:${list.length}`).join(" ")}`);
   });

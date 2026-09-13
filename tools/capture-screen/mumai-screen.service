@@ -1,0 +1,15 @@
+[Unit]
+Description=Mumai read-only acquisition desktop stream
+After=graphical-session.target
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=%h/.Xauthority
+EnvironmentFile=%h/.config/mumai-screen/environment
+ExecStart=/usr/bin/python3 %h/.local/share/mumai-screen/stream.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
