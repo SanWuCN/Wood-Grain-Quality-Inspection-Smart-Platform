@@ -450,14 +450,29 @@ export default function Base(props: BaseProps) {
      * Demo2 的判据是 `obj instanceof Mesh || obj instanceof LineSegments`，
      * 我们的移植版只写了 Mesh —— 于是省界白线的 opacity 永远停在 0，
      * 这也是「Demo2 那三行白线在这个项目里丢了」的直接原因。
+     *
+     * **还要处理 `material` 是数组的情况。** `ShapeBox` 是双材质网格
+     * （material-0 顶面 / material-1 侧壁），它的 `obj.material` 是**数组**；
+     * 对数组调 `gsap.to(..., { opacity: 1 })` 是**静默无效**的 —— 不报错、
+     * 不生效。于是地图主体从来没被这条时间线点亮过，一直是靠 5 秒后的
+     * `settle()` 兜底才出现。这就是「开场动画没做出来」的真正原因：
+     * 时间线确实在跑，但它只点亮了单材质的白线，主体没被碰到。
      */
     group.traverse((obj) => {
       if (obj instanceof Mesh || obj instanceof LineSegments) {
-tl.to(
-          obj.material,
-          { opacity: 1, duration: 1, ease: "circ.out" },
-          MAP_PUSH_DURATION,
-        );
+        const list = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const material of list) {
+          /*
+           * 标了 `skipReveal` 的材质**不参与淡入**，永远保持 opacity 0。
+           *
+           * 用途：省份的侧壁。每个省都被当成一块独立挤出的 City，
+           * 于是**每条省界都带了一圈发光侧壁** —— 用户看到内蒙古、新疆
+           * 与邻省之间有「光屏」。侧壁只该出现在国境线上，
+           * 所以省侧壁不点亮，另用外轮廓单独挤出一层来提供厚度。
+           */
+          if (material.userData?.skipReveal) continue;
+          tl.to(material, { opacity: 1, duration: 1, ease: "circ.out" }, MAP_PUSH_DURATION);
+        }
       }
     });
 
@@ -579,6 +594,8 @@ tl.to(
                   texture={mapTexture}
                   normalTexture={normalTexture}
                   normalScale={normalScale}
+                  /* 有国界外轮廓时省侧壁不点亮，厚度交给下面的 OutlineBody */
+                  plainSide={boundary.length > 0}
                   onClick={
                     region.name.startsWith("上海")
                       ? () => onSelectRegion?.(region.name)
@@ -587,6 +604,9 @@ tl.to(
                 />
               ))
             : null}
+          {on("outlineBody") && boundary.length ? (
+            <OutlineBody shapes={boundary} bbox={bbox} depth={slabDepth} />
+          ) : null}
           {outlineData && on("geoTrail") ? (
             <GeoTrail
               projection={projection}
@@ -643,6 +663,45 @@ tl.to(
   );
 }
 
+/**
+ * 国境线侧壁：用**外轮廓**单独挤出一层，提供地图厚度。
+ *
+ * 为什么需要它：省份各自挤出时，每条省界都带一圈发光侧壁，
+ * 看起来就是「省与省之间有光屏」（用户报的内蒙古 / 新疆）。现在省侧壁不点亮，
+ * 厚度只能由这一层提供 —— 它沿国界走一圈，所以光只出现在该出现的地方。
+ *
+ * 上海没有 outlineData，走不到这里；它的区界尺度小，沿用省份那套即可。
+ */
+function OutlineBody({
+  shapes,
+  bbox,
+  depth,
+}: {
+  shapes: Shape[];
+  bbox: Box2;
+  depth: number;
+}) {
+  const materialRef = useRef<ShaderMaterial>(null!);
+
+  useFrame((_, delta) => {
+    if (materialRef.current) materialRef.current.uniforms.time.value += delta / 3;
+  });
+
+  return (
+    <ShapeBox bbox={bbox} args={[shapes, { depth, bevelEnabled: false }]}>
+      {/* material-0（顶面）不画：顶面由各省自己铺，这里只要侧壁 */}
+      <meshBasicMaterial attach="material-0" transparent opacity={0} depthWrite={false} />
+      <ShiftMaterial
+        transparent
+        attach="material-1"
+        ref={materialRef}
+        opacity={0}
+        depth={depth}
+      />
+    </ShapeBox>
+  );
+}
+
 function City(props: {
   depth: number;
   bbox: Box2;
@@ -658,8 +717,16 @@ function City(props: {
   normalScale: Vector2;
   /** 仅上海区域挂载：点击下钻到上海 */
   onClick?: () => void;
+  /**
+   * 省侧壁是否**不点亮**。
+   *
+   * 有国界外轮廓时传 true：每个省都是一块独立挤出的 City，各自带一圈发光侧壁，
+   * 于是每条省界之间都出现「光屏」（用户报的内蒙古 / 新疆与邻省之间）。
+   * 厚度改由外轮廓那一层单独提供，省侧壁保持全透明，只留顶面与白线。
+   */
+  plainSide?: boolean;
 }) {
-  const { bbox, data, depth, texture, normalTexture, normalScale, onClick } = props;
+  const { bbox, data, depth, texture, normalTexture, normalScale, onClick, plainSide } = props;
   const groupRef = useRef<Group>(null!);
   const materialRef = useRef<ShaderMaterial>(null!);
   const vector3 = useRef(new Vector3(1, 1, 1));
@@ -745,6 +812,12 @@ function City(props: {
           ref={materialRef}
           opacity={0}
           depth={depth}
+          /*
+           * 侧壁不参与开场淡入（见 Base 时间线里 skipReveal 的说明）。
+           * 用 userData 打标而不是加 prop：ShiftMaterial 是 extend 出来的
+           * shaderMaterial，多传一个未知 prop 会被透传到材质上，不如打标干净。
+           */
+          userData={plainSide ? { skipReveal: true } : undefined}
         />
       </ShapeBox>
       {/*
