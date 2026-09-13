@@ -370,10 +370,22 @@ export function SiteMarker(props: SiteMarkerProps) {
           尺寸比首版放大：首版 0.1×0.26 在 1920 宽的大屏上只有 3~4 个像素，
           叠加地表贴图后几乎读不出状态色（规范 §5.2 要求红黄绿一眼可辨）。 */}
       <group ref={core} position={[0, 0, 0.24]}>
+        {/*
+          菱形主体**接近白**（评审 G01）。
+
+          原来这里是 `color={color}` —— 主体直接染状态色，结果红 / 黄 / 绿
+          压在地表贴图上明度都偏低，与背景混在一起（用户原话：
+          「地标箭头感觉不鲜明，和背景混在一起了，可以白一些」）。
+
+          现在主体固定 #F4FAFF（冰白），**状态色只留给下面的光斑、脉冲环、
+          旋转光圈** —— 那几件本来就是「附属元素」，颜色在那里读得出来，
+          也符合 G02「不要把整个 Marker 染成红黄绿」。
+        */}
         <mesh rotation={[0, Math.PI / 4, 0]} renderOrder={5}>
           <coneGeometry args={[0.13, 0.34, 4]} />
-          <meshBasicMaterial color={color} {...NO_DEPTH} side={DoubleSide} />
+          <meshBasicMaterial color="#f4faff" {...NO_DEPTH} side={DoubleSide} />
         </mesh>
+        {/* 内核光点：纯白，给主体一个亮点，与背景拉开最大明度差 */}
         <mesh renderOrder={6}>
           <sphereGeometry args={[0.055, 12, 12]} />
           <meshBasicMaterial color="#ffffff" {...NO_DEPTH} />
