@@ -337,7 +337,14 @@ export default function Base(props: BaseProps) {
      * 地图完整落在雾外，只有远端留一点纵深提示（这正是 Demo2 里
      * 写死 10~30 想要的效果：轻雾，不是把主体吃掉）。
      */
-    scene.fog = new Fog("#000000", fitDistance * 1.05, fitDistance * 2.6);
+    /*
+     * 雾再推远一档（1.05 → 1.7 倍取景距离）。
+     *
+     * 地图是斜置的，远端比近端远出一大截；起点 1.05 倍时地图中段就已经在雾里，
+     * 整幅图被均匀压暗 —— 这是"灰蒙蒙"的直接来源。推到 1.7 倍之后只有最远端
+     * 吃到一点雾，保留纵深提示但不吃主体。
+     */
+    scene.fog = new Fog("#000000", fitDistance * 1.7, fitDistance * 3.1);
     return () => {
       scene.fog = null;
     };
@@ -648,9 +655,18 @@ function City(props: {
           map={texture ?? undefined}
           normalMap={normalTexture ?? undefined}
           normalScale={normalScale}
-          color={texture ? "#8ea6bd" : "#28486e"}
-          metalness={0.5}
-          roughness={0.7}
+          color={texture ? "#b9cbdc" : "#28486e"}
+          /*
+           * metalness / roughness 相对 Demo2 调过（0.5/0.7 → 0.32/0.55）。
+           *
+           * Demo2 那组值是在「只有四川一块、相机恒定 13 单位、无雾」下调的。
+           * 我们的地图大 13 倍、带雾，照抄的结果是金属反射把亮度吃掉、
+           * 地块糊成一块暗斑 —— 实测默认取景下地图宽 55%（尺寸达标）
+           * 却仍然"看着小"，就是因为明度差不够。
+           * 降金属度让漫反射起来，降粗糙度让方向光打出明确的地形明暗。
+           */
+          metalness={0.32}
+          roughness={0.55}
           side={DoubleSide}
           transparent
           opacity={0}
