@@ -23,7 +23,9 @@ import AgentHost from "./agent/AgentHost";
 import { openAgent } from "./agent";
 import { wakeChannel } from "./agent/wakeChannel";
 import type { WakeChannelState } from "./agent/wakeChannel";
-import { INTENTS, INTENT_COUNT } from "./agent/intents";
+import { INTENTS, INTENT_COUNT, intentById } from "./agent/intents";
+import { searchKnowledge } from "./agent/replyView";
+import { sourcesOf } from "./agent/facts";
 import type { Intent } from "./agent/intents";
 import {
   KNOWLEDGE_DOCS,
@@ -106,26 +108,19 @@ const nextTurnId = () => (turnSeq += 1);
 
 /** 把 {key} 占位符替换成事实值；缺值时显式说明，不编造 */
 
-/** 资料检索：本地关键词命中（PRD 5.2 首版检索），返回 Top K 片段位置 */
-function searchDocs(text: string, topK = KNOWLEDGE_META.topK) {
-  const scored: { title: string; locator: string; score: number }[] = [];
-  const chars = Array.from(new Set(text.replace(/\s/g, ""))).slice(0, 40);
-  for (const doc of KNOWLEDGE_DOCS) {
-    for (const chunk of doc.chunks) {
-      let hit = 0;
-      for (const ch of chars) if (chunk.text.includes(ch)) hit += 1;
-      const score = chars.length ? hit / chars.length : 0;
-      if (score > KNOWLEDGE_META.noHitThreshold) {
-        scored.push({
-          title: doc.title,
-          locator: `${chunk.section} · ${chunk.chunkId}`,
-          score,
-        });
-      }
-    }
-  }
-  return scored.sort((a, b) => b.score - a.score).slice(0, topK);
-}
+/**
+ * 资料检索已经搬到 `agent/replyView.ts` 的 `searchKnowledge`，**全平台只剩那一份**。
+ *
+ * ── 为什么必须合并（PRD §10.2 / AC-06）────────────────────────────
+ * 本文件原先自带一份 `searchDocs`，右下角语音气泡那边没有 —— 于是同一个
+ * 天气问题，文字入口能给出引用、语音入口给不出（或者给出另一条）。
+ * PRD 要求"结构化事实和资料引用只有一个来源"，所以两处现在都从
+ * `replyView.ts` 取：声明式引用优先（意图在 `response.sources` 里声明
+ * 依据哪个文档的哪一块），检索只作兜底。
+ *
+ * 注意：`searchDocs` 与共享实现**算法完全相同**（都是字符重叠 Top-K），
+ * 所以这次合并是行为等价的替换，不是改判定。
+ */
 
 export default function SmallWoodPanel() {
   const {
@@ -261,7 +256,7 @@ export default function SmallWoodPanel() {
             reply,
             steps: [],
             facts: [],
-            sources: decision.kind === "no-hit" ? searchDocs(cleaned) : [],
+            sources: decision.kind === "no-hit" ? searchKnowledge(cleaned).map((s) => ({ title: s.title, locator: s.locator })) : [],
           },
         ]);
         return;
@@ -304,7 +299,26 @@ export default function SmallWoodPanel() {
           reply: facts.length ? reply.text : NO_HIT_REPLY,
           steps,
           facts,
-          sources: searchDocs(intent.utterance),
+          /**
+           * 引用优先取**意图声明**的那一条（`sourcesOf`），检索只作兜底 ——
+           * 与右下角语音气泡用的是同一条规则，两个入口才会给出同一份引用（AC-06）。
+           *
+           * ⚠ 兜底用的**检索文本必须与语音侧一致**（实测出来的不一致，见手册 §7.12）：
+           * 原来这里传的是 `intent.utterance`（意图的示例句），而 `agent/replyView.ts`
+           * 的 `buildReplyView` 传的是 `query + intentName`。同一个意图、同一句话，
+           * 一边按示例句检索、一边按用户问句+意图名检索，结果就是
+           * **一个入口有引用、另一个引用为空**（`introduce_platform` 实测如此）。
+           * 现在两边都用「用户问句 + 意图名」：示例句只在"用户没问句"时兜底。
+           */
+          sources: (() => {
+            const intentDef = intentById(intent.intentId);
+            const declared = sourcesOf(intentDef);
+            if (declared.length) return declared.map((ref) => ({ title: ref.title, locator: ref.locator }));
+            // 意图名从**共享意图表**取（`intentById(...).name`），与语音侧
+            // `buildReplyView` 用的 `turn.intentName` 是同一个字符串
+            const searchText = `${cleaned || intent.utterance} ${intentDef?.name ?? ""}`.trim();
+            return searchKnowledge(searchText).map((s) => ({ title: s.title, locator: s.locator }));
+          })(),
         },
       ]);
 

@@ -20,14 +20,21 @@
 
 import { clockStamp } from "../lib";
 import { CURRENT_RISKS, KNOWLEDGE_META, WAYPOINTS } from "../seed/scenario";
+import {
+  annotateHighRiskBlocked,
+  annotateLowConfidence,
+  installDegradeGuard,
+  replyFallback,
+  replyNotHeard,
+  type MatchJudge,
+} from "./degrade";
 import { evaluateFacts, factToneOf, type FactContext, type FactRow, type LiveSnapshot } from "./facts";
 import {
-  FALLBACK_HINT,
   FALLBACK_TEXT,
   voicePackOf,
   type Intent,
 } from "./intents";
-import { understand, type MatchResult } from "./matcher";
+import { understand, SEMANTIC_THRESHOLDS, type MatchResult } from "./matcher";
 import { planFacts, planTask, type TaskPlan } from "./planner";
 import {
   finishToolRun,
@@ -58,6 +65,40 @@ export type Runtime = {
 const STEP_DELAY = 900;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+
+/* ------------------------------------------------------------------ *
+ * 本轮取消令牌（AC-04「统一关闭生命周期」）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 为什么需要它：`ask()` 是**异步**的，一轮里要 await 好几次
+ * （160ms 理解、每步最多 900ms、确认气泡、工具调用、220ms 组织回复）。
+ * 关闭界面时如果只是把 store 里的 `open` 置 false，已经飞在半空的那一轮
+ * 醒来后照样 `setAgent(...)`、照样 `runtime.speak(...)`，于是：
+ *
+ *   · 面板"关掉又自己冒出来"（状态机回到 RESPONDING/EXECUTING，而面板的
+ *     可见判据里包含"正在交互"，这是复现过的现象）；
+ *   · TTS 明明被 `speechSynthesis.cancel()` 掐掉了，几百毫秒后又从头念一遍；
+ *   · 未确认的高风险确认层被关掉后又被重新拉起。
+ *
+ * AC-04 要求的是「关闭 → 取消本轮 → 待机」，所以关闭必须能**真正打断**
+ * 这条异步链。做法是给每一轮发一个代号，关闭时把代号 +1；链上每个
+ * await 之后都先问一句"我还是当前这一轮吗"，不是就直接退出、不再写任何状态。
+ * 这比在每处 await 上挂 AbortController 更轻，也不必给 `window.setTimeout`
+ * 包一层可取消实现（`sleep` 仍然只是 sleep）。
+ */
+let runGeneration = 0;
+
+/** 取消当前这一轮并把状态机复位（幂等；关闭界面、开新一轮都会调用） */
+export function cancelRun(reason = "已取消本轮"): void {
+  runGeneration += 1;
+  setAgent({ agentState: "IDLE", stateNote: reason, level: 0, partial: "" });
+}
+
+/** 这一轮是否已经被取消（代号变了就说明它已经不是"当前轮"） */
+function stale(gen: number | undefined): boolean {
+  return gen !== undefined && gen !== runGeneration;
+}
 
 const ENTITY_LABEL: Record<string, string> = {
   pillar: "构件",
@@ -191,19 +232,26 @@ function replyIntent(
   return turn;
 }
 
-/** Fallback 回复（§41）：不猜、不执行，给出可选动作 */
-function replyFallback(runtime: Runtime, match: MatchResult): void {
-  const turn = botTurnBase({
-    text: match.fallbackText,
+/**
+ * Fallback 回复（§41）：不猜、不执行，给出可选动作。
+ *
+ * 实现已挪到 `degrade.ts` 的 `replyFallback(judge?)` —— 四种失败降级
+ * （未听清 / 低置信 / 未命中 / 服务断开）现在集中在同一处，便于一处读完、
+ * 一处断言（PRD §FR-10）。这里保留一个薄封装，只是把 `MatchResult`
+ * 翻译成它要的判据，避免调用方都要自己拆字段。
+ *
+ * 换掉旧实现的一个实际好处：旧版把阈值 `0.68` **硬编码在提示文案里**，
+ * 与 `SEMANTIC_THRESHOLDS.lowConfidence` 是两个可能漂移的数字；
+ * 现在从常量取。
+ */
+function replyFallbackFromMatch(match: MatchResult, runtime: Runtime): void {
+  const judge: MatchJudge = {
     confidence: match.confidence,
-    level: "fallback",
-    entities: entityRows(match.entities),
-    note: `${FALLBACK_HINT}；Top1 相似度 ${match.confidence.toFixed(3)} 低于阈值 ${0.68}，未调用任何工具`,
-  });
-  pushTurn(turn);
-  setAgent({ agentState: "RESPONDING", stateNote: "未命中意图目录，给出可选动作" });
-  runtime.speak(`${match.fallbackText}${FALLBACK_HINT}。`);
-  setAgent({ agentState: "FINISHED", stateNote: "已回复（未执行工具）" });
+    margin: match.margin,
+    lowThreshold: SEMANTIC_THRESHOLDS.lowConfidence,
+  };
+  // 播报回调必须传：兜底回复也要出声，否则用户以为设备没反应（见 degrade.ts 的说明）
+  replyFallback(judge, runtime.speak);
 }
 
 /* ------------------------------------------------------------------ *
@@ -231,6 +279,7 @@ export async function runTool(
   entities: EntityBag,
   askConfirm: boolean,
   confirmTitle?: string,
+  gen?: number,
 ): Promise<ToolOutcome> {
   const ctx = makeToolContext(runtime.navigate, entities);
   const runId = startToolRun({ tool: tool.name, label: tool.label, args, risk: tool.risk, state: "running" });
@@ -247,10 +296,16 @@ export async function runTool(
       tool: tool.name,
       cancelText: "已取消，未执行任何动作。",
     });
-    if (!approved) {
-      finishToolRun(runId, "用户取消", "cancelled", Date.now() - startedAt);
+    if (!approved || stale(gen)) {
+      finishToolRun(runId, stale(gen) ? "本轮已取消" : "用户取消", "cancelled", Date.now() - startedAt);
       return { ok: false, summary: "用户取消", facts: {}, blocked: true, args, tool: tool.name, label: tool.label };
     }
+  }
+
+  // 关闭界面/新一轮到来后，绝不允许旧的一轮把工具真的跑出去
+  if (stale(gen)) {
+    finishToolRun(runId, "本轮已取消", "cancelled", Date.now() - startedAt);
+    return { ok: false, summary: "本轮已取消", facts: {}, blocked: true, args, tool: tool.name, label: tool.label };
   }
 
   setAgent({ agentState: "EXECUTING", stateNote: `调用工具：${tool.label}` });
@@ -285,7 +340,7 @@ export async function runTool(
  * 多步 Agent 任务（§23 / §24）
  * ------------------------------------------------------------------ */
 
-async function runPlan(runtime: Runtime, intent: Intent, match: MatchResult, plan: TaskPlan): Promise<void> {
+async function runPlan(runtime: Runtime, intent: Intent, match: MatchResult, plan: TaskPlan, gen?: number): Promise<void> {
   setAgent({ agentState: "PLANNING", stateNote: `生成执行计划（${plan.steps.length} 步）` });
 
   // §24 的步骤清单：理解任务 → 生成执行计划 → 逐步动作（✓ / ● / ○ 三态）
@@ -331,13 +386,13 @@ async function runPlan(runtime: Runtime, intent: Intent, match: MatchResult, pla
       tool: "agent_plan",
       cancelText: "已取消，未执行任何步骤。",
     });
-    if (!approved) {
+    if (!approved || stale(gen)) {
       setSteps(
         steps.map((step) => (step.status === "pending" ? { ...step, status: "skipped", message: "用户取消" } : step)),
       );
       updateLastBot(() => ({ note: "用户取消了这条多步任务，未执行任何步骤。" }));
       setAgent({ agentState: "FINISHED", stateNote: "任务已取消" });
-      runtime.speak("好的，这条任务已经取消。");
+      if (!stale(gen)) runtime.speak("好的，这条任务已经取消。");
       return;
     }
   }
@@ -346,6 +401,8 @@ async function runPlan(runtime: Runtime, intent: Intent, match: MatchResult, pla
   for (let i = 0; i < plan.steps.length; i += 1) {
     const spec = plan.steps[i];
     const stepIndex = i + 2;
+    // 关闭界面后不再逐步推进：留在"待执行"上比继续跑工具安全得多
+    if (stale(gen)) return;
     const tool = toolByName(spec.tool);
     patchStep(stepIndex, { status: "running", message: spec.runningMessage });
     if (!tool) {
@@ -354,7 +411,9 @@ async function runPlan(runtime: Runtime, intent: Intent, match: MatchResult, pla
       break;
     }
     await sleep(Math.min(spec.delayMs, STEP_DELAY));
-    const outcome = await runTool(tool, resolveArgs(spec.args, match.entities), runtime, match.entities, false);
+    if (stale(gen)) return;
+    const outcome = await runTool(tool, resolveArgs(spec.args, match.entities), runtime, match.entities, false, undefined, gen);
+    if (stale(gen)) return;
     if (!outcome.ok) {
       patchStep(stepIndex, { status: "failed", message: outcome.summary });
       failed = true;
@@ -366,6 +425,7 @@ async function runPlan(runtime: Runtime, intent: Intent, match: MatchResult, pla
     }));
   }
 
+  if (stale(gen)) return;
   setAgent({ agentState: "RESPONDING", stateNote: "汇总执行结果" });
   const doneCount = getAgentState().steps.filter((step) => step.status === "done").length;
   const tail = failed
@@ -373,19 +433,20 @@ async function runPlan(runtime: Runtime, intent: Intent, match: MatchResult, pla
     : `任务执行完成，${plan.steps.length} 个动作全部成功，小车已返回起点。`;
   updateLastBot((current) => ({ text: `${current.text}${tail}`, note: `${current.note}。${tail}` }));
   setAgent({ agentState: "FINISHED", stateNote: failed ? "任务部分完成" : "任务执行完成" });
-  runtime.speak(tail);
+  if (!stale(gen)) runtime.speak(tail);
 }
 
 /* ------------------------------------------------------------------ *
  * 单步动作 / 查询
  * ------------------------------------------------------------------ */
 
-async function runSingleAction(runtime: Runtime, intent: Intent, match: MatchResult): Promise<void> {
+async function runSingleAction(runtime: Runtime, intent: Intent, match: MatchResult, gen?: number): Promise<void> {
   const action = intent.action;
   if (!action) {
     const turn = replyIntent(runtime, intent, match);
     setAgent({ agentState: "RESPONDING", stateNote: "组织回复并播报" });
     await sleep(200);
+    if (stale(gen)) return;
     runtime.speak(turn.text);
     setAgent({ agentState: "FINISHED", stateNote: "已完成" });
     return;
@@ -406,12 +467,20 @@ async function runSingleAction(runtime: Runtime, intent: Intent, match: MatchRes
     const turn = replyIntent(runtime, intent, match, {
       note: `低置信（${match.confidence.toFixed(3)}）且工具风险 ${tool.risk}：按安全策略不执行动作，只回复`,
     });
+    /**
+     * FR-10 第 2 条：低置信必须让用户看见"识别成了什么""应该怎么说"，
+     * 并明确标注不确定；高风险被拦下时还要说清是**因为**低置信才没执行
+     * （不然用户会以为功能坏了）。
+     */
+    annotateLowConfidence(match.raw, intent);
+    annotateHighRiskBlocked();
     setAgent({ agentState: "FINISHED", stateNote: "低置信 + 高风险：不执行" });
     runtime.speak(`${turn.text}我没有完全听清，如果确认要执行，请再说一次，例如「${intent.examples[0]}」。`);
     return;
   }
 
-  const outcome = await runTool(tool, resolveArgs(action.params, match.entities), runtime, match.entities, true);
+  const outcome = await runTool(tool, resolveArgs(action.params, match.entities), runtime, match.entities, true, undefined, gen);
+  if (stale(gen)) return;
   if (outcome.blocked) {
     updateLastBot(() => ({ text: outcome.summary === "用户取消" ? "好的，这条指令已经取消，我没有执行任何动作。" : outcome.summary }));
     setAgent({ agentState: "FINISHED", stateNote: "等待确认时被取消" });
@@ -426,18 +495,20 @@ async function runSingleAction(runtime: Runtime, intent: Intent, match: MatchRes
   });
   setAgent({ agentState: "RESPONDING", stateNote: "组织回复并播报" });
   await sleep(220);
+  if (stale(gen)) return;
   runtime.speak(turn.text);
   setAgent({ agentState: "FINISHED", stateNote: outcome.ok ? "已完成" : "工具失败，已如实说明" });
 }
 
 /** 纯查询意图：先跑一次只读工具，再按工具返回的真实结果回答（§18 QUERY） */
-async function runQuery(runtime: Runtime, intent: Intent, match: MatchResult): Promise<void> {
+async function runQuery(runtime: Runtime, intent: Intent, match: MatchResult, gen?: number): Promise<void> {
   let facts: Record<string, string> | undefined;
   const action = intent.action;
   if (action) {
     const tool = toolByName(action.tool);
     if (tool && tool.risk === 0) {
-      const outcome = await runTool(tool, resolveArgs(action.params, match.entities), runtime, match.entities, false);
+      const outcome = await runTool(tool, resolveArgs(action.params, match.entities), runtime, match.entities, false, undefined, gen);
+      if (stale(gen)) return;
       facts = outcome.facts;
       if (!outcome.ok) {
         const failedTurn = replyIntent(runtime, intent, match, {
@@ -451,8 +522,14 @@ async function runQuery(runtime: Runtime, intent: Intent, match: MatchResult): P
     }
   }
   const turn = replyIntent(runtime, intent, match, { extraFacts: facts });
+  /**
+   * FR-10 第 2 条：查询类低置信**可以回复**，但必须标注不确定，
+   * 并把「识别成了什么 / 建议怎么说」摆出来，用户才有纠正的抓手。
+   */
+  if (match.level === "low") annotateLowConfidence(match.raw, intent);
   setAgent({ agentState: "RESPONDING", stateNote: "组织回复并播报" });
   await sleep(200);
+  if (stale(gen)) return;
   runtime.speak(turn.text);
   setAgent({ agentState: "FINISHED", stateNote: "已完成" });
 }
@@ -461,18 +538,50 @@ async function runQuery(runtime: Runtime, intent: Intent, match: MatchResult): P
  * 对外唯一入口
  * ------------------------------------------------------------------ */
 
+/**
+ * 模块加载即装上降级守卫（PRD FR-10 第 4 条 / FR-02 第 5 条）。
+ *
+ * 为什么放在模块级而不是某个组件的 effect：执行器被多个入口 import
+ * （右下角气泡、全屏控制台、standalone 兜底），**谁先 import 谁就装上**，
+ * 不依赖任何组件是否挂载。放在组件里会出现"控制台没开就没人订阅通道状态"，
+ * 而那恰恰是最需要它的时候（面板关着、靠唤醒说话）。
+ */
+installDegradeGuard();
+
 export async function ask(text: string, runtime: Runtime, via: "text" | "mic" | "example" = "text"): Promise<void> {
   const trimmed = text.trim();
-  if (!trimmed) return;
+  /**
+   * 空文本 = 「未听清」（PRD FR-10 第 1 条）。
+   *
+   * 原先是 `if (!trimmed) return;` —— **静默返回**。后果很具体：
+   * 用户喊醒了小木、说了句谁都没听懂的话，服务端如实回了一条空命令，
+   * 而这里直接吞掉，界面上什么都没有 —— 比说错话更糟，
+   * 因为用户不知道是自己的问题还是它坏了。
+   *
+   * 现在给一条可见的提示，并且**一个工具都不调用**（`replyNotHeard` 里
+   * 没有任何通向 Tool Registry 的路径）。
+   */
+  if (!trimmed) {
+    replyNotHeard(via);
+    return;
+  }
+
+  /**
+   * 本轮代号：**新命令进来会让上一轮作废**（AC-03 的串行化纪律）。
+   * 与其让两轮交错写同一个 store，不如明确地"后到者打断先到者" ——
+   * 用户看到的是最新那条被完整回答，而不是两条回答互相盖。
+   */
+  const gen = ++runGeneration;
 
   pushTurn({ kind: "user", id: nextId(), at: clockStamp(), text: trimmed, via, level: getAgentState().level });
   setAgent({ agentState: "UNDERSTANDING", stateNote: "规范化 + 意图匹配", partial: "", finalText: trimmed });
 
   await sleep(160);
+  if (stale(gen)) return;
   const match = understand(trimmed, 4);
 
   if (!match.intent) {
-    replyFallback(runtime, match);
+    replyFallbackFromMatch(match, runtime);
     return;
   }
 
@@ -491,19 +600,19 @@ export async function ask(text: string, runtime: Runtime, via: "text" | "mic" | 
   if (match.intent.type === "AGENT") {
     const plan = planTask(trimmed, match.entities);
     if (plan.steps.length === 0) {
-      replyFallback(runtime, match);
+      replyFallbackFromMatch(match, runtime);
       return;
     }
-    await runPlan(runtime, match.intent, match, plan);
+    await runPlan(runtime, match.intent, match, plan, gen);
     return;
   }
 
   if (match.intent.type === "QUERY") {
-    await runQuery(runtime, match.intent, match);
+    await runQuery(runtime, match.intent, match, gen);
     return;
   }
 
-  await runSingleAction(runtime, match.intent, match);
+  await runSingleAction(runtime, match.intent, match, gen);
 }
 
 /* ------------------------------------------------------------------ *

@@ -1,0 +1,363 @@
+/**
+ * 小木 · 失败降级与真实状态（PRD FR-10 / FR-02 第 5 条）
+ *
+ * ── 这个文件解决什么问题 ────────────────────────────────────────────
+ *
+ * FR-10 的四处降级里，原来只有「未命中意图 → Fallback」是真的能跑的：
+ *   · 未听清    —— 服务端**确实**会回一条空命令（实测见 验收降级.mjs），
+ *                  但链路两头都不认它：wakeChannel 用 `if (text)` 把空命令丢掉，
+ *                  executor 拿到空串也只 `return`。结果用户喊醒了、说了句没人听懂的话，
+ *                  界面上**什么都没有**——比说错话更糟。
+ *   · 低置信    —— execute 侧已经有「不执行高风险动作」的判断，但回复里
+ *                  只有「先回复并标注不确定」这句话在注释里，界面上看不到
+ *                  「识别成了什么」「应该怎么说」，用户没有纠正的抓手。
+ *   · 服务断开  —— wakeChannel 会自己重连，但**界面不进入错误态**，
+ *                  用户看到的是「正在听 / 待机」，而实际上一条帧都推不上去。
+ *   · FR-02 第5条 —— 服务不可用 / 麦克风被拒绝 / KWS 退化时界面必须显示真实状态。
+ *
+ * 本文件只做这三件事，且**只通过已有入口**改状态（不新增 UI）：
+ *   1. 把「未听清」变成一条可见的提示气泡，并且**一个工具都不调用**；
+ *   2. 把「低置信」的识别文本、建议标准说法、不确定标注挂到已有的回复视图上；
+ *   3. 订阅 `wakeChannel`，把真实的音频链路状态翻译成 store 的 `ERROR` 态
+ *      （右下角小木的徽标随即变成「出错了」），并给出一条带重连办法的提示。
+ *
+ * ── 为什么单独一个文件，而不是塞进 executor.ts ──────────────────────
+ *
+ * executor.ts 是「理解 → 执行」的纯链路，它现在的全部依赖是 store / intents /
+ * facts / tools；而本文件要订阅一个**有生命周期的外部通道**（wakeChannel）。
+ * 把订阅写进 executor 会让「执行器」和「通道」互相绑死，之后想单独测执行器
+ * 就得起一个假通道。这里用 `installDegradeGuard()` 显式安装，安装点在 executor.ts
+ * 末尾一次性调用 —— 谁 import 执行器谁就装上守卫，不依赖任何组件挂载。
+ *
+ * ── 不属于本文件的（需要别的 owner 改，已写在注释里）────────────────
+ *   · wakeChannel.ts 第 562 行的 `if (text)` 需要去掉，否则服务端回的
+ *     **空命令**根本传不到这里（详见该文件注释与本报告）。
+ *   · 界面侧「一个真正的重连按钮」需要 XiaomuDock.tsx（现在只有 Alt+W 与
+ *     「开启常驻唤醒」按钮这条现有路径可用，本文件不新增 UI）。
+ */
+
+import { FALLBACK_HINT, FALLBACK_TEXT, INTENT_BY_ID, type Intent } from "./intents";
+import { clockStamp } from "../lib";
+import {
+  getAgentState,
+  nextId,
+  pushTurn,
+  setAgent,
+  updateLastBot,
+  type AgentStoreState,
+} from "./store";
+import { wakeChannel } from "./wakeChannel";
+import type { BotTurn } from "./types";
+
+/* ------------------------------------------------------------------ *
+ * 文案（唯一来源；验收脚本直接断言这些字符串）
+ * ------------------------------------------------------------------ */
+
+/** FR-10 第 1 条：未听清 */
+export const NOT_HEARD_TEXT = "没有听清，请再说一次";
+/** 未听清时的可选动作：复用 Fallback 的提示，不另写一套说法 */
+export const NOT_HEARD_HINT = FALLBACK_HINT;
+/** 兜底时真正播报出去的整句（主回答 + 可选动作），文字入口与语音入口共用 */
+export const FALLBACK_SPOKEN = `${FALLBACK_TEXT}${FALLBACK_HINT}。`;
+/** 未听清时给用户一个"照着说"的样本（来自意图目录，不硬编码业务话术） */
+export const NOT_HEARD_EXAMPLE = "查近三个月天气";
+
+/** FR-10 第 2 条：低置信 */
+export const LOW_CONFIDENCE_LABEL = "不确定";
+/** 低置信时给用户的标准说法前缀 */
+export const SUGGEST_PREFIX = "建议说法：";
+/** 低置信且高风险时的说明 */
+export const HIGH_RISK_BLOCKED = "这是高风险操作，低置信下不会执行";
+
+/** FR-10 第 4 条：服务断开 */
+export const RECONNECT_HINT = "重连：按 Alt+W，或点击右下角「开启常驻唤醒」";
+
+/** FR-02 第 5 条：界面状态与真实音频链路对不上时的说明 */
+export const AUDIO_LINK_DOWN_NOTE = "音频链路当前不在线（界面状态以此为准，不显示「正在听」）";
+
+/* ------------------------------------------------------------------ *
+ * 未听清 / 低置信 的回复组装（供 executor.ts 调用）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 未听清回复：**不执行任何工具**，只提示重说。
+ *
+ * 返回值里没有任何 intentId / toolRuns，本函数也不调用 understand() ——
+ * 这就是"不执行任何工具"这句话在代码上的落点：整条函数没有通向 Tool Registry 的路径。
+ */
+export function replyNotHeard(via: "text" | "mic" | "example"): BotTurn {
+  const turn: BotTurn = {
+    kind: "bot",
+    id: nextId(),
+    at: clockStamp(),
+    text: `${NOT_HEARD_TEXT}。例如可以说「${NOT_HEARD_EXAMPLE}」。`,
+    intentId: null,
+    intentName: "未听清",
+    type: "RESPONSE",
+    confidence: 0,
+    // 与 FR-10 的四种降级一一对应：未听清自成一档，界面据此着色，
+    // 不与 fallback（未命中意图）混成同一个 level
+    level: "unheard",
+    rule: null,
+    facts: [],
+    entities: [],
+    steps: [],
+    voice: "—",
+    toolRuns: [],
+    note: `${NOT_HEARD_HINT}；语音/${via} 入口都没有拿到可用的识别文本，本轮未调用任何工具`,
+  };
+  pushTurn(turn);
+  setAgent({
+    agentState: "FINISHED",
+    stateNote: "未听清，未执行工具",
+    partial: "",
+    finalText: "",
+    // 工具调用记录保持原样（本轮没有新增），这里显式清空步骤清单，避免上一轮的
+    // 多步任务清单挂在这一轮回复下面
+    steps: [],
+  });
+  return turn;
+}
+
+/** 低置信时该建议用户怎么说的"标准说法"（取意图目录里的示例，不另写字面量） */
+export function suggestPhraseOf(intent: Intent | null): string {
+  if (!intent) return NOT_HEARD_EXAMPLE;
+  return intent.examples[0] ?? NOT_HEARD_EXAMPLE;
+}
+
+/**
+ * 给低置信回复补上「识别文本 + 建议标准说法 + 不确定标注」。
+ *
+ * 为什么改的是**已有那一轮回复**而不是再推一条气泡：FR-07 要求"识别定稿后就地更新，
+ * 不重复新增相同文本"，而低置信恰恰是"识别文本已经定稿、只是不敢肯定"，再推一条
+ * 会让用户看到两条几乎一样的话，分不清哪条算数。
+ *
+ * @param recognized 识别的原话（executor 里就是 final text）
+ */
+export function annotateLowConfidence(recognized: string, intent: Intent | null): void {
+  const suggestion = suggestPhraseOf(intent);
+  updateLastBot((turn) => ({
+    level: "low",
+    note: [
+      `低置信：识别为「${recognized}」，${SUGGEST_PREFIX}「${suggestion}」`,
+      `${LOW_CONFIDENCE_LABEL}：本轮不是确定性命中，我可能理解错了`,
+      turn.note,
+    ]
+      .filter(Boolean)
+      .join("；"),
+  }));
+}
+
+/** 高风险拦截时的说明（在 annotateLowConfidence 之后追加） */
+export function annotateHighRiskBlocked(): void {
+  updateLastBot((turn) => ({ note: `${turn.note}；${HIGH_RISK_BLOCKED}` }));
+}
+
+/**
+ * 「未命中意图」的兜底回复（FR-10 第 3 条：用现有 Fallback，不猜答案）。
+ *
+ * 与原先 executor 里的 replyFallback 行为一致，挪到这里是为了让四种降级
+ * 在**同一处**可读、可断言；Fallback 文本仍然只有 intents.ts 一个来源。
+ *
+ * @param judge 这一轮的匹配判据。只用来把「Top1 到底多低、阈值是多少」如实写进
+ *              note（原来阈值 0.68 是硬编码在文案里的字面量，容易和
+ *              `SEMANTIC_THRESHOLDS` 漂移）。
+ * @param speak 播报回调。**必须传** —— 见下面那段说明。
+ */
+export type MatchJudge = { confidence: number; margin: number; lowThreshold: number };
+
+export function replyFallback(judge?: MatchJudge, speak?: (text: string) => void): void {
+  const judgeNote = judge
+    ? `Top1 相似度 ${judge.confidence.toFixed(3)} 低于低置信阈值 ${judge.lowThreshold}`
+    : "未达到任何置信档";
+  const turn: BotTurn = {
+    kind: "bot",
+    id: nextId(),
+    at: clockStamp(),
+    text: FALLBACK_TEXT,
+    intentId: null,
+    intentName: "未命中意图目录",
+    type: "RESPONSE",
+    confidence: judge?.confidence ?? 0,
+    level: "fallback",
+    rule: null,
+    facts: [],
+    entities: [],
+    steps: [],
+    voice: "—",
+    toolRuns: [],
+    note: `${FALLBACK_HINT}；${judgeNote}，本轮未调用任何工具`,
+  };
+  pushTurn(turn);
+  setAgent({ agentState: "FINISHED", stateNote: "未命中意图目录，未执行工具", steps: [] });
+  /**
+   * ⚠ 播报不能省 —— 这是搬移 `replyFallback` 时漏掉的一行，实测代价是
+   * **兜底回复变成静音**（AC-01 录音验证里"播报 0 次"就是这么来的）。
+   *
+   * 为什么它重要：用户说了一句没听懂的话，气泡里出现一行字但他**没听见任何回应**，
+   * 第一反应是"设备死了"而不是"它没听懂"。语音助手的兜底必须出声。
+   *
+   * 播报内容是主回答 + 可选动作（`FALLBACK_SPOKEN`）—— 与旧实现一致，
+   * 且**不含** note 里的诊断信息（那是我写给开发者看的，不该念给用户）。
+   */
+  speak?.(FALLBACK_SPOKEN);
+}
+
+/* ------------------------------------------------------------------ *
+ * 音频链路真实状态（FR-02 第 5 条 / FR-10 第 4 条）
+ * ------------------------------------------------------------------ */
+
+/** 当前是不是真的有一条在听的音频链路：只有 wakeChannel 说 live 才算 */
+export function audioLinkLive(): boolean {
+  return wakeChannel().snapshot().state === "live";
+}
+
+/** 一句话说明音频链路现在到底怎么了（界面与验收脚本共用） */
+export function audioLinkNote(): string {
+  const snapshot = wakeChannel().snapshot();
+  const sent = wakeChannel().currentStats.sentFrames;
+  switch (snapshot.state) {
+    case "live":
+      // 状态是 live 但一帧都没推上去 = 典型"看起来在听"，如实标出来（见文件头说明）
+      return sent === 0 ? `${AUDIO_LINK_DOWN_NOTE}：状态为 live，但尚未推送任何音频帧` : "";
+    case "starting":
+      return `${AUDIO_LINK_DOWN_NOTE}：正在申请麦克风`;
+    case "reconnecting":
+      return `${AUDIO_LINK_DOWN_NOTE}：本地语音服务连接已断开，正在重连`;
+    case "error":
+      return `${AUDIO_LINK_DOWN_NOTE}：${snapshot.note || "唤醒通道出错"}`;
+    case "stopped":
+      return `${AUDIO_LINK_DOWN_NOTE}：常驻唤醒已被用户关闭`;
+    default:
+      return `${AUDIO_LINK_DOWN_NOTE}：常驻唤醒未开启`;
+  }
+}
+
+/**
+ * 断开时的提示气泡 + 错误态。
+ *
+ * ── 为什么走 store 而不是自己画一个浮层 ──────────────────────────────
+ * 「小木进入错误态」在现有实现里只有一个落点：`AgentState = "ERROR"`，
+ * 右下角小木据此显示「出错了」徽标（XiaomuDock 的 dockState 推导）。
+ * 自己再挂一个 DOM 浮层会变成第二个状态来源 —— 之前删掉 WakeOverlay 正是这个原因。
+ */
+let lastErrorNote = "";
+
+function enterServiceError(note: string): void {
+  setAgent({ agentState: "ERROR", stateNote: note });
+  if (lastErrorNote === note) return; // 同一种断开只提示一次，别刷屏
+  lastErrorNote = note;
+  pushTurn({
+    kind: "bot",
+    id: nextId(),
+    at: clockStamp(),
+    text: `本地语音服务当前不可用：${note}。文字入口和 COM4 语音串口入口不受影响，仍然可用。${RECONNECT_HINT}。`,
+    intentId: null,
+    intentName: "语音服务不可用",
+    type: "ERROR",
+    confidence: 0,
+    level: "error",
+    rule: null,
+    facts: [],
+    entities: [],
+    steps: [],
+    voice: "—",
+    toolRuns: [],
+    note: `${AUDIO_LINK_DOWN_NOTE}；${RECONNECT_HINT}`,
+  });
+}
+
+function leaveServiceError(): void {
+  lastErrorNote = "";
+  // 只把 ERROR 收回 IDLE；正在跑的那一轮（UNDERSTANDING/EXECUTING…）不要打断
+  if (getAgentState().agentState === "ERROR") {
+    setAgent({ agentState: "IDLE", stateNote: "音频链路已恢复" });
+  }
+}
+
+let installed = false;
+
+/**
+ * 安装降级守卫：订阅唤醒通道的真实状态。
+ *
+ * 订阅回调在订阅时会**立即**收到一次当前快照（wakeChannel.subscribe 的实现如此），
+ * 所以安装即校准，不需要额外读一次初值。
+ *
+ * 幂等：executor 被多个入口 import（右下角气泡、全屏控制台、standalone 兜底），
+ * 但安装只会发生一次。
+ */
+export function installDegradeGuard(): void {
+  if (installed || typeof window === "undefined") return;
+  installed = true;
+  let wasError = false;
+  wakeChannel().subscribe((snapshot) => {
+    if (snapshot.state === "error" || snapshot.state === "reconnecting") {
+      wasError = true;
+      enterServiceError(snapshot.note || (snapshot.state === "error" ? "通道出错" : "连接断开，正在重连"));
+      return;
+    }
+    if (snapshot.state === "live" && wasError) {
+      wasError = false;
+      leaveServiceError();
+    }
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * 供验收脚本使用的只读快照 / 入口（照项目里 __mumaiWake 的惯例挂到 window）
+ * ------------------------------------------------------------------ */
+
+/** 一次读出界面要判定的全部真实状态，避免验收脚本自己拼装 */
+export function degradeSnapshot(): {
+  wakeState: string;
+  wakeNote: string;
+  sentFrames: number;
+  audioLinkLive: boolean;
+  audioNote: string;
+  agentState: AgentStoreState["agentState"];
+  agentNote: string;
+  toolRuns: number;
+  lastTurn: { level: string; intentId: string | null; text: string; note: string; confidence: number } | null;
+} {
+  const snapshot = wakeChannel().snapshot();
+  const state = getAgentState();
+  const lastBot = [...state.turns].reverse().find((turn) => turn.kind === "bot") as BotTurn | undefined;
+  return {
+    wakeState: snapshot.state,
+    wakeNote: snapshot.note,
+    sentFrames: wakeChannel().currentStats.sentFrames,
+    audioLinkLive: audioLinkLive(),
+    audioNote: audioLinkNote(),
+    agentState: state.agentState,
+    agentNote: state.stateNote,
+    toolRuns: state.toolRuns.length,
+    lastTurn: lastBot
+      ? {
+          level: lastBot.level,
+          intentId: lastBot.intentId,
+          text: lastBot.text,
+          note: lastBot.note,
+          confidence: lastBot.confidence,
+        }
+      : null,
+  };
+}
+
+if (typeof window !== "undefined") {
+  (window as unknown as { __mumaiDegrade?: unknown }).__mumaiDegrade = {
+    snapshot: degradeSnapshot,
+    audioLinkNote,
+    constants: {
+      NOT_HEARD_TEXT,
+      NOT_HEARD_HINT,
+      LOW_CONFIDENCE_LABEL,
+      SUGGEST_PREFIX,
+      HIGH_RISK_BLOCKED,
+      RECONNECT_HINT,
+      FALLBACK_TEXT,
+      FALLBACK_HINT,
+    },
+    /** 建议说法：给定意图 id 返回它语料里的第一条标准说法（验收脚本用来做对照） */
+    suggestOf: (intentId: string) => suggestPhraseOf(INTENT_BY_ID[intentId] ?? null),
+  };
+}

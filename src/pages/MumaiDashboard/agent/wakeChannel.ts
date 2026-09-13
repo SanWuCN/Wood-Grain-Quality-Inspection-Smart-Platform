@@ -22,9 +22,39 @@
  */
 
 /** 采集参数。16k 单声道是语音模型的标准输入，浏览器会自动重采样 */
-import { createElement } from "react";
 
 const SAMPLE_RATE = 16000;
+
+/* ------------------------------------------------------------------ *
+ * 常驻唤醒的「记住我的选择」
+ * ------------------------------------------------------------------ */
+
+/** 键名带 `mumai.` 前缀，与页面已有的本地会话键（`mumai.session`）同一命名空间 */
+const WAKE_PREF_KEY = "mumai.wake.enabled";
+
+/**
+ * 用户上次是否开着常驻唤醒（localStorage）。
+ *
+ * 存在的理由（用户直接提的需求）："每次打开都要主动点一下启用呼唤"太烦。
+ * 只记"显式开关"这一个布尔事实，不记任何音频数据；
+ * 读不到（隐私模式、禁用存储）就返回 false，退化成原来的"默认不开麦"。
+ */
+export function readWakePreference(): boolean {
+  try {
+    return window.localStorage.getItem(WAKE_PREF_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeWakePreference(on: boolean): void {
+  try {
+    window.localStorage.setItem(WAKE_PREF_KEY, on ? "1" : "0");
+  } catch {
+    /* 存储不可用就只是"记不住"，不影响本次开关 */
+  }
+}
+
 /** 每片 100ms：与服务端既有的分片节奏一致，也够小到不影响唤醒延迟 */
 const CHUNK_MS = 100;
 const CHUNK_SAMPLES = (SAMPLE_RATE * CHUNK_MS) / 1000;
@@ -74,8 +104,21 @@ export type WakeSnapshot = {
   commandCount: number;
   /** 唤醒之后正在说的那句话（累积后的完整文本，空串表示当前没在说） */
   partial: string;
+  /**
+   * 是否正处于「已唤醒、正在收集命令」这一段。
+   *
+   * ── 为什么需要它（实测发现的缺陷）──────────────────────────────
+   * 界面原先只能靠 `partial` 判断"它听见我了没有"，而流式字幕要等
+   * 音频攒够 0.35 秒、再等一次 300ms 的推送才有内容 —— 也就是**唤醒之后
+   * 有近一秒的完全静默**。用户以为没反应就会重复喊，反而把命令说乱；
+   * PRD §9 要求"唤醒结束到可见反馈 ≤800ms"。
+   *
+   * `collecting` 在**收到唤醒事件的那一刻**就为真，与音频处理进度无关，
+   * 界面据此立刻切到「正在听」。
+   */
+  collecting: boolean;
   lastWake: { route: string; detail: string; decisionMs: number } | null;
-  lastCommand: { text: string; raw: string; reason: string } | null;
+  lastCommand: { text: string; raw: string; reason: string; interactionId: string } | null;
 };
 
 export type WakeStats = {
@@ -172,8 +215,10 @@ export class WakeChannel {
   private lastWake: { route: string; detail: string; decisionMs: number } | null = null;
   private wakeCount = 0;
   /** 最近一次识别出的命令（验收脚本用它判断"唤醒之后那句话说对了没有"） */
-  private lastCommand: { text: string; raw: string; reason: string } | null = null;
+  private lastCommand: { text: string; raw: string; reason: string; interactionId: string } | null = null;
   private commandCount = 0;
+  /** 语音命令的轮次序号：与 commandCount 同源，用来拼唯一 interactionId */
+  private commandSeq = 0;
   /**
    * 收集命令期间的流式字幕。
    *
@@ -182,6 +227,8 @@ export class WakeChannel {
    * 直接替换就会只剩最后几个字。
    */
   private partialText = "";
+  /** 已唤醒、正在收集命令（见 WakeSnapshot.collecting 的说明） */
+  private collecting = false;
   private resumeTimer: number | null = null;
 
   get wakeCountValue(): number {
@@ -196,7 +243,7 @@ export class WakeChannel {
     return this.commandCount;
   }
 
-  get lastCommandData(): { text: string; raw: string; reason: string } | null {
+  get lastCommandData(): { text: string; raw: string; reason: string; interactionId: string } | null {
     return this.lastCommand;
   }
 
@@ -231,6 +278,7 @@ export class WakeChannel {
       wakeCount: this.wakeCount,
       commandCount: this.commandCount,
       partial: this.partialText,
+      collecting: this.collecting,
       lastWake: this.lastWake,
       lastCommand: this.lastCommand,
     };
@@ -267,6 +315,12 @@ export class WakeChannel {
   async start(): Promise<boolean> {
     if (this.state === "live" || this.state === "starting") return true;
     this.disposed = false;
+    /**
+     * 用户**显式**开启 → 记住这个选择（下次加载自动恢复，见 main.tsx）。
+     * 写在 start() 里而不是各个 UI 里，是为了让"点开关 / Alt+W / 助手面板的按钮"
+     * 三条入口共用同一份记忆，不会各记各的。
+     */
+    writeWakePreference(true);
     this.setState("starting", "正在申请麦克风…");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -343,6 +397,30 @@ export class WakeChannel {
     this.clearResumeTimer();
   }
 
+  /**
+   * 取消"当前这一轮识别"（AC-04「关闭时正在识别也必须正确取消」）。
+   *
+   * 与 stop() 的区别同样是**别把麦克风关掉**：常驻唤醒是用户显式开的能力，
+   * 关气泡不该顺手把它关了（FR-08）。所以这里只做两件事：
+   *   · 把本轮的流式字幕与收集态清掉，界面立刻回到"待机"；
+   *   · 记住"下一句命令要丢" —— 只在**确实正在收集**时才置位，
+   *     否则用户关完气泡后正常喊的那一句会被误丢。
+   *
+   * 服务端仍会把这一轮的 utterances 判完并回一条 command，客户端丢弃它，
+   * 语义上等价于"这一轮被取消了"；不需要改服务端协议。
+   */
+  abortRound(): boolean {
+    const wasCollecting = this.collecting;
+    this.collecting = false;
+    this.partialText = "";
+    this.dropNextCommand = wasCollecting;
+    this.emit();
+    return wasCollecting;
+  }
+
+  /** 关闭时是否取消了正在收集的那一轮（给验收脚本读，避免靠时间猜） */
+  private dropNextCommand = false;
+
   /** 排一次"命令处理完之后自动恢复聆听"，重复调用只保留最后一次 */
   private scheduleResume() {
     this.clearResumeTimer();
@@ -376,6 +454,8 @@ export class WakeChannel {
   stop() {
     this.disposed = true;
     this.suspended = false;
+    /** 用户**显式**关闭 → 也记住，免得下次一进页面又自己开起来 */
+    writeWakePreference(false);
     if (this.reconnectTimer !== null) {
       window.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -517,6 +597,12 @@ export class WakeChannel {
         this.lastWake = { route, detail: String(payload.detail ?? ""), decisionMs: decision };
         // 新的一轮开始：清掉上一轮的字幕，否则界面会先显示上一句再跳到新的
         this.partialText = "";
+        /**
+         * 立刻进入「正在收集命令」，与音频处理进度无关。
+         * 这样界面在唤醒的**同一帧**就能切到「正在听」，
+         * 不必等流式字幕攒够音频（那条路要近一秒）。
+         */
+        this.collecting = true;
         console.info(`[wake] 唤醒（${route}，判定滞后 ${decision}ms）`);
         this.options.onWake?.(this.lastWake);
         this.emit();
@@ -536,6 +622,20 @@ export class WakeChannel {
        */
       if (payload.type === "partial") {
         const text = String(payload.text ?? "");
+        /**
+         * **命令定稿之后到达的 partial 一律丢弃。**
+         *
+         * 实测缺陷（`验收停顿边界.mjs` 抓到）：命令事件到达时会把 `collecting`
+         * 置假、字幕清空，界面本应显示**定稿后的命令文本**；但此时往往还有
+         * 一两条 partial 在网络上飞 —— 它们是在命令之前发出来的，到达却晚于命令事件，
+         * 于是把刚清空的字幕又填回**半截识别**（屏幕上从「查近三个月天气」
+         * 退回到「小木小木查警三個月天氣」）。用户看到的是"识别结果自己变差了"。
+         *
+         * 判据用 `collecting`：它只在"唤醒之后、命令定稿之前"为真，
+         * 正是流式字幕该出现的窗口；窗口之外的字幕消息没有意义，丢掉即可。
+         * 关掉气泡取消本轮时也走同一条路（`collecting` 已被清），不会误伤。
+         */
+        if (!this.collecting) return;
         if (!text || text === this.partialText) return;
         this.partialText = text;
         this.options.onPartial?.(this.partialText);
@@ -543,30 +643,88 @@ export class WakeChannel {
         return;
       }
       /**
-       * 命令识别完成：这时才打开控制台并把命令交给小木。
+       * 命令识别完成：交给小木执行。
        *
-       * 走的是**既有的 `mumai:agent-open` 事件**（带 question），
-       * 不是新入口 —— 这样语音唤醒、串口语音、点击/文本三个入口
-       * 最终都落到同一个执行链路上，风险确认、工具日志、页面跳转都不会被绕过。
+       * ── 派发的是 `mumai:xiaomu-ask`，不是 `mumai:agent-open`（PRD FR-02 / FR-06）──
+       * 两者的区别正是本次改造的核心：
+       *   `mumai:agent-open`  → 挂起**全屏控制台**（现在只作开发诊断入口保留）
+       *   `mumai:xiaomu-ask`  → 右下角气泡直接跑，主页面不被遮挡
+       * 唤醒一句就把主业务页面整个盖住，是 PRD 明确要改掉的行为。
+       *
+       * 两条路最终都调同一个 `ask()`，所以业务结果一致（FR-04 / AC-06）；
+       * 页面跳转、风险确认、工具日志都不会被绕过。
        */
       if (payload.type === "command") {
         const text = String(payload.text ?? "").trim();
         const raw = String(payload.raw ?? "");
         console.info(`[wake] 命令：「${text}」（原始转写「${raw}」）`);
         this.commandCount += 1;
-        this.lastCommand = { text, raw, reason: String(payload.reason ?? "") };
-        if (text) {
-          window.dispatchEvent(new CustomEvent("mumai:agent-open", { detail: { question: text } }));
-        } else {
-          // 只喊了唤醒词、没说做什么：把控制台打开，让用户看到并在里面直接说
-          window.dispatchEvent(new CustomEvent("mumai:agent-open", {}));
+        this.lastCommand = { text, raw, reason: String(payload.reason ?? ""), interactionId: "" };
+        /**
+         * 收尾：退出收集态并清掉流式字幕。
+         *
+         * 不清的后果是实测出来的：字幕留着 → 界面的状态推导里
+         * 「正在听」（优先级高于「思考中」）会一直成立 → 小木明明在执行了，
+         * 徽标却还写着「正在听」，用户以为它没听见、接着重复说。
+         */
+        this.collecting = false;
+        this.partialText = "";
+        /**
+         * 「关闭 → 取消本轮」（AC-04）。
+         *
+         * 用户在识别过程中把气泡关掉，这一轮就不该再冒出来 —— 否则他刚关掉，
+         * 半秒后同一句回答又把气泡顶开，看起来像"关不掉"。
+         * 这里丢的是**已经作废的那一轮**：只丢一次，且只丢"关闭时正在收集"的
+         * 那一轮；常驻唤醒本身不动（FR-08：关气泡不释放麦克风），
+         * 下一轮唤醒照常工作。
+         */
+        if (this.dropNextCommand) {
+          this.dropNextCommand = false;
+          console.info("[wake] 本轮已在关闭时取消，丢弃这条命令");
+          this.emit();
+          return;
         }
+        /**
+         * 唤醒词不属于命令。
+         *
+         * 服务端的命令段有时会把唤醒词一起带进来（实测出现过
+         * 「小木小木查警三个月天气」这种整段），如果不剥掉：
+         *   · 字幕里会多出「小木小木」，用户看到的"命令"不是他说的那句；
+         *   · 语义层要额外容忍前缀，命令文本也进了日志，事后排查更乱。
+         * 只剥**开头连续两遍**「小木」（允许中间有顿号/逗号/空格），
+         * 剥一次就够 —— 句中出现的小木是用户的实际用词，不能动。
+         */
+        const spoken = text.replace(/^\s*(?:小木[\s，,、]*){2}\s*/, "");
+        const cleaned = spoken || text;
+        /**
+         * **每轮带唯一 interactionId**（AC-03 第 1 条）。
+         *
+         * 诊断控制台那条路早就有（`nextInteractionId()`），语音这条路一直没有：
+         * 事件里只有 question，于是"按 id 去重"在语音侧根本无从谈起 ——
+         * 同一条 WS 命令被重复投递两次就会执行两轮。
+         * 这里不让 wakeChannel 去 import api.tsx：api.tsx 现在已经 import 本模块
+         * （关闭生命周期要调 abortRound），反向 import 会成环。所以就地生成，
+         * 格式与 `nextInteractionId()` 保持一致的约定（时间戳 + 序号 + 来源标签），
+         * 现场排查时一眼能看出这轮是语音来的。
+         */
+        this.commandSeq += 1;
+        const interactionId = `ia-${Date.now().toString(36)}-wake${this.commandSeq}`;
+        this.lastCommand = { text: cleaned, raw, reason: String(payload.reason ?? ""), interactionId };
+        /**
+         * **空命令也要往下传**（PRD FR-10 第 1 条「未听清」）。
+         *
+         * 原先这里是 `if (text) { … }` —— 空串直接丢掉，于是"喊醒了、
+         * 说了句没人听懂的话"在界面上**什么都不会发生**，比说错话更糟。
+         * 现在照常派发，由 `executor.ask("")` 走 `replyNotHeard` 给出一条
+         * 可见提示，并且一个工具都不调用。
+         */
+        window.dispatchEvent(new CustomEvent("mumai:xiaomu-ask", { detail: { question: cleaned, interactionId } }));
         this.options.onCommand?.(this.lastCommand);
         this.emit();
         /**
          * 交出去之后暂停推流（小木要说话，喇叭声音会漏回麦克风），
          * 但**定时自动恢复** —— 不恢复就会出现"只采集一次就停了"。
-         * 控制台关闭时会立即恢复，不用等这个定时。
+         * 关掉气泡时会立即恢复，不用等这个定时。
          */
         this.suspend();
         this.scheduleResume();
@@ -636,34 +794,38 @@ export function wakeChannel(): WakeChannel {
   return singleton;
 }
 
-if (typeof window !== "undefined") {
+/**
+ * 浏览器环境判定 —— **不能只写 `typeof window !== "undefined"`**。
+ *
+ * ── 这是实测踩出来的（而且代价不小）──────────────────────────────
+ * PRD 验收工装里有一个只读探针，用 vite 的 `ssrLoadModule` 在 **Node** 里
+ * 加载本模块来读它的导出。那种环境下 `window` 是存在的（SSR 兼容层给的桩），
+ * 但**没有 `addEventListener`** —— 于是模块级那几行直接把整个探针打崩：
+ *
+ *     TypeError: window.addEventListener is not a function
+ *     at src/pages/MumaiDashboard/agent/wakeChannel.ts
+ *
+ * 后果是一整片验收项变成「证据不足」（FR-05 主回答逐字、三个业务字段、
+ * 引用、时间戳、TTS 播报…），看起来像产品没做，其实只是模块在非浏览器
+ * 环境下不该执行 DOM 代码。
+ *
+ * 判据因此收紧成"**确实有 DOM 事件接口**"：有才做事件订阅与自动启动，
+ * 没有就只导出类与单例（纯逻辑部分照样可用）。
+ */
+const HAS_DOM = typeof window !== "undefined" && typeof window.addEventListener === "function";
+
+if (HAS_DOM) {
   /**
-   * 挂唤醒浮层（右下角状态 + 流式字幕 + 中央回执）。
+   * 醒目的状态提示与流式字幕现在由右下角的常驻小木（`XiaomuDock`）负责。
    *
-   * 为什么不放进应用的 React 树：唤醒要在**任何页面、控制台关着**的时候都能用，
-   * 而应用树会随路由挂载/卸载。这里自己建容器和 root，
-   * 与 api.tsx 挂独立控制台是同一套路。
+   * 这里原来挂过一个独立浮层（`WakeOverlay`），本次按 PRD FR-06/FR-07 删掉了：
+   * 它的职责（右下角状态、流式字幕、结果回执）已经被小木气泡完全覆盖，
+   * 两个都留着会在右下角叠出两块面板，而且气泡还拿不到会话上下文
+   * （挂到 body 上用不了 `useMumai()`，事实值会和点击/文字入口不一致）。
    *
-   * 浮层是提示、不是功能：挂载失败只打一行日志，唤醒本身照常工作。
+   * 本模块因此回到"只管音频与判定"这一件事：采集、推流、唤醒事件、命令事件。
+   * 界面从 `wakeChannel().subscribe()` 读状态，不再由这里创建 DOM。
    */
-  const mountOverlay = () => {
-    if (document.getElementById("mumai-wake-overlay")) return;
-    const container = document.createElement("div");
-    container.id = "mumai-wake-overlay";
-    document.body.appendChild(container);
-    void Promise.all([import("react-dom/client"), import("./WakeOverlay")])
-      .then(([{ createRoot }, mod]) => {
-        createRoot(container).render(createElement(mod.default));
-      })
-      .catch((error: unknown) => {
-        console.warn("[wake] 浮层挂载失败（不影响唤醒本身）", error);
-      });
-  };
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", mountOverlay, { once: true });
-  } else {
-    mountOverlay();
-  }
 
   /**
    * 控制台关闭 → **立即**恢复常驻聆听。

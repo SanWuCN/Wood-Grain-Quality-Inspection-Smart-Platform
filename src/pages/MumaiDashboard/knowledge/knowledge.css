@@ -1308,13 +1308,43 @@
   scrollbar-color: var(--kb-scroll) transparent;
 }
 
-.kb-docs li {
+/*
+   资料清单的每一行是一个按钮：点一下把 docId 写进 URL，落点面板展开它的分块。
+   视觉与原来一致（行底色 + 两列基线对齐），只是多了可点与选中态。
+*/
+.kb-docs__item {
+  display: block;
+  background: var(--bg-page);
+  border-left: 2px solid transparent;
+}
+
+.kb-docs__row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-1) var(--space-3);
   align-items: baseline;
+  width: 100%;
   padding: var(--space-1) var(--space-2);
-  background: var(--bg-page);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--motion-fast), background var(--motion-fast);
+}
+
+.kb-docs__row:hover {
+  background: var(--fill-weak);
+}
+
+.kb-docs__item.is-active {
+  background: var(--fill-weak);
+  border-left-color: var(--primary);
+}
+
+.kb-docs__item.is-active .kb-docs b {
+  color: var(--text-primary);
 }
 
 .kb-docs b {
@@ -1351,12 +1381,146 @@
 }
 
 /* ------------------------------------------------------------------
-   6. 三档分辨率（规范 §8）：1672×940 / 1280×720 下压辅助信息，主交互不删
+   7. 引用深链（PRD FR-05）：#/knowledge?doc=<docId>&chunk=<chunkId>
+   ------------------------------------------------------------------
+   中列原来是单块面板；引用落点面板只在 URL 带参数时出现，
+   所以包一层 flex 容器（不改变无参数时的观感：检索工作区仍然占满整列）。
+   ------------------------------------------------------------------ */
+
+.kb-ask-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* 检索工作区：撑满中列剩余高度，与「面板直接作为网格项被拉伸」时表现一致 */
+.kb-ask-col > .tech-panel:not(.kb-cite) {
+  flex: 1 1 auto;
+  min-height: 466px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* 落点面板按内容高度：它是「打开了哪一处」的结论，不该被拉成整列高 */
+.kb-ask-col > .kb-cite {
+  flex: 0 0 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.kb-ask-col > .kb-cite > .tech-panel__inner > .tech-panel__body {
+  flex: 0 0 auto;
+}
+
+.kb-cite__body {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.kb-cite__doc {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.kb-cite__doc b {
+  color: var(--text-primary);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.kb-cite__doc span {
+  color: var(--text-tertiary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-aux);
+}
+
+.kb-cite__doc code,
+.kb-cite__where code {
+  color: var(--text-secondary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-aux);
+}
+
+.kb-cite__where {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+}
+
+.kb-cite__where em {
+  color: var(--text-tertiary);
+  font-style: normal;
+}
+
+/* 引用的那句原文：左侧主色竖条 + 弱填充，一眼看到「引的是哪句话」 */
+.kb-cite__text {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--primary);
+  background: var(--fill-weak);
+  color: var(--text-primary);
+  font-size: var(--fs-body);
+  line-height: 1.7;
+}
+
+/* 该资料的分块索引：命中那一块高亮，也可以点别的块改用其它落点 */
+.kb-cite__chunks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kb-cite__chunks button {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: var(--fs-aux);
+  cursor: pointer;
+  transition: color var(--motion-fast), border-color var(--motion-fast);
+}
+
+.kb-cite__chunks button:hover {
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+}
+
+.kb-cite__chunks button.is-target {
+  border-color: var(--primary);
+  background: var(--fill-weak);
+  color: var(--text-primary);
+}
+
+.kb-cite__chunks code {
+  font-family: var(--font-data-mixed);
+}
+
+/* ------------------------------------------------------------------
+   8. 三档分辨率（规范 §8）：1672×940 / 1280×720 下压辅助信息，主交互不删
    ------------------------------------------------------------------ */
 
 @media (max-height: 940px) {
   .kb-main > .tech-panel,
-  .kb-main > .kb-run {
+  .kb-main > .kb-run,
+  .kb-ask-col > .tech-panel:not(.kb-cite) {
     min-height: 428px;
   }
 
@@ -1379,7 +1543,8 @@
 
 @media (max-height: 780px) {
   .kb-main > .tech-panel,
-  .kb-main > .kb-run {
+  .kb-main > .kb-run,
+  .kb-ask-col > .tech-panel:not(.kb-cite) {
     min-height: 392px;
   }
 

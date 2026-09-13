@@ -84,8 +84,26 @@ export const STOP_WORDS = ["停", "停止", "停下", "别动", "立即停止", 
 /** 「返回起点」类指令的字面量 */
 export const HOME_WORDS = ["返回起点", "回到起点", "返回原位", "回到原点", "回到殿门", "返航", "返回充电站", "回来"];
 
+/**
+ * 「打开 / 进入 / 跳转 + 页面名」的一级规则用到的句式。
+ *
+ * 页面名是**确定性**的（写死在 NAV_ITEMS / ADAPT_TABS 里），不该让「打开脚本」
+ * 这种 4 字短句去跟示例语料算相似度：字符 bigram 在短句上覆盖不足，实测八个一级页面里
+ * 有四个（任务总览 / 工单档案 / 建图巡检 / 数字孪生）的「打开<label>」会掉进 Fallback——
+ * 用户把页面名说对了，小木反而没反应。句式只截取「动词 + 页面说法」，
+ * 页面说法是否成立由 `isPagePhrase()` 查别名表决定（见下方词典区）。
+ */
+const NAV_PAGE_PATTERN = /^(?:(?:请|帮我|帮忙|给我|麻烦|小木|你好))*(?:打开|进入|跳转(?:到)?|切换到?)(.{1,12})$/;
+
 /** 规则表：按顺序匹配，先命中者生效（长词在前，避免「取消」吃掉「取消巡检」） */
-const RULES: { intentId: string; pattern: RegExp; reason: string; label: string }[] = [
+const RULES: {
+  intentId: string;
+  pattern: RegExp;
+  reason: string;
+  label: string;
+  /** 可选的二次判定：正则命中后还要过这一关才算命中（页面名必须精确落在别名表里） */
+  guard?: (hit: RegExpExecArray) => boolean;
+}[] = [
   {
     intentId: "robot_stop",
     pattern: /(立即停止|紧急停止|马上停止|停止|停下|暂停|急停|刹车|别动|停一下)/,
@@ -110,13 +128,27 @@ const RULES: { intentId: string; pattern: RegExp; reason: string; label: string 
     reason: "命中建图确定性规则（§36 start_mapping）",
     label: "开始建图",
   },
+  {
+    /*
+      页面导航规则，**放在最后**：停止 / 返回 / 装载地图 / 开始建图的既有优先级不变
+      （「切换地图」仍然先命中 load_map，不会被这里的「切换到」句式抢走）。
+      guard 要求「动词后面那段话」精确落在页面别名表里，所以
+      「打开当时的高斯场景」「打开旧场景对比一下外观」这类带修饰的说法不会被它截走，
+      仍然交给相似度匹配（scene 类意图）。
+    */
+    intentId: "open_page",
+    pattern: NAV_PAGE_PATTERN,
+    guard: (hit) => isPagePhrase(hit[1] ?? ""),
+    reason: "命中「打开 / 进入 / 跳转 + 页面名」确定性规则（§11：页面名与 NAV_ITEMS / ADAPT_TABS 的别名表同源，不靠相似度猜）",
+    label: "打开页面",
+  },
 ];
 
 /** 规范化后的文本做规则匹配 */
 export function matchRule(normalized: string): RuleHit | null {
   for (const rule of RULES) {
     const hit = rule.pattern.exec(normalized);
-    if (hit) {
+    if (hit && (!rule.guard || rule.guard(hit))) {
       return { intentId: rule.intentId, reason: rule.reason, phrase: hit[0] };
     }
   }
@@ -127,27 +159,111 @@ export function matchRule(normalized: string): RuleHit | null {
  * 词典：页面 / 构件 / 场景 / 地图 / 批次（§17 Regex + Dictionary）
  * ------------------------------------------------------------------ */
 
-/** 页面名词典：label 全部来自 NAV_ITEMS（design.ts），不再另写一套页面名 */
+/**
+ * 一级页面的同义说法：**按 NAV key 挂，不按数组下标**。
+ *
+ * 这里原来是 `{ page: NAV_ITEMS[5].label, route: NAV_ITEMS[5].path, aliases: ["知识库", …] }`
+ * 这种写法 —— 别名组一行一行地跟导航项按下标对齐。NAV_ITEMS 后来把「检测适配」拆成
+ * 「硬件详情 + 固件及模型」（design.ts 的注释与 pages/Firmware.tsx 都说明了这次拆页），
+ * 又把「演示控制台」移出八项一级导航，下标整体漂移，而代码本身**不会报任何错**：
+ *   「打开知识库」→ /firmware、「打开报告归档」→ /knowledge、「打开演示控制台」→ /archive。
+ * 改成按 key 查表后，导航项增删只影响它自己那一行，别的说法不会再跟着漂；
+ * 新增 NAV key 时这里即使忘了补同义说法，也还有它的 label 兜底（不会指错页面）。
+ */
+const PAGE_ALIAS_EXTRAS: Record<string, string[]> = {
+  overview: ["总览", "首页", "概览", "态势", "全国态势", "上海态势"],
+  orders: ["工单", "工单列表", "档案", "当前工单", "工单页"],
+  mapping: ["建图", "巡检", "巡检任务", "巡检页面", "巡航任务", "任务中心", "小车任务", "地图页", "slam"],
+  twin: ["孪生", "三维", "三维模型", "高斯场景", "场景页面", "点云", "地图"],
+  hardware: ["硬件", "设备详情", "硬件监看"],
+  firmware: ["固件", "模型", "固件模型", "版本管理"],
+  knowledge: ["资料库", "检索", "资料", "知识库页面"],
+  report: ["归档", "报告", "校验", "报告页"],
+};
+
+/**
+ * 页签 → 宿主页面 key（是 NAV key，不是下标）。
+ *
+ * design.ts 的 ADAPT_TABS 只说页签自己（key / label / icon），不说它挂在哪个页面，
+ * 宿主必须另说一句。按拆页后的实际路由写：采集 / 异常排查在「硬件详情」，
+ * 数据集 / 训练验证 / 更新交付 / 融合分析在「固件及模型」——与 tools.ts 的 open_panel、
+ * pages/Hardware.tsx 与 pages/Firmware.tsx 里的页签一致。
+ * 这里原来写死的是 `PAGE_ALIASES[4]`（旧「检测适配」页 /adapt）：拆页后这个下标变成了
+ * 「硬件详情」，于是数据集 / 训练验证 / 更新交付 / 融合分析四个页签全被送到 /hardware。
+ */
+const ADAPT_TAB_HOST_KEY: Record<string, string> = {
+  capture: "hardware",
+  triage: "hardware",
+  dataset: "firmware",
+  training: "firmware",
+  delivery: "firmware",
+  fusion: "firmware",
+};
+
+/** 页签的额外说法；页签名一律由 ADAPT_TABS 派生，不在这里重抄一遍 */
+const ADAPT_TAB_EXTRA_ALIASES: Record<string, string[]> = {
+  capture: ["采集作业", "手持采集", "原始数据"],
+  triage: ["排查"],
+  dataset: ["清洗", "划分"],
+  training: ["训练", "模型对比", "验证"],
+  delivery: ["交付", "更新包", "下发"],
+  fusion: ["融合"],
+};
+
+/**
+ * 排练控制台（`/console`）—— 唯一不在八项一级导航里的页面。
+ *
+ * PRD §11「管理员排练控制独立于日常岗位」：它刻意不进 NAV_ITEMS（design.ts 的说明），
+ * 入口在顶栏账号菜单旁，只有 console:admin 看得见（auth.ts 的 ROUTE_PERMISSION）。
+ * 因此它没有 NAV key 可挂，只能单列一条，路由抄自 routes.tsx。
+ * **不要**因为「它不在 NAV_ITEMS 里」就把它塞进某个导航项名下 —— 那正是这次错位的成因。
+ */
+const CONSOLE_PAGE = {
+  label: "排练控制台",
+  path: "/console",
+  aliases: ["排练控制台", "演示控制台", "控制台", "演示控制", "演示台", "脚本"],
+} as const;
+
+/** 别名 = 页面/页签自己的 label + 同义说法（去重，label 在前） */
+function aliasesWithLabel(label: string, extras: string[] | undefined): string[] {
+  return [...new Set([label, ...(extras ?? [])])];
+}
+
+/** NAV key → 导航项（宿主页面、别名表都只按 key 找） */
+function navItemOf(key: string): (typeof NAV_ITEMS)[number] | undefined {
+  return NAV_ITEMS.find((item) => item.key === key);
+}
+
+/** 页面名词典：page / route 全部来自 NAV_ITEMS，别名按 NAV key 对齐 */
 export const PAGE_ALIASES: { page: string; route: string; aliases: string[] }[] = [
-  { page: NAV_ITEMS[0].label, route: NAV_ITEMS[0].path, aliases: ["总览", "任务总览", "首页", "概览", "态势", "全国态势", "上海态势"] },
-  { page: NAV_ITEMS[1].label, route: NAV_ITEMS[1].path, aliases: ["工单", "工单档案", "工单列表", "档案", "当前工单", "工单页"] },
-  { page: NAV_ITEMS[2].label, route: NAV_ITEMS[2].path, aliases: ["建图巡检", "建图", "巡检", "巡检任务", "巡检页面", "巡航任务", "任务中心", "小车任务", "地图页", "slam"] },
-  { page: NAV_ITEMS[3].label, route: NAV_ITEMS[3].path, aliases: ["数字孪生", "孪生", "三维", "三维模型", "高斯场景", "场景页面", "点云", "地图"] },
-  { page: NAV_ITEMS[4].label, route: NAV_ITEMS[4].path, aliases: ["检测适配", "适配", "检测", "采集", "异常排查", "数据集", "训练验证", "更新交付", "融合分析"] },
-  { page: NAV_ITEMS[5].label, route: NAV_ITEMS[5].path, aliases: ["知识库", "资料库", "检索", "资料"] },
-  { page: NAV_ITEMS[6].label, route: NAV_ITEMS[6].path, aliases: ["报告归档", "归档", "报告", "校验"] },
-  { page: NAV_ITEMS[7].label, route: NAV_ITEMS[7].path, aliases: ["演示控制", "控制台", "演示台", "脚本"] },
+  ...NAV_ITEMS.map((item) => ({
+    page: item.label,
+    route: item.path,
+    aliases: aliasesWithLabel(item.label, PAGE_ALIAS_EXTRAS[item.key]),
+  })),
+  { page: CONSOLE_PAGE.label, route: CONSOLE_PAGE.path, aliases: [...CONSOLE_PAGE.aliases] },
 ];
 
-/** 检测适配页签别名 → ADAPT_TABS.key（route 上加 ?tab=） */
-export const ADAPT_TAB_ALIASES: { key: string; aliases: string[] }[] = [
-  { key: ADAPT_TABS[1].key, aliases: ["异常排查", "排查"] },
-  { key: ADAPT_TABS[2].key, aliases: ["数据集", "清洗", "划分"] },
-  { key: ADAPT_TABS[3].key, aliases: ["训练验证", "训练", "模型对比", "验证"] },
-  { key: ADAPT_TABS[4].key, aliases: ["更新交付", "交付", "更新包", "下发"] },
-  { key: ADAPT_TABS[5].key, aliases: ["融合分析", "融合"] },
-  { key: ADAPT_TABS[0].key, aliases: ["采集", "手持采集", "原始数据"] },
-];
+/** 页签别名 → ADAPT_TABS.key（route 上加 ?tab=）；key 取自 ADAPT_TABS，不按下标 */
+export const ADAPT_TAB_ALIASES: { key: string; aliases: string[] }[] = ADAPT_TABS.map((tab) => ({
+  key: tab.key,
+  aliases: aliasesWithLabel(tab.label, ADAPT_TAB_EXTRA_ALIASES[tab.key]),
+}));
+
+/**
+ * 页面说法的**精确**集合，供一级规则判定用（'打开脚本' 这种短句在相似度里够不到阈值，
+ * 但页面名本身是确定性的）。集合与上面两张别名表同源，别名表改了就自动跟上。
+ */
+const PAGE_PHRASES = new Set<string>();
+for (const entry of PAGE_ALIASES) for (const alias of entry.aliases) PAGE_PHRASES.add(normalize(alias));
+for (const entry of ADAPT_TAB_ALIASES) for (const alias of entry.aliases) PAGE_PHRASES.add(normalize(alias));
+
+/** 「打开 / 进入 / 跳转 + 页面名」的规则判定（也认「…页面 / …页」这种说法） */
+function isPagePhrase(phrase: string): boolean {
+  if (PAGE_PHRASES.has(phrase)) return true;
+  const stripped = phrase.replace(/(?:页面|页)$/, "");
+  return stripped.length > 0 && PAGE_PHRASES.has(stripped);
+}
 
 /** 构件的自然语言别名全部由 COMPONENTS 派生（「一号木柱 / 1号柱 / Z01 / 第一根」） */
 const CN_ORDINAL = ["一", "二", "三", "四", "五", "六"];
@@ -198,48 +314,58 @@ const SCENE_ALIASES: { sceneId: string; aliases: string[] }[] = (() => {
  * 实体抽取（§17）
  * ------------------------------------------------------------------ */
 
-function findAlias(
+/**
+ * 在一张别名表里找**最先出现、且更长**的说法。
+ *
+ * 返回的是条目本身，不是下标 —— 调用方不需要知道它在表里的位置，
+ * 这样导航项 / 页签增删都不会牵动调用方（下标漂移正是这次跳错页面的根因）。
+ */
+function findAlias<T extends { aliases: string[] }>(
   text: string,
-  entries: { aliases: string[] }[],
-): { index: number; alias: string; matched: string } | null {
-  let best: { index: number; alias: string; matched: string } | null = null;
-  for (let index = 0; index < entries.length; index += 1) {
-    for (const alias of entries[index].aliases) {
+  entries: readonly T[],
+): { entry: T; alias: string; matched: string } | null {
+  let best: { entry: T; alias: string; matched: string } | null = null;
+  let bestAt = -1;
+  for (const entry of entries) {
+    for (const alias of entry.aliases) {
       const needle = normalize(alias);
       if (!needle) continue;
       const at = text.indexOf(needle);
       if (at < 0) continue;
       // 取最先出现、且更长的别名（长别名更具体，「一号木柱」优先于「一号」）
-      const better =
-        best === null || at < best.index || (at === best.index && needle.length > best.alias.length);
-      if (better) best = { index, alias: needle, matched: alias };
+      const better = best === null || at < bestAt || (at === bestAt && needle.length > best.alias.length);
+      if (better) {
+        best = { entry, alias: needle, matched: alias };
+        bestAt = at;
+      }
     }
   }
   return best;
 }
 
 function pageEntities(normalized: string): EntityBag {
-  // 先看检测适配的六个页签，再落到一级导航
+  // 先看页签（页签是宿主页面里的一个视图，说法更具体），再落到一级导航
   const tab = findAlias(normalized, ADAPT_TAB_ALIASES);
-  const page = findAlias(normalized, PAGE_ALIASES);
   if (tab && tab.alias.length >= 2) {
-    const pageEntry = PAGE_ALIASES[4];
-    const tabEntry = ADAPT_TABS.find((item) => item.key === ADAPT_TAB_ALIASES[tab.index]?.key);
-    return {
-      page: pageEntry.page,
-      pageLabel: `${pageEntry.page} · ${tabEntry?.label ?? ""}`,
-      route: `${pageEntry.route}?tab=${tabEntry?.key ?? ""}`,
-    };
+    const tabEntry = ADAPT_TABS.find((item) => item.key === tab.entry.key);
+    const host = navItemOf(ADAPT_TAB_HOST_KEY[tab.entry.key] ?? "");
+    // 宿主页面没登记（ADAPT_TABS 新增了页签、这张宿主表还没跟上）→ 不猜，落到一级导航/Fallback
+    if (tabEntry && host) {
+      return {
+        page: host.label,
+        pageLabel: `${host.label} · ${tabEntry.label}`,
+        route: `${host.path}?tab=${tabEntry.key}`,
+      };
+    }
   }
+  const page = findAlias(normalized, PAGE_ALIASES);
   if (!page) return {};
-  const entry = PAGE_ALIASES[page.index];
-  return { page: entry.page, pageLabel: entry.page, route: entry.route };
+  return { page: page.entry.page, pageLabel: page.entry.page, route: page.entry.route };
 }
 
 /** 「三号木柱」这类说法里，位次词优先于 id 匹配，避免 Z03 与「三号」冲突 */
 function pillarEntity(normalized: string): string | undefined {
-  const hit = findAlias(normalized, PILLAR_ALIASES);
-  return hit ? PILLAR_ALIASES[hit.index].componentId : undefined;
+  return findAlias(normalized, PILLAR_ALIASES)?.entry.componentId;
 }
 
 function zoneEntity(normalized: string, componentId: string | undefined): string | undefined {
@@ -296,7 +422,7 @@ function batchEntity(normalized: string): string | undefined {
 
 function sceneEntity(normalized: string): string | undefined {
   const hit = findAlias(normalized, SCENE_ALIASES);
-  if (hit) return SCENE_ALIASES[hit.index].sceneId;
+  if (hit) return hit.entry.sceneId;
   if (/场景|三维|孪生|高斯/.test(normalized)) {
     return SCENES.find((item) => item.round === "历史")?.id;
   }
@@ -412,8 +538,15 @@ function buildIndex(): IntentVector[] {
     const bigrams = new Set<string>();
     const examples: SparseVector[] = [];
     for (const example of intent.examples) {
-      examples.push(vectorize(example));
+      /**
+       * 示例侧一律用**归一化后**的串建向量，与查询侧同一口径。
+       *
+       * 原来这里是 `vectorize(example)`（原始串），而查询侧的 query 用归一化串 ——
+       * 两边口径不一致的代价实测过：用户在语料里原样念一句，只要那句含有会被
+       * 折叠的字（例如「巡检」里的字被折叠过），head 就凑不满、得分凑不到 1.000。
+       */
       const normalizedExample = normalize(example);
+      examples.push(vectorize(normalizedExample));
       for (let i = 0; i + 2 <= normalizedExample.length; i += 1) {
         bigrams.add(normalizedExample.slice(i, i + 2));
       }
@@ -444,7 +577,23 @@ function scoreOf(query: SparseVector, normalizedQuery: string, entry: IntentVect
 /** 对一句话做 Top-N 相似度排序（§14 的第 3 步） */
 export function rankIntents(raw: string, topN = INTENTS.length): { intentId: string; score: number }[] {
   const normalized = normalize(raw);
-  const query = vectorize(raw);
+  /**
+   * 查询向量必须用**归一化后**的串，不能用原始串。
+   *
+   * ── 这是本次实测挖出来的根因，值得写清楚 ────────────────────────
+   * 原来这里是 `vectorize(raw)`，于是语音容错层（`lang.ts` 的 PHRASE_FIXES）
+   * **只作用到 coverage，head（余弦）那一项还在拿错字去比干净示例** ——
+   * 折叠等于只做了一半。实测对比：
+   *
+   *   「开始寻检」（巡检被听成寻检）
+   *     折叠后 normalized = 「开始巡检」（正确！）
+   *     但用 vectorize(raw) 算 head → 总分 0.635 → **判成未命中**
+   *     改用 vectorize(normalized) → 与示例完全一致 → 1.000
+   *
+   * 也就是说：容错表写对了、normalize() 也折叠对了，但分数纹丝不动 ——
+   * 只看 normalize 的输出根本发现不了，必须看**最终得分**。
+   */
+  const query = vectorize(normalized);
   const scored = INDEX.map((entry) => ({
     intentId: entry.intent.id,
     score: round3(scoreOf(query, normalized, entry)),

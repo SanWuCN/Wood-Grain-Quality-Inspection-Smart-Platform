@@ -61,6 +61,19 @@ export type AgentStoreState = {
    * 两种路径都能拿到同一个待执行问句。
    */
   initialQuestion: string;
+  /**
+   * 本轮交互的唯一 ID（每次 mumai:agent-open 生成一个）。
+   *
+   * ── 为什么必须按 ID 去重，不能按文本（PRD FR-03 / FR-09）──
+   * 原先 VoiceConsole 用 `lastAutoQuestionRef.current === question` 去重，
+   * 于是**连续两次说同一句话，第二次被直接 return 掉**。
+   * 实测复现：连续两次 open(question="介绍一下这套系统")，用户气泡只出 1 个。
+   * 但"同一句话再说一遍"是完全合法的操作，必须产生新的一轮。
+   *
+   * 去重的真实目的是「同一个打开事件被重复消费」——那是**事件**层面的重复，
+   * 所以判据也必须是事件 ID，而不是文本。
+   */
+  interactionId: string;
   /** 语音是否开启 */
   voiceOn: boolean;
   /** ASR 通道说明（真实 / 脚本降级） */
@@ -81,6 +94,7 @@ let state: AgentStoreState = {
   micActive: false,
   pendingConfirm: null,
   initialQuestion: "",
+  interactionId: "",
   voiceOn: true,
   asrNote: "等待选择输入方式",
 };

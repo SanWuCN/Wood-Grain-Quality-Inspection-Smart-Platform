@@ -94,6 +94,16 @@ export class VoiceOutput {
    */
   private generation = 0;
 
+  /** 看门狗句柄：`onend`/`onerror` 都没来时的兜底（见 speakWithSynthesis 里的说明） */
+  private watchdog: number | null = null;
+
+  private clearWatchdog() {
+    if (this.watchdog !== null) {
+      window.clearTimeout(this.watchdog);
+      this.watchdog = null;
+    }
+  }
+
   /**
    * 播报状态变化的旁路回调（可选）。
    *
@@ -166,13 +176,13 @@ export class VoiceOutput {
     // 新一段接替旧一段：先把还在响的 <audio> 收掉，避免两段声音叠在一起
     this.silenceCurrent();
     if (audioUrl && (await probeAudio(audioUrl))) {
-      const played = await this.playAudio(audioUrl);
+      const played = await this.playAudio(audioUrl, text);
       if (played) return;
     }
     this.speakWithSynthesis(text);
   }
 
-  private playAudio(url: string): Promise<boolean> {
+  private playAudio(url: string, text = ""): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       try {
         const audio = new Audio(url);
@@ -183,11 +193,30 @@ export class VoiceOutput {
         const finish = (ok: boolean) => {
           // 迟到的回调（被 stop()/换段之后才触发）不许改状态：代次不匹配就只兑现 Promise
           if (token === this.generation) {
+            this.clearWatchdog();
             if (this.current === audio) this.current = null;
             this.setSpeaking(false);
           }
           resolve(ok);
         };
+        /**
+         * **音频路径也要看门狗**（这是探针实测出来的缺口）。
+         *
+         * 先只给合成路径加了看门狗，跑 `验收录音链路.mjs` 的看门狗段时
+         * `speaking` 仍然是 true —— 因为那次走的正是 <audio> 这条：
+         * `onended` / `onerror` 都可能永远不来（文件被缓存层截断、
+         * 标签页被节流、`play()` 永远挂起），于是状态卡在"正在说话"。
+         * 两条路都必须有兜底，窗口同一个口径（按文本估时 + 余量，不短于 2.5s）。
+         */
+        if (text) {
+          const watchdogMs = Math.max(2500, text.length * 260);
+          this.watchdog = window.setTimeout(() => {
+            if (token !== this.generation) return;
+            if (this.current === audio) this.current = null;
+            try { audio.pause(); } catch { /* 已经停了 */ }
+            this.setSpeaking(false);
+          }, watchdogMs);
+        }
         audio.onended = () => finish(true);
         audio.onerror = () => finish(false);
         void audio.play().catch(() => finish(false));
@@ -219,10 +248,29 @@ export class VoiceOutput {
         // cancel() / stop() 之后旧 utterance 的 end / error 事件可能迟到，
         // 代次不匹配就丢弃（否则它会把新一段的 speaking 提前压回 false）
         if (token !== this.generation) return;
+        this.clearWatchdog();
         this.setSpeaking(false);
       };
       utterance.onend = finish;
       utterance.onerror = finish;
+      /**
+       * **看门狗：onend / onerror 都不来时，必须自己把 speaking 放回 false。**
+       *
+       * 为什么必须有：`speaking` 不只影响界面文案 —— 它还被用来判断
+       * "小木正在说话"（barge-in 抢话、播报期间的横幅、恢复聆听的时机）。
+       * 实测环境里 `speechSynthesis` 有两种吞事件的方式：
+       *   · 浏览器在标签页失去焦点/被节流时直接不发 `end`；
+       *   · 音色缺失时 `speak()` 静默丢弃 utterance，既不报错也不结束。
+       * 一旦卡在 true，用户按唤醒词也抢不回话（barge-in 不触发），
+       * 看起来就是"它哑了但我喊不动它"。
+       * 窗口取"按文本长度估的时长 + 余量"，并且**不短于 2.5s**：
+       * 太短会在正常朗读中被误判成结束，反而把状态提前放掉。
+       */
+      const watchdogMs = Math.max(2500, text.length * 260);
+      this.watchdog = window.setTimeout(() => {
+        if (token !== this.generation) return;
+        this.setSpeaking(false);
+      }, watchdogMs);
       this.setSpeaking(true);
       synth.speak(utterance);
     } catch {
@@ -232,6 +280,8 @@ export class VoiceOutput {
 
   /** Barge-in（§7）：立即停止播报 */
   stop() {
+    // 看门狗也要一起撤：这段已经停了，不该再有一次"迟到"的状态收尾
+    this.clearWatchdog();
     // 先让在途回调失效，再做真正的停止：cancel()/pause() 会让它们的
     // onend/onerror 迟到触发，代次一变就不会再把状态改回来
     this.generation += 1;

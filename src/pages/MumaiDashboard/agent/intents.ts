@@ -50,6 +50,24 @@ export type Slot = {
   hint: string;
 };
 
+/**
+ * 资料引用声明（PRD 5.1 / FR-05 / AC-01.5）。
+ *
+ * 只声明「引用哪份资料的哪一段」——`docId` + `chunkId`，**不抄标题与原文位置**：
+ * 标题、章节、原文片段由 facts.ts 的 `sourcesOf()` 从 `seed/scenario.ts` 的
+ * KNOWLEDGE_DOCS 里解析出来。资料改名、分块调整后，引用跟着种子走，不会漂移。
+ *
+ * 为什么不让关键词检索去决定引用：检索回答的是「哪一段最相关」，
+ * 引用回答的是「这段回答从哪来」。归档天气这种固定答案必须指向归档档案本身，
+ * 不能因为问句里少说了几个字就换成另一份资料（那样引用就不再可追溯了）。
+ */
+export type IntentSourceRef = {
+  /** 知识文档 id，例如 doc-weather */
+  docId: string;
+  /** 文档内的块号 / 原文位置锚点，例如 w-01 */
+  chunkId: string;
+};
+
 /** 回复（技术方案 §28 / §29 / §30） */
 export type IntentResponse = {
   /** 模板文本，{key} 由 facts.ts 渲染 */
@@ -67,6 +85,11 @@ export type IntentResponse = {
   audio?: string;
   /** 回复里要展示的事实键，顺序即展示顺序 */
   facts: string[];
+  /**
+   * 这个意图的回答该引用哪些资料（可追溯原文位置）。
+   * 缺省表示纯业务状态回复，不带资料引用。
+   */
+  sources?: IntentSourceRef[];
 };
 
 /** 单步动作（方案 §39 / §40） */
@@ -185,13 +208,25 @@ export const INTENTS: Intent[] = [
     ],
     slots: [],
     response: {
+      /**
+       * PRD FR-05 要求主回答**逐字固定**，因此本意图**不给 `alternatives`**。
+       *
+       * executor.pickTemplate() 会在 `text` 与 `alternatives` 之间随机取一条
+       * （§30 的「降低机械感」），多用一条说法就等于多一种主回答：
+       * 原来这里有一条「近三个月天气来自归档档案（…）：…。来源：…。」，
+       * 命中后约一半的轮次会丢掉「数据来源」与「这是归档数据，不是实时联网查询」
+       * 这两句归档声明 —— 既对不上 FR-05 的逐字要求，也弱化了非实时联网的口径。
+       * 归档天气是固定答案，不是闲聊，随机说法在这里是负收益。
+       *
+       * 文本仍然由 facts.ts 从 seed 取值渲染（{weatherRange} / {weatherSummary} /
+       * {weatherSource}），本文件一个数字都不写死。
+       */
       text:
         "归档天气档案（{weatherRange}）：{weatherSummary}。数据来源：{weatherSource}；" +
         "这是归档数据，不是实时联网查询。",
-      alternatives: [
-        "近三个月天气来自归档档案（{weatherRange}）：{weatherSummary}。来源：{weatherSource}。",
-      ],
       facts: ["weatherRange", "weatherSummary", "weatherSource"],
+      // 引用落点：doc-weather 的 w-01「降水与湿度」（seed/scenario.ts 已有该文档）
+      sources: [{ docId: "doc-weather", chunkId: "w-01" }],
     },
   },
   {

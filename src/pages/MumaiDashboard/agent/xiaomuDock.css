@@ -1,0 +1,567 @@
+/**
+ * 右下角常驻小木与气泡（PRD FR-06 / FR-07 / AC-05）
+ *
+ * 尺寸与边距是按 PRD 的硬指标写的，不是随手调的：
+ *   · 形象主体 72–96px          → 取 76px（含状态徽标后仍不超 96px）
+ *   · 距右、下边缘 20–28px       → 取 24px
+ *   · 气泡最大宽度 420px         → max-width: 420px
+ *   · 1366×768 下不遮挡超过约 1/4 → 气泡高度上限 46vh，且窄屏再收一档
+ *
+ * 动效只用 transform / opacity（PRD §9）：
+ * 地图和三维页面是这个项目的性能瓶颈，动 width/box-shadow 会让它们掉帧。
+ */
+
+.xd {
+  position: fixed;
+  right: 24px;
+  /**
+   * 底边距 **64px**，而不是 PRD FR-06 建议的 20–28px。
+   *
+   * ── 为什么必须让步（实测出来的真缺陷）──────────────────────────
+   * 右下角已经有一个「小木助手」浮标（`.appshell__fab`，同事的文件）：
+   * 实测它在 1366×768 下占 right 25 / bottom 29、尺寸 26×26。
+   * 而形象按建议放在 bottom 24、尺寸 72×72 时会把它**整块盖住** ——
+   * `elementFromPoint(浮标中心)` 命中的是形象里的 `<img>`，
+   * 也就是**用户根本点不到「小木助手」入口**（实测 26×26 全重叠，覆盖率 100%）。
+   *
+   * 两条要求在这里冲突：
+   *   · FR-06「距右、下边缘 20–28px」是**建议值**（原文写的是"建议形象主体 72–96px"）
+   *   · AC-05「背景地图、表格和**主要按钮仍可见、可点**」是**硬判据**
+   * 硬判据优先，所以把形象整体上移，与浮标上下错开、互不遮挡。
+   *
+   * 上移到 64px 的依据：浮标上沿在距底 55px（29+26），留 9px 视觉间隙。
+   * 右边缘仍保持 24px（这一侧没有冲突元素）。
+   *
+   * ── 再抬到 120px（形象放大到 112 之后）────────────────────────────
+   * 形象从 76 放大到 112 后，容器占位高度跟着涨：若仍停在 64px，
+   * 形象下沿会从 64 一直占到底部 176，重新压住浮标（52–104 那一段）。
+   * 所以 bottom 同步抬到 120：形象占 120–232，浮标占 52–104，互不相交。
+   * 短屏（≤820px）形象收一档到 96，间距更宽松。
+   */
+  bottom: 120px;
+  /**
+   * z-index 刻意**低于**全屏控制台（`.vc-root` 是 90），高于普通页面内容。
+   *
+   * ── 为什么不是越高越好（实测发现的冲突）────────────────────────
+   * 初版给了 9300，结果全屏控制台打开时右下角小木压在它上面：
+   *   · 同一个高风险确认出现**两个确认面**（气泡里的卡片 + 控制台里的框），
+   *     两边都调同一个 resolveConfirm，用户不知道该点哪个；
+   *   · 控制台是模态遮罩，小木浮在遮罩上视觉上也不对。
+   * 全屏控制台现在是**开发诊断入口**，它打开时就该盖住一切 ——
+   * 所以让小木待在它下面。普通页面内容的 z-index 都在几十以内，
+   * 80 仍然保证小木浮在业务页面之上。
+   */
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  /* 容器本身不吃点击：只有形象与面板吃，否则右下角一块会挡住页面 */
+  pointer-events: none;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.xd__avatar,
+.xd__panel {
+  pointer-events: auto;
+}
+
+/* ── 形象 ─────────────────────────────────────────────────────────── */
+
+.xd__avatar {
+  position: relative;
+  /*
+   * 形象尺寸：76 → **112**（用户要求"大一些"）。
+   * 放大后容器 bottom 必须同步抬高，否则会重新盖住右下角的「小木助手」浮标
+   * （`.appshell__fab`：right:16 / bottom:52 / 52×52）—— 那正是当初把
+   * bottom 从 24 改到 64 的原因。现在 bottom:120，形象占 120–232，
+   * 浮标占 52–104，两者不再相交。
+   */
+  width: 112px;
+  height: 112px;
+  padding: 5px;
+  border: none;
+  /* 方圆形：与 I04 素材本身的轮廓一致（那是个圆角方形音箱，不是圆脸） */
+  border-radius: 26%;
+  background: radial-gradient(circle at 50% 34%, #ffffff 0%, #eef4fd 58%, #dbe6f7 100%);
+  box-shadow:
+    0 10px 26px rgba(16, 32, 60, 0.24),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  overflow: visible;
+  transition: transform 0.18s ease-out, box-shadow 0.18s ease-out;
+}
+
+/* 短屏（1366×768 这类）把形象收一档，避免和气泡一起顶到顶部 */
+@media (max-height: 820px) {
+  .xd__avatar {
+    width: 96px;
+    height: 96px;
+  }
+}
+
+.xd__avatar:hover {
+  transform: translateY(-2px);
+}
+
+.xd__avatar:active {
+  transform: translateY(0) scale(0.97);
+}
+
+/**
+ * ⚠ 这里**不要**写 `object-fit: cover` —— 这是实测踩出来的一个视觉缺陷。
+ *
+ * I04 素材是「圆角方形智能音箱 + 大片留白」的构图（1024×1024，主体居中）。
+ * 初版为了让头像"填满"，写了：
+ *     object-fit: cover; object-position: 50% 28%;
+ * 结果画面被放大并上移裁切，**只剩中间那块深色面板** ——
+ * 截图里小木变成"认不出的一团暗色"，看不出是设备。
+ *
+ * 项目既有的 `.mumai-illustration--avatar` 本来就是 `object-fit: contain`
+ * （正确的做法），我这一行属于**用局部样式覆盖了正确的全局约定**。
+ * 现在把这个覆盖去掉，只保留尺寸约束。
+ */
+.xd__figure {
+  width: 100%;
+  height: 100%;
+  border-radius: 20%;
+  display: block;
+}
+
+/* 状态圈：用 transform 做呼吸，不用 box-shadow 动画（后者每帧重绘） */
+.xd__ring {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid rgba(120, 150, 200, 0.5);
+  transform: scale(1);
+  animation: xd-breathe 3.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes xd-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.55; }
+  50% { transform: scale(1.06); opacity: 0.95; }
+}
+
+/* ── 状态姿态：同一张素材，靠姿态与动效"活"起来（宠物感）─────────────
+ *
+ * 只有一张 I04 素材，所以不换图，而是给**形象本体**（`.xd__figure`）按状态
+ * 套不同的姿态动画 —— 这正是桌宠的常规做法：用户感知到的是"它在听/在想/在说"，
+ * 而不是"图标换了"。七个状态各有可辨的体态：
+ *
+ *   idle         轻微呼吸起伏（几乎察觉不到，不抢注意力）
+ *   listening    放大 + 向用户方向前倾（"凑过来听"），同时光环脉冲加快
+ *   recognizing  小幅左右摆动（正在逐字辨认）
+ *   thinking     歪头 + 缓慢上下浮动（"在想"）
+ *   speaking     快速缩放跳动（"在说话"）
+ *   confirming   左右轻推（"等你点一下"）
+ *   error        去饱和 + 抖两下（坏了，别把它当待机）
+ *
+ * ⚠ 动效只做 transform / filter，不做 box-shadow / width 这类每帧重绘的属性：
+ * 地图与三维页是性能瓶颈，形象必须便宜。
+ * ⚠ `prefers-reduced-motion: reduce` 下这些动画会被全局规则一起关掉，
+ *   状态信息仍然由徽标文字与配色承担（AC-05 第 3 条）。
+ */
+.xd[data-state="idle"] .xd__figure { animation: xd-idle 5.2s ease-in-out infinite; }
+.xd[data-state="listening"] .xd__figure { animation: xd-listen 1.5s ease-in-out infinite; }
+.xd[data-state="recognizing"] .xd__figure { animation: xd-sway 2.2s ease-in-out infinite; }
+.xd[data-state="thinking"] .xd__figure { animation: xd-think 2.6s ease-in-out infinite; }
+.xd[data-state="speaking"] .xd__figure { animation: xd-speak 0.52s ease-in-out infinite; }
+.xd[data-state="confirming"] .xd__figure { animation: xd-nudge 1.1s ease-in-out infinite; }
+.xd[data-state="error"] .xd__figure {
+  filter: grayscale(0.7) brightness(0.94);
+  animation: xd-shake 0.42s ease-in-out 3;
+}
+
+/* 正在听：光环脉冲更快、更亮，与体态一起表达"我在听" */
+.xd[data-state="listening"] .xd__ring { animation-duration: 1.2s; border-width: 3px; }
+.xd[data-state="thinking"] .xd__ring,
+.xd[data-state="recognizing"] .xd__ring { animation-duration: 2s; }
+.xd[data-state="error"] .xd__ring { animation: none; }
+
+@keyframes xd-idle {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-2.5px) rotate(0deg); }
+}
+
+@keyframes xd-listen {
+  0%, 100% { transform: scale(1.04) rotate(-3.5deg); }
+  50% { transform: scale(1.07) rotate(-2deg); }
+}
+
+@keyframes xd-sway {
+  0%, 100% { transform: rotate(-2.5deg); }
+  50% { transform: rotate(2.5deg); }
+}
+
+@keyframes xd-think {
+  0%, 100% { transform: translateY(0) rotate(5deg); }
+  50% { transform: translateY(-4.5px) rotate(7deg); }
+}
+
+@keyframes xd-speak {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+@keyframes xd-nudge {
+  0%, 100% { transform: translateX(-3px) rotate(-1.5deg); }
+  50% { transform: translateX(3px) rotate(1.5deg); }
+}
+
+@keyframes xd-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+
+/* 状态徽标：**关掉动效后靠它分辨状态**，所以它始终显示 */
+.xd__badge {
+  position: absolute;
+  left: 50%;
+  bottom: -9px;
+  transform: translateX(-50%);
+  padding: 1px 9px;
+  border-radius: 999px;
+  background: #1b2740;
+  color: #dfe9fb;
+  font-size: 11px;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+/* 各状态配色：颜色本身就是状态信息（动效关了也读得出来） */
+.xd[data-state="listening"] .xd__ring { border-color: #2fbf8f; }
+.xd[data-state="listening"] .xd__badge { background: #10674f; }
+.xd[data-state="recognizing"] .xd__ring { border-color: #3f8ff0; }
+.xd[data-state="recognizing"] .xd__badge { background: #14477f; }
+.xd[data-state="thinking"] .xd__ring { border-color: #b4791f; }
+.xd[data-state="thinking"] .xd__badge { background: #6d4a0d; }
+.xd[data-state="speaking"] .xd__ring { border-color: #7a5cf0; }
+.xd[data-state="speaking"] .xd__badge { background: #3f2c8c; }
+/**
+ * 等确认 / 出错：**必须是两种颜色**。
+ *
+ * 原来两个状态共用同一组红（环 #d94a3d / 徽标 #8c2119），实测统计"7 个状态
+ * 有几种不同配色"只有 6 种。语义上也不该一样：
+ * 等确认是"在等你点一下"（橙，需要行动但不危险），出错是"坏了"（红，需要排查）。
+ * 关掉动效之后颜色就是唯一的状态线索，混在一起会让人把"等你确认"看成"出故障"。
+ */
+.xd[data-state="confirming"] .xd__ring { border-color: #f0871f; }
+.xd[data-state="confirming"] .xd__badge { background: #7a3f06; }
+.xd[data-state="error"] .xd__ring { border-color: #d94a3d; }
+.xd[data-state="error"] .xd__badge { background: #8c2119; }
+
+/* ── 气泡面板 ─────────────────────────────────────────────────────── */
+
+.xd__panel {
+  width: min(420px, calc(100vw - 48px));
+  /**
+   * 高度上限。
+   *
+   * 46vh 在 1366×768 上只有约 350px，而一条完整的天气回复（主回答 4 行 +
+   * 业务状态 + 资料引用 + 页脚）要 400px 出头 —— 实测截图里
+   * **「资料引用 1 条」那一行被截在可视区之外**：DOM 里有、用户看不见，
+   * 点不到也就发现不了。这属于"内容被藏起来"，不是"内容太多"。
+   *
+   * 所以：普通屏放到 58vh，矮屏（≤820px）保 50vh，并给滚动区加渐隐提示
+   * （见 .xd__reply 的 mask），让用户知道下面还有内容。
+   * 上限仍受 AC-05「不遮挡超过约 1/4 页面」约束：420px 宽 × 58vh
+   * 在 1366×768 下约占 18%，没有越界。
+   */
+  max-height: 58vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  background: #fdfefe;
+  border: 1px solid #d5e0f0;
+  box-shadow: 0 18px 46px rgba(16, 32, 60, 0.24);
+  overflow: hidden;
+  animation: xd-in 0.2s ease-out;
+}
+
+@keyframes xd-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.xd__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: linear-gradient(180deg, #f7faff 0%, #eef4fd 100%);
+  border-bottom: 1px solid #e2eaf6;
+  flex: none;
+}
+
+.xd__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #1b2740;
+}
+
+.xd__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #93a3bd;
+}
+
+.xd[data-state="listening"] .xd__dot { background: #2fbf8f; }
+.xd[data-state="recognizing"] .xd__dot { background: #3f8ff0; }
+.xd[data-state="thinking"] .xd__dot { background: #d99a2b; }
+.xd[data-state="speaking"] .xd__dot { background: #7a5cf0; }
+/* 等确认用橙、出错用红：与上面的 ring/badge 配色保持一致（见该处注释） */
+.xd[data-state="confirming"] .xd__dot { background: #f0871f; }
+.xd[data-state="error"] .xd__dot { background: #d94a3d; }
+
+.xd__intent {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: #eaf1fb;
+  color: #3d5578;
+  font-size: 11px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xd__icon-btn {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #63748f;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.xd__icon-btn:hover { background: #e4ecf8; color: #1b2740; }
+
+/* 用户那句（流式，就地更新） */
+.xd__user {
+  margin: 10px 12px 0;
+  padding: 7px 11px;
+  border-radius: 10px 10px 2px 10px;
+  background: #eaf3ff;
+  border: 1px solid #d3e5ff;
+  color: #1b3c66;
+  font-weight: 600;
+  word-break: break-all;
+  flex: none;
+}
+
+.xd__reply {
+  padding: 10px 12px 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  /**
+   * ⚠ 这里**刻意不使用 mask 渐隐**，尽管它是"还有内容可滚"的常见提示做法。
+   *
+   * 实测教训：加过一版底部渐隐，结果把**最后一个折叠按钮淡成了半透明** ——
+   * 截图里「资料引用 1 条」几乎看不见，看上去像"这个功能没做"。
+   * 渐隐对"内容确实溢出"是提示，对"内容刚好放下"就是**遮蔽**，
+   * 而 CSS 无法区分这两种情况（没有"是否可滚动"的选择器）。
+   *
+   * 所以改成从根上解决：把面板高度调到内容放得下（见下方媒体查询），
+   * 真正的溢出交给滚动条本身表达。宁可留一条系统滚动条，也不要藏内容。
+   */
+}
+
+/* 主回答：字号最大、颜色最深 —— 它是唯一不许折叠的内容 */
+.xd__answer {
+  margin: 0;
+  color: #16233b;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.xd__fold { margin-top: 9px; }
+
+.xd__fold-btn {
+  width: 100%;
+  text-align: left;
+  padding: 5px 9px;
+  border: 1px solid #dfe8f5;
+  border-radius: 7px;
+  background: #f6f9fe;
+  color: #40587c;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.xd__fold-btn:hover { background: #edf3fc; }
+
+.xd__facts {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: #f7fafd;
+  border: 1px solid #e6eef8;
+  font-size: 12px;
+}
+
+.xd__facts > div { display: flex; gap: 8px; padding: 2px 0; }
+.xd__facts dt { flex: none; color: #63748f; min-width: 96px; }
+.xd__facts dd { margin: 0; color: #1b2740; word-break: break-all; }
+
+.xd__sources { list-style: none; margin: 6px 0 0; padding: 0; }
+
+.xd__source {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 9px;
+  border: 1px solid #dfe8f5;
+  border-radius: 7px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.xd__source:hover { border-color: #b9cdea; background: #f8fbff; }
+.xd__source b { color: #1b3c66; }
+
+.xd__locator {
+  display: block;
+  margin-top: 2px;
+  color: #63748f;
+}
+
+.xd__excerpt {
+  margin: 6px 0 0;
+  padding: 7px 9px;
+  border-left: 3px solid #b9cdea;
+  background: #f7fafd;
+  color: #40587c;
+  font-size: 12px;
+}
+
+.xd__foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  margin-top: 8px;
+  border-top: 1px solid #eef3fa;
+  color: #7a8aa5;
+  font-size: 11px;
+  flex: none;
+}
+
+.xd__foot time { color: #40587c; font-weight: 600; }
+
+.xd__link {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: #2f6fd0;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.xd__link:hover { text-decoration: underline; }
+
+.xd__note {
+  margin: 0 12px 10px;
+  color: #7a8aa5;
+  font-size: 11px;
+}
+
+/* 高风险确认：醒目但不能盖住页面 */
+.xd__confirm {
+  margin: 10px 12px 0;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: #fff6f4;
+  border: 1px solid #f2c4bc;
+}
+
+.xd__confirm b { color: #8c2119; font-size: 13px; }
+.xd__confirm p { margin: 4px 0 9px; color: #6d4a45; font-size: 12px; }
+.xd__confirm-actions { display: flex; gap: 8px; }
+
+.xd__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-top: 1px solid #eef3fa;
+  background: #fbfdff;
+  flex: none;
+}
+
+.xd__btn {
+  padding: 5px 11px;
+  border: 1px solid #cfdcee;
+  border-radius: 7px;
+  background: #fff;
+  color: #24405f;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.xd__btn:hover { background: #f2f7ff; }
+
+.xd__btn--wake.is-live {
+  border-color: #7fd7b6;
+  background: #eafaf4;
+  color: #10674f;
+}
+
+.xd__btn--danger {
+  border-color: #e3a49b;
+  background: #d94a3d;
+  color: #fff;
+}
+
+.xd__hint { color: #8b9ab3; font-size: 11px; }
+
+/* ── 窄屏 / 矮屏 ────────────────────────────────────────────────────
+   ⚠ 这里的 vh 值**比默认更大**，这是有意的，别按"屏幕小就该显示更少"的直觉改回去。
+
+   理由：气泡内容是**固定高度**的（主回答 4 行 + 业务状态 + 资料引用约 390px），
+   它不随视口缩小。视口越矮，要放下同一份内容就需要**更大的 vh 比例**。
+
+   实测踩过的坑：初版写的是 `max-height: 40vh`（"小屏收一档"的直觉），
+   在 1366×768 的真实浏览器里（innerHeight≈672）只有 269px，
+   比内容少了 125px —— 于是「业务状态」「资料引用」两个折叠按钮**双双被推到可视区外**，
+   DOM 里有、用户看不见也点不到，看起来像功能缺失。
+
+   现在的取法：按内容高度反推，并留 10% 余量；上限仍受
+   AC-05「不遮挡超过约 1/4 页面」约束
+   （420×443 = 18.6 万 px²，1366×672 = 91.8 万 px²，占 20%）。 */
+
+@media (max-height: 820px) {
+  .xd__panel { max-height: 58vh; }
+  .xd__avatar { width: 72px; height: 72px; }
+}
+
+@media (max-height: 720px) {
+  .xd__panel { max-height: 66vh; }
+}
+
+/* ── 关掉动效（PRD FR-06 / AC-05）───────────────────────────────────
+   注意：这里只关动画，**不隐藏任何状态信息** ——
+   状态徽标与配色都还在，用户依然能分辨小木在干什么。 */
+
+@media (prefers-reduced-motion: reduce) {
+  .xd__avatar,
+  .xd__ring,
+  .xd__panel {
+    animation: none;
+    transition: none;
+  }
+  .xd__ring { opacity: 0.9; }
+}

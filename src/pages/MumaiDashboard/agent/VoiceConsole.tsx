@@ -12,18 +12,18 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useNavigate } from "react-router";
-import { useMumai } from "../context";
-import { CHANNELS, KNOWLEDGE_META } from "../seed/scenario";
+import { useAgentNavigate, useAgentSession } from "./agentSession";
+import { KNOWLEDGE_META } from "../seed/scenario";
 import { AGENT_TASK_EXAMPLES, INTENTS, voicePackOf } from "./intents";
 import { SEMANTIC_THRESHOLDS, PILLAR_ALIASES } from "./matcher";
 import { ask, RETRIEVAL_NOTE, type Runtime } from "./executor";
 import { VoiceInput, recognitionSupported } from "./asr";
-import { takePendingQuestion } from "./api";
+import { closeAgent, hasForeignModal, takePendingInteractionId, takePendingQuestion } from "./api";
 import { VoiceOutput, type TtsStatus } from "./tts";
 import {
   clearTurns,
   getAgentState,
+  hasPendingConfirm,
   resolveConfirm,
   setAgent,
   subscribeAgent,
@@ -93,63 +93,21 @@ function useAgentState() {
   return useSyncExternalStore(subscribeAgent, getAgentState, getAgentState);
 }
 
-/** 会话上下文的只读快照；不在 MumaiProvider 内时退回 seed 里的通道数据 */
-type SessionInfo = {
-  stageKey: string;
-  accountLabel: string;
-  sourceMode: "demo" | "real";
-  channelSummary: string;
-};
-
-function channelSummaryOf(channels: { label: string; state: string; ageSec: number }[]): string {
-  return channels
-    .map((item) => `${item.label}${item.state === "online" ? "在线" : item.state === "stale" ? `延迟${item.ageSec}s` : "离线"}`)
-    .join("、");
-}
-
 /**
- * 控制台可能挂在两处：应用 React 树内（有 Router + MumaiProvider），
- * 或 agent/index.tsx 的 standalone root（没有 Provider）。
- * 因此这里对 useMumai / useNavigate 做可选处理 —— 缺上下文时不抛错，
- * 只是把上下文类信息退回到 seed 的默认值、把导航降级为 hash 路由。
+ * 会话上下文与导航的取用已经搬到 **`agentSession.ts`**，与右下角气泡共用同一份。
+ *
+ * ── 为什么搬走（PRD §10.2 / AC-06）────────────────────────────────
+ * 本文件原先自带 `useSession` / `useAgentNavigate` / `channelSummaryOf`。
+ * 右下角气泡（`XiaomuDock.tsx`）也需要同样的东西，于是那两个文件里
+ * 各写了一份"取不到上下文就退回默认值"的逻辑 —— 两份迟早漂移，
+ * 而 AC-06 要求点击 / 文字 / 语音 / 串口四个入口对同一意图返回**同一事实值**，
+ * 事实值恰恰依赖这段会话上下文。所以合并成一份，两边都 import。
+ *
+ * 搬迁本身**没有改行为**：`agentSession.ts` 里的实现与这里删掉的逐行一致
+ * （唯一的类型收紧是 `sourceMode` 从 `string` 收成 `"demo" | "real"`，
+ *  那是为了能直接喂给 `Runtime.session`；
+ *  原先两份各自与 `FactContext` 对得上、但两份之间其实不一致）。
  */
-function useSession(): SessionInfo {
-  let mumai: ReturnType<typeof useMumai> | null = null;
-  try {
-    // eslint-disable-next-line react-hooks/rules-of-hooks -- 该 hook 在 Provider 内永远可用，脱离 Provider 时由 catch 兜底
-    mumai = useMumai();
-  } catch {
-    mumai = null;
-  }
-  const channels = mumai?.channels ?? CHANNELS;
-  return {
-    stageKey: mumai?.stage ?? "",
-    accountLabel: mumai?.accountId ?? "未登录会话",
-    sourceMode: mumai?.deviceSource ?? "demo",
-    channelSummary: channelSummaryOf(channels),
-  };
-}
-
-/** 导航：优先用 react-router 的 navigate，没有 Router 时写 hash（HashRouter 认 hash 变化） */
-function useAgentNavigate(): (to: string) => void {
-  let navigate: ReturnType<typeof useNavigate> | null = null;
-  try {
-    // eslint-disable-next-line react-hooks/rules-of-hooks -- 同上：脱离 Router 时由 catch 兜底
-    navigate = useNavigate();
-  } catch {
-    navigate = null;
-  }
-  return useCallback(
-    (to: string) => {
-      if (navigate) {
-        navigate(to);
-        return;
-      }
-      if (typeof window !== "undefined") window.location.hash = `#${to}`;
-    },
-    [navigate],
-  );
-}
 
 /** 声波：用音量驱动高度，青色只用于光效（设计规范 1.2） */
 function Waveform({ level, active }: { level: number; active: boolean }) {
@@ -284,7 +242,7 @@ function BotBubble({ turn, onReplay, tts }: { turn: BotTurn; onReplay: (turn: Bo
 
 export default function VoiceConsole() {
   const state = useAgentState();
-  const session = useSession();
+  const session = useAgentSession();
   const navigate = useAgentNavigate();
   const [input, setInput] = useState("");
   const [ttsStatus, setTtsStatus] = useState<TtsStatus>({ supported: false, speaking: false, muted: false, channel: "" });
@@ -294,7 +252,19 @@ export default function VoiceConsole() {
   const outputRef = useRef<VoiceOutput | null>(null);
   const inputAsrRef = useRef<VoiceInput | null>(null);
   const lastSpokenRef = useRef<{ text: string; audio?: string }>({ text: "" });
-  const lastAutoQuestionRef = useRef("");
+  /**
+   * 上一次自动执行过的**交互 ID**（不是命令文本）。
+   * 按 ID 去重才能既防"同一事件被重复消费"，又不误杀"同一句话再说一遍"。
+   */
+  const lastAutoInteractionRef = useRef("");
+  /** 组件是否还在（延迟执行前的存活检查，见下方"故意不返回 cleanup"的说明） */
+  const aliveRef = useRef(true);
+  useEffect(
+    () => () => {
+      aliveRef.current = false;
+    },
+    [],
+  );
 
   /* ---------- 运行时：把路由与会话状态注入执行器 ---------- */
   const runtime = useMemo<Runtime>(
@@ -319,6 +289,36 @@ export default function VoiceConsole() {
   // （cleanup 里 stopMic → onLevel → setAgent → 再渲染），最终撞上 React 的
   // "Maximum update depth exceeded"。生命周期只跟组件挂载绑定。
   const runtimeRef = useRef(runtime);
+
+  /**
+   * 命令**排队**执行 —— 与右下角气泡同一套纪律（FR-09 / AC-03）。
+   *
+   * ── 为什么控制台也要排队（实测暴露的通道不一致）─────────────────
+   * 右下角气泡那条路（`XiaomuDock` 的 `askQueue`）用 Promise 链把命令按到达顺序串起来；
+   * 控制台这条（`onFinal` / 打开时携带的问句 / 输入框回车）一直是**直接 `ask()`**。
+   * 后果实测过（`验收双通道一致.mjs`）：串口/控制台连发两条命令时，
+   * 第二条会把第一条打断（执行器的取消令牌让上一轮作废），只出一条回答；
+   * 同一次操作走气泡则是两条都完整回答 —— **同一个平台两条通道两种纪律**。
+   * 对"语音设备下指令"这类场景，静默作废上一条比排队危险得多。
+   *
+   * 实现刻意与气泡一致：一条 Promise 链，上一条跑完才跑下一条，
+   * 顺序与说话/发帧顺序相同；不做去重（去重按 `interactionId` 在各自入口做），
+   * 也不吞异常（失败照旧写进 store 的错误态）。
+   *
+   * 位置说明：必须声明在**所有调用点之前**（VoiceInput 的 effect 也在用它），
+   * 否则 TS 会报 use-before-declaration。
+   */
+  const askQueue = useRef<Promise<void>>(Promise.resolve());
+  const enqueueAsk = useCallback((text: string, via: "text" | "mic" | "example") => {
+    askQueue.current = askQueue.current.then(async () => {
+      try {
+        await ask(text, runtimeRef.current, via);
+      } catch (error) {
+        console.warn("[xiaomu] 命令执行失败", error);
+        setAgent({ agentState: "ERROR", stateNote: `执行失败：${String(error)}` });
+      }
+    });
+  }, []);
   runtimeRef.current = runtime;
 
   /* ---------- 语音输出 ---------- */
@@ -368,7 +368,7 @@ export default function VoiceConsole() {
       onFinal: (text) => {
         if (!text.trim()) return;
         setAgent({ finalText: text, partial: "" });
-        void ask(text, runtimeRef.current, "mic");
+        enqueueAsk(text, "mic");
       },
       onNotice: (text) => {
         setBanner(text);
@@ -392,47 +392,128 @@ export default function VoiceConsole() {
       inputAsrRef.current = null;
       input$.dispose();
     };
-  }, []);
+    // enqueueAsk 是稳定引用（useCallback 空依赖），加进来只是让 lint 满意，
+    // 不会让这个"只跑一次"的 effect 重跑 —— 它负责创建 VoiceInput 实例。
+  }, [enqueueAsk]);
 
-  /* ---------- 全局事件：外部通过 mumai:agent-open 打开控制台 ---------- */
+  /**
+   * 注意：本组件**不再自己监听** `mumai:agent-open` / `mumai:agent-close`。
+   *
+   * ── 这里原来是个真 bug，而且很隐蔽 ──────────────────────────────
+   * 原先 api.tsx 和本组件**各自**挂了一个 open 监听器，于是同一个打开事件
+   * 被处理两次。按文本去重的时代看不出来（两次结果一样，第二次被去重吃掉）；
+   * 改成按**交互 ID** 去重之后它立刻暴露：两处各自生成一个 ID，
+   * 表现为**每一轮自动执行两次**。
+   * 实测日志（一轮一个事件）：
+   *     [agent] 自动执行 interactionId=ia-…-3
+   *     [agent] 自动执行 interactionId=ia-…-4
+   *
+   * 结论：**事件只在一个地方处理**。api.tsx 的模块级监听器在 api.tsx 被导入时
+   * 就已注册（本组件从它导入 closeAgent，所以它一定在），
+   * 由它统一生成 ID、写 store、挂载 standalone；本组件只消费 store。
+   */
   useEffect(() => {
-    const onOpen = (event: Event) => {
-      const detail = (event as CustomEvent<{ question?: string }>).detail;
-      setAgent({ open: true, initialQuestion: detail?.question?.trim() ?? "" });
-    };
-    const onClose = () => setAgent({ open: false });
-    window.addEventListener("mumai:agent-open", onOpen);
-    window.addEventListener("mumai:agent-close", onClose);
-    return () => {
-      window.removeEventListener("mumai:agent-open", onOpen);
-      window.removeEventListener("mumai:agent-close", onClose);
-    };
+    // 打开状态与待执行问句都由 api.tsx 写进 store，这里不做任何事件处理。
+    // （保留这个空 effect 是为了让"本组件不监听事件"这件事有个显式的落点，
+    //   删掉它反而会让后来者以为漏写了监听器。）
   }, []);
 
   /* ---------- 打开时携带的问句：自动跑一次完整交互 ---------- */
   useEffect(() => {
     // 两个来源：组件在挂载前派发的事件由 api.tsx 的模块级监听器暂存，
-    // 挂载后派发的走 store 的 initialQuestion。
+    // 挂载后派发的走 store。
     const question = state.initialQuestion || takePendingQuestion();
+    const id = state.interactionId || takePendingInteractionId();
     if (!question) return;
-    // 同一句话只自动跑一次（重复打开同一个问题不应重复执行）
-    if (lastAutoQuestionRef.current === question) return;
-    lastAutoQuestionRef.current = question;
-    setAgent({ initialQuestion: "", finalText: question });
-    // 略微延后，等控制台渲染完成再跑链路，观众能看到字幕与状态机的推进
-    const timer = window.setTimeout(() => void ask(question, runtimeRef.current, "example"), 420);
-    return () => window.clearTimeout(timer);
-  }, [state.initialQuestion, state.open]);
+    /**
+     * 去重判据是**交互 ID**，不是命令文本（PRD FR-03 / FR-09）。
+     *
+     * 原先这里是 `if (lastAutoQuestionRef.current === question) return;` ——
+     * 按文本去重。于是"同一句话再说一遍"这种完全合法的操作会被直接吞掉：
+     * 实测连续两次 open(question="介绍一下这套系统")，用户气泡只出 1 个。
+     * 去重要防的是**同一个打开事件被重复消费**，那是事件层面的事，
+     * 判据就必须是事件 ID。
+     */
+    const key = id || `legacy-${question}`;
+    if (lastAutoInteractionRef.current === key) return;
+    lastAutoInteractionRef.current = key;
+    // 消费掉：清空 store 与暂存，避免下一轮拿到上一轮的残留
+    setAgent({ initialQuestion: "", interactionId: "" });
+
+    /**
+     * ⚠ 这里**故意不返回 cleanup**，值得写下来 —— 这是我自己踩进去又爬出来的坑。
+     *
+     * 本 effect 会因为"消费掉问句"（initialQuestion 被清空）而**再跑一次**。
+     * 如果按常规写法返回 `() => clearTimeout(timer)`，那次重跑的第一件事
+     * 就是把刚排好的执行取消掉 —— 表现是**彻底不执行**（实测气泡 0 个）。
+     *
+     * 之前之所以看着正常，是因为问句走的是 api.tsx 的模块级暂存、
+     * store 里的 initialQuestion 始终是空串，dep 不变、effect 不重跑，
+     * 于是 cleanup 永远不会触发。也就是说：**它的"正常"依赖了一个巧合**，
+     * 一旦改成每次都写 store（去重需要 interactionId 进 store），这个巧合就没了。
+     *
+     * 卸载安全改用 aliveRef 兜底：组件没了就不再往下跑，定时器本身无需取消。
+     */
+    window.setTimeout(() => {
+      if (!aliveRef.current) return;
+      /**
+       * 每次自动执行都打一行带交互 ID 的日志。
+       *
+       * 这不是调试残留：现场排查"同一句话说了两遍只执行一次 / 执行了两次"
+       * 这类问题时，唯一能回答"这两轮到底是不是同一次"的就是这个 ID。
+       * 按文本去重的旧实现正是因为没有它，才只能靠猜。
+       */
+      console.info(`[agent] 自动执行 interactionId=${key} question=「${question}」`);
+      enqueueAsk(question, "example");
+    }, 420);
+  }, [state.initialQuestion, state.interactionId, state.open, enqueueAsk]);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [state.turns]);
 
+  /**
+   * 关闭控制台 —— **必须走统一入口 `closeAgent()`**（PRD FR-08）。
+   *
+   * ── 这里原来是个真 bug ──────────────────────────────────────────
+   * 原先只执行 `setAgent({open:false})`，而卸载 standalone 的唯一入口是
+   * `mumai:agent-close` 事件。于是 standalone 路径下：容器不卸载、
+   * 全屏遮罩 `.vc-root` 留在 DOM 里继续拦截页面点击（实测点关闭后
+   * 900ms 仍然如此，页面中心的 elementFromPoint 命中的是控制台内的元素）。
+   *
+   * 现在的顺序：先停播报与识别、把未确认的高风险操作按"取消"处理，
+   * 再派发关闭事件（由 api.tsx 统一复位 store + 卸载 standalone）。
+   */
   const close = useCallback(() => {
     outputRef.current?.stop();
     inputAsrRef.current?.stopAll();
-    setAgent({ open: false, agentState: "IDLE", stateNote: "待命", level: 0, partial: "", micActive: false });
+    // 未确认的高风险操作按"取消"处理，绝不能因为关掉界面就当成已确认
+    if (hasPendingConfirm()) resolveConfirm(false);
+    closeAgent();
   }, []);
+
+  /**
+   * Esc 关闭（PRD FR-08：必须支持 Esc）。
+   *
+   * 只在控制台确实打开时响应，并且**不阻止默认行为以外的传播** ——
+   * 页面上其它组件的 Esc（比如关闭抽屉）不该被这里吞掉。
+   *
+   * ── 补上"有页面弹窗时让路"（与气泡同一条规则，见 api.tsx 的 hasForeignModal）──
+   * 缺这条的后果实测过：页面 Modal 与控制台同时开着时，一次 Esc 会把两个都关掉。
+   * 控制台自己也是 `role="dialog" aria-modal`，所以共享判据里**排除小木自己的两层**
+   * （`.xd` 与 `.vc-root`），否则控制台会把自己的键位一起废掉。
+   * 同样用**捕获阶段**：让路判据不能依赖"谁的监听器先注册"。
+   */
+  useEffect(() => {
+    if (!state.open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (hasForeignModal()) return;
+      close();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [state.open, close]);
 
   const submit = useCallback(
     (text: string, via: "text" | "mic" | "example") => {
@@ -441,13 +522,13 @@ export default function VoiceConsole() {
       setInput("");
       if (via === "text") {
         setAgent({ finalText: trimmed, partial: "" });
-        void ask(trimmed, runtime, "text");
+        enqueueAsk(trimmed, "text");
         return;
       }
       // 示例问句走脚本化 ASR：逐字吐 partial，再给 final（§8 的效果）
       inputAsrRef.current?.simulate(trimmed);
     },
-    [runtime],
+    [enqueueAsk],
   );
 
   /** 按住说话：抢麦克风（失败自动降到脚本模式并提示） */
@@ -491,6 +572,17 @@ export default function VoiceConsole() {
   }, []);
 
   const activeTone = STATE_TONE[state.agentState];
+
+  /**
+   * 按 store 的 `open` 门控渲染（PRD FR-08：关闭后 200ms 内界面消失、不留遮罩）。
+   *
+   * 为什么要加这一道：应用内挂载路径由 `AgentHost` 用 `useAgentOpen()` 门控，
+   * 但 **standalone 兜底挂载是无条件 `root.render(<VoiceConsole />)`** ——
+   * 组件自己不看 `open` 的话，卸载晚一步界面就多留一步，
+   * 而 `.vc-root` 是全屏遮罩，多留一步就多拦一段时间的点击。
+   * 这条门控让"界面消失"不再依赖卸载时序。
+   */
+  if (!state.open) return null;
 
   return (
     <div className="vc-root" role="dialog" aria-modal="true" aria-label="小木语音智能体">

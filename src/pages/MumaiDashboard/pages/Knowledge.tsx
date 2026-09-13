@@ -19,9 +19,17 @@
  *
  * 信息层级（规范 §3.3）：主任务（上传 → 更新）→ 状态（队列 / 六步流水线 / 终端日志）
  *   → 辅助（三个可视化视图）→ 历史（版本历史 / 资料清单）
+ *
+ * PRD FR-05（加强项）：资料引用要能**精确跳到原文位置**，所以本页支持深链
+ *   `#/knowledge?doc=<docId>&chunk=<chunkId>`
+ * 参数由小木气泡里的引用点击带进来（`SourceRef.route`），页面自己用 `useSearchParams` 读
+ * —— HashRouter 下 query 在 hash 内部，读 `location.search` 永远是空。
+ * 落地表现：自动选中对应资料 → 高亮并滚动到引用的那一块 → 原文那句话直接可读；
+ * 参数缺失或指向不存在的资料 / 块时按知识库首页正常显示，只在顶部给一条说明。
  */
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router";
 import { useMumai } from "../context";
 import { Panel } from "../Panel";
 import { Btn, Modal, SourceTag, StateBlock, StatusChip } from "../ui";
@@ -757,6 +765,116 @@ export default function Knowledge() {
   }, [hitKey]);
   const activeHit = search.hits.find((hit) => hit.chunkId === picked) ?? search.hits[0] ?? null;
 
+  /* ---------------- 引用深链：?doc=<docId>&chunk=<chunkId>（PRD FR-05 / 2.2） ---------------- */
+
+  /**
+   * 引用落点记在 URL 上，跟平台其它页面同一个约定
+   * （`/orders?order=`、`/twin?component=`、`/hardware?batch=`，见 routes.tsx 顶部注释：
+   * 「页面用 URL 记录 job_id / component_id / batch_id」）。
+   *
+   * 为什么必须是 URL 而不是组件 state：
+   *   1. 小木气泡点引用跳过来时，参数本来就在跳转地址里；
+   *   2. 刷新页面（或把链接发给另一台电脑）要回到同一份资料的同一块；
+   *   3. HashRouter 下 query 在 hash 内部，所以只能用 useSearchParams，不能读 location.search。
+   *
+   * 解析口径（宁可少动，不要猜错）：
+   *   - `chunk` 比 `doc` 更精确（块自带所属文档），所以**块优先**；
+   *   - 只给 `chunk` 也能定位 —— 文字助手的兜底引用只拿得到块号，没有 docId；
+   *   - 参数缺失 / 指向不存在的资料或块时这里全为 null，页面按首页照常显示，
+   *     只在顶部给一条「没定位到」的说明：不抛错、不白屏、不静默。
+   */
+  const [params, setParams] = useSearchParams();
+  const docParam = params.get("doc") ?? "";
+  const chunkParam = params.get("chunk") ?? "";
+  const citation = useMemo(() => {
+    /**
+     * 块号有两种写法，**都要认**（这是实测暴露的缺陷）。
+     *
+     * 本页内部（`knowledge/logic.ts`）把块号拼成 `${docId}#${chunkId}`
+     * （例如 `doc-weather#w-01`），而资料引用那头（`agent/facts.ts` 的
+     * `SourceRef.chunkId`、界面上显示的「降水与湿度 · w-01」）用的是种子里的
+     * **裸块号** `w-01`。只按等值匹配的后果很具体：从气泡点引用进来，
+     * 面板显示「已打开文档」而不是「已定位」，并提示"未找到引用的原文位置" ——
+     * 文档打开了、原文位置却没定位到，FR-05 要的正是后半句。
+     *
+     * 所以先按原样精确匹配，再退回"以 `#<裸块号>` 结尾"的后缀匹配；
+     * 两种 URL（`chunk=w-01` / `chunk=doc-weather%23w-01`）都能落到同一块原文。
+     */
+    const chunk = chunkParam
+      ? kb.chunks.find((item) => item.chunkId === chunkParam) ??
+        kb.chunks.find((item) => item.chunkId.endsWith(`#${chunkParam}`)) ??
+        null
+      : null;
+    const doc =
+      (chunk ? kb.docs.find((item) => item.docId === chunk.docId) ?? null : null) ??
+      (docParam ? kb.docs.find((item) => item.docId === docParam) ?? null : null);
+    return {
+      /** URL 里有没有引用参数：没有就是普通的知识库首页，落点面板完全不出现 */
+      asked: Boolean(docParam || chunkParam),
+      docParam,
+      chunkParam,
+      doc,
+      chunk,
+      /** 该文档的全部分块：块号排成一行，命中那条高亮，用来回答「引的是哪一块」 */
+      docChunks: doc ? kb.chunks.filter((item) => item.docId === doc.docId) : [],
+    };
+  }, [chunkParam, docParam, kb.chunks, kb.docs]);
+
+  /** 落点元素：有块就滚到「引用的那句话」，只给了文档就滚到定位面板本身 */
+  const citeBodyRef = useRef<HTMLDivElement>(null);
+  const citeTextRef = useRef<HTMLParagraphElement>(null);
+  /** 同一个落点只自动滚一次：入库 / 回滚引起的重渲染不抢用户自己滚到的位置 */
+  const landedRef = useRef("");
+  const landingKey = citation.chunk
+    ? `${citation.chunk.docId}:${citation.chunk.chunkId}`
+    : citation.doc
+      ? `doc:${citation.doc.docId}`
+      : "";
+  /** 选中的分块也进 `picked`：技术观察的关系链焦点与块摘要跟着落到同一块，全页只有一个焦点 */
+  const citedChunkId = citation.chunk?.chunkId ?? null;
+
+  useEffect(() => {
+    if (citedChunkId) setPicked(citedChunkId);
+  }, [citedChunkId]);
+
+  useEffect(() => {
+    if (!landingKey || landedRef.current === landingKey) return;
+    landedRef.current = landingKey;
+    /**
+     * 落点用瞬移（behavior 默认 auto）而不是平滑滚动：这是「打开某处」的结果，
+     * 不是用户发起的滚动，动画只会让人等（规范 §8 也要求尊重 prefers-reduced-motion）。
+     */
+    (citeTextRef.current ?? citeBodyRef.current)?.scrollIntoView({ block: "center" });
+  }, [landingKey]);
+
+  /** 页面内选择也写回 URL：复制链接 / 刷新后回到同一个对象（replace，不刷屏浏览历史） */
+  const openDoc = useCallback(
+    (docId: string, chunkId?: string) => {
+      const next = new URLSearchParams(params);
+      next.set("doc", docId);
+      if (chunkId) next.set("chunk", chunkId);
+      else next.delete("chunk");
+      setParams(next, { replace: true });
+    },
+    [params, setParams],
+  );
+
+  /** 回到知识库首页：清掉引用参数，与「打开知识库」同一个落点 */
+  const clearCitation = useCallback(() => {
+    const next = new URLSearchParams(params);
+    next.delete("doc");
+    next.delete("chunk");
+    setParams(next, { replace: true });
+  }, [params, setParams]);
+
+  /** 资料清单在页面最下面，而且列表自己有滚动：选中态要能被看见，所以两处都要滚 */
+  const docsPanelRef = useRef<HTMLElement>(null);
+  const activeDocRowRef = useRef<HTMLLIElement>(null);
+  const revealDocRow = useCallback(() => {
+    docsPanelRef.current?.scrollIntoView({ block: "start" });
+    activeDocRowRef.current?.scrollIntoView({ block: "nearest" });
+  }, []);
+
   /* ---------------- 关系链：节点序号 ↔ 分块 ---------------- */
 
   const focusIndex = hovered ?? (picked ? space.points.findIndex((point) => point.chunkId === picked) : -1);
@@ -1204,6 +1322,105 @@ export default function Knowledge() {
           </div>
 
           {/* ============ 主区：检索工作区（首屏要直接证明「从哪份资料找到什么答案」） ============ */}
+          <div className="kb-ask-col">
+          {/*
+            引用落点面板（PRD FR-05「点击后打开现有知识库原文位置」）。
+
+            只在 URL 带 doc / chunk 参数时出现：带参数进来 = 有人点了资料引用，
+            首屏就必须直接给出「引的是哪份资料的哪一块、原文是哪句话」；
+            没有参数就是普通知识库首页，这块完全不占位置。
+          */}
+          {citation.asked ? (
+            <Panel
+              title="原文定位"
+              className="kb-cite"
+              extra={
+                citation.chunk ? (
+                  <StatusChip text={`已定位 ${citation.chunk.chunkId}`} tone="ok" />
+                ) : citation.doc ? (
+                  <StatusChip text="已打开文档" tone="warn" />
+                ) : (
+                  <StatusChip text="未定位到" tone="warn" />
+                )
+              }>
+              <div className="kb-cite__body" ref={citeBodyRef} data-kb-citation={landingKey || "missing"}>
+                {citation.doc ? (
+                  <>
+                    <div className="kb-cite__doc">
+                      <b>{citation.doc.title}</b>
+                      <span>
+                        {citation.doc.category} · {citation.doc.date} · {citation.doc.version} ·{" "}
+                        <code>{citation.doc.docId}</code>
+                      </span>
+                    </div>
+
+                    {citation.chunk ? (
+                      <>
+                        <p className="kb-cite__where">
+                          <span>
+                            原文位置 <code>{citation.chunk.section} · {citation.chunk.chunkId}</code>
+                          </span>
+                          <em>
+                            第 {citation.chunk.paragraphIndex} 段 · {citation.chunk.chars} 字 · 本资料共{" "}
+                            {citation.docChunks.length} 块
+                          </em>
+                        </p>
+                        {/* 引用的那句话：左侧主色竖条，扫一眼就知道引的是哪一句 */}
+                        <p className="kb-cite__text" ref={citeTextRef} data-kb-citation-chunk={citation.chunk.chunkId}>
+                          {citation.chunk.text}
+                        </p>
+                      </>
+                    ) : (
+                      /* 块号给错（或已被更新移除）：文档照常打开，并说清是哪一块没找到 */
+                      <StateBlock
+                        kind="partial"
+                        title={`未找到引用的原文位置：${citation.chunkParam || "URL 未给块号"}`}
+                        hint={`已打开 ${citation.doc.title}，下面是它当前的全部分块，点任意一块看原文。`}
+                      />
+                    )}
+
+                    <ul className="kb-cite__chunks">
+                      {citation.docChunks.map((item) => {
+                        const target = item.chunkId === citation.chunk?.chunkId;
+                        return (
+                          <li key={item.chunkId}>
+                            <button
+                              type="button"
+                              data-chunk-id={item.chunkId}
+                              className={target ? "is-target" : ""}
+                              aria-current={target ? "true" : undefined}
+                              title={`${item.section} · ${item.chunkId}`}
+                              onClick={() => openDoc(item.docId, item.chunkId)}>
+                              <code>{item.chunkId}</code>
+                              <span>{item.section}</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </>
+                ) : (
+                  /* 资料本身不在索引里：页面其余部分照常可用，只说明这一次定位没成功 */
+                  <StateBlock
+                    kind="partial"
+                    title="引用的资料不在当前索引里"
+                    hint={`doc=${citation.docParam || "—"} chunk=${citation.chunkParam || "—"}；当前索引 ${kb.label}。资料可能已被更新或回滚移除。`}
+                  />
+                )}
+
+                <div className="kb-actions">
+                  {citation.doc ? <Btn onClick={revealDocRow}>在资料清单中选中</Btn> : null}
+                  <Btn tone={citation.doc ? "default" : "primary"} onClick={clearCitation}>
+                    返回知识库首页
+                  </Btn>
+                  <span className="kb-actions__hint">
+                    落点由 URL 记录（doc / chunk 参数），刷新或复制链接都会回到这一块。
+                  </span>
+                </div>
+              </div>
+            </Panel>
+          ) : null}
+
           <Panel
             title="检索与回答"
             extra={
@@ -1362,6 +1579,7 @@ export default function Knowledge() {
               </div>
             </div>
           </Panel>
+          </div>
 
           {/* ============ 观察列：技术观察 + 索引状态 ============ */}
           <div className="kb-side">
@@ -1689,25 +1907,45 @@ export default function Knowledge() {
 
           <Panel
             title="资料清单"
+            ref={docsPanelRef}
             extra={
               <>
                 <StatusChip text={`${kb.docs.length} 份`} tone="muted" />
                 <StatusChip text={`${kb.chunks.length} 块`} tone="muted" />
               </>
             }>
+            {/*
+              每一行都是「打开这份资料的原文位置」的入口：点一下把 docId 写进 URL，
+              落点面板展开它的分块并高亮被引用的那一块。
+              选中态由 URL 决定（不是本地 state），所以刷新后选中行还在。
+            */}
             <ul className="kb-docs kb-scroll">
-              {kb.docs.map((doc) => (
-                <li key={doc.docId}>
-                  <b title={doc.title}>
-                    {doc.title}
-                    {doc.parseMode === "estimate" ? "（估算）" : ""}
-                  </b>
-                  <span>
-                    {doc.category} · {doc.date} · {doc.chunkCount} 块 · {formatCount(doc.chars)} 字 ·{" "}
-                    {doc.changeFlag === "seed" ? "初始" : doc.changeFlag === "changed" ? "本次变更" : "本次新增"}
-                  </span>
-                </li>
-              ))}
+              {kb.docs.map((doc) => {
+                const active = citation.doc?.docId === doc.docId;
+                return (
+                  <li
+                    key={doc.docId}
+                    className={`kb-docs__item ${active ? "is-active" : ""}`}
+                    data-doc-id={doc.docId}
+                    ref={active ? activeDocRowRef : undefined}>
+                    <button
+                      type="button"
+                      className="kb-docs__row"
+                      aria-current={active ? "true" : undefined}
+                      title={`查看 ${doc.title} 的分块与原文位置`}
+                      onClick={() => openDoc(doc.docId)}>
+                      <b title={doc.title}>
+                        {doc.title}
+                        {doc.parseMode === "estimate" ? "（估算）" : ""}
+                      </b>
+                      <span>
+                        {doc.category} · {doc.date} · {doc.chunkCount} 块 · {formatCount(doc.chars)} 字 ·{" "}
+                        {doc.changeFlag === "seed" ? "初始" : doc.changeFlag === "changed" ? "本次变更" : "本次新增"}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
             <p className="kb-actions__hint">
               {KB_DEMO_NOTES.estimated} {PARSE_MODE_NOTE.estimated}

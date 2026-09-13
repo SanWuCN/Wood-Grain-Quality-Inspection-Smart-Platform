@@ -40,6 +40,7 @@ import {
   componentById,
 } from "../seed/scenario";
 import { runEvaluation } from "../lib";
+import { NAV_ITEMS } from "../design";
 import { formatDistance, routeDistance } from "./lib/geo";
 import type { EntityBag } from "./types";
 import type { Intent } from "./intents";
@@ -98,6 +99,12 @@ export type FactSet = {
 };
 
 const NOT_MEASURED = "未采集";
+
+/**
+ * 知识库页面的路由：取自 design.ts 的导航表，本文件不另写一份页面路径
+ * （兜底值 `/knowledge` 就是 routes.tsx 注册的那条路径，导航表改名时它保证不空指针）。
+ */
+const KNOWLEDGE_ROUTE = NAV_ITEMS.find((item) => item.key === "knowledge")?.path ?? "/knowledge";
 
 /** 数值格式化统一走 lib 的口径，避免同一数字在不同页面位数不同；null 表示未计算 */
 function num(value: number | null, digits = 3): string {
@@ -408,6 +415,80 @@ export function evaluateFacts(intent: Intent, ctx: FactContext): FactSet {
 
   const rows = intent.response.facts.map((key) => ({ key, value: table[key] ?? "—" }));
   return { intentId: intent.id, rows, text, missing };
+}
+
+/* ------------------------------------------------------------------ *
+ * 资料引用（PRD 5.1：事实来自结构化数据，引用来自资料本身）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 一条可追溯的资料引用。
+ *
+ * 界面拿到它就能直接渲染成可点击的入口：标题 + 原文位置 + 打开路由 + 原文片段。
+ * 字段口径与文字助手/语音气泡已有的引用展示一致（`章节 · 块号`，见 replyView.ts
+ * 的 ReplySource 与 SmallWoodPanel 的 locator），两处不各写一套格式。
+ */
+export type SourceRef = {
+  /** 知识文档 id，例如 doc-weather */
+  docId: string;
+  /** 文档内的块号 / 原文位置锚点，例如 w-01 */
+  chunkId: string;
+  /** 文档标题，例如「示例寺近三个月归档天气档案」 */
+  title: string;
+  /** 原文位置，格式 `章节 · 块号`，例如「降水与湿度 · w-01」 */
+  locator: string;
+  /** 命中的原文片段（点击后展示，PRD FR-05 的「到底引用的是哪句话」） */
+  excerpt: string;
+  /** 打开入口：知识库页面 + 原文位置深链（见 knowledgeDeepLink） */
+  route: string;
+};
+
+/**
+ * 引用落点：知识库页面 + 原文位置深链 `#/knowledge?doc=<docId>&chunk=<chunkId>`。
+ *
+ * ── 为什么必须带上参数（这是实测暴露的缺陷）──────────────────────
+ * 引用原先只跳 `#/knowledge`。`Knowledge.tsx` 明明已经实现了"按 doc/chunk
+ * 定位并高亮那一块"（它的顶部会显示 `doc=… chunk=…` 的落点说明），
+ * 但**没有任何地方生成过这个链接** —— 于是用户点开引用看到的是知识库默认视图，
+ * 还得自己去一篇篇文档里找那句话，PRD FR-05 要的"打开原文位置"就落空了。
+ *
+ * 参数名是与读取端（`Knowledge.tsx` 的 `useSearchParams`，取 `doc` / `chunk`）
+ * 的硬约定：只给 `chunk` 也能定位（检索兜底时拿不到 docId），两个都给最精确。
+ */
+export function knowledgeDeepLink(docId?: string, chunkId?: string): string {
+  const params = new URLSearchParams();
+  if (docId) params.set("doc", docId);
+  if (chunkId) params.set("chunk", chunkId);
+  const query = params.toString();
+  return query ? `${KNOWLEDGE_ROUTE}?${query}` : KNOWLEDGE_ROUTE;
+}
+
+/**
+ * 意图 → 资料引用。入参允许 null，调用方可以直接传 `intentById(turn.intentId)`。
+ *
+ * 引用由意图**声明**（`response.sources` 的 docId + chunkId），这里只负责把它
+ * 翻译成种子里真实存在的标题与原文位置：
+ *   - 标题 / 章节 / 片段一律从 KNOWLEDGE_DOCS 取，不在意图目录里抄一遍；
+ *   - 声明的资料或块在种子里找不到时**直接不返回这一条** —— 引用指向不存在的原文，
+ *     比没有引用更糟（PRD 5.1 / 4.2：宁可说没有，不许编造出处）。
+ */
+export function sourcesOf(intent: Intent | null | undefined): SourceRef[] {
+  const declared = intent?.response.sources ?? [];
+  const refs: SourceRef[] = [];
+  for (const ref of declared) {
+    const doc = KNOWLEDGE_DOCS.find((item) => item.docId === ref.docId);
+    const chunk = doc?.chunks.find((item) => item.chunkId === ref.chunkId);
+    if (!doc || !chunk) continue;
+    refs.push({
+      docId: doc.docId,
+      chunkId: chunk.chunkId,
+      title: doc.title,
+      locator: `${chunk.section} · ${chunk.chunkId}`,
+      excerpt: chunk.text,
+      route: knowledgeDeepLink(doc.docId, chunk.chunkId),
+    });
+  }
+  return refs;
 }
 
 /** 事实行 → 语义色调，供界面按「红黄绿只表达状态」的规范着色 */
