@@ -515,6 +515,33 @@ export default function Base(props: BaseProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [introArmed]);
 
+  /**
+   * **与时间线解耦的终态兜底。**
+   *
+   * 上面那条 `safety` 挂在时间线 effect 里，effect 一旦重建就会被 clearTimeout
+   * 清掉 —— 项目里有数百次量级的重渲染，实测地图**渲染出来之后又会消失**
+   * （画布像素：t=8s 有 rgb(170,193,219)、t=12s 变 rgb(13,22,40)），
+   * 而且时有时无。各材质的 opacity 起点是 0，只要停在 0 整幅地图就是全透明。
+   *
+   * 这一条依赖写死 `[]`：只在挂载时注册一次，`clearTimeout` 只在卸载时发生，
+   * 任何重渲染都动不了它。5 秒后无条件把画面推到终态。
+   */
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const g = groupRef.current;
+      if (!g) return;
+      g.position.set(0, 0, 0);
+      g.scale.set(1, 1, 1);
+      g.traverse((obj) => {
+        if (obj instanceof Mesh || obj instanceof LineSegments) {
+          const list = Array.isArray(obj.material) ? obj.material : [obj.material];
+          for (const material of list) material.opacity = 1;
+        }
+      });
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   /** 贴图就绪 = 遮罩可以撤了；与开场动画同帧发生，中间不留黑屏 */
   const sceneReadyRef = useRef(props.onSceneReady);
   sceneReadyRef.current = props.onSceneReady;
