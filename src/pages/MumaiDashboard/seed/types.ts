@@ -347,6 +347,71 @@ export type DeviceLogSource =
   | "供电";
 
 /**
+ * 一次设备启动的**结果档位**。
+ *
+ * 用户要求「95% 都是正常没有异常的记录」，所以「正常」必须是可判定的一个档，
+ * 而不是靠人看有没有徽标：
+ *   正常   = 包内没有 WARN、也没有 ERROR
+ *   需留意 = 有 WARN，但没有 ERROR
+ *   异常   = 有 ERROR
+ * 这三档由生成器保证（正常包只从无噪声模板里抽），页面按它筛选与着色。
+ */
+export type DeviceLogOutcome = "正常" | "需留意" | "异常";
+
+/** 会话结束方式：主动关机 vs 出错中断/掉电 */
+export type DeviceLogEnding = "正常结束" | "异常结束";
+
+/** 日志包的统计量，由生成器算出来，页面直接显示（不写模糊值） */
+export type DeviceLogStats = {
+  total: number;
+  info: number;
+  warn: number;
+  error: number;
+  /** 出现过的 ERROR 摘要，列表里直接能看见，不用点进去找 */
+  errorSummary: string | null;
+  warnSummary: string | null;
+};
+
+/**
+ * 日志包**索引**（列表与筛选用）。
+ *
+ * 30 个包 × 两三百条 ≈ 7000+ 条，内容不在这里 —— 点开某个包时再由
+ * `buildPacket(id)` 按需生成。列表只需要判断「哪一次启动、多久、多少条、
+ * 什么结果」，索引足够了。
+ */
+export type DeviceLogBoot = {
+  id: string;
+  /** 设备启动时刻（mm:ss，与剧本时间轴同口径） */
+  bootAt: string;
+  /** 归属业务日期 */
+  date: string;
+  /** 会话时长（分钟） */
+  durationMin: number;
+  /** 设备标识与显示名，取自 seed 的 DEVICES */
+  deviceId: string;
+  deviceName: string;
+  firmwareVersion: string;
+  configVersion: string;
+  /** 这一段会话里关联的采集批次；没有采集时为 null */
+  batchId: string | null;
+  outcome: DeviceLogOutcome;
+  /** 会话说明：这一趟干了什么 / 为什么停的，不能只写「已停止」 */
+  endNote: string;
+  stats: DeviceLogStats;
+};
+
+/**
+ * 设备日志包（**完整内容**，点开才生成）。
+ *
+ * 一次设备启动就是一段连续会话，所以日志不该平铺成一条流水账 ——
+ * 页面上先给「一个个日志包」，点进去才是那一场会话的完整输出。
+ */
+export type DeviceLogPacket = DeviceLogBoot & {
+  endedAs: DeviceLogEnding;
+  entries: DeviceLogEntry[];
+};
+
+/**
  * 异常事件。
  *
  * 列表页一行一条，点开看详情 —— 所以除了列表要显示的摘要，还要有

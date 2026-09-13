@@ -419,7 +419,12 @@ export default function Hardware() {
       ) : null}
 
       {frozen && tab === "capture" ? <div className="capture-freeze-note"><b>诊断输出已冻结</b><span>该批次缺少有效标定记录，等待专业复核；仍可监看采集画面和传感器数据。</span></div> : null}
-      <div className="adapt-body">
+      {/*
+        异常排查页要求「两列等高、整页不滚动」（所以列表在面板内部滚），
+        所以这一档把 .adapt-body 自己的滚动关掉。其余页签内容较长、
+        仍然需要整页滚，保持原样。
+      */}
+      <div className={`adapt-body${tab === "triage" ? " adapt-body--fixed" : ""}`}>
         {tab === "capture" ? <CaptureTab /> : null}
         {tab === "triage" ? <TriageTab /> : null}
         {tab === "monitor" ? <MonitorTab /> : null}
