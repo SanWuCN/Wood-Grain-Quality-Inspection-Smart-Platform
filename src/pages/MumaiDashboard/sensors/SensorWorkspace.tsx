@@ -3,7 +3,9 @@ import { Euler, MathUtils, Quaternion, Vector3 } from 'three';
 import { Panel } from '../Panel';
 import { Btn, Modal, StatusChip } from '../ui';
 import { useSharedStore } from '../store/shared';
+import type { Tone } from '../lib';
 import { sensorRequest, useSensor } from './useSensor';
+import { humidityBadge, useBeijingHumidity } from './weather';
 import { freshness, type SensorFrame, type BridgeStatus } from './types';
 import type { Quat, Readings } from '../../../../shared/sensortag.mjs';
 import './sensors.css';
@@ -18,6 +20,15 @@ const METRICS: { key: keyof Readings; label: string; unit: string; digits: numbe
   {key:'pressure',label:'大气压力',unit:'hPa',digits:1},
   {key:'battery',label:'扫描枪电量',unit:'%',digits:0},
 ];
+
+/**
+ * 扫描枪电量的固定值。
+ *
+ * 演示用：电量取自 SensorTag 的电池通道，枪不在线时那一格是空的。
+ * 按需求把这一格写死成 83%，界面上标明「写死」而不是伪装成实时读数。
+ * 需要恢复真实读数时删掉这一处覆盖即可，下面的取数逻辑原样保留。
+ */
+const FIXED_BATTERY_PCT = 83;
 
 function Trend({ history, field, label, unit, now }: { history: SensorFrame[]; field: 'ambientTemp' | 'light'; label: string; unit: string; now: number }) {
   const points = history.filter((f)=> typeof f.readings[field] === 'number' && f.receivedAt-(f.fieldAt[field] ?? 0)<=3000 && now-f.receivedAt<300000);
@@ -41,6 +52,7 @@ function Trend({ history, field, label, unit, now }: { history: SensorFrame[]; f
 
 export default function SensorWorkspace({ batchId, screen }: { batchId: string; screen: ReactNode }) {
   const sensor = useSensor(batchId);
+  const humidity = useBeijingHumidity();
   const actions = useSharedStore((s)=>s.allowedActions);
   const canControl = actions.includes('scan:capture') || actions.includes('console:admin');
   const [demo,setDemo] = useState(false);
@@ -58,15 +70,16 @@ export default function SensorWorkspace({ batchId, screen }: { batchId: string; 
   const [detailsTab,setDetailsTab] = useState<'raw'|'trend'>('raw');
   const frame = demo ? demoFrame : sensor.frame;
   const currentDevice = frame?.deviceId ?? 'unbound';
-  // Installation settings survive navigation; zero is scoped to the collector run.
+  const poseEpoch = frame?.poseEpoch ?? frame?.streamId;
+  // Brief BLE reconnects share the pose epoch, preserving both the zero and model view.
   useEffect(()=> {
     try {
       const saved=JSON.parse(localStorage.getItem(`mumai.sensor.mount.${currentDevice}`) ?? 'null');
       setMount(Array.isArray(saved)&&saved.length===3&&saved.every(Number.isFinite) ? saved as [number,number,number] : [0,0,0]);
-      const baseline=JSON.parse(sessionStorage.getItem(`mumai.sensor.zero.${currentDevice}.${frame?.streamId}`) ?? 'null');
+      const baseline=JSON.parse(sessionStorage.getItem(`mumai.sensor.zero.${currentDevice}.${poseEpoch}`) ?? 'null');
       setZero(Array.isArray(baseline)&&baseline.length===4&&baseline.every(Number.isFinite) ? baseline as Quat : identity);
     } catch { setMount([0,0,0]); setZero(identity); }
-  },[currentDevice,frame?.streamId]);
+  },[currentDevice,poseEpoch]);
   useEffect(()=> {
     if (!demo) { setDemoFrame(null); return; }
     const start=performance.now();
@@ -105,7 +118,7 @@ export default function SensorWorkspace({ batchId, screen }: { batchId: string; 
     if (!frame?.quaternion) return;
     setZero(frame.quaternion);
     setFollow(true);
-    try { sessionStorage.setItem(`mumai.sensor.zero.${currentDevice}.${frame.streamId}`,JSON.stringify(frame.quaternion)); } catch { /* session-only fallback */ }
+    try { sessionStorage.setItem(`mumai.sensor.zero.${currentDevice}.${poseEpoch}`,JSON.stringify(frame.quaternion)); } catch { /* session-only fallback */ }
     setMessage('已将当前姿态设为零位');
   };
   const exportHistory = async () => {
@@ -119,11 +132,45 @@ export default function SensorWorkspace({ batchId, screen }: { batchId: string; 
       after=result.frames[result.frames.length-1].id ?? after;
       if(all.length>=100000) throw new Error('记录过多，请从后端按时间范围导出');
     }
-    const rows=[['deviceId','batchId','sampledAt','source','temperatureRawC','temperatureCalibratedC','illuminanceRawLux','illuminanceCalibratedLux','temperatureStatus','lightStatus','humidityPct','pressureHpa','qx','qy','qz','qw'],...all.map((f)=>[f.deviceId,f.batchId,new Date(f.sampledAt).toISOString(),'ble:sensortag',f.readings.ambientTemp??'',f.calibrated?.ambientTemp??'',f.readings.light??'',f.calibrated?.light??'',freshness(f.fieldAt.ambientTemp,f.receivedAt),freshness(f.fieldAt.light,f.receivedAt),f.readings.humidity??'',f.readings.pressure??'',...(f.quaternion??['','','',''])])];
+    /*
+     * 湿度与电量列导出的是**面板上显示的那个数**（北京市湿度 / 写死的 83%），
+     * 并各自带一个来源标签：否则导出的表里会出现「面板写 83、CSV 却写 41」
+     * 这种对不上的情况。其余各列仍是 SensorTag 的原始实测值。
+     */
+    const humidityCell = `${humidity.humidity}（${humidity.source === 'live' ? '北京市·联网' : humidity.source === 'cache' ? '北京市·上次数据' : '北京市·默认值'}）`;
+    const batteryCell = `${FIXED_BATTERY_PCT}（演示固定值）`;
+    const rows=[['deviceId','batchId','sampledAt','source','temperatureRawC','temperatureCalibratedC','illuminanceRawLux','illuminanceCalibratedLux','temperatureStatus','lightStatus','humidityPct','batteryPct','pressureHpa','qx','qy','qz','qw'],...all.map((f)=>[f.deviceId,f.batchId,new Date(f.sampledAt).toISOString(),'ble:sensortag',f.readings.ambientTemp??'',f.calibrated?.ambientTemp??'',f.readings.light??'',f.calibrated?.light??'',freshness(f.fieldAt.ambientTemp,f.receivedAt),freshness(f.fieldAt.light,f.receivedAt),humidityCell,batteryCell,f.readings.pressure??'',...(f.quaternion??['','','',''])])];
     const csv='\uFEFF'+rows.map((row)=>row.map((v)=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\r\n');
     const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
     const a=document.createElement('a');a.href=url;a.download=`sensortag-${batchId}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
     setMessage(`已导出 ${all.length} 条真实记录`);
+  };
+
+  /**
+   * 五格读数的显示取值。
+   *
+   * 环境温度 / 光照 / 大气压力走原来的实时通道：连上 SensorTag 才有值，
+   * 没连上就是「—」，这是真实状态，不补数。
+   *
+   * 另外两格按需求另算：
+   *   · 相对湿度 —— 取北京市的相对湿度（`useBeijingHumidity`）。
+   *     枪上的湿度通道要蓝牙连上才出数，演示时那一格常年是空的；
+   *     换成外网读数的同时保留三级兜底：取不到网就用上一次的值，
+   *     连缓存都没有才用常量。`source` 直接决定标签，缓存不会被写成「实时」。
+   *   · 扫描枪电量 —— 写死 83%（`FIXED_BATTERY_PCT`），标签同样是「写死」。
+   *
+   * 演示姿态模式下这两格也照常显示：它们本来就不依赖SensorTag。
+   */
+  const humidityChip = humidityBadge(humidity.source, humidity.at, sensor.now);
+  const humidityFoot =
+    humidity.source === 'live' ? `北京市 · 联网取得 ${timeLabel(humidity.at)}`
+    : humidity.source === 'cache' ? `北京市 · 联网失败，沿用上次 ${timeLabel(humidity.at)}`
+    : '北京市 · 联网失败且无缓存，使用默认值';
+  const metricView = (key: keyof Readings, digits: number, live: number | undefined): { value: number | undefined; digits: number; chip: string; tone: Tone; stale: boolean; foot: string | undefined } => {
+    if (key === 'humidity') return { value: humidity.humidity, digits: 1, chip: humidityChip.text, tone: humidityChip.tone, stale: humidityChip.stale, foot: humidityFoot };
+    if (key === 'battery') return { value: FIXED_BATTERY_PCT, digits: 0, chip: '写死', tone: 'muted' as const, stale: false, foot: `演示固定值 · 设备 ${currentDevice}` };
+    const state = freshness(frame?.fieldAt[key], sensor.now);
+    return { value: demo ? undefined : live, digits, chip: state, tone: toneOf(state), stale: state !== '实时', foot: undefined as string | undefined };
   };
 
   return <>
@@ -132,7 +179,7 @@ export default function SensorWorkspace({ batchId, screen }: { batchId: string; 
       <Panel title="扫描枪姿态" className={`sensor-pose${demo?' is-demo':''}`} extra={<StatusChip text={demo?'开发调试 · 模拟姿态':poseState} tone={demo?'warn':toneOf(poseState)} dot />}>
         <div className="sensor-pose__caption"><span>{demo?'模型动作预览':frame ? '扫描枪 · 姿态跟随' : '扫描枪 · 等待连接'}</span><span>仅同步旋转</span></div>
         <div className="sensor-model" role="img" aria-label="扫描枪三维模型，拖动旋转视角，滚轮缩放">
-          <Suspense fallback={<div className="sensor-model-error">正在准备 3D 模型…</div>}><ScannerModel key={demo ? "demo" : frame?.streamId ?? "waiting"} quaternion={displayQ} follow={follow && poseState==='实时'} reset={reset}/></Suspense>
+          <Suspense fallback={<div className="sensor-model-error">正在准备 3D 模型…</div>}><ScannerModel key={demo ? "demo" : poseEpoch ?? "waiting"} quaternion={displayQ} follow={follow && poseState==='实时'} reset={reset}/></Suspense>
           {demo ? <span className="sensor-demo-watermark">模拟姿态 · 非实机</span> : null}
           {!frame?.quaternion ? <span className="sensor-model__hint">模型已就绪 · 等待真实姿态数据</span> : !follow ? <span className="sensor-model__hint">跟随已暂停 · 读数继续接收</span> : poseState!=='实时' ? <span className="sensor-model__hint">保持最后姿态 · {timeLabel(frame.poseAt)}</span> : null}
         </div>
@@ -145,8 +192,9 @@ export default function SensorWorkspace({ batchId, screen }: { batchId: string; 
       <div className="sensor-metrics">{METRICS.map(({key,label,unit,digits})=> {
         const value=demo ? undefined : (key==='ambientTemp' || key==='light') ? frame?.calibrated?.[key] ?? frame?.readings[key] : frame?.readings[key];
         const at=demo ? undefined : frame?.fieldAt[key];
-        const state=freshness(at,sensor.now);
-        return <div className={`sensor-metric${state!=='实时'?' is-stale':''}`} key={key}><header><span>{label}</span><StatusChip text={state} tone={toneOf(state)} dot /></header><strong>{typeof value==='number'?value.toFixed(digits):'—'}<small>{unit}</small></strong><footer>BLE {frame?.calibration && (key==='ambientTemp'||key==='light')?'已校准':'原始值'} · {timeLabel(at)}</footer></div>;
+        const view=metricView(key,digits,typeof value==='number'?value:undefined);
+        const foot=view.foot ?? `BLE ${frame?.calibration && (key==='ambientTemp'||key==='light')?'已校准':'原始值'} · ${timeLabel(at)}`;
+        return <div className={`sensor-metric${view.stale?' is-stale':''}`} key={key}><header><span>{label}</span><StatusChip text={view.chip} tone={view.tone} dot /></header><strong>{typeof view.value==='number'?view.value.toFixed(view.digits):'—'}<small>{unit}</small></strong><footer>{foot}</footer></div>;
       })}</div>
       <div className="sensor-strip__foot"><span>{sensor.error ? `平台连接异常：${sensor.error}` : sensor.bridge.message}{sensor.bridge.batchId && sensor.bridge.batchId!==batchId ? ` · 当前采集绑定其他批次 ${sensor.bridge.batchId}` : ''}</span><span>姿态更新 {timeLabel(frame?.poseAt)} · 超过 3 秒标记延迟 / 10 秒离线</span></div>
     </section>
@@ -157,6 +205,7 @@ export default function SensorWorkspace({ batchId, screen }: { batchId: string; 
           <div className="sensor-connect__row"><label className="field"><span>设备标识（MAC / UUID）</span><input value={deviceId} onChange={(e)=>setDeviceId(e.target.value)} placeholder={sensor.bridge.deviceId ?? '扫描选择或输入设备标识'} /></label><Btn disabled={!canControl||Boolean(busy)} onClick={()=>void run('scan',async()=>{const data=await sensorRequest<{devices:typeof devices}>('scan',{});setDevices(data.devices);setMessage(`发现 ${data.devices.length} 台设备，请选择 SensorTag`);})}>{busy==='scan'?'扫描中…':'扫描附近设备'}</Btn></div>
           {devices.length ? <ul className="sensor-devices">{devices.map((d)=><li key={d.deviceId}><button type="button" className={deviceId===d.deviceId?'is-selected':''} onClick={()=>setDeviceId(d.deviceId)}><b>{d.name}</b><span>{d.deviceId} · {d.rssi} dBm</span></button></li>)}</ul> : null}
           <div className="sensor-connect__row"><Btn tone="primary" disabled={!canControl||Boolean(busy)||!deviceId.trim()} onClick={()=>void run('connect',async()=>{await sensorRequest<BridgeStatus>('connect',{deviceId:deviceId.trim(),batchId,sessionId:sensor.sessionId});setMessage('已启动连接，请查看实时数据状态');sensor.reconnect();})}>绑定并连接本批次</Btn><Btn disabled={!canControl||Boolean(busy)} onClick={()=>void run('disconnect',async()=>{await sensorRequest('disconnect',{});sensor.reconnect();setMessage('已停止采集并取消自动连接');})}>断开连接</Btn><Btn tone="ghost" onClick={sensor.reconnect}>刷新连接状态</Btn></div>
+          {sensor.bridge.connection?.actual ? <p className="note">蓝牙连接间隔 {sensor.bridge.connection.actual.intervalMs} ms · 监督超时 {sensor.bridge.connection.actual.supervisionTimeoutMs} ms · 本次断连 {sensor.bridge.disconnectCount ?? 0} 次</p> : null}
           {sensor.bridge.profiles?.motion ? <p className="note">运动服务配置 {sensor.bridge.profiles.motion.config} · 固件采样周期 {parseInt(sensor.bridge.profiles.motion.period,16)*10} ms</p> : null}
           {sensor.bridge.warnings?.map((warning)=><p className="note" key={warning}>{warning}</p>)}
           {!canControl ? <p className="note">当前账号只读，使用有采集权限的账号连接设备。</p> : null}

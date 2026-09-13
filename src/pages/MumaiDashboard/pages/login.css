@@ -244,15 +244,19 @@
   letter-spacing: 0.18em;
 }
 
-/* 斗拱标记：现造的几何图形，比引用图标更像这个平台自己的标识 */
-.login__mark {
-  width: 40px;
-  height: 40px;
-  margin-bottom: var(--space-2);
-  fill: none;
-  stroke: var(--text-tertiary);
-  stroke-width: 1.4;
-  stroke-linecap: square;
+/*
+ * 团队字标（登录页主视觉）。
+ *
+ * 就是 `public/brand/mumai-wordmark-white.png`：原图抠掉蓝底、重新着白色的
+ * 完整字标（含符号）。**只放这一件** —— 旁边不再并排放单独的符号，
+ * 字标里已经有一个了，两个并排是重复；把字标放大即可。
+ * 只有位图，所以只约束高度、宽度随比例 —— 写死宽高会把它压扁。
+ */
+.login__wordmark {
+  display: block;
+  height: 58px;
+  width: auto;
+  margin-bottom: var(--space-1);
 }
 
 .login__eyebrow {
@@ -596,8 +600,12 @@
     gap: var(--space-2);
   }
 
-  .login__mark {
-    display: none;
+  /*
+   * 单列时（≤1360px 宽或 ≤760px 高）牌子不能消失 —— 标识是登录页的主视觉，
+   * 这里是「收小」而不是「隐藏」：高度从 44px 降到 32px，宽度仍随比例。
+   */
+  .login__wordmark {
+    height: 38px;
   }
 
   .login__facts {

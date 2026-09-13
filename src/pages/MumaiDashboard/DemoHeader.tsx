@@ -92,30 +92,41 @@ const SvgLayer = styled.div`
   }
 `;
 
-/** 品牌 + 标题：左上角，带切角底衬 */
+/**
+ * 品牌 + 标题：左上角，带切角底衬
+ *
+ * 品牌名用**团队字标本身**：`public/brand/mumai-wordmark-white.png`
+ * （原图抠掉蓝色背景、重新着白色，含前面的小符号）。
+ *
+ * 为什么不再用系统字体写「木脉智检」：团队字标用的是 MumaiDisplay
+ * （`public/font/pmzd.woff2`）那套偏斜、横画带切角的字，系统字体写出来
+ * 字形对不上；这里直接贴字标，顶栏和登录页的字形才一致。
+ * 所以左上角只有这一个图形，不再另外放一个符号（会和字标里自带的重复）。
+ * 副标题仍是系统字体的小字 —— 它本来就属于界面文案，不属于字标。
+ */
 const Brand = styled.div`
   position: absolute;
   left: 22px;
   top: 10px;
   z-index: 2;
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: flex-end;
+  gap: 12px;
   pointer-events: none;
   white-space: nowrap;
 
-  b {
-    font-size: 26px;
-    font-weight: 600;
-    letter-spacing: 0.16em;
-    color: ${COLORS.textPrimary};
-    text-shadow: 0 0 22px rgba(120, 158, 255, 0.65);
+  img {
+    height: 30px;
+    width: auto;
+    display: block;
+    filter: drop-shadow(0 0 14px rgba(120, 158, 255, 0.35));
   }
 
   span {
     color: rgba(232, 239, 255, 0.42);
     font-size: 11px;
     letter-spacing: 0.24em;
+    padding-bottom: 5px;
   }
 `;
 
@@ -342,7 +353,12 @@ export default function DemoHeader(props: DemoHeaderProps) {
       </SvgLayer>
 
       <Brand>
-        <b>木脉智检</b>
+        {/*
+          团队字标（含符号），深色底用白色那一版；旁边的副标题是界面文案。
+          字标本体已经写了品牌名，因此这里不再有同义的隐藏文本，
+          alt 给「木脉智检」供辅助技术读取。
+        */}
+        <img src="/brand/mumai-wordmark-white.png" alt="木脉智检" />
         <span>古建筑智能巡检平台</span>
       </Brand>
 

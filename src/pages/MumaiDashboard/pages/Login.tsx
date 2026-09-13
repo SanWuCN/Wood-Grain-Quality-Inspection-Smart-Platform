@@ -332,13 +332,21 @@ export function Login() {
 
         <div className="login__brand">
           <p className="login__meta">LOCAL DEMO BUILD · v1.0</p>
-          <svg className="login__mark" viewBox="0 0 48 48" aria-hidden="true">
-            {/* 斗拱意象：一横一竖一承托，四笔收住 */}
-            <path d="M6 36h36M12 30h24M24 30V12M12 12h24M18 18h12" />
-          </svg>
+          {/*
+            团队字标：`public/brand/mumai-wordmark-white.png` —— 团队 logo 原图
+            抠掉蓝色背景后重新着白色的完整字标（含前面的符号）。
+            这里**只放这一件**：原来旁边还并排放了一个单独的符号，和字标自带的
+            那个重复；现在把字标本身放大，它已经包含符号 + 品牌名 + 那套字形，
+            就是登录页的主标题。因此下面的 h1 不再重复写品牌名。
+            原图只有位图，所以只约束高度、宽度随比例，避免被压扁。
+          */}
+          <img
+            className="login__wordmark"
+            src="/brand/mumai-wordmark-white.png"
+            alt="木脉智检"
+          />
           <p className="login__eyebrow">MUMAI INSPECTION PLATFORM</p>
-          <h1 className="login__name">木脉智检</h1>
-          <p className="login__sub">古建筑智能巡检平台</p>
+          <h1 className="login__name">古建筑智能巡检平台</h1>
 
           <ul className="login__facts">
             <li>四柱 Z01–Z04 统一编号</li>

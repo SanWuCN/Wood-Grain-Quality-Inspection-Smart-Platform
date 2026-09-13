@@ -1057,11 +1057,25 @@
   所以这里放一组同心圆环，外环顺时针、中环反向、内环脉冲 ——
   与场景里真正的 Bottom 展示盘同一套几何语言，揭幕淡出时视觉是连续的。
 */
+/*
+  团队 logo（与 index.html 的 #boot 同一版式）：只放整条字标，居中。
+  原来这里是「符号 + 系统字体写的品牌名」两件，字形和团队字标对不上；
+  现在直接用字标本体（含符号），字号也对得上。
+*/
+.map-veil__wordmark {
+  display: block;
+  width: auto;
+  height: 46px;
+  margin-bottom: 16px;
+  opacity: 0.96;
+  filter: drop-shadow(0 0 18px rgba(120, 158, 255, 0.35));
+}
+
 .map-veil__rings {
   position: relative;
   display: block;
-  width: 132px;
-  height: 132px;
+  width: 96px;
+  height: 96px;
   margin-bottom: 6px;
 }
 
