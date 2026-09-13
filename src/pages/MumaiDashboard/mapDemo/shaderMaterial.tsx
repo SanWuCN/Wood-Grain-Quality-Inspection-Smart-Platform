@@ -7,11 +7,18 @@ export default extend(
     {
       time: 0,
       depth: 1,
-      // 《视觉设计规范 v1.0》§1.2 / §5.2：侧面属于科技光效，用 GLOW-CYAN #5DE4FF
-      // 与 PRIMARY #4EA8FF；底部收到最深的 BG-02 #091321，取代原本偏紫的高饱和蓝。
-      baseTopColor: new Color("#4EA8FF"),
-      baseBottomColor: new Color("#091321"),
-      scanColor: new Color("#5DE4FF"),
+      /*
+       * 侧壁三段色**对齐 Demo2 源码**（原为项目 v1.0 规范的 GLOW-CYAN #5DE4FF /
+       * PRIMARY #4EA8FF / BG-02 #091321）。
+       *
+       * 本任务的验收基准是 Demo2 的实际效果，而两套蓝的差别在截图里很明显：
+       * 我们那组是高饱和科技蓝，Demo2 的 #8fc2ff 是偏冰的浅蓝，
+       * 顶面冷灰 + 侧壁冰蓝才是 Demo2 那种「通透」的观感。
+       * 底端 #10182c 也比 #091321 亮一档，侧壁下沿不会糊进背景。
+       */
+      baseTopColor: new Color("#8fc2ff"),
+      baseBottomColor: new Color("#10182c"),
+      scanColor: new Color("#8fc2ff"),
       opacity: 1.0,
     },
     `varying vec3 vPosition;
