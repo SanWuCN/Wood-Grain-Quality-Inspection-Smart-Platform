@@ -329,7 +329,15 @@ export default function Base(props: BaseProps) {
    */
   const scene = useThree((state) => state.scene);
   useLayoutEffect(() => {
-    scene.fog = new Fog("#000000", fitDistance * 0.75, fitDistance * 2.4);
+    /*
+     * 雾的起点由 0.75 推到 1.05 倍取景距离。
+     *
+     * 0.75 意味着地图**近端**就已经在雾里，整幅图被压暗 ——
+     * 换回金属材质之后这一条尤其明显。推到 1.05 之后，
+     * 地图完整落在雾外，只有远端留一点纵深提示（这正是 Demo2 里
+     * 写死 10~30 想要的效果：轻雾，不是把主体吃掉）。
+     */
+    scene.fog = new Fog("#000000", fitDistance * 1.05, fitDistance * 2.6);
     return () => {
       scene.fog = null;
     };

@@ -57,6 +57,12 @@ const DATASETS: Record<
 > = {
   // 取景由 base.tsx 按投影包围盒反解距离，这里只给留白系数。
   // 两者跨度差 13 倍，但都留同样比例的余量，所以系数接近。
+  /*
+   * 留白系数。用户的目标构图（图 3）里地图是画面的主角，
+   * 而「包围球」反解出来的距离本身偏保守（把地图当成圆来框，
+   * 横长条的中国因此被推远）。收小一点，让地图真正占住中央。
+   * 具体值靠 ?fit= 逐档截图比对定，这里先给一个起点。
+   */
   china: { data: chinaData, outline: chinaOutline, fitPadding: 1.14 },
   shanghai: { data: shanghaiData, fitPadding: 1.08 },
 };
