@@ -2923,6 +2923,17 @@
   overflow-y: auto;
 }
 
+/*
+ * 异常排查用：整页不滚动，滚动交给两块面板自己的列表。
+ *
+ * 为什么按页签区分而不是全局改：其余页签（采集作业、硬件监看）的内容本来就是
+ * 一长列卡片，整页滚动是对的；只有异常排查是「两列并排、各自一个长列表」，
+ * 两边分开滚才看得出「左边还有多少没处理、右边还有哪几次启动」。
+ */
+.adapt-body--fixed {
+  overflow: hidden;
+}
+
 .adapt-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
@@ -3263,11 +3274,84 @@
    各按内容高度排；事件列表短，日志长，并排之后两列都不留白块。
    日志一条记录是时间 / 级别 / 来源 / 正文四段，右列给宽容度（1.4fr）保证不折行。
 */
+/*
+ * 异常排查：左「异常事件」/ 右「设备日志」。
+ *
+ * 两列必须**等高**，且整页不滚动（用户明确要求：「左边异常事件高度要和右边的
+ * 窗口高度一致，这个页面不要可以向下滚动」）。
+ * 所以这里不用 align-items: start —— 那会让每一列各按自己的内容高度撑开，
+ * 左边 17 条事件比右边长一大截，页面就跟着能滚了。
+ * 改成两列都占满这一屏高度，各自的列表**在面板内部滚动**：
+ *   · 左边事件列表：已结案的一多就会溢出，滚它自己
+ *   · 右边日志包列表：30 个包同理
+ * 这样任何一列内容变多都不会把整页顶下去。
+ */
 .triage {
   display: grid;
   grid-template-columns: minmax(360px, 0.9fr) minmax(0, 1.4fr);
   gap: var(--space-3);
-  align-items: start;
+  align-items: stretch;
+  /* 撑满 .adapt-body 的高度；min-height: 0 让内部滚动区能真正收到高度约束 */
+  height: 100%;
+  min-height: 0;
+}
+
+/*
+ * 面板本体在等高布局下的行为：
+ *   .tech-panel        外框，撑满格子
+ *   .tech-panel__inner 纵向 flex，min-height: 0 是关键 ——
+ *                      没有它，flex 子项的最小高度是内容高度，
+ *                      里面的列表就永远撑开、滚动条也不会出现
+ *   .tech-panel__body  再分成「固定筛选区 / 滚动列表 / 固定说明」三段
+ */
+.triage .tri-panel {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.triage .tri-panel .tech-panel__inner {
+  height: 100%;
+  min-height: 0;
+}
+
+/*
+ * body 自己**不滚**，改成纵向 flex 容器：
+ *   ① .pkt-filter        flex: 0 0 auto  → 固定在顶部，列表滚动时不动
+ *   ② .pkt-list__scroll  flex: 1         → 唯一滚动区（只有列表滚）
+ *   ③ .note              flex: 0 0 auto  → 固定在底部
+ *
+ * 用户的要求是「筛选区不要随着上滑而看不到」。常见做法 position: sticky
+ * 也行，但那需要给滚动区补负 margin 和背景色去遮住穿过的行，
+ * 而这里本来就是两列等高的固定布局 —— 直接不让它参与滚动更简单、也没有
+ * 背景色对齐的问题。
+ */
+.triage .tri-panel .tech-panel__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pkt-list__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/*
+ * 左侧「异常事件」同理：列表滚，底部的「标记待核验 / 核验通过并恢复」固定。
+ * 面板头的标题 + 计数不参与滚动（它本来就在 .tech-panel__head 里）。
+ */
+.evt-list__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.triage .tri-panel .adapt-actions {
+  flex: 0 0 auto;
 }
 
 .tri-panel,
@@ -3405,6 +3489,249 @@
   font-style: normal;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/*
+  已结案事件：结论直接长在列表里。
+  十几条结案记录如果要点开才知道「最后怎么解决的」，等于没结案 ——
+  所以列表里就给出结论，未结案的则没有这一行（它本来就还没结论）。
+*/
+.evt-list__conclusion {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--ma-green, var(--success));
+  font-size: var(--fs-aux);
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.evt-list__conclusion::before {
+  content: "结论：";
+  color: var(--ma-text-3);
+}
+
+/*
+  已结案的行整体压低对比：这一页要回答的是「还有什么没解决」，
+  结案的一多，未结案的就容易被淹掉。压暗不等于隐藏 —— 依然可点开看全过程。
+*/
+.evt-list li.is-settled button {
+  opacity: 0.72;
+}
+
+.evt-list li.is-settled button:hover {
+  opacity: 1;
+}
+
+/* ---- 日志包列表 ---- */
+
+/*
+  筛选区（时间 / 设备机号 / 结果 + 关键词）。
+  三行竖排而不是挤成一行：三组条件各自是一类，横着排会在 1366 档折成一堆
+  参差不齐的行，读起来分不清哪个按钮属于哪一组。每行最前面给一个固定宽度的
+  标签，「时间」「设备机号」「结果」三个词竖直对齐。
+*/
+.pkt-filter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pkt-filter__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.pkt-filter__label {
+  flex: 0 0 62px;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.pkt-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  /*
+    不给固定高度：列表的高度由面板剩余空间决定（.tri-panel__body 自己滚）。
+    原来写死 max-height: 460px 是为了「别把面板撑成几屏高」，但在两列等高的
+    布局里这个值反而会和面板实际高度打架 —— 面板高的时候列表不填满、
+    面板矮的时候又溢出。交给 flex 分配即可。
+  */
+}
+
+/* 与异常事件同一套交互：整行可点，只在悬停时提亮 */
+.pkt-list button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-2);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pkt-list button:hover {
+  background: var(--fill-weak);
+}
+
+/*
+  结果档的视觉区分：**只有出过问题的包才给彩色左边线**。
+  正常包保持中性 —— 三十行里二十七行都描边的话，剩下三行的问题就被淹了
+  （这正是原来「每个包都挂 WARN 徽标」的毛病）。
+*/
+.pkt-list li.is-需留意 button {
+  border-left: 2px solid var(--warning);
+  padding-left: calc(var(--space-2) - 2px);
+}
+
+.pkt-list li.is-异常 button {
+  border-left: 2px solid var(--danger);
+  padding-left: calc(var(--space-2) - 2px);
+}
+
+/*
+  本次会话那一包：极淡底色 + 强调色左边线。
+  与上面两档的左边线冲突时以「本次」为准（它的信息优先级更高）。
+  PRD §4「选中态同时有底色或边线、文字变化，不能仅变色」—— 这里三者都有。
+*/
+.pkt-list li.is-current button {
+  border-left: 2px solid var(--primary);
+  padding-left: calc(var(--space-2) - 2px);
+  background: var(--fill-weak);
+}
+
+.pkt__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.pkt__main b {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 600;
+}
+
+/* 日期与时刻用等宽数字：三十行的启动时刻竖直对齐才能扫读 */
+.pkt__time {
+  color: var(--text-tertiary);
+  font-family: var(--font-data);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.pkt__at {
+  color: var(--text-secondary);
+  font-family: var(--font-data);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.pkt__now {
+  padding: 0 6px;
+  border: 1px solid var(--border-active);
+  color: var(--primary);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.pkt__main i {
+  overflow: hidden;
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/*
+  把「这一包错在哪」提到列表里 —— 否则要逐包点开才知道哪一包有问题。
+  只显示一条（首个 ERROR，其次首个 WARN），多了会把列表撑成两屏。
+*/
+.pkt__issue {
+  overflow: hidden;
+  font-size: var(--fs-aux);
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pkt__issue.is-error {
+  color: var(--danger);
+}
+
+.pkt__issue.is-warn {
+  color: var(--warning);
+}
+
+.pkt__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+
+.pkt__n {
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.pkt__n.is-warn {
+  color: var(--warning);
+}
+
+.pkt__n.is-error {
+  color: var(--danger);
+}
+
+/* ---- 日志包内容弹窗内的检索框 ---- */
+
+.devlog-search {
+  margin-left: auto;
+}
+
+.devlog-search input {
+  width: 260px;
+  height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-default);
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-size: var(--fs-aux);
+}
+
+.devlog-search input::placeholder {
+  color: var(--text-tertiary);
+}
+
+/*
+  包内日志列表：两三百条要能连续翻，所以给一个受控高度让它自己滚，
+  而不是把弹窗撑到页面高度。等宽时间戳 + 固定列宽让同一来源的行竖直对齐，
+  扫读时能直接按列定位。
+*/
+.devlog--packet {
+  max-height: 46vh;
+  overflow-y: auto;
 }
 
 .evt-list__meta {

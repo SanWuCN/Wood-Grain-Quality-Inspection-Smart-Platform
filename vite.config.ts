@@ -118,25 +118,31 @@ export default defineConfig({
     /**
      * 只 watch 真正参与构建的东西 —— 白名单，不是黑名单。
      *
-     * 这个 dev server 已经被 EBUSY 搞挂四次，每次肇事文件都不同：
-     *   1. `.tmp-*.tmpdir`（Vite 依赖预构建的临时目录）
-     *   2. `~RFxxxx.TMP`（Word/WPS 打开 CSS 时生成的锁文件）
-     *   3. `docs/design/视觉设计规范-v1.1.md`（编辑器打开一份文档）
+     * 这个 dev server 已被 EBUSY 搞挂五次，每次肇事文件都不同：
+     *   1. `.tmp-*.tmpdir`（Vite 依赖预构建）
+     *   2. `~RFxxxx.TMP`（Word/WPS 打开 CSS 的锁文件）
+     *   3. `docs/design/*.md`（编辑器打开一份文档）
      *   4. `tmp-docx/x/[Content_Types].xml`（解压 docx 的临时目录）
+     *   5. `src/**\/.xxx.tmpdir/*.tmp`（工具原子写在 src 内部生成的临时目录）
      *
-     * 每补一个通配符，下一个新目录又会踩中。根因是 Vite 默认 watch
-     * **整个项目根目录**，而 Windows 上只要文件被任何进程锁住，chokidar 就抛
-     * EBUSY，Vite 又不捕获它 —— Node 进程直接退出，页面上就是「服务器没了」。
+     * 根因：Vite 默认 watch **整个项目根目录**，而 Windows 上只要文件被任何
+     * 进程锁住，chokidar 就抛 EBUSY，Vite 又不捕获它 —— Node 进程直接退出。
      *
-     * 所以改成白名单：只有 src/ 与 public/ 需要 HMR，加上根目录少数几个
-     * 配置与入口文件。其余一律不 watch —— 从此在项目根目录里解压什么、
-     * 生成什么、用什么编辑器打开什么，都不会再把它弄崩。
+     * 所以：**白名单限制根目录 + 临时文件模式始终排除，两者必须并存**。
+     * 只做白名单会漏掉第 5 类（临时目录在 src 内部），只做黑名单会漏掉
+     * 第 3、4 类（谁也不知道下一个临时目录叫什么）。
      */
     watch: {
       ignored: (watchPath: string) => {
         const rel = relative(process.cwd(), watchPath);
         // 项目根本身必须保留，否则整棵树都不 watch 了
         if (!rel) return false;
+
+        // 临时 / 锁文件一律忽略，即使在 src 里也要忽略
+        if (/\.tmpdir([\\/]|$)|[\\/]\.tmp-|\.(tmp|TMP)$|~RF|~\$|\.swp$|~$/.test(rel)) {
+          return true;
+        }
+
         const head = rel.split(/[\\/]/)[0];
         if (head === "src" || head === "public") return false;
         // 根目录下改了需要触发的配置与入口文件

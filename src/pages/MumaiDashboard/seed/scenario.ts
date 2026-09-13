@@ -928,7 +928,21 @@ export const WAVEFORMS: Waveform[] = [
  * 首版异常由演示控制事件触发，关联预置证据；真实模式只有实际检查结果或
  * 检测程序输出才能触发（PRD 3.4）。
  */
-export const ANOMALY_EVENTS: AnomalyEvent[] = [
+/**
+ * 异常事件。
+ *
+ * ⚠️ 这里的 `ANOMALY_EVENTS` 与下面的 `DEVICE_LOGS` **已不再被页面使用**。
+ *
+ * 异常排查页（pages/TriageLog.tsx）现在读 `seed/deviceLogs.ts`：
+ * 异常事件从 4 条扩到 16 条（多数已结案），设备日志从 16 条平铺改成
+ * 「一次启动一个日志包」（每包两三百条）。本文件里这两份保留下来是因为：
+ *   · `DEVICE_LOGS` 的 16 条是**手工写的原始记录**，deviceLogs.ts 里当日
+ *     日志包的锚点直接沿用了它们的措辞与时间戳（27:52 / 27:53 / 27:54 /
+ *     27:56 / 28:01 / …），删掉就失去了「这句话当初为什么这么写」的出处；
+ *   · `ANOMALY_EVENTS` 的前四条同样被 deviceLogs.ts 原样承接。
+ * 改名加 `_LEGACY` 后缀，避免下一个人误以为改这里能改到页面。
+ */
+export const ANOMALY_EVENTS_LEGACY: AnomalyEvent[] = [
   {
     id: "evt-domain-01",
     at: "2026-09-11 28:04",
@@ -1038,7 +1052,7 @@ export const ANOMALY_EVENTS: AnomalyEvent[] = [
  * 前四条沿用原「四项检查」里已经写好的记录（供电、参考件、落盘、信号），
  * 那几条本来就是设备日志的口径，放在检查单里反而埋没了。
  */
-export const DEVICE_LOGS: DeviceLogEntry[] = [
+export const DEVICE_LOGS_LEGACY: DeviceLogEntry[] = [
   { id: "log-001", at: "27:52", level: "INFO", source: "供电", text: "上电自检完成，电池电量 68%，供电电压 12.4V" },
   { id: "log-002", at: "27:53", level: "INFO", source: "ESP32-S3", text: "固件 FW-2.4.1 启动，采集配置 CFG-02 已加载" },
   { id: "log-003", at: "27:54", level: "INFO", source: "树莓派", text: "上位机服务就绪，存储余量 12.4 GB，时间同步偏差 0.18s" },
