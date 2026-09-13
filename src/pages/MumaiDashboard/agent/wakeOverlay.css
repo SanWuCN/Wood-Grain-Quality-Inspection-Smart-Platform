@@ -1,0 +1,203 @@
+/**
+ * 唤醒浮层样式：右下角状态条 + 中央回执对话框。
+ *
+ * 两条原则：
+ *   1. 右下角那块**必须一眼看得见**（用户的原话是"稍微醒目一点"）——
+ *      所以用了实色底 + 强调色描边 + 呼吸点，而不是半透明小字。
+ *   2. 中央对话框**不能挡住操作**：它不是模态，不锁背景，
+ *      4 秒自动收起，也可以直接点 ×。
+ */
+
+/* ── 右下角常驻状态 ─────────────────────────────────────────────── */
+
+.wko {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 9400;
+  min-width: 258px;
+  max-width: 380px;
+  padding: 12px 16px 13px;
+  border-radius: 12px;
+  /* 深色实底：白字在任何页面底色上都读得清，不依赖背后的内容 */
+  background: rgba(16, 24, 38, 0.96);
+  border: 1px solid rgba(120, 160, 220, 0.45);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: #e8eefb;
+  font-size: 13px;
+  line-height: 1.5;
+  backdrop-filter: blur(6px);
+}
+
+.wko.is-live {
+  border-color: rgba(64, 214, 160, 0.75);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(64, 214, 160, 0.25);
+}
+
+.wko__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wko__row b {
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+/* 呼吸点：静止的画面里唯一能表达"一直在听"的东西 */
+.wko__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #9aa7bd;
+  flex: none;
+}
+
+.wko.is-live .wko__dot {
+  background: #40d6a0;
+  animation: wko-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes wko-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(64, 214, 160, 0.55); }
+  50% { opacity: 0.75; transform: scale(1.12); box-shadow: 0 0 0 6px rgba(64, 214, 160, 0); }
+}
+
+.wko__hint {
+  margin: 6px 0 0;
+  color: #a9b6cc;
+  font-size: 12px;
+}
+
+/* 流式字幕：唤醒后正在说的那句话 */
+.wko__partial {
+  margin: 9px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(64, 214, 160, 0.12);
+  border-left: 3px solid #40d6a0;
+  color: #f2f7ff;
+  font-size: 15px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.wko__partial-label {
+  display: inline-block;
+  margin-right: 7px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(64, 214, 160, 0.25);
+  color: #8ff0c8;
+  font-size: 11px;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+
+/* 光标：表示这句话还在长 */
+.wko__caret {
+  display: inline-block;
+  width: 2px;
+  height: 15px;
+  margin-left: 2px;
+  background: #40d6a0;
+  vertical-align: -3px;
+  animation: wko-blink 1s steps(2, start) infinite;
+}
+
+@keyframes wko-blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+.wko__count {
+  margin: 7px 0 0;
+  color: #7f8ca3;
+  font-size: 11px;
+}
+
+/* ── 中央回执对话框 ─────────────────────────────────────────────── */
+
+.wkd {
+  position: fixed;
+  inset: 0;
+  z-index: 9410;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 不锁背景：这不是模态确认，只是回执。挡操作比看得见更糟 */
+  pointer-events: none;
+}
+
+.wkd__card {
+  pointer-events: auto;
+  min-width: 340px;
+  max-width: min(620px, 82vw);
+  padding: 18px 22px 20px;
+  border-radius: 16px;
+  background: rgba(16, 24, 38, 0.97);
+  border: 1px solid rgba(64, 214, 160, 0.55);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  color: #eef4ff;
+  animation: wkd-in 0.22s ease-out;
+}
+
+@keyframes wkd-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.wkd__card header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 12px;
+}
+
+.wkd__card header b {
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: #8ff0c8;
+}
+
+.wkd__card header button {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #cfd9ea;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wkd__card header button:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.wkd__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #40d6a0;
+  flex: none;
+}
+
+.wkd__text {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.wkd__raw {
+  margin: 10px 0 0;
+  color: #8d9ab0;
+  font-size: 12px;
+}

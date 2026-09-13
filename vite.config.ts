@@ -1,6 +1,44 @@
-import { defineConfig } from "vite";
+import { defineConfig, type ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
 import { relative, resolve } from "node:path";
+
+/**
+ * 给代理加错误处理 —— **这是必须的，不是可选优化**。
+ *
+ * 实测踩过：被代理的服务不在时，代理层的连接错误会以 `Error: read ECONNRESET`
+ * 形式**冒到进程级**，把整个 vite dev server 打挂
+ * （日志里能看到 `Emitted 'error' event on Socket instance` 然后进程退出）。
+ * 表现极具误导性：页面突然打不开，而真正的原因是"某个后端没起"。
+ *
+ * 加上它之后，后端不在只会让**那一个请求**返回 502 并打印一行日志，页面照常可用。
+ *
+ * 参数类型直接取 vite 的 `ProxyOptions["configure"]`，不自己手写结构类型 ——
+ * 手写的那版只声明了 `on`，与真实的 `ProxyServer` 不兼容，`tsc -b` 会报
+ * TS2769（每个代理一条）。注意 `tsc -b` 覆盖 vite.config.ts，
+ * 而平时只跑 `tsc -p tsconfig.app.json` 是看不到这个错的。
+ */
+function attachProxyErrorHandler(name: string): NonNullable<ProxyOptions["configure"]> {
+  return (proxy) => {
+    proxy.on("error", (error, _req, res) => {
+      console.warn(`[proxy] ${name}不可用：${error.message}`);
+      // res 是 ServerResponse（HTTP）或 Socket（WebSocket），两种都要照顾
+      const target = res as unknown as {
+        writeHead?: (code: number, headers?: Record<string, string>) => void;
+        end?: (body?: string) => void;
+        destroy?: () => void;
+        writable?: boolean;
+      };
+      if (typeof target.writeHead === "function" && target.writable !== false) {
+        target.writeHead(502, { "content-type": "application/json; charset=utf-8" });
+        target.end?.(
+          JSON.stringify({ code: "UPSTREAM_DOWN", message: `${name}不可用`, fieldErrors: [], retryable: true }),
+        );
+      } else if (typeof target.destroy === "function") {
+        target.destroy();
+      }
+    });
+  };
+}
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -42,6 +80,38 @@ export default defineConfig({
         target: process.env.MUMAI_API ?? "http://localhost:8000",
         ws: true,
         changeOrigin: true,
+      },
+      /**
+       * 本地语音通道 —— **全部走同源，前端不认识模型的端口**。
+       *
+       * 为什么不直连 `127.0.0.1:8770`：页面若是 https，浏览器会拦 `ws://`
+       * （混合内容），直连必然失败；走同源 `/voice-*` 则 https→wss、
+       * http→ws 自动匹配，开发与部署同一套代码。
+       *
+       * 这两条指向**桥接层**（voice-module/bridge，默认 8780），
+       * 由它去连本机的 Python 识别服务（8770）并管它的生命周期。
+       *
+       * `/voice-asr` 与 `/voice-wake` 是**两条独立连接，不能合并**：
+       *   /voice-asr   一次连接 = 一句话，服务端定稿后主动关
+       *   /voice-wake  长连接一直在听（唤醒用）
+       * 合并会出现"唤醒听着听着连接就没了"。
+       */
+      "/voice-asr": {
+        target: process.env.MUMAI_VOICE ?? "ws://127.0.0.1:8780",
+        ws: true,
+        rewrite: () => "/voice-asr",
+        configure: attachProxyErrorHandler("语音桥接层"),
+      },
+      "/voice-wake": {
+        target: process.env.MUMAI_VOICE ?? "ws://127.0.0.1:8780",
+        ws: true,
+        rewrite: () => "/voice-wake",
+        configure: attachProxyErrorHandler("语音桥接层（唤醒）"),
+      },
+      "/voice-api": {
+        target: process.env.MUMAI_VOICE_HTTP ?? "http://127.0.0.1:8780",
+        changeOrigin: true,
+        configure: attachProxyErrorHandler("语音桥接层"),
       },
     },
 

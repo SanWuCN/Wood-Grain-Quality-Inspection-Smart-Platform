@@ -20,6 +20,8 @@ import { Icon } from "./icons";
 import { SourceTag, StateBlock, StatusChip } from "./ui";
 import AgentHost from "./agent/AgentHost";
 import { openAgent } from "./agent";
+import { wakeChannel } from "./agent/wakeChannel";
+import type { WakeChannelState } from "./agent/wakeChannel";
 import { INTENTS, INTENT_COUNT } from "./agent/intents";
 import type { Intent } from "./agent/intents";
 import {
@@ -143,6 +145,26 @@ export default function SmallWoodPanel() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
   const timers = useRef<number[]>([]);
+  /**
+   * 常驻唤醒开关。
+   *
+   * 状态**不是**本组件自己的 useState —— 它必须反映 `wakeChannel()` 的真实状态，
+   * 否则"面板关掉再打开"就会显示成关闭，而通道其实还在听。
+   * 单例在模块级，所以关闭面板不会停掉唤醒，这正是想要的行为：
+   * 用户点一次「常驻唤醒」，关掉面板，之后随时喊「小木小木」都能唤起。
+   */
+  const [wakeState, setWakeState] = useState<WakeChannelState>(() => wakeChannel().currentState);
+  useEffect(() => wakeChannel().subscribe((snap) => setWakeState(snap.state)), []);
+  const toggleWake = useCallback(async () => {
+    const channel = wakeChannel();
+    if (channel.currentState === "live" || channel.currentState === "starting") {
+      channel.stop();
+      return;
+    }
+    await channel.start();
+    // 失败时不要在这里写死状态：start() 内部会把 error 推给订阅者，
+    // 这里再写一次就会出现"两个来源"，界面上看到哪个取决于时序
+  }, []);
 
   const toolLabel = useCallback(
     (key: string) => key,
@@ -393,6 +415,19 @@ export default function SmallWoodPanel() {
           </span>
         </div>
         <div className="xm__head-actions">
+          <button
+            type="button"
+            className={`xm__voice-open${wakeState === "live" ? " is-live" : ""}`}
+            onClick={() => void toggleWake()}
+            title={
+              wakeState === "live"
+                ? "常驻唤醒已开启：说两遍「小木小木」即可唤起。点此关闭。"
+                : "开启常驻唤醒：说两遍「小木小木」就能唤起小木，不用点任何按钮。需要麦克风权限。"
+            }
+          >
+            <Icon name="wave" />
+            {wakeState === "live" ? "唤醒中" : wakeState === "starting" ? "启动中" : "常驻唤醒"}
+          </button>
           <button
             type="button"
             className="xm__voice-open"
