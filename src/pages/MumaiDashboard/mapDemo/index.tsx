@@ -9,16 +9,40 @@ import Bottom from "./bottom";
 import BeamLight from "./beamLight";
 import { useCanvasRoot } from "./useCanvasRoot";
 import { MAP_MODE_EVENT, useDashboardStore, type MapMode } from "../map/store";
+import { useConfigStore } from "./stores";
 import { chinaSites, shanghaiSites } from "../data";
 import type { CityGeoJSON } from "@/types/map";
 
 import chinaMapData from "@/assets/map/china.json";
 import shanghaiMapData from "@/assets/map/shanghai.json";
 import chinaOutlineData from "@/assets/map/china_outline.json";
+import chinaSurface from "@/assets/map/china_surface.png";
+import shanghaiSurface from "@/assets/map/shanghai_surface.png";
 
 const chinaData = chinaMapData as CityGeoJSON,
   shanghaiData = shanghaiMapData as CityGeoJSON,
   chinaOutline = chinaOutlineData as CityGeoJSON;
+
+/**
+ * **贴图预取**（A01 的真正修法）。
+ *
+ * 实测：`china_surface.png`（1.5 MB）的请求是在 `Base` 挂载之后才发出的，
+ * 而地表贴图要等它下载完才能烤 —— 整条链路 **17 秒**
+ * （`performance.now()` 实测 imgAt = 17046）。这 17 秒画布上什么都没有，
+ * 就是用户看到的「纯黑空屏」。
+ *
+ * 光加遮罩不够：遮罩只把「黑屏」换成「正在初始化」，17 秒的等待本身还在。
+ * 所以把请求提到**模块求值阶段** —— 组件还没开始渲染，浏览器已经在下载；
+ * `useImage` 之后再请求同一张图走 HTTP 缓存，`onload` 几乎立刻回调。
+ *
+ * 中国与上海都预取：下钻时同样不该等。
+ */
+void [chinaSurface, shanghaiSurface].map((src) => {
+  const pre = new Image();
+  pre.decoding = "async";
+  pre.src = src;
+  return pre;
+});
 
 /**
  * 中国模式：主体 + 国界外轮廓；上海模式：只换主体（上海不需要外轮廓）。
@@ -48,6 +72,29 @@ const CanvasWrapper = styled.div`
   background: #000000;
 `;
 
+/**
+ * 加载遮罩（A01）。
+ *
+ * 原来这里是 `<Suspense fallback={null}>` —— DEM 贴图加载 + 2048px 地表烘焙
+ * 大约要 3 秒，这 3 秒画布是纯黑的、连一个像素的反馈都没有。
+ * 用户的原话是「刚打开网页加载是黑屏状态，没有加载动画」。
+ *
+ * 现在盖一层与 Demo2 同语言的极简遮罩：深黑蓝底 + 极弱中心光 + 一行字 + 一条细线。
+ * 它等的是 `onSceneReady`（贴图烤好）而不是 `onReady`（开场播完）——
+ * 两者中间隔着整个 3.5 秒开场，等错了就等于把开场也遮掉。
+ */
+function LoadingVeil({ visible }: { visible: boolean }) {
+  return (
+    <div className={`map-veil${visible ? "" : " is-gone"}`} aria-hidden={!visible}>
+      <div className="map-veil__core">
+        <b>木脉智检</b>
+        <span>MAP INITIALIZING</span>
+        <i className="map-veil__line" />
+      </div>
+    </div>
+  );
+}
+
 export interface MapProps {
   mode: MapMode;
   /** 开场时间线播完后回调一次，用于外部启动面板入场 */
@@ -69,6 +116,41 @@ export default function Map(props: MapProps) {
 
   const { canvasRef, getRoot } = useCanvasRoot();
   const [loadedMode, setLoadedMode] = useState<MapMode>(mode);
+  /**
+   * 地表贴图烤好了没有：遮罩等它，不等开场动画。
+   * 走 store 而不是 props 回调 —— 这套 setState 在本模块已经跑通。
+   */
+  /**
+   * 遮罩撤掉的时刻 = `mapPlayComplete`（镜头推完 = 地图开始显形）。
+   *
+   * 试过用「贴图就绪」当信号，但它偏偏撤不干净（试了两套写法）。
+   * 改用这个已经跑通的信号还有一个好处：遮罩盖住的是
+   * 「加载 + 镜头飞行」整段 —— 这两段时间画面本来就没有地图主体，
+   * 揭开时正好接上 2.5→3.5s 的材质淡入，中间不留暗场。
+   */
+  /** 遮罩是否还盖着：本地状态 + 定时揭幕，不依赖场景反馈（见文件顶部说明） */
+  const [veiled, setVeiled] = useState(true);
+
+  /**
+   * 换图（下钻 / 返回）时重新落遮罩。
+   *
+   * 不这么做的话，切到上海会先看到旧的中国地图被淡出、然后一小段空白 ——
+   * 那正是加载遮罩要消掉的东西。
+   */
+  /**
+   * 揭幕：挂载后 900ms 撤遮罩，**同一帧**置 introArmed 让开场开始。
+   * 900ms 是留给预取命中的窗口；贴图万一还没到，base 的时间线会等它，
+   * 不会出现「遮罩撤了但地图不来」。
+   */
+  useEffect(() => {
+    useConfigStore.setState({ introArmed: false });
+    setVeiled(true);
+    const timer = window.setTimeout(() => {
+      setVeiled(false);
+      useConfigStore.setState({ introArmed: true });
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [loadedMode]);
 
   /**
    * 真正的切换：淡出 → 换数据（重新取景）→ 淡入。
@@ -191,6 +273,7 @@ export default function Map(props: MapProps) {
         {on("mirror") ? <Mirror /> : null}
         {on("beam") ? <BeamLight /> : null}
       </Canvas>
+      <LoadingVeil visible={veiled} />
     </CanvasWrapper>
   );
 }

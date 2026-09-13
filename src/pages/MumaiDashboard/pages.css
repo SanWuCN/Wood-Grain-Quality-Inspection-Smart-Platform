@@ -984,6 +984,87 @@
   background-color: transparent;
 }
 
+/*
+  地图加载遮罩（A01）。
+  深黑蓝底 + 极弱中心光 + 一行字 + 一条细线，与 Demo2 同一套语言：
+  不另做一套复杂 UI，只把「纯黑空屏」变成「正在初始化」。
+
+  等的是地表贴图烤好（onSceneReady），不是开场动画播完 —— 后者会连开场一起遮掉。
+  淡出 0.45s，接上开场第一帧。
+*/
+.map-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(60% 45% at 50% 52%, rgba(28, 52, 88, 0.55), transparent 70%),
+    #04070f;
+  opacity: 1;
+  transition: opacity 0.45s ease;
+}
+
+.map-veil.is-gone {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.map-veil__core {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.map-veil__core b {
+  color: #e8f3ff;
+  font-size: var(--fs-panel);
+  font-weight: 600;
+  letter-spacing: 0.22em;
+}
+
+.map-veil__core span {
+  color: #5d7ea8;
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+  letter-spacing: 0.34em;
+}
+
+/* 细线：不确定进度条，来回扫；比转圈更克制，也和 Demo2 的线路语言一致 */
+.map-veil__line {
+  position: relative;
+  display: block;
+  width: 168px;
+  height: 1px;
+  overflow: hidden;
+  background: rgba(143, 194, 255, 0.16);
+}
+
+.map-veil__line::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 42%;
+  background: linear-gradient(90deg, transparent, #8fc2ff, transparent);
+  animation: map-veil-sweep 1.15s ease-in-out infinite;
+}
+
+@keyframes map-veil-sweep {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(240%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-veil__line::after {
+    animation: none;
+    width: 100%;
+  }
+}
+
 /* 左右各一栏：每栏上下两块面板，靠 grid 撑满留白区。
    grid 的高度由 top/bottom 决定，所以两栏高度必然相等，面板不会互相重叠；
    每块面板 flex:1 等分，面板内部再滚动，内容不会被裁掉。 */

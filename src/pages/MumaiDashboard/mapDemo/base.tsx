@@ -57,6 +57,14 @@ export interface BaseProps {
   /** 开场时间线播完（含 mapPlayComplete 置位）后回调 */
   onReady?: () => void;
   /**
+   * **场景真正可以看了**：DEM 贴图已加载、地表贴图已烤好。
+   *
+   * 与 `onReady`（开场动画播完）是两件事，中间差着整个 3.5 秒的开场。
+   * 加载遮罩要等的是这一个 —— 贴图没就绪就撤遮罩，观众看到的是黑屏，
+   * 那正是「Hard Reload 后一片纯黑」的来源。
+   */
+  onSceneReady?: () => void;
+  /**
    * 取景留白系数：1.0 = 刚好内接，越大留白越多。
    * 中国与上海跨度差 13 倍，靠这个系数把两者框到同样的画面比例。
    */
@@ -88,6 +96,7 @@ export default function Base(props: BaseProps) {
   } = props;
   const on = (name: string) => debug !== `no${name}` && debug !== "minimal";
 
+  const introArmed = useConfigStore((state) => state.introArmed);
   const groupRef = useRef<Group>(null!);
   const camera = useThree((state) => state.camera);
   const canvasSize = useThree((state) => state.size);
@@ -326,6 +335,18 @@ export default function Base(props: BaseProps) {
   useLayoutEffect(() => {
     const group = groupRef.current;
     if (!group) return;
+    /*
+     * **贴图没就绪就不许开场。**
+     *
+     * 原来这个 effect 依赖是 `[]`，组件一挂载时间线就跑：2.5 秒推镜头 +
+     * 1 秒展开 + 1 秒淡入，而 DEM 贴图的加载与 2048px 地表烘焙是异步的、
+     * 要 3 秒上下。于是**动画在黑屏里演完了**，贴图一到，整幅地图直接以终态出现
+     * —— 现象就是「黑屏几秒，然后所有东西突然一起出现」，也正是用户报的 A01/A02。
+     *
+     * 现在门控在 `mapTexture` 上：贴图就绪的那一帧才开始推镜头，
+     * 遮罩同时撤掉，观众看到的是完整开场。
+     */
+    if (!mapTexture || !introArmed) return;
 
     const tl = gsap.timeline();
     tl.to(group.position, { x: 0, y: 0, z: 0, duration: 1 }, MAP_PUSH_DURATION);
@@ -371,8 +392,18 @@ export default function Base(props: BaseProps) {
       tl.kill();
       settle();
     };
+    // 依赖只有 mapTexture：它由 null 变成贴图的那一刻跑一次。
+    // 不能再带上 fitDistance —— 画布尺寸一确定 fitDistance 就变，
+    // 时间线会被 kill 重建，而各材质 opacity 起点是 0，重建没跑完地图就整幅透明。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mapTexture, introArmed]);
+
+  /** 贴图就绪 = 遮罩可以撤了；与开场动画同帧发生，中间不留黑屏 */
+  const sceneReadyRef = useRef(props.onSceneReady);
+  sceneReadyRef.current = props.onSceneReady;
+  useEffect(() => {
+    if (mapTexture) useConfigStore.setState({ sceneReady: true });
+  }, [mapTexture]);
 
   return (
     <>
