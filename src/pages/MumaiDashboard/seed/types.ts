@@ -81,10 +81,22 @@ export type DeviceReading = {
    * 手持设备在采集中读数本来就会小幅摆动，一条钉死的数字反而假。
    * 界面按这个幅度做确定性摆动（围绕 value，不产生超出幅度的漂移），
    * 幅度缺省表示该项不摆动 —— 版本号、采样时间这类不该抖。
+   *
+   * 只在**种子兜底**时用：真机上报的读数不做摆动，设备说多少就是多少。
    */
   drift?: number;
   /** 摆动周期（秒），不同项给不同周期，避免所有数字同频一起跳 */
   driftPeriod?: number;
+  /**
+   * 读数来源（终端上报才有这一项）。
+   *
+   * 终端把来源分成三档：`real` 本机实测 / `derived` 由实测推算 /
+   * `estimated` 本机没有该采集接口时的估算。页面必须原样显示这三档，
+   * 不能一律当实测值 —— 这是终端文档 §2.5 的硬口径。
+   */
+  source?: "real" | "derived" | "estimated";
+  /** 采集口径（如 `/var/lib/woodpulse`、`psutil`、`vcgencmd`），Tooltip 用 */
+  origin?: string;
 };
 
 /** 环境记录（PRD 3.1 / 12：温度℃、湿度 0–100、风速非负、仪表、位置、测量时间） */
@@ -294,7 +306,7 @@ export type ScanBatch = {
   batchId: string;
   componentId: string;
   zoneId: string;
-  round: "初扫" | "复扫" | "补扫";
+  round: "初扫" | "复扫" | "补扫" | "参考";
   configVersion: string;
   modelVersion: string;
   rawLevel: "ADC" | "IQ" | "spectrum" | "features" | "result_only" | "opaque";
@@ -345,6 +357,71 @@ export type DeviceLogSource =
   | "毫米波模块"
   | "传输"
   | "供电";
+
+/**
+ * 一次设备启动的**结果档位**。
+ *
+ * 用户要求「95% 都是正常没有异常的记录」，所以「正常」必须是可判定的一个档，
+ * 而不是靠人看有没有徽标：
+ *   正常   = 包内没有 WARN、也没有 ERROR
+ *   需留意 = 有 WARN，但没有 ERROR
+ *   异常   = 有 ERROR
+ * 这三档由生成器保证（正常包只从无噪声模板里抽），页面按它筛选与着色。
+ */
+export type DeviceLogOutcome = "正常" | "需留意" | "异常";
+
+/** 会话结束方式：主动关机 vs 出错中断/掉电 */
+export type DeviceLogEnding = "正常结束" | "异常结束";
+
+/** 日志包的统计量，由生成器算出来，页面直接显示（不写模糊值） */
+export type DeviceLogStats = {
+  total: number;
+  info: number;
+  warn: number;
+  error: number;
+  /** 出现过的 ERROR 摘要，列表里直接能看见，不用点进去找 */
+  errorSummary: string | null;
+  warnSummary: string | null;
+};
+
+/**
+ * 日志包**索引**（列表与筛选用）。
+ *
+ * 30 个包 × 两三百条 ≈ 7000+ 条，内容不在这里 —— 点开某个包时再由
+ * `buildPacket(id)` 按需生成。列表只需要判断「哪一次启动、多久、多少条、
+ * 什么结果」，索引足够了。
+ */
+export type DeviceLogBoot = {
+  id: string;
+  /** 设备启动时刻（mm:ss，与剧本时间轴同口径） */
+  bootAt: string;
+  /** 归属业务日期 */
+  date: string;
+  /** 会话时长（分钟） */
+  durationMin: number;
+  /** 设备标识与显示名，取自 seed 的 DEVICES */
+  deviceId: string;
+  deviceName: string;
+  firmwareVersion: string;
+  configVersion: string;
+  /** 这一段会话里关联的采集批次；没有采集时为 null */
+  batchId: string | null;
+  outcome: DeviceLogOutcome;
+  /** 会话说明：这一趟干了什么 / 为什么停的，不能只写「已停止」 */
+  endNote: string;
+  stats: DeviceLogStats;
+};
+
+/**
+ * 设备日志包（**完整内容**，点开才生成）。
+ *
+ * 一次设备启动就是一段连续会话，所以日志不该平铺成一条流水账 ——
+ * 页面上先给「一个个日志包」，点进去才是那一场会话的完整输出。
+ */
+export type DeviceLogPacket = DeviceLogBoot & {
+  endedAs: DeviceLogEnding;
+  entries: DeviceLogEntry[];
+};
 
 /**
  * 异常事件。

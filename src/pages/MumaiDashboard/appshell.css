@@ -53,11 +53,19 @@
   height: 100%;
 }
 
-/* 设备四路通道：只留文字与状态点，不再一条一个框 */
+/* 顶栏状态区：平台 / 智能车 / 扫描仪 / 模型，只留文字与状态点，不再一条一个框 */
 .appshell__channels {
   display: flex;
   align-items: center;
   gap: var(--space-4);
+  /*
+    不换行、不撑破：这一行与左侧导航同处顶栏第二行，两者都是绝对定位，
+    一旦状态项变宽就会**叠在导航文字上**（原来四路通道还带时间戳时就是这样）。
+    这里给一个上限并允许裁切 —— 窄屏宁可少见一格，也不压住导航。
+  */
+  flex-wrap: nowrap;
+  max-width: min(46vw, 640px);
+  overflow: hidden;
 }
 
 .appshell__channels button {
@@ -69,21 +77,14 @@
   border: 0;
   background: none;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .appshell__channels-label {
   font-size: var(--fs-aux);
   color: var(--text-secondary);
   letter-spacing: 0.02em;
-}
-
-.appshell__channels em {
-  font-family: var(--font-data);
-  font-variant-numeric: tabular-nums;
-  font-style: normal;
-  font-size: var(--fs-aux);
-  color: var(--text-tertiary);
-  text-align: left;
+  white-space: nowrap;
 }
 
 .appshell__source {
@@ -472,7 +473,8 @@
 }
 
 @media (max-width: 1440px) {
-  .appshell__channels em { display: none; }
+  /* 状态区不再有时间戳要收（时间与来源都在 title 里），只收窄间距 */
+  .appshell__channels { gap: var(--space-3); }
   .appshell__source { display: none; }
   .appshell__login em { display: none; }
 }

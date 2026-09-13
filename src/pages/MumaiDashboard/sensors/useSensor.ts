@@ -16,7 +16,8 @@ export async function sensorRequest<T>(path: string, body?: unknown): Promise<T>
 }
 export function useSensor(batchId: string) {
   const sessionId = useSharedStore((s) => s.sessionId);
-  const online = useSharedStore((s) => s.status === 'online');
+  // Workflow connectivity is independent: a transient workflow reconnect must not clear the pose.
+  const actorId = useSharedStore((s) => s.actor?.id ?? null);
   const [frame, setFrame] = useState<SensorFrame | null>(null);
   const [history, setHistory] = useState<SensorFrame[]>([]);
   const [error, setError] = useState('');
@@ -40,17 +41,17 @@ export function useSensor(batchId: string) {
     return () => clearInterval(timer);
   },[]);
   useEffect(() => {
+    latest.current=null; historyAt.current=0; setFrame(null); setHistory([]);
+  }, [batchId,sessionId,actorId]);
+  useEffect(() => {
     let disposed = false;
     let socket: WebSocket | null = null;
     let retry = 0;
     let attempt = 0;
     let loading = false;
     let historyDevice = '';
-    latest.current = null;
-    historyAt.current = 0;
-    setFrame(null);
-    setHistory([]);
-    if (!online) return;
+    let lastMessage=Date.now();
+    if (!actorId) return;
     const query = new URLSearchParams({sessionId,batchId});
     const poll = async () => {
       if (loading || disposed) return;
@@ -76,21 +77,29 @@ export function useSensor(batchId: string) {
     };
     const connect = () => {
       if (disposed) return;
-      socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws?${new URLSearchParams({sessionId,afterSeq:String(useSharedStore.getState().lastSeq)})}`);
-      socket.onopen = () => { attempt=0; void poll(); };
-      socket.onmessage = (event) => {
+      const current = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws?${new URLSearchParams({sessionId,afterSeq:String(useSharedStore.getState().lastSeq)})}`);
+      socket=current;
+      current.onopen = () => { attempt=0; lastMessage=Date.now(); void poll(); };
+      current.onmessage = (event) => {
+        lastMessage=Date.now();
         try {
           const data = JSON.parse(event.data);
           if (data.kind === 'sensor' && !disposed) accept(data.frame);
         } catch { /* Ignore unrelated workflow events. */ }
       };
-      socket.onclose = () => { if (!disposed) retry = window.setTimeout(connect,Math.min(10000,1000*2**attempt++)); };
-      socket.onerror = () => socket?.close();
+      current.onclose = () => { if (!disposed) retry = window.setTimeout(connect,Math.min(10000,1000*2**attempt++)); };
+      current.onerror = () => current.close();
     };
     void poll();
     connect();
     const poller = window.setInterval(poll,2000);
-    return () => { disposed=true; clearInterval(poller); clearTimeout(retry); socket?.close(); };
-  },[batchId,sessionId,online,accept,revision]);
+    const heartbeat=window.setInterval(()=>{
+      if (socket?.readyState===WebSocket.OPEN) {
+        if (Date.now()-lastMessage>30000) socket.close();
+        else socket.send('ping');
+      }
+    },10000);
+    return () => { disposed=true; clearInterval(poller); clearInterval(heartbeat); clearTimeout(retry); socket?.close(); };
+  },[batchId,sessionId,actorId,accept,revision]);
   return { frame,history,error,bridge,now,sessionId,reconnect: () => setRevision((v)=>v+1) };
 }

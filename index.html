@@ -2,7 +2,15 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <!--
+      站点图标 = 团队标识（品牌蓝圆角底 + 白色符号，见 public/brand/favicon-*.png）。
+      SVG 给现代浏览器，PNG 兜底 16/32 两档；Apple / Windows 磁贴用 180px 那张。
+      素材全部在 public/brand/ 下，路径不带哈希 —— 换图要同步改这里。
+    -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/brand/favicon-16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/brand/apple-touch-icon.png" />
+    <meta name="msapplication-TileImage" content="/brand/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#020711" />
     <meta name="description" content="木脉智检古建筑智能巡检平台演示" />
@@ -39,11 +47,24 @@
         justify-items: center;
         gap: 10px;
       }
+      /*
+        团队 logo：整条字标（含符号），在 .core 里居中（justify-items:center），
+        转圈退到 logo 下面当进度指示 —— 原来只有三个空环，看不出这是哪个平台。
+        与 React 的加载页（LoadingVeil / .map-veil）同一套素材与尺寸。
+      */
+      #boot .wordmark {
+        display: block;
+        width: auto;
+        height: 46px;
+        margin-bottom: 16px;
+        opacity: 0.96;
+        filter: drop-shadow(0 0 18px rgba(120, 158, 255, 0.35));
+      }
       #boot .rings {
         position: relative;
         display: block;
-        width: 132px;
-        height: 132px;
+        width: 96px;
+        height: 96px;
         margin-bottom: 6px;
       }
       #boot .ring {
@@ -131,12 +152,17 @@
     <div id="root">
       <div id="boot">
         <div class="core">
+          <!--
+            首屏加载态用团队 logo（原图抠掉蓝底后的透明 PNG，整条字标含符号）。
+            `#boot` 在 React 挂载前就画出来，所以这里只能写死路径 ——
+            资源放在 `public/brand/`，路径不带哈希；改文件名要同步这里。
+          -->
+          <img class="wordmark" src="/brand/mumai-wordmark-white.png" alt="木脉智检" />
           <span class="rings" aria-hidden="true">
             <i class="ring outer"></i>
             <i class="ring mid"></i>
             <i class="ring inner"></i>
           </span>
-          <b>木脉智检</b>
           <span class="ascii">MAP INITIALIZING</span>
           <i class="line"></i>
         </div>

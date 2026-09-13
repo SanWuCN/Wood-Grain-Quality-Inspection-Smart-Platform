@@ -19,7 +19,8 @@
  * 目标载体与回退方式都不一样，混成一张表就只能比大小了。
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import { Btn, Modal, StateBlock, StatusChip } from "../ui";
 import { useMumai } from "../context";
@@ -54,6 +55,46 @@ function inferTarget(name: string): DeliveryTarget {
 function versionFromName(name: string): string {
   return name.replace(/\.(engine|bin|pt|onnx|tar|gz|zip)$/i, "");
 }
+
+/**
+ * 「12.40 MB」这类**已经格式化好的大小串** → 数值 + 单位，交给数字动效组件滚。
+ *
+ * 两个刻意的选择：
+ *   · 小数位从原串里数出来（`3.12` → 2 位、`86` → 0 位），滚动前后的文本与
+ *     原串逐字一致，不改平台既有的显示精度；
+ *   · `group={false}` —— 这些串本来就是 `toFixed` 口径、不带千分位，
+ *     开着千分位会把「1234.50 MB」显示成「1,234.50 MB」，等于偷偷换了排版。
+ * 串里没有数字（例如「—」）就原样渲染，不做任何事。
+ */
+const SIZE_TEXT = /^([\d.]+)(.*)$/;
+
+function SizeText({ text }: { text: string }) {
+  const matched = SIZE_TEXT.exec(text.trim());
+  const value = matched ? Number(matched[1]) : Number.NaN;
+  if (!matched || !Number.isFinite(value)) return <>{text}</>;
+  return (
+    <NumberAnimation
+      value={value}
+      digits={matched[1].split(".")[1]?.length ?? 0}
+      group={false}
+      suffix={matched[2]}
+    />
+  );
+}
+
+/**
+ * 「本轮产物」四段轨道的一步。
+ *
+ * `detail` 放宽成 `ReactNode`：里面有「已取用 N 次」这种会变的数，
+ * 数字要逐帧改自己那个文本节点，就不能先被拼成一个字符串。
+ */
+type TrackStep = {
+  key: string;
+  label: string;
+  done: boolean;
+  owner: string;
+  detail: ReactNode;
+};
 
 /* ------------------------------------------------------------------ *
  * 上传产物
@@ -128,9 +169,25 @@ function UploadModal({
         <span>
           <b>{file ? file.name : "点击选择产物文件"}</b>
           <em>
-            {file
-              ? `${(file.bytes / 1024 / 1024).toFixed(2)} MB`
-              : `支持 ${ALLOWED_EXT.join(" / ")}`}
+            {file ? (
+              <>
+                {/*
+                  数字动效渲染出来的是 `<span>`，而 `.pkg-drop span` 是
+                  `display:flex; flex-direction:column` —— 那是给外层文案列的，
+                  会把这个数字也变成块级 flex 盒，把「3.12 MB」拆成两行。
+                  内联样式优先级高于那条选择器，这里把它退回行内、字号颜色继续继承。
+                */}
+                <NumberAnimation
+                  value={file.bytes / 1024 / 1024}
+                  digits={2}
+                  group={false}
+                  style={{ display: "inline", fontSize: "inherit", color: "inherit" }}
+                />{" "}
+                MB
+              </>
+            ) : (
+              `支持 ${ALLOWED_EXT.join(" / ")}`
+            )}
           </em>
         </span>
       </label>
@@ -288,12 +345,19 @@ export function DeliveryTab() {
         </span>
         <StatusChip text={artifact.target} tone={TARGET_TONE[artifact.target] ?? "info"} />
         <span className="art-row__ver">{artifact.modelVersion}</span>
-        <span className="art-row__num">{artifact.sizeText}</span>
+        <span className="art-row__num">
+          <SizeText text={artifact.sizeText} />
+        </span>
         <span className="art-row__num">{artifact.sha256}</span>
         <span className="art-row__checks">
           {artifact.checks.filter((check) => !check.pass).length > 0 ? (
             <StatusChip
-              text={`${artifact.checks.filter((check) => !check.pass).length} 项待处理`}
+              /* chip 是 `inline-flex + gap:5px`：整段文案包一层 span，数字才不会被 gap 撑开 */
+              text={
+                <span>
+                  <NumberAnimation value={artifact.checks.filter((check) => !check.pass).length} /> 项待处理
+                </span>
+              }
               tone="warn"
             />
           ) : (
@@ -336,31 +400,37 @@ export function DeliveryTab() {
     const receipts = current.data.receipts ?? [];
     const verified = receipts.some((item) => item.pass);
     const downloaded = (current.data.downloadCount ?? 0) > 0;
+    const steps: TrackStep[] = [
+      { key: "build", label: "生成", done: true, owner: "史 · 人工智能架构师", detail: current.data.fromJob ?? "手工上传" },
+      { key: "check", label: "校验", done: true, owner: "平台", detail: `${current.data.sizeText} · 摘要 ${current.data.sha256.slice(0, 12)}…` },
+      {
+        key: "publish",
+        label: "发布",
+        done: state !== "待提交",
+        owner: "史 · 人工智能架构师",
+        detail: current.data.publishedAt ? `发布于 ${current.data.publishedAt.slice(0, 19).replace("T", " ")}` : "尚未发布",
+      },
+      {
+        key: "receive",
+        label: "接收",
+        done: downloaded,
+        owner: "饶 · 全栈开发工程师",
+        detail: downloaded ? (
+          <>
+            已取用 <NumberAnimation value={current.data.downloadCount} /> 次
+            {verified ? " · 摘要已回验" : " · 等待提交摘要"}
+          </>
+        ) : (
+          "尚未取用"
+        ),
+      },
+    ];
     return {
       name: current.data.name,
       version: current.data.modelVersion,
       target: current.data.target,
       demoOnly: current.data.demoOnly,
-      steps: [
-        { key: "build", label: "生成", done: true, owner: "史 · 人工智能架构师", detail: current.data.fromJob ?? "手工上传" },
-        { key: "check", label: "校验", done: true, owner: "平台", detail: `${current.data.sizeText} · 摘要 ${current.data.sha256.slice(0, 12)}…` },
-        {
-          key: "publish",
-          label: "发布",
-          done: state !== "待提交",
-          owner: "史 · 人工智能架构师",
-          detail: current.data.publishedAt ? `发布于 ${current.data.publishedAt.slice(0, 19).replace("T", " ")}` : "尚未发布",
-        },
-        {
-          key: "receive",
-          label: "接收",
-          done: downloaded,
-          owner: "饶 · 全栈开发工程师",
-          detail: downloaded
-            ? `已取用 ${current.data.downloadCount} 次${verified ? " · 摘要已回验" : " · 等待提交摘要"}`
-            : "尚未取用",
-        },
-      ],
+      steps,
       verified,
     };
   }, [current]);
@@ -437,7 +507,19 @@ export function DeliveryTab() {
         extra={
           selected ? (
             <StatusChip
-              text={failed.length > 0 ? `${failed.length} 项未通过` : "全部通过"}
+              /*
+                chip 是 `inline-flex + gap:5px`：整段文案包一层 span，数字才不会被 gap 撑开。
+                「全部通过」那一支保持原样，不把 0 显示成「0 项未通过」。
+              */
+              text={
+                failed.length > 0 ? (
+                  <span>
+                    <NumberAnimation value={failed.length} /> 项未通过
+                  </span>
+                ) : (
+                  "全部通过"
+                )
+              }
               tone={failed.length > 0 ? "warn" : "ok"}
               dot
             />
@@ -456,7 +538,7 @@ export function DeliveryTab() {
             </ul>
             {failed.length > 0 ? (
               <p className="dl-block">
-                有 {failed.length} 项未通过，暂不能发布。校验不通过的产物不给提交入口 ——
+                有 <NumberAnimation value={failed.length} /> 项未通过，暂不能发布。校验不通过的产物不给提交入口 ——
                 发布出去的是别人要烧进设备的东西，不能靠「先发了再说」。
               </p>
             ) : null}
@@ -470,7 +552,9 @@ export function DeliveryTab() {
         title="已发布产物"
         extra={
           online ? (
-            <span className="muted">{sharedArtifacts.length} 项 · 平台可下载</span>
+            <span className="muted">
+              <NumberAnimation value={sharedArtifacts.length} /> 项 · 平台可下载
+            </span>
           ) : (
             <StatusChip text="未连接共享服务" tone="warn" />
           )
@@ -493,13 +577,15 @@ export function DeliveryTab() {
                   <span className="art-row__name">
                     <b>{item.data.name}</b>
                     <i>
-                      {item.data.fromJob ?? "手工上传"} · rev {item.revision}
+                      {item.data.fromJob ?? "手工上传"} · rev <NumberAnimation value={item.revision} />
                       {item.data.demoOnly ? " · 演示资产" : ""}
                     </i>
                   </span>
                   <StatusChip text={item.data.target} tone="info" />
                   <span className="art-row__ver">{item.data.modelVersion}</span>
-                  <span className="art-row__num">{item.data.sizeText}</span>
+                  <span className="art-row__num">
+                    <SizeText text={item.data.sizeText} />
+                  </span>
                   <span className="art-row__num">{item.data.sha256.slice(0, 16)}…</span>
                   <span className="art-row__checks">
                     <StatusChip
@@ -507,7 +593,9 @@ export function DeliveryTab() {
                       tone={item.data.state === "已回验" ? "ok" : item.data.state === "已下载" ? "info" : "muted"}
                     />
                     {item.data.downloadCount ? (
-                      <em className="muted">取用 {item.data.downloadCount} 次</em>
+                      <em className="muted">
+                        取用 <NumberAnimation value={item.data.downloadCount} /> 次
+                      </em>
                     ) : null}
                   </span>
                 </span>

@@ -199,7 +199,7 @@ export const CLOCK_PHASES: ClockPhase[] = [
 export const DEMO_EVENTS: DemoEvent[] = [
   { key: "domain-pending", label: "触发适用域待核验", detail: "冻结 scan-Z04-001 诊断输出，四柱状态置为待核验", effect: "该批诊断输出冻结，传感器状态置为等待操作员确认停止", tone: "red" },
   { key: "preset-annotation", label: "切换为预设标注演示", detail: "明确标注「预设标注演示」，不称为实时视觉推理", effect: "初筛结果来源标记为预设标注", tone: "amber" },
-  { key: "source-switch", label: "切换数据来源：演示车 / 实机", detail: "只能在任务停止后进行（PRD 3.2）", effect: "通道来源改为「演示车 · replay」或「实机 · live」", tone: "amber" },
+  { key: "source-switch", label: "切换数据来源：智能巡检车 / 算力服务器", detail: "只能在任务停止后进行（PRD 3.2）", effect: "通道来源改为「智能巡检车 · replay」或「算力服务器 · live」", tone: "amber" },
   { key: "deliver-package", label: "下发演示更新包", detail: "DEMO-PKG-02 · demo_nonflashable", effect: "交付步骤从「封装」推进到「下发」", tone: "cyan" },
   { key: "draft-order", label: "生成复核工单草稿", detail: "小木按所选风险生成草稿并带入证据", effect: "新建 WO-2026-0912，状态为草稿", tone: "cyan" },
   { key: "archive-check", label: "运行归档完整性校验", detail: "逐项存在性检查 + SHA-256 摘要对比", effect: "输出缺失与不一致文件清单", tone: "cyan" },
@@ -212,17 +212,31 @@ export const DEMO_EVENTS: DemoEvent[] = [
  * ------------------------------------------------------------------ */
 
 export const CHANNELS: ChannelStatus[] = [
-  { key: "map", label: "地图", state: "online", updatedAt: "14:22:31", ageSec: 2, source: "演示车 · replay" },
-  { key: "pose", label: "位姿", state: "online", updatedAt: "14:22:33", ageSec: 1, source: "演示车 · replay" },
+  { key: "map", label: "地图", state: "online", updatedAt: "14:22:31", ageSec: 2, source: "智能巡检车 · replay" },
+  { key: "pose", label: "位姿", state: "online", updatedAt: "14:22:33", ageSec: 1, source: "智能巡检车 · replay" },
   { key: "video", label: "视频", state: "stale", updatedAt: "14:22:24", ageSec: 9, source: "MJPEG 同源转发" },
-  { key: "vehicle", label: "车辆", state: "online", updatedAt: "14:22:32", ageSec: 2, source: "ROS1 rosbridge · 只读" },
+  /* key 仍是 vehicle（通道协议与权限口径不改），对外标签改为「算力」：
+     这一路现在承载的是算力服务器的心跳，不是车端运动通道 */
+  { key: "vehicle", label: "算力", state: "online", updatedAt: "14:22:32", ageSec: 2, source: "算力服务器 · 平台本体" },
 ];
 
-/** 设备档案：演示车与实机名称明显不同（PRD 3.2） */
+/**
+ * 设备档案。
+ *
+ * 三台设备的对外名称是这一份，页面一律引用 `DEVICES.*.name`，不再各写一遍：
+ *   · `scanner`   毫米波扫描仪（手持采集设备）
+ *   · `demoCart`  智能巡检车（回放建图与巡检轨迹）
+ *   · `realCart`  算力服务器（平台本体的算力资源，只读监看）
+ *
+ * `realCart` 的 id 与 `live` 模式保持不变：它是「实机通道」的既有约定，
+ * 换的只是对外名称与它在总览页承载的语义（从一台车变成平台算力）。
+ * 算力服务器的**实时读数**（存储 / 内存 / GPU / 功耗 / 网络）不在这里写死，
+ * 由 `/api/system/metrics` 采集运行后端那台机器的真实占用，见 platformData。
+ */
 export const DEVICES = {
-  demoCart: { id: "cart-demo-01", name: "演示车 DEMO-CART-01", mode: "replay" as SourceMode },
-  realCart: { id: "cart-real-01", name: "实机 FIREBAT-N100", mode: "live" as SourceMode },
-  scanner: { id: "scan-dev-02", name: "手持毫米波 02 号机", mode: "simulation" as SourceMode },
+  demoCart: { id: "cart-demo-01", name: "智能巡检车", mode: "replay" as SourceMode },
+  realCart: { id: "cart-real-01", name: "算力服务器", mode: "live" as SourceMode },
+  scanner: { id: "scan-dev-02", name: "毫米波扫描仪", mode: "simulation" as SourceMode },
 };
 
 /**
@@ -262,7 +276,7 @@ export const CAPTURE_SCREEN_STREAM: {
   image: "/rviz-reference.png",
   url: null,
   kind: "mjpeg",
-  source: "手持毫米波 02 号机 · 上位机屏幕",
+  source: "毫米波扫描仪 · 上位机屏幕",
   note: "采集端上位机屏幕推流；未接入时显示最近一帧静态画面，不标作实时。",
 };
 
@@ -928,7 +942,21 @@ export const WAVEFORMS: Waveform[] = [
  * 首版异常由演示控制事件触发，关联预置证据；真实模式只有实际检查结果或
  * 检测程序输出才能触发（PRD 3.4）。
  */
-export const ANOMALY_EVENTS: AnomalyEvent[] = [
+/**
+ * 异常事件。
+ *
+ * ⚠️ 这里的 `ANOMALY_EVENTS` 与下面的 `DEVICE_LOGS` **已不再被页面使用**。
+ *
+ * 异常排查页（pages/TriageLog.tsx）现在读 `seed/deviceLogs.ts`：
+ * 异常事件从 4 条扩到 16 条（多数已结案），设备日志从 16 条平铺改成
+ * 「一次启动一个日志包」（每包两三百条）。本文件里这两份保留下来是因为：
+ *   · `DEVICE_LOGS` 的 16 条是**手工写的原始记录**，deviceLogs.ts 里当日
+ *     日志包的锚点直接沿用了它们的措辞与时间戳（27:52 / 27:53 / 27:54 /
+ *     27:56 / 28:01 / …），删掉就失去了「这句话当初为什么这么写」的出处；
+ *   · `ANOMALY_EVENTS` 的前四条同样被 deviceLogs.ts 原样承接。
+ * 改名加 `_LEGACY` 后缀，避免下一个人误以为改这里能改到页面。
+ */
+export const ANOMALY_EVENTS_LEGACY: AnomalyEvent[] = [
   {
     id: "evt-domain-01",
     at: "2026-09-11 28:04",
@@ -1038,7 +1066,7 @@ export const ANOMALY_EVENTS: AnomalyEvent[] = [
  * 前四条沿用原「四项检查」里已经写好的记录（供电、参考件、落盘、信号），
  * 那几条本来就是设备日志的口径，放在检查单里反而埋没了。
  */
-export const DEVICE_LOGS: DeviceLogEntry[] = [
+export const DEVICE_LOGS_LEGACY: DeviceLogEntry[] = [
   { id: "log-001", at: "27:52", level: "INFO", source: "供电", text: "上电自检完成，电池电量 68%，供电电压 12.4V" },
   { id: "log-002", at: "27:53", level: "INFO", source: "ESP32-S3", text: "固件 FW-2.4.1 启动，采集配置 CFG-02 已加载" },
   { id: "log-003", at: "27:54", level: "INFO", source: "树莓派", text: "上位机服务就绪，存储余量 12.4 GB，时间同步偏差 0.18s" },
@@ -1121,7 +1149,7 @@ export const BOOT_CHECKS: BootCheckItem[] = [
 export const DATA_PACKAGES: DataPackage[] = [
   {
     id: "pkg-Z04-001-raw", name: "scan-Z04-001_radar_spectrum.zip", kind: "原始雷达数据",
-    rawLevel: "spectrum", source: "手持毫米波 02 号机", batchId: "scan-Z04-001", componentId: "Z04",
+    rawLevel: "spectrum", source: "毫米波扫描仪", batchId: "scan-Z04-001", componentId: "Z04",
     frames: 386, sizeText: "412 MB", capturedAt: "2026-09-11 27:36", state: "已入库",
     checks: [
       { key: "schema", label: "格式与字段", pass: true, detail: "420 点频谱 / 每帧含时间戳与测区编号" },
@@ -1132,7 +1160,7 @@ export const DATA_PACKAGES: DataPackage[] = [
   },
   {
     id: "pkg-Z04-001-img", name: "scan-Z04-001_images.zip", kind: "表面图像",
-    rawLevel: "opaque", source: "手持毫米波 02 号机", batchId: "scan-Z04-001", componentId: "Z04",
+    rawLevel: "opaque", source: "毫米波扫描仪", batchId: "scan-Z04-001", componentId: "Z04",
     frames: 12, sizeText: "38.4 MB", capturedAt: "2026-09-11 27:52", state: "已入库",
     checks: [
       { key: "schema", label: "格式与字段", pass: true, detail: "JPEG 12 帧，含张号与拍摄方向" },
@@ -1141,7 +1169,7 @@ export const DATA_PACKAGES: DataPackage[] = [
   },
   {
     id: "pkg-Z04-002-raw", name: "scan-Z04-002_radar_spectrum.zip", kind: "原始雷达数据",
-    rawLevel: "spectrum", source: "手持毫米波 02 号机", batchId: "scan-Z04-002", componentId: "Z04",
+    rawLevel: "spectrum", source: "毫米波扫描仪", batchId: "scan-Z04-002", componentId: "Z04",
     frames: 420, sizeText: "448 MB", capturedAt: "2026-09-11 39:26", state: "已入库",
     checks: [
       { key: "schema", label: "格式与字段", pass: true, detail: "420 点频谱，帧号连续" },
@@ -1152,7 +1180,7 @@ export const DATA_PACKAGES: DataPackage[] = [
   },
   {
     id: "pkg-ref-g1", name: "ref-Z04-g1_radar_adc.zip", kind: "原始雷达数据",
-    rawLevel: "ADC", source: "手持毫米波 02 号机", batchId: "ref-batch-01", componentId: "REF",
+    rawLevel: "ADC", source: "毫米波扫描仪", batchId: "ref-batch-01", componentId: "REF",
     frames: 168, sizeText: "196 MB", capturedAt: "2026-09-11 31:22", state: "已入库",
     checks: [
       { key: "schema", label: "格式与字段", pass: true, detail: "ADC 原始采样，含距离与方向标注" },
@@ -1162,7 +1190,7 @@ export const DATA_PACKAGES: DataPackage[] = [
   },
   {
     id: "pkg-ref-g3", name: "ref-Z04-g3_radar_adc.zip", kind: "原始雷达数据",
-    rawLevel: "ADC", source: "手持毫米波 02 号机", batchId: "ref-batch-01", componentId: "REF",
+    rawLevel: "ADC", source: "毫米波扫描仪", batchId: "ref-batch-01", componentId: "REF",
     frames: 96, sizeText: "112 MB", capturedAt: "2026-09-11 32:05", state: "待审核",
     checks: [
       { key: "schema", label: "格式与字段", pass: true, detail: "ADC 原始采样" },
@@ -1199,7 +1227,7 @@ export const DATA_PACKAGES: DataPackage[] = [
   },
   {
     id: "pkg-cart-map", name: "MAP-SH-06_slam.tar", kind: "混合包",
-    rawLevel: "opaque", source: "演示车 DEMO-CART-01", batchId: null, componentId: null,
+    rawLevel: "opaque", source: "智能巡检车", batchId: null, componentId: null,
     frames: 1, sizeText: "86 MB", capturedAt: "2026-09-11 22:40", state: "已入库",
     checks: [
       { key: "schema", label: "格式与字段", pass: true, detail: "栅格地图 + 位姿轨迹" },
@@ -1207,7 +1235,7 @@ export const DATA_PACKAGES: DataPackage[] = [
   },
   {
     id: "pkg-ref-g2", name: "ref-Z04-g2_radar_adc.zip", kind: "原始雷达数据",
-    rawLevel: "ADC", source: "手持毫米波 02 号机", batchId: "ref-batch-01", componentId: "REF",
+    rawLevel: "ADC", source: "毫米波扫描仪", batchId: "ref-batch-01", componentId: "REF",
     frames: 84, sizeText: "98 MB", capturedAt: "2026-09-11 31:48", state: "待审核",
     checks: [
       { key: "schema", label: "格式与字段", pass: true, detail: "ADC 原始采样" },
@@ -1582,7 +1610,7 @@ export const DELIVERY_ARTIFACTS: DeliveryArtifact[] = [
     checks: [
       { key: "map", label: "地图版本兼容", pass: true, detail: "适配 MAP-SH-06" },
       { key: "fallback", label: "回退包可用", pass: true, detail: "DEMO-CART-1.6.0 备份完整" },
-      { key: "field", label: "实机验证", pass: false, detail: "仅在演示车跑过，实机未获运动权限" },
+      { key: "field", label: "整机验证", pass: false, detail: "仅在智能巡检车上跑过，算力服务器未接运动通道" },
     ],
   },
   {
@@ -1641,7 +1669,7 @@ export const UPDATE_PACKAGE: UpdatePackage = {
     { key: "q3", label: "算子与内存检查", detail: "输入长度 420、算子支持列表与可用内存均满足" },
   ],
   compatibility: [
-    { key: "c1", label: "目标设备型号", pass: true, detail: "手持毫米波 02 号机（scan-dev-02）" },
+    { key: "c1", label: "目标设备型号", pass: true, detail: "毫米波扫描仪（scan-dev-02）" },
     { key: "c2", label: "输入长度", pass: true, detail: "420 ≤ 设备最大输入 512" },
     { key: "c3", label: "算子支持", pass: true, detail: "conv2d / bn / relu / gap / fc 均在支持列表" },
     { key: "c4", label: "恢复版本可用", pass: true, detail: "DEMO-M02 备份完整，摘要一致" },

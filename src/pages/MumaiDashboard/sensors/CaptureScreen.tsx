@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import NumberAnimation from '@/components/numberAnimation';
 import { Panel } from '../Panel';
 import { Btn, Modal, StatusChip } from '../ui';
 import { Icon } from '../icons';
@@ -89,14 +90,19 @@ export default function CaptureScreen() {
   }, [retry]);
   const live = state === 'live';
   return <><Panel title="采集设备画面" className="cap-panel cap-panel--screen" extra={<StatusChip text={live ? '实时串流' : state === 'connecting' ? '连接中' : state === 'unconfigured' ? '尚未接入' : '画面已断开'} tone={live ? 'ok' : 'muted'} dot />}>
-    <div className="capture-screen-meta"><span>树莓派屏幕</span><span>{size.width} × {size.height}{live ? ` · ${fps || '—'} FPS` : ''}</span></div>
+    {/* 分辨率随串流变化、FPS 每秒统计一次，都是运行时会变的数，交给 NumberAnimation：
+        默认 0.8s 短于 1s 统计间隔，永远在上一次滚完之后才开始下一段。
+        分辨率是像素尺寸、不是数量，关掉千分位，保持 `1024 × 600` 的原写法。
+        放大弹窗的 subtitle 外面多包一层 <span>：`.modal__sub` 是 `display:flex; gap:6px`，
+        子节点一多就会被 gap 撑开，包一层才能保持原来「一整行文字」的排版。 */}
+    <div className="capture-screen-meta"><span>树莓派屏幕</span><span><NumberAnimation value={size.width} group={false} /> × <NumberAnimation value={size.height} group={false} />{live ? <> · <NumberAnimation value={fps || null} /> FPS</> : ''}</span></div>
     <div className={`cap-screen${live ? ' is-live' : ''}`} style={{ aspectRatio: `${size.width} / ${size.height}` }}>
       <canvas ref={canvas} width={1024} height={600} className="cap-screen__media" role="img" aria-label="树莓派采集设备实时屏幕" />
       {!live ? <span className="cap-screen__placeholder"><Icon name="nav-capture" size={32} aria-hidden /><b>{state === 'connecting' ? '正在连接采集设备画面' : state === 'unconfigured' ? '采集设备屏幕尚未接入' : '屏幕信号已中断，正在重连'}</b><em>屏幕、姿态与实时数据独立接收。</em></span> : null}
     </div>
     <div className="capture-screen-footer"><span>{live ? '实时桌面 · 只读监看' : '等待设备屏幕信号'}</span><div><Btn tone="ghost" onClick={() => setRetry(v => v + 1)}>重新连接</Btn><Btn tone="ghost" onClick={() => setExpanded(true)}>放大画面</Btn></div></div>
   </Panel>
-    {expanded ? <Modal wide title="采集设备画面 · 放大监看" subtitle={`树莓派屏幕 · ${size.width} × ${size.height} · ${live ? '实时串流' : '信号中断，自动重连中'}`} onClose={() => setExpanded(false)}>
+    {expanded ? <Modal wide title="采集设备画面 · 放大监看" subtitle={<span>树莓派屏幕 · <NumberAnimation value={size.width} group={false} /> × <NumberAnimation value={size.height} group={false} /> · {live ? '实时串流' : '信号中断，自动重连中'}</span>} onClose={() => setExpanded(false)}>
       <div className={`capture-screen-expanded${live ? '' : ' is-offline'}`}>
         <canvas ref={expandedCanvas} width={size.width} height={size.height} role="img" aria-label="放大的树莓派实时屏幕" />
         {!live ? <p>屏幕信号已中断，正在重连</p> : null}

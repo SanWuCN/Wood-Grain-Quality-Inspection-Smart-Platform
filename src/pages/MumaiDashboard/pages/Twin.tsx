@@ -19,6 +19,7 @@ import { useSearchParams } from "react-router";
 import { DoubleSide, MathUtils, Vector3, type Group } from "three";
 import { useMumai } from "../context";
 import { Icon } from "../icons";
+import NumberAnimation from "@/components/numberAnimation";
 import { isApiError } from "../api/client";
 import { isOnline, scenes as scenesOf, useSharedStore } from "../store/shared";
 import { permissionHint } from "../auth";
@@ -831,7 +832,10 @@ export default function Twin() {
             title="场景库"
             extra={
               online ? (
-                <span className="muted">{sceneRows.length} 个 · 共享</span>
+                /* 场景条数来自共享服务（WebSocket 推送），是这一屏最典型的会变的数 */
+                <span className="muted">
+                  <NumberAnimation value={sceneRows.length} /> 个 · 共享
+                </span>
               ) : (
                 <StatusChip text="未连接共享服务" tone="warn" />
               )
@@ -1079,7 +1083,7 @@ export default function Twin() {
               <StateBlock
                 kind="empty"
                 title="该构件未采集回波"
-                hint="只有做过手持毫米波扫描的构件才有频谱。"
+                hint="只有用毫米波扫描仪做过的构件才有频谱。"
               />
             )}
 

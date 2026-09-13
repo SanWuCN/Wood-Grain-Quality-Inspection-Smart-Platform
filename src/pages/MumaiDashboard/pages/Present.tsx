@@ -21,6 +21,7 @@
  */
 
 import { useMemo } from "react";
+import NumberAnimation from "@/components/numberAnimation";
 import { useDashboardStore, requestMapMode } from "../map/store";
 import Map from "../mapDemo";
 import { Icon } from "../icons";
@@ -40,6 +41,19 @@ import {
   WORK_ORDER,
 } from "../seed/scenario";
 import { artifacts as artifactsOf, publishedScene, useSharedStore } from "../store/shared";
+
+/**
+ * 投屏上「读数」的显示口径。
+ *
+ * 响应得分与模型阈值原本写的是 `toFixed(2)`，这里固定成两位小数交给
+ * `NumberAnimation`（`digits` 同时定最小 / 最大小数位），滚动过程中不会中途换写法。
+ * 提成模块级常量是为了让「这一栏保留几位」一眼可查，而不是散在七处 JSX 里。
+ *
+ * 注意：`present__evidence` / `present__foot` 里的数字是成组出现的 KPI，
+ * 组内要么整组走动效、要么整组静止（一个静止数字挨着三个滚动的会像坏了）；
+ * 识别信息（工单号 / 构件号 / 批次号 / 版本串 / 时间戳 / SHA / 文件名）一律不滚。
+ */
+const SCORE_DIGITS = 2;
 
 /* ------------------------------------------------------------------ *
  * 各视图
@@ -91,7 +105,10 @@ function SceneView({ componentId, sceneId }: { componentId: string; sceneId: str
           </li>
           <li className={risk ? "is-risk" : ""}>
             <small>本轮响应</small>
-            <strong>{risk ? risk.score.toFixed(2) : "—"}</strong>
+            <strong>
+              {/* 风险得分是读数值：换构件 / 换场景就换一个数，走动效；无风险时 `undefined` 落成「—」 */}
+              <NumberAnimation value={risk?.score} digits={SCORE_DIGITS} />
+            </strong>
             <em>{risk ? risk.priority : "未提示异常"}</em>
           </li>
           <li>
@@ -158,7 +175,10 @@ function CaptureView({ componentId, batchId }: { componentId: string; batchId: s
           </li>
           <li>
             <small>雷达响应</small>
-            <strong>{component.radarScore === null ? "未采集" : component.radarScore.toFixed(2)}</strong>
+            <strong>
+              {/* 传感器读数：滚动计数；原有空值文案是「未采集」（不是「—」），用 fallback 保口径 */}
+              <NumberAnimation value={component.radarScore} digits={SCORE_DIGITS} fallback="未采集" />
+            </strong>
             <em>{risk ? risk.priority : "—"}</em>
           </li>
         </ul>
@@ -231,14 +251,21 @@ function TrainingView() {
           <li className={passed === EXPERIMENT.acceptance.length ? "is-ok" : ""}>
             <small>验收项通过</small>
             <strong>
-              {passed}
-              <em> / {EXPERIMENT.acceptance.length}</em>
+              {/* 通过项与总项是同一个读数（n / m），整对一起滚，避免分母僵在旁边 */}
+              <NumberAnimation value={passed} />
+              <em>
+                {" / "}
+                <NumberAnimation value={EXPERIMENT.acceptance.length} />
+              </em>
             </strong>
             <em>按同一测试集口径</em>
           </li>
           <li>
             <small>阈值</small>
-            <strong>{EXPERIMENT.threshold.toFixed(2)}</strong>
+            <strong>
+              {/* 阈值本身是常量，但它和「验收项通过」同属一行 KPI：整行一致，这里跟着走 */}
+              <NumberAnimation value={EXPERIMENT.threshold} digits={SCORE_DIGITS} />
+            </strong>
             <em>{EXPERIMENT.stopCondition}</em>
           </li>
         </ul>
@@ -270,7 +297,14 @@ function DeliveryView() {
               <small>状态</small>
               <strong>{current.data.state}</strong>
               <em>
-                {current.data.downloadCount ? `取用 ${current.data.downloadCount} 次` : "尚未取用"}
+                {/* 取用次数是共享服务里的计数（随时会被别的会话改），走动效 */}
+                {current.data.downloadCount ? (
+                  <>
+                    取用 <NumberAnimation value={current.data.downloadCount} /> 次
+                  </>
+                ) : (
+                  "尚未取用"
+                )}
               </em>
             </li>
             <li>
@@ -280,10 +314,22 @@ function DeliveryView() {
             </li>
             <li>
               <small>回验</small>
-              <strong>{verified}</strong>
-              <em>{receipts.length ? `共 ${receipts.length} 次提交` : "等待接收方提交摘要"}</em>
+              <strong>
+                {/* 通过数与提交数都来自产物的 receipts，共享服务一刷新就变 */}
+                <NumberAnimation value={verified} />
+              </strong>
+              <em>
+                {receipts.length ? (
+                  <>
+                    共 <NumberAnimation value={receipts.length} /> 次提交
+                  </>
+                ) : (
+                  "等待接收方提交摘要"
+                )}
+              </em>
             </li>
           </ul>
+          {/* 包摘要区：`sha256` 是哈希、`sizeText` 是预格式化文本，都不属于会变的读数 */}
           <div className="present__scene-hero">
             <b>包摘要</b>
             <span className="present__mono">{current.data.sha256}</span>
@@ -308,6 +354,8 @@ function ReportView() {
     <div className="present__view">
       <h2>报告归档 · 结论与完整性</h2>
       <div className="present__scene">
+        {/* 这一组证据卡是一整行 KPI（风险数 / 未关闭数 / 附件完整度），整组走动效；
+            `WORK_ORDER.id` 与区县、站点名是识别信息，保持静止 */}
         <ul className="present__evidence">
           <li>
             <small>本轮工单</small>
@@ -318,22 +366,32 @@ function ReportView() {
           </li>
           <li className="is-risk">
             <small>本轮风险</small>
-            <strong>{CURRENT_RISKS.length}</strong>
+            <strong>
+              <NumberAnimation value={CURRENT_RISKS.length} />
+            </strong>
             <em>Z04 柱脚渗水待复核</em>
           </li>
           <li className={HISTORY_STATS.open ? "is-risk" : "is-ok"}>
             <small>历史未关闭</small>
-            <strong>{HISTORY_STATS.open}</strong>
-            <em>共 {HISTORY_STATS.total} 项</em>
+            <strong>
+              <NumberAnimation value={HISTORY_STATS.open} />
+            </strong>
+            <em>
+              共 <NumberAnimation value={HISTORY_STATS.total} /> 项
+            </em>
           </li>
           <li className={missing.length || mismatch.length ? "is-risk" : "is-ok"}>
             <small>附件完整</small>
             <strong>
-              {ok}
-              <em> / {ARCHIVE_ITEMS.length}</em>
+              <NumberAnimation value={ok} />
+              <em>
+                {" / "}
+                <NumberAnimation value={ARCHIVE_ITEMS.length} />
+              </em>
             </strong>
             <em>
-              缺失 {missing.length} · 摘要不符 {mismatch.length}
+              缺失 <NumberAnimation value={missing.length} /> · 摘要不符{" "}
+              <NumberAnimation value={mismatch.length} />
             </em>
           </li>
         </ul>
@@ -377,7 +435,10 @@ function WorkspaceView({ focus }: { focus: ReturnType<typeof usePresentFocus> })
         </li>
         <li className={risk ? "is-risk" : ""}>
           <small>响应</small>
-          <strong>{component.radarScore === null ? "未采集" : component.radarScore.toFixed(2)}</strong>
+          <strong>
+            {/* 与采集视图同一口径：传感器读数滚动，空值仍显示「未采集」 */}
+            <NumberAnimation value={component.radarScore} digits={SCORE_DIGITS} fallback="未采集" />
+          </strong>
           <em>{risk ? risk.priority : "未提示异常"}</em>
         </li>
       </ul>
@@ -431,6 +492,7 @@ export default function Present() {
           <StatusChip text={VIEW_LABEL[focus.viewType]} tone="info" />
           {online ? null : <StatusChip text="未连接共享服务" tone="danger" />}
           <span>
+            {/* 会话 ID 与投放时间是标识 / 时间戳，保持静止 */}
             演示回放 · 会话 {sessionId}
             {focus.deliveredAt ? ` · 投放于 ${focus.deliveredAt.slice(11, 19)}` : ""}
           </span>
@@ -447,13 +509,20 @@ export default function Present() {
         </div>
       </header>
 
+      {/* 页脚是一整行计数 KPI（已采集 / 异常区 / 未关闭），整行走动效；
+          阶段名是文字、经纬度是常量字符串，保持静止 */}
       <footer className="present__foot">
         <span>当前阶段 {stageLabel}</span>
         <span>
-          四柱已采集 {scanned} / {COMPONENTS.length}
+          四柱已采集 <NumberAnimation value={scanned} /> /{" "}
+          <NumberAnimation value={COMPONENTS.length} />
         </span>
-        <span>本轮异常响应区 {CURRENT_RISKS.length}</span>
-        <span>历史未关闭 {HISTORY_STATS.open}</span>
+        <span>
+          本轮异常响应区 <NumberAnimation value={CURRENT_RISKS.length} />
+        </span>
+        <span>
+          历史未关闭 <NumberAnimation value={HISTORY_STATS.open} />
+        </span>
         <span className="present__foot-mono">实时位置 31.2304°N 121.4737°E</span>
       </footer>
     </div>

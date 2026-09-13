@@ -7,3 +7,5 @@ export function decodeSensor(key: string, bytes: DataView | Uint8Array): Reading
 export function multiply(a: Quat, b: Quat): Quat;
 export function normalize(q: Quat): Quat;
 export class AttitudeFilter { q: Quat; at: number | null; bias: Vec3; calibration: string; calibrate(): void; update(accel: Vec3, gyro: Vec3, at: number): Quat; }
+
+export class PoseSmoother { q: Quat | null; update(input: Quat, at: number): Quat; }

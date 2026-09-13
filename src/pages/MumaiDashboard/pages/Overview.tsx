@@ -30,17 +30,25 @@
  * 地图是视觉主角（§0）：面板只留摘要行，不再用字段平铺和它抢注意力。
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import styled from "styled-components";
+import NumberAnimation from "@/components/numberAnimation";
 import { useDashboardStore, requestMapMode } from "../map/store";
 import Map from "../mapDemo";
 import { Panel } from "../Panel";
 import { Icon } from "../icons";
-import { DeviceFigure } from "../illustrations";
-import { StatusChip } from "../ui";
+import { Btn, Modal, StatusChip } from "../ui";
 import { useMumai } from "../context";
 import { STATUS_ACTION, STATUS_COLOR, STATUS_TEXT } from "../map/status";
+import Chart from "./OverviewCharts";
+import { CHART } from "../design";
+import { LOAD_TEXT, LOAD_TONE, QUALITY_TEXT, barWidth, bytesPerSec, gibShort, percent, power, tb, usePlatformResources } from "./usePlatformResources";
+import ResourceModal from "./ResourceModal";
+import type { ResourceTab } from "./usePlatformResources";
+import { useEntranceSettled } from "./useEntranceSettled";
+import { useMediaQuery, usePrefersReducedMotion } from "./useMediaQuery";
+import "./overview-boards.css";
 import SiteDetailCard from "../map/SiteDetailCard";
 import {
   CHINA_PROVINCE_COUNT,
@@ -51,29 +59,29 @@ import {
 } from "../seed/sites";
 import {
 
-  CURRENT_RISKS,
   DEVICES,
   HISTORIC_ORDERS,
-  HISTORY_STATS,
   MISSION,
-  RECENT_EVENTS,
 
-  TODO_ITEMS,
   WORK_ORDER,
 } from "../seed/scenario";
 import {
   DEMO_GEO_POSITION,
-  EVENT_PREVIEW_ITEMS,
-  ORDER_COUNTERS,
   ORDER_LEVEL_TONE,
-  ORDER_PREVIEW_ROWS,
   ORDER_STATUS_TONE,
   OVERVIEW_SLOGAN,
-  TODO_PREVIEW_ITEMS,
+  CHART_BASE,
+  LOAD_COLOR,
 } from "./overview.constants";
 
 /** 首页工单列表：本轮工单 + 历史工单，共 6 条（设计稿「工单列表」） */
 const OVERVIEW_ORDERS = [WORK_ORDER, ...HISTORIC_ORDERS];
+
+/**
+ * 巡检概览环形图的状态顺序：已检测 → 有工单 → 有风险 → 已勘察。
+ * 提到模块级是为了让 `useMemo` 的依赖稳定（写在组件里每次渲染都是新数组）。
+ */
+const SITE_STATUS_ORDER = ["inspected", "workorder", "risk", "collected"] as const;
 
 /**
  * 图例里的计数。`pages.css` 已有 `.ov__actions .legend i`（色点）的样式，
@@ -95,50 +103,75 @@ const MISSION_MAP_VERSION = MISSION.mapVersion;
  * 渐进披露：面板内「更多 / 收起」开关（§3.3，不用弹窗）
  * ------------------------------------------------------------------ */
 
-function MoreButton({
-  open,
-  moreText,
-  onClick,
-}: {
-  open: boolean;
-  /** 收起态按钮文案，写清「还有多少」比只写「更多」更好判断 */
-  moreText: string;
-  onClick: () => void;
-}) {
-  return (
-    <button type="button" className="ov-more" aria-expanded={open} onClick={onClick}>
-      {open ? "收起" : moreText}
-    </button>
-  );
-}
-
 /* ------------------------------------------------------------------ *
  * 左栏 · 面板一：场地概览（阶段 / 本轮工单 + 三通道）
  * ------------------------------------------------------------------ */
 
 /** 三角色通道一行（PRD 3.1：地图 / 场景 / 手持采集三个通道） */
 /**
- * 全国巡检态势
+ * 全国巡检态势 → **巡检概览**
  *
  * 首页左栏第一块，回答「这轮覆盖了多少地方、做到哪一步」。
  * 数字全部由 seed/sites 现算，不写死。
+ *
+ * ⚠️ 面板标题叫「巡检概览」而不是「巡检态势」：后者是评审点名的 AI 腔命名
+ * （见 `docs/design/视觉重构验收报告.md` 对文案口径的要求），而且这一块本来
+ * 就是「概览」——四个 KPI + 一张状态分布图，没有推演、没有态势判断。
+ *
+ * 视觉（规范 §10「减少首页字段，采用渐进披露」+ §5.1 图表口径）：
+ *   · 上半：四个 KPI 数字，只靠字号/颜色分层，不各自包框（§4.3）
+ *   · 中段：状态分布**环形图**，中心写点位数 —— 原来这里是四行「色点 + 文字 +
+ *     数字」，既和上面 KPI 抢注意力，也把面板下半部留成一大片空白
+ *   · 下半：完成率细条 + 本轮任务脚注，贴到面板底部
+ * 图例不再单独一行文字：状态名与数量直接进 ECharts 图例，颜色即语义
+ * （绿=已检测 / 黄=有工单 / 红=有风险 / 蓝=已勘察，取自 `map/status.ts`）。
  */
 function SituationPanel() {
+  const ready = useEntranceSettled("/");
   const summary = useMemo(() => summariseSites(CHINA_SITES), []);
   const done = summary.byStatus.inspected + summary.byStatus.workorder;
   const rate = Math.round((done / Math.max(1, summary.total)) * 100);
 
-  const order = ["inspected", "workorder", "risk", "collected"] as const;
+  /**
+   * 状态分布环形图。
+   *
+   * 顺序按 `SITE_STATUS_ORDER`（已检测 → 有工单 → 有风险 → 已勘察），
+   * 颜色逐个取自 `STATUS_COLOR` —— 和地图点位、页面图例是同一份色源，
+   * 不在这里另配一套色。
+   */
+  const option = useMemo(
+    () => ({
+      ...CHART_BASE,
+      series: [
+        {
+          type: "pie",
+          radius: ["54%", "78%"],
+          center: ["50%", "50%"],
+          avoidLabelOverlap: true,
+          // 总量由单独的 DOM 层显示，避免四个扇区的中心标签重叠。
+          label: { show: false },
+          labelLine: { show: false },
+          itemStyle: { borderColor: "transparent", borderWidth: 2 },
+          data: SITE_STATUS_ORDER.map((key) => ({
+            name: STATUS_TEXT[key],
+            value: summary.byStatus[key],
+            itemStyle: { color: STATUS_COLOR[key] },
+          })),
+        },
+      ],
+    }),
+    [summary],
+  );
 
   return (
     <Panel
-      title="巡检态势"
+      title="巡检概览"
       extra={<span className="muted">全国 {CHINA_PROVINCE_COUNT} 个省级区域</span>}
-      className="ov__panel">
+      className="ov__panel ov-board ov-board--situation">
       <div className="ov-tally">
         <div>
           <strong>{CHINA_PROVINCE_COUNT}</strong>
-          <span>已覆盖省份</span>
+          <span>覆盖省份</span>
         </div>
         <div>
           <strong>{summary.total}</strong>
@@ -157,330 +190,788 @@ function SituationPanel() {
         </div>
       </div>
 
-      {/* 完成率进度条：设计稿里「完成率」带一条横向进度条，这里补上。
-          宽度就是上面算出的 rate，不引入任何新数字 */}
-      <div className="ov-tally__rate" title={`完成率 ${rate}%`}>
-        <i style={{ width: `${rate}%` }} />
+      <h3 className="ov-board__section-title">点位分布</h3>
+      <div className="ov-board__distribution">
+        <div className="ov-board__ring">
+          <Chart
+            className="ov-chart ov-chart--donut"
+            option={option}
+            animate={ready}
+            ariaLabel={`全国古建点位状态分布：共 ${summary.total} 处，${SITE_STATUS_ORDER
+              .map((key) => `${STATUS_TEXT[key]} ${summary.byStatus[key]} 处`)
+              .join("，")}`}
+          />
+          <div className="ov-board__ring-label" aria-hidden="true">
+            <strong>{summary.total}<small>处</small></strong>
+            <span>古建点位</span>
+          </div>
+        </div>
+        <ul className="ov-board__legend" aria-label="点位状态数量">
+          {SITE_STATUS_ORDER.map((key) => (
+            <li key={key}>
+              <i style={{ background: STATUS_COLOR[key] }} aria-hidden="true" />
+              <span>{STATUS_TEXT[key]}</span>
+              <b>{summary.byStatus[key]}</b>
+            </li>
+          ))}
+        </ul>
       </div>
 
-      <ul className="ov-tally__bar">
-        {order.map((key) => (
-          <li key={key}>
-            <i style={{ background: STATUS_COLOR[key] }} />
-            <span>{STATUS_TEXT[key]}</span>
-            <b>{summary.byStatus[key]}</b>
-          </li>
-        ))}
-      </ul>
-
       <p className="ov-tally__foot">
-        本轮任务 {WORK_ORDER.id} · {WORK_ORDER.site}
+        <span>本轮任务</span>
+        <strong title={`${WORK_ORDER.id} · ${WORK_ORDER.site}`}>{WORK_ORDER.id} · {WORK_ORDER.site}</strong>
       </p>
     </Panel>
   );
 }
 
 /**
- * 设备状态
+ * 设备状态（PRD §6）
  *
- * 硬件侧一眼可见：三台设备各自的数据来源与状态，加四路通道的更新时间。
- * 不在这里给检测结论 —— 设备状态与结果判定是两条线（PRD 3.2）。
+ * 固定三行：毫米波扫描仪 / 智能巡检车 / 算力服务器。
+ *   · 前两行是**真实设备接口**（扫描仪走设备网关的在线与采集状态，
+ *     巡检车走任务与回放状态），名称只做显示名映射，协议 deviceId 不动（§6.2）。
+ *   · 第三行是新增的独立算力实体：**不复用旧实机的 ID 或控制通道**，
+ *     状态取自后端主机 GPU 基准（§6.1）。
+ * 下面是四路数据通道的横向条形图（§6.4）：条长 = 距最后有效数据的时间，
+ * 超出绘图上限时封顶但把真实秒数写在条右侧。
  */
 function DevicePanel() {
+  const ready = useEntranceSettled("/");
+  const navigate = useNavigate();
   const { channels } = useMumai();
+  const { data: resources, error: resourceError } = usePlatformResources(true);
+  /** 算力行点开资源弹窗（不是设备详情）：状态就放在这个组件里 */
+  const [resourceTab, setResourceTab] = useState<ResourceTab | null>(null);
 
-  const devices = [
-    { ...DEVICES.scanner, source: "模拟采集", tone: "warn" as const },
-    { ...DEVICES.demoCart, source: "回放", tone: "info" as const },
-    { ...DEVICES.realCart, source: "只读监视", tone: "muted" as const },
-  ];
+  /**
+   * 行的点击目标。
+   * 前两行进既有业务页（设备详情 / 建图巡检），第三行开资源弹窗 ——
+   * 算力服务器没有「设备详情页」，硬跳过去会打开一台根本不存在的设备（§6.1）。
+   */
+  const selectDeviceRow = (row: { resourceTab?: ResourceTab; to?: string }) => {
+    if (row.resourceTab) setResourceTab(row.resourceTab);
+    else if (row.to) navigate(row.to);
+  };
 
-  const channelTone = (state: string) =>
-    state === "online" ? ("ok" as const) : state === "stale" ? ("warn" as const) : ("danger" as const);
   const channelText = (state: string) =>
     state === "online" ? "正常" : state === "stale" ? "延迟" : "断开";
+  const channelColor = (state: string) =>
+    state === "online" ? STATUS_COLOR.inspected : state === "stale" ? STATUS_COLOR.workorder : STATUS_COLOR.risk;
+
+  /**
+   * 三行设备状态。
+   *
+   * 扫描仪与巡检车读的是既有真实接口的状态（`channels` 来自 `useMumai`，
+   * 与顶栏状态条同一个来源），不是静态名称，也没有演示计时器（§6.2）。
+   * 算力服务器的负载用后端快照的 GPU 基准；取不到就是「负载未知」，
+   * **不能**落成「空闲」—— 空闲是一个有效样本的档位，不是缺省值（§9.5）。
+   */
+  const deviceRows = [
+    {
+      key: "scanner",
+      name: DEVICES.scanner.name,
+      mode: "模拟采集",
+      state: channels.some((channel) => channel.state !== "online") ? "延迟" : "在线",
+      tone: channels.some((channel) => channel.state !== "online") ? ("warn" as const) : ("ok" as const),
+      hint: "设备详情",
+      to: "/hardware?tab=monitor",
+    },
+    {
+      key: "cart",
+      name: DEVICES.demoCart.name,
+      /* 名称与数据模式分离：改叫「智能巡检车」之后，回放语义必须留着（§6.2） */
+      mode: "回放",
+      state: MISSION.state,
+      tone: "info" as const,
+      hint: "建图巡检",
+      to: "/mapping",
+    },
+    {
+      key: "compute",
+      name: DEVICES.realCart.name,
+      /* 台数来自 2s 轮询的资源快照：文字里嵌一个滚动数字，和「平台数据」面板同一口径 */
+      mode: resources ? (
+        <>
+          <NumberAnimation value={resources.serverCount} active={ready} /> 台
+        </>
+      ) : (
+        "—"
+      ),
+      state: resourceError
+        ? "连接中断"
+        : resources
+          ? LOAD_TEXT[resources.summary.loadState]
+          : "负载未知",
+      tone: resourceError
+        ? ("danger" as const)
+        : resources
+          ? LOAD_TONE[resources.summary.loadState]
+          : ("muted" as const),
+      hint: "算力明细",
+      /* 算力行点开的不是设备详情，而是资源弹窗 */
+      resourceTab: "gpu" as const,
+    },
+  ];
+
+  /**
+   * 通道新鲜度条形图。
+   *
+   * 只有 4 个通道、量纲是「秒」，横向条 + 阈值线最直观：条越短越好。
+   * 轴从 0 起，不截断 —— 截断会让 9 秒看起来和 1 秒一样长，反而失真。
+   */
+  const option = useMemo(() => {
+    const rows = [...channels].sort((a, b) => a.ageSec - b.ageSec);
+    return {
+      ...CHART_BASE,
+      grid: { left: 0, right: 42, top: 6, bottom: 2, containLabel: true },
+      xAxis: {
+        type: "value" as const,
+        max: 12,
+        splitLine: { lineStyle: { color: CHART.grid } },
+        axisLabel: { color: CHART.axisText, fontSize: 12, margin: 10, formatter: "{value}s" },
+      },
+      yAxis: {
+        type: "category" as const,
+        inverse: true,
+        data: rows.map((channel) => channel.label),
+        axisLine: { lineStyle: { color: CHART.axisLine } },
+        axisTick: { show: false },
+        axisLabel: { color: CHART.axisText, fontSize: 13 },
+      },
+      series: [
+        {
+          type: "bar",
+          barWidth: 10,
+          /* 阈值线：规范 §3.4「超过 10 秒标记离线」，与前端 freshness 同一口径 */
+          markLine: {
+            silent: true,
+            symbol: "none",
+            label: { formatter: "离线", color: CHART.axisText, fontSize: 11, position: "insideEndTop" },
+            lineStyle: { color: CHART.axisLine, type: "dashed" as const },
+            data: [{ xAxis: 10 }],
+          },
+          label: {
+            show: true,
+            position: "right" as const,
+            color: CHART.axisText,
+            fontSize: 12,
+            formatter: "{c}s",
+          },
+          data: rows.map((channel) => ({
+            value: channel.ageSec,
+            itemStyle: { color: channelColor(channel.state) },
+          })),
+        },
+      ],
+    };
+  }, [channels]);
 
   return (
     <Panel
       title="设备状态"
       extra={<span className="muted">{MISSION.mapVersion}</span>}
       className="ov__panel">
-      {/*
-        PRD §5 任务总览：「插图限设备摘要，不覆盖地图和任务信息」——
-        所以插图只出现在左栏这张设备摘要卡里，地图与右侧工单区完全不受影响。
-        PRD §3.1 / §5 又要求 I02「可在待接入引导使用概念图，不放在『设备实拍』标题下」：
-        真车是一台尚未接入的实体（DEVICES.realCart 只读监视），这里用概念图给它一个
-        视觉落点。caption 只写「待接入」——「概念示意」由 DeviceFigure 依据
-        illustrationManifest 的 conceptPlaceholder 自动补，不在这里重复写。
-      */}
-      <ul className="ov-devices">
-        {devices.map((device) => (
-          <li key={device.id}>
-            <div className="ov-devices__id">
-              <b>{device.name}</b>
-              <em>{device.id}</em>
-            </div>
-            <StatusChip text={device.source} tone={device.tone} dot />
+      {/* 三行设备：名称 + 数据模式 + 状态。ID 下沉到详情页，不在这里占行（§6.1 表） */}
+      <ul className="dev-rows">
+        {deviceRows.map((row) => (
+          <li key={row.key}>
+            <button
+              type="button"
+              className="dev-row"
+              onClick={() => selectDeviceRow(row)}
+              title={`${row.name} · ${row.hint}`}>
+              <span className="dev-row__name">{row.name}</span>
+              <small className="dev-row__mode">{row.mode}</small>
+              <StatusChip text={row.state} tone={row.tone} dot />
+            </button>
           </li>
         ))}
       </ul>
 
-      <DeviceFigure id="i02-cart-concept" caption="巡检车（待接入）" height={104} />
+      {/* 数据通道标题做成紧凑标签，不再单独占一整行（§6.4） */}
+      <h4 className="ov-sec ov-sec--tight">
+        数据通道
+        <span className="ov-sec__note">条长 = 距最后有效数据</span>
+      </h4>
+      <Chart
+        className="ov-chart ov-chart--bars"
+        option={option}
+        animate={ready}
+        ariaLabel={`四路数据通道距最后有效数据的秒数：${channels
+          .map((channel) => `${channel.label} ${channel.ageSec} 秒（${channelText(channel.state)}）`)
+          .join("，")}；超过 10 秒算离线`}
+      />
 
-      <h4 className="ov-sec">数据通道</h4>
-      <ul className="ov-channels">
-        {channels.map((channel) => (
-          <li key={channel.key}>
-            <span>{channel.label}</span>
-            <StatusChip
-              text={channelText(channel.state)}
-              tone={channelTone(channel.state)}
-              dot
-            />
-            <em>{channel.updatedAt}</em>
-          </li>
-        ))}
-      </ul>
+      {resourceTab ? <ResourceModal initialTab={resourceTab} onClose={() => setResourceTab(null)} /> : null}
     </Panel>
   );
 }
 
 
+/**
+ * 工单看板（PRD §7）
+ *
+ * 顶部是三个**互斥**状态计数：待处理 / 处理中 / 待验收（待复核并入待处理，
+ * 口径写在标题旁）。已关闭工单只进「查看全部 · N」，不进这三个数。
+ * 高风险不再是第四个计数 —— 它是行内标记，最多在标题旁附一处「高风险 N」（§7）。
+ *
+ * 列表固定高度、逐条循环（`OrderBoardList`）。**没有**独立的选中大卡片：
+ * 选中详情移出窗口（点行进工单页），重复编号与长问题说明一并删掉（§7）。
+ */
 function RiskOrderPanel() {
-  const navigate = useNavigate();
+  const [boardOpen, setBoardOpen] = useState(false);
+  const orderTotal = OVERVIEW_ORDERS.length;
+
+  /** 三档互斥状态计数。待复核并入待处理；已关闭不计入（§7） */
+  const buckets = useMemo(() => {
+    const pending = OVERVIEW_ORDERS.filter((order) => order.status === "待处理" || order.status === "待复核").length;
+    const running = OVERVIEW_ORDERS.filter((order) => order.status === "处理中").length;
+    const accepting = OVERVIEW_ORDERS.filter((order) => order.status === "待验收").length;
+    const high = OVERVIEW_ORDERS.filter((order) => order.level === "高风险").length;
+    return { pending, running, accepting, high };
+  }, []);
+
   /**
-   * 工单选中态放在 `map/store` 而不是这里的 `useState`：
-   * 地图点位与右栏工单必须互相联动（选中工单 → 地图高亮点位；点击点位 →
-   * 右栏这条变选中）。两处各自 `useState` 会绕成环，收敛到 store 才是单一来源。
+   * 排序：高风险优先 → 临期优先 → 最近更新优先 → 稳定 ID（§7）。
+   * 都在种子数据里，不额外造字段；同权重用 order id 兜底保证稳定。
    */
-  const selectedOrderId = useDashboardStore((state) => state.selectedOrderId);
-  const selectOrder = useDashboardStore((state) => state.selectOrder);
-  const selectedSiteId = useDashboardStore((state) => state.selectedSiteId);
-  /** 工单表默认 4 行，其余收进「更多」 */
-  const [listOpen, setListOpen] = useState(false);
-  /** 当前工单卡默认只给一行摘要，点位/区县/发现时间收进「详情」 */
-  const [detailOpen, setDetailOpen] = useState(false);
-
-  const selected =
-    OVERVIEW_ORDERS.find((item) => item.id === selectedOrderId) ?? WORK_ORDER;
-
-  /** 地图上处于选中态的点位（只用于给工单卡补一行「地图点位」） */
-  const selectedSite = useMemo(() => {
-    if (!selectedSiteId) return null;
-    return [...CHINA_SITES, ...SHANGHAI_SITES].find((site) => site.id === selectedSiteId) ?? null;
-  }, [selectedSiteId]);
-
-  /** 计数按种子工单真实统计，不写死数字 */
-  const counts = useMemo(
-    () => ORDER_COUNTERS.map((counter) => ({ ...counter, value: OVERVIEW_ORDERS.filter(counter.match).length })),
+  const ordered = useMemo(
+    () =>
+      [...OVERVIEW_ORDERS].sort((a, b) => {
+        const level = (order: typeof a) => (order.level === "高风险" ? 0 : order.level === "中风险" ? 1 : 2);
+        if (level(a) !== level(b)) return level(a) - level(b);
+        /* 种子里的工单没有独立「到期日」，临期按发现时间早的优先（越早发现越该先处理） */
+        const seen = (order: typeof a) => order.discoveredAt ?? "9999";
+        if (seen(a) !== seen(b)) return seen(a) < seen(b) ? -1 : 1;
+        return a.id.localeCompare(b.id);
+      }),
     [],
   );
 
-  /**
-   * 收起态只给前 4 条；**当前选中的那条必须在场**——选中第 5/6 条时用选中行
-   * 顶掉预览区的最后一行，顺序仍按原列表，避免选中项被挤到滚动区外看不见。
-   */
-  const rows = useMemo(() => {
-    if (listOpen) return OVERVIEW_ORDERS;
-    const preview = OVERVIEW_ORDERS.slice(0, ORDER_PREVIEW_ROWS);
-    if (preview.some((order) => order.id === selected.id)) return preview;
-    return OVERVIEW_ORDERS.filter((order, index) => index < ORDER_PREVIEW_ROWS - 1 || order.id === selected.id);
-  }, [listOpen, selected]);
-
-  /** 问题类型取该工单来源风险里优先级最高的一条，没有来源风险时退回检测范围 */
-  const issueType = useMemo(() => {
-    const risks = CURRENT_RISKS.filter((item) => selected.sourceRiskIds.includes(item.id));
-    const top = risks.reduce<(typeof risks)[number] | null>(
-      (best, risk) => (best === null || risk.score > best.score ? risk : best),
-      null,
-    );
-    return top?.label ?? selected.scope;
-  }, [selected]);
-
-  /** 设计稿里 `SH-2026-0901` 额外显示 Z04 下部与疑似空洞读数。
-      取该构件本轮得分最高的一条（0.87），与设计稿一致。 */
-  const z04Risk = useMemo(() => {
-    if (selected.id !== WORK_ORDER.id) return undefined;
-    const z04 = WORK_ORDER.componentIds[WORK_ORDER.componentIds.length - 1];
-    const risks = CURRENT_RISKS.filter((item) => item.componentId === z04);
-    return risks.reduce<(typeof risks)[number] | undefined>(
-      (best, risk) => (best === undefined || risk.score > best.score ? risk : best),
-      undefined,
-    );
-  }, [selected]);
-
   return (
     <>
-      {/* 第二层：三条计数只做数字 + 标签，不各自包一张边框卡（§4.3） */}
-      <div className="ov-counts">
-        {counts.map((counter) => (
-          <div key={counter.key} className={`ov-count ov-count--${counter.tone}`}>
-            <strong>
-              {counter.value}
-              <small>{counter.label}</small>
-            </strong>
-          </div>
-        ))}
-      </div>
-
-      <h4 className="ov-sec">
-        工单列表
-        <MoreButton
-          open={listOpen}
-          moreText={`共 ${OVERVIEW_ORDERS.length} 条 · 更多`}
-          onClick={() => setListOpen((v) => !v)}
-        />
-      </h4>
-      {/* 表格负责「列表 + 选中」：编号 + 点位 / 风险 / 状态，都是一行的东西 */}
-      <div className={`ov-orders${listOpen ? " is-open" : ""}`}>
-        <div className="ov-orders__head">
-          <span>工单 · 点位</span>
-          <span>风险</span>
-          <span>状态</span>
+      <div className="ob-counts">
+        <div className="ob-count is-warn" title="待复核工单计入待处理">
+          <strong>{buckets.pending}</strong>
+          <span>待处理</span>
         </div>
-        <div className="ov-orders__list">
-          {rows.map((order) => (
-            <button
-              key={order.id}
-              type="button"
-              className={order.id === selected.id ? "is-active" : ""}
-              onClick={() => selectOrder(order.id)}>
-              <span className="ov-orders__id">
-                {order.id}
-                <i>{order.site}</i>
-              </span>
-              <StatusChip text={order.level} tone={ORDER_LEVEL_TONE[order.level]} />
-              <StatusChip text={order.status} tone={ORDER_STATUS_TONE[order.status]} />
-            </button>
-          ))}
+        <div className="ob-count is-info">
+          <strong>{buckets.running}</strong>
+          <span>处理中</span>
+        </div>
+        <div className="ob-count is-ok">
+          <strong>{buckets.accepting}</strong>
+          <span>待验收</span>
         </div>
       </div>
+      <div className="ov-board__queue-head">
+        <h4 className="ov-board__section-title">工单队列</h4>
+        {buckets.high > 0 ? <span className="ov-board__risk">高风险 <b>{buckets.high}</b></span> : null}
+        <button type="button" className="ov-more" onClick={() => setBoardOpen((open) => !open)}>
+          {boardOpen ? "收起明细" : `查看全部 · ${orderTotal}`}
+        </button>
+      </div>
 
-      {/* 第一层：当前工单。点位/区县已在上面表格里，这里只留表格没有的
-          问题类型 / 构件 / 得分，压成一行摘要；明细进「详情」 */}
-      <article className="ov-coc">
-        <h3>
-          {selected.id}
-          <i>{selected.title}</i>
-        </h3>
-        <div className="ov-coc__chips">
-          <StatusChip text={selected.level} tone={ORDER_LEVEL_TONE[selected.level]} />
-          <StatusChip text={selected.status} tone={ORDER_STATUS_TONE[selected.status]} />
-        </div>
-        <p className="ov-coc__sum">
-          问题类型 {issueType} · 构件 {z04Risk ? z04Risk.componentId : selected.componentIds.join("/")}
-          {z04Risk ? <em>{z04Risk.score.toFixed(2)}</em> : null}
-        </p>
-        {detailOpen ? (
-          <dl className="ov-coc__dl">
-            <div>
-              <dt>点位</dt>
-              <dd>
-                {selected.site} · {selected.componentIds.join("/")}
-              </dd>
-            </div>
-            <div>
-              <dt>区县</dt>
-              <dd>{selectedSite ? selectedSite.district ?? selectedSite.province ?? selected.district : selected.district}</dd>
-            </div>
-            <div>
-              <dt>发现时间</dt>
-              <dd>{selected.discoveredAt}</dd>
-            </div>
-            <div>
-              <dt>地图点位</dt>
-              <dd>
-                {selectedSite
-                  ? `${selectedSite.name} · ${STATUS_TEXT[selectedSite.status]}（地图上已高亮）`
-                  : "该工单未关联地图点位"}
-              </dd>
-            </div>
-          </dl>
-        ) : null}
-        <div className="ov-coc__foot">
-          <MoreButton open={detailOpen} moreText="详情" onClick={() => setDetailOpen((v) => !v)} />
-          <button
-            type="button"
-            className="btn btn--primary ov-coc__go"
-            onClick={() => navigate(`/orders?order=${selected.id}`)}>
-            查看工单
-            {/* PRD §3.3：arrow 保留原图标（新包没有同义替代），只统一到 20px 操作档 */}
-            <Icon name="arrow" size={20} aria-hidden />
-          </button>
-        </div>
-      </article>
+      {boardOpen ? (
+        /* 「查看全部」打开的是**弹窗式清单**，不在窗口里向下展开长列表（§4.3） */
+        <OrderListModal onClose={() => setBoardOpen(false)} />
+      ) : null}
+
+      <OrderBoardList orders={ordered} />
     </>
   );
 }
 
-/* ------------------------------------------------------------------ *
- * 右栏 · 面板二：待办与最近事件 + 历史风险统计
- * ------------------------------------------------------------------ */
+/**
+ * 工单循环列表（PRD §7.1）
+ *
+ * 固定高度视口，可见行数由面板正文剩余高度决定（大屏 3 行 / 小屏 2 行）；
+ * 总数超过可见行数时每条停 4 秒、再花 450ms 向上移一个整行高，尾部无缝接回第一条。
+ *
+ * 暂停条件（缺一不可恢复）：鼠标悬停、键盘焦点在列表内、工单被选中、
+ * 页面不可见、prefers-reduced-motion。
+ *
+ * 这里**不提供**暂停/继续与上一条/下一条按钮：轮播就是默认行为，
+ * 要看某一条可以直接点它进工单详情，要看全部走标题右侧的「查看全部」。
+ * 悬停发生在移动途中时位移本来就在整行像素上（translateY = 行高 × 整数索引），
+ * 所以停下来不会卡在半条工单上。
+ */
+function OrderBoardList({ orders }: { orders: typeof OVERVIEW_ORDERS }) {
+  const navigate = useNavigate();
+  const rowHeight = useMediaQuery("(max-width: 1440px), (max-height: 800px)") ? 46 : 52;
+  const visibleRows = useMediaQuery("(max-width: 1440px), (max-height: 800px)") ? 2 : 3;
+  const reduceMotion = usePrefersReducedMotion();
 
-function TodoEventPanel() {
-  const [todoOpen, setTodoOpen] = useState(false);
-  const [eventOpen, setEventOpen] = useState(false);
+  const [index, setIndex] = useState(0);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hidden, setHidden] = useState(false);
 
-  const todos = todoOpen ? TODO_ITEMS : TODO_ITEMS.slice(0, TODO_PREVIEW_ITEMS);
-  const events = eventOpen ? RECENT_EVENTS : RECENT_EVENTS.slice(0, EVENT_PREVIEW_ITEMS);
+  const loop = orders.length > visibleRows;
+  /** 循环副本：多渲染 visibleRows 条，位移到副本时视觉上无缝（§7.1） */
+  const rendered = loop ? [...orders, ...orders.slice(0, visibleRows)] : orders;
+
+  useEffect(() => {
+    const onVisibility = () => setHidden(document.hidden);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
+  /**
+   * 暂停条件（缺一不可恢复）：鼠标悬停、键盘焦点在列表内、工单被选中、
+   * 页面不可见、prefers-reduced-motion。
+   *
+   * 界面上**没有**暂停/继续、上一条/下一条这些按钮：轮播就是默认行为，
+   * 要看某一条直接点它进工单详情，要看全部走标题右侧的「查看全部」。
+   *
+   * 悬停时**不禁用点击定位**（下面那行 style 的 pointer-events）：
+   * 鼠标移上来只停轮播，行本身照旧可以点、可以聚焦 —— 否则用户想点某条
+   * 还得先把鼠标挪开，属于「暂停把操作抢走」。
+   */
+  const blocked = hovered || focused || hidden || reduceMotion || Boolean(selectedId);
+
+  useEffect(() => {
+    if (!loop || blocked) return;
+    const timer = window.setTimeout(() => setIndex((value) => value + 1), 4000);
+    return () => window.clearTimeout(timer);
+  }, [loop, blocked, index]);
+
+  /** 位移到位后归一索引：把「副本位置」换算回真实位置，避免索引无限增长 */
+  useEffect(() => {
+    if (!loop || index < orders.length) return;
+    const timer = window.setTimeout(() => setIndex(index - orders.length), 460);
+    return () => window.clearTimeout(timer);
+  }, [index, loop, orders.length]);
+
+  if (orders.length === 0) {
+    return <p className="note">当前范围内没有工单。</p>;
+  }
 
   return (
-    <Panel title="待办与最近事件" className="ov__panel ov__panel--todo">
-      <h4 className="ov-sec">
-        待办事项
-        <MoreButton
-          open={todoOpen}
-          moreText={`共 ${TODO_ITEMS.length} 项 · 更多`}
-          onClick={() => setTodoOpen((v) => !v)}
-        />
-      </h4>
-      <ul className="ov-todo">
-        {todos.map((item) => (
-          <li key={item.id} className={`is-${item.level}`}>
-            <span className="ov-todo__text">
-              {/* 待办正文单独包一层：flex 里的裸文本节点是匿名 flex item，
-                  给不了 min-width/省略号，窄屏（1366）下会被硬切掉半行 */}
-              <b>
-                {item.id} · {item.text}
-              </b>
-              <i>
-                {item.owner} · {item.due.slice(5)}
-              </i>
-            </span>
-          </li>
-        ))}
-      </ul>
-
-      <h4 className="ov-sec">
-        最近事件
-        <MoreButton
-          open={eventOpen}
-          moreText={`共 ${RECENT_EVENTS.length} 条 · 更多`}
-          onClick={() => setEventOpen((v) => !v)}
-        />
-      </h4>
-      <ol className="ov-events">
-        {events.map((event) => (
-          <li key={event.at + event.text}>
-            <time>{event.at}</time>
-            {event.text}
-          </li>
-        ))}
-      </ol>
-
-      {/* 第三层：历史风险口径（数字由种子算出，不写死） */}
-      <div className="ov-stats">
-        <span>
-          历史风险<b>{HISTORY_STATS.total}</b>
-        </span>
-        <span>
-          已关闭<b className="is-ok">{HISTORY_STATS.closed}</b>
-        </span>
-        <span>
-          未关闭<b className="is-danger">{HISTORY_STATS.open}</b>
-        </span>
+    <div className="ob">
+      <div
+        className="ob-viewport"
+        style={{ height: `${visibleRows * rowHeight}px` }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}>
+        <ul
+          className="ob-track"
+          style={{
+            /* 要移动的位移用 calc 保证与行高严格一致：行高变了位移跟着变，不会错半行 */
+            transform: `translateY(calc(${-index} * var(--ob-row)))`,
+            transition: reduceMotion ? "none" : "transform 450ms cubic-bezier(0.33, 0, 0.2, 1)",
+            ["--ob-row" as string]: `${rowHeight}px`,
+          }}>
+          {rendered.map((order, position) => {
+            const real = orders[position % orders.length];
+            const duplicate = position >= orders.length;
+            return (
+              <li key={`${order.id}-${position}`} aria-hidden={duplicate || undefined}>
+                <button
+                  type="button"
+                  tabIndex={duplicate ? -1 : 0}
+                  className={`ob-row${selectedId === real.id ? " is-selected" : ""}`}
+                  style={{ height: `${rowHeight}px` }}
+                  onClick={() => {
+                    setSelectedId(real.id);
+                    navigate(`/orders?order=${real.id}`);
+                  }}>
+                  <span className="ob-row__title" title={`${real.id} · ${real.site}`}>
+                    <b>{real.site}</b><span>{real.id}</span>
+                  </span>
+                  <span className="ob-row__meta">
+                    <StatusChip text={real.level} tone={ORDER_LEVEL_TONE[real.level]} />
+                    <StatusChip text={real.status} tone={ORDER_STATUS_TONE[real.status]} />
+                    <em>{real.discoveredAt?.slice(5) ?? ""}</em>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
       </div>
-    </Panel>
+
+    </div>
+  );
+}
+
+/** 「查看全部」弹窗：清单式，不在窗口内纵向展开（§4.3 / UI-10） */
+function OrderListModal({ onClose }: { onClose: () => void }) {
+  const navigate = useNavigate();
+  return (
+    <Modal
+      wide
+      title="全部工单"
+      subtitle={`共 ${OVERVIEW_ORDERS.length} 条 · 含已关闭工单`}
+      onClose={onClose}
+      footer={<Btn onClick={onClose}>关闭</Btn>}>
+      <div className="ob-all">
+        {OVERVIEW_ORDERS.map((order) => (
+          <button
+            key={order.id}
+            type="button"
+            className="ob-all__row"
+            onClick={() => navigate(`/orders?order=${order.id}`)}>
+            <span className="ob-all__id">
+              {order.id}
+              <i>{order.site}</i>
+            </span>
+            <StatusChip text={order.level} tone={ORDER_LEVEL_TONE[order.level]} />
+            <StatusChip text={order.status} tone={ORDER_STATUS_TONE[order.status]} />
+          </button>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 右栏 · 面板二：平台数据
+ * ------------------------------------------------------------------ */
+
+/**
+ * 功耗的两个显示口径，交给 `NumberAnimation` 逐帧复用。
+ *
+ * 为什么提成模块级常量：`NumberAnimation` 把 `format` 存在 ref 里读，内联箭头
+ * 也不会重建动画，但稳定的引用让「这两行到底怎么格式化」一眼可查。
+ *
+ * W 走 `power()`——**取整口径与弹窗、硬件页完全同源**，不在这里另写一份 round。
+ * kW 只在 `power()` 判定 ≥1000 W 时才被渲染（出现条件不在这儿），
+ * 所以这里只负责「滚动过程中的 kW 怎么写」。
+ */
+const powerWatts = (value: number) => power(value).w;
+const powerKilowatts = (value: number) => `${(value / 1000).toFixed(2)} kW`;
+
+/**
+ * 平台数据（PRD §8.1）
+ *
+ * 五行摘要：存储 / 内存 / GPU / 功耗 / 网络，每行一个数字 + 一条短比例条。
+ * 数据是**运行后端那台主机**的实测值经服务端映射后的统一快照
+ * （`/api/platform/resources`），主卡与弹窗读同一份。
+ *
+ * 刻意不做的几件事（都是 PRD 明令）：
+ *   · 不在这里逐台列服务器、不画多条历史曲线、不堆多个圆环（§8.1）
+ *   · 不用「更多 / 收起」在窗口里展开长列表（§4.3）—— 明细进弹窗
+ *   · 不解释指标怎么算的 —— 那是弹窗「映射说明」的事
+ * 标题右侧只放一个轻量入口与一个状态点，不新增第六行。
+ */
+function PlatformDataPanel() {
+  const ready = useEntranceSettled("/");
+  const { data, error } = usePlatformResources(true);
+  const [tab, setTab] = useState<ResourceTab | null>(null);
+
+  const summary = data?.summary;
+  const quality = data?.quality ?? "unavailable";
+
+  /**
+   * 一行摘要：名称 + 数字 + 可选比例条。null 一律显示「—」，不显示 0
+   *
+   * 这里的数字走 `/api/platform/resources` 的 **2s 轮询**，是总览页变化最频繁的
+   * 一组。全部交给 `NumberAnimation`：每来一份新快照都从当前显示值平滑滚到新值，
+   * 而不是跳变。`format` 直接复用 `usePlatformResources` 里的格式化函数 ——
+   * 滚动中的每一帧与最终落值走同一套小数位和单位，不会中途换写法。
+   *
+   * 为什么带 `active={ready}`：本面板是**滑入**的（`entrance.ts`，1.4s）。不加门控
+   * 时数字在面板还停在屏幕外时就数完了，一个都看不见；加了门控，滚动正好发生在
+   * 面板落位那一刻，和下面两张图（`Chart animate={ready}`）同一拍。门控期间显示
+   * 的是起始值 0，而那段时间面板还在屏幕外 —— **不存在「让用户看见临时零值」的
+   * 问题**（§9.5 禁的是拿 0 冒充有效样本，不是入场插值）。
+   */
+  const rows: { key: ResourceTab; label: string; value: ReactNode; ratio: number | null; note?: string }[] = summary
+    ? [
+        {
+          key: "storage",
+          label: "存储",
+          value: (
+            <>
+              <NumberAnimation value={summary.storageUsedTB} format={tb} active={ready} />{" "}
+              <i>
+                / <NumberAnimation value={summary.storageTotalTB} active={ready} /> TB
+              </i>
+            </>
+          ),
+          ratio: summary.storageRatio,
+          note: data?.noVolumeReason ?? undefined,
+        },
+        {
+          key: "memory",
+          label: "内存",
+          value: (
+            <>
+              <NumberAnimation value={summary.memoryUsedGiB} format={gibShort} active={ready} />{" "}
+              <i>
+                / <NumberAnimation value={summary.memoryTotalGiB} format={gibShort} active={ready} />
+              </i>
+            </>
+          ),
+          ratio: summary.memoryRatio,
+        },
+        {
+          key: "gpu",
+          label: "GPU",
+          value: (
+            <>
+              <NumberAnimation value={summary.gpuBasePercent} digits={0} suffix="%" active={ready} />
+              <i>{LOAD_TEXT[summary.loadState]}</i>
+            </>
+          ),
+          ratio: summary.gpuBasePercent === null ? null : summary.gpuBasePercent / 100,
+        },
+        {
+          key: "power",
+          label: "功耗",
+          value: (() => {
+            const formatted = power(summary.powerTotalW);
+            return (
+              <>
+                <NumberAnimation value={summary.powerTotalW} format={powerWatts} active={ready} />
+                {formatted.kw ? (
+                  <>
+                    {" "}
+                    <i>
+                      <NumberAnimation value={summary.powerTotalW} format={powerKilowatts} active={ready} />
+                    </i>
+                  </>
+                ) : null}
+              </>
+            );
+          })(),
+          ratio: null,
+        },
+        {
+          key: "network",
+          label: "网络",
+          value: (
+            <>
+              ↑ <NumberAnimation value={summary.uploadBytesPerSec} format={bytesPerSec} active={ready} />{" "}
+              <i>
+                ↓ <NumberAnimation value={summary.downloadBytesPerSec} format={bytesPerSec} active={ready} />
+              </i>
+            </>
+          ),
+          ratio: null,
+        },
+      ]
+    : [];
+
+  /**
+   * 逐台 GPU 占用：横向条形图。
+   *
+   * 颜色按负载档位取语义色（空闲灰 / 低绿 / 中黄 / 高红），并在 25 / 50 / 75
+   * 画三条虚线 —— 与 §9.5 的档位定义同一套口径，看图不用数刻度就知道哪台进档。
+   * 未知（null）的条不画，靠右侧文字与「负载未知」表达，不拿 0 顶替（§10.3）。
+   */
+  const loadOption = useMemo(() => {
+    const list = data?.servers ?? [];
+    return {
+      ...CHART_BASE,
+      grid: { left: 0, right: 34, top: 4, bottom: 0, containLabel: true },
+      xAxis: {
+        type: "value" as const,
+        max: 100,
+        splitLine: { lineStyle: { color: CHART.grid } },
+        axisLabel: { color: CHART.axisText, fontSize: 11, formatter: "{value}%" },
+      },
+      yAxis: {
+        type: "category" as const,
+        inverse: true,
+        data: list.map((server) => server.id),
+        axisLine: { lineStyle: { color: CHART.axisLine } },
+        axisTick: { show: false },
+        axisLabel: { color: CHART.axisText, fontSize: 12 },
+      },
+      series: [
+        {
+          type: "bar",
+          barWidth: 10,
+          markLine: {
+            silent: true,
+            symbol: "none",
+            label: { show: false },
+            lineStyle: { color: CHART.axisLine, type: "dashed" as const },
+            data: [{ xAxis: 25 }, { xAxis: 50 }, { xAxis: 75 }],
+          },
+          label: {
+            show: true,
+            position: "right" as const,
+            color: CHART.axisText,
+            fontSize: 11,
+            formatter: "{c}%",
+          },
+          data: list.map((server) => ({
+            value: server.gpu.percent === null ? null : Number(server.gpu.percent.toFixed(1)),
+            itemStyle: { color: LOAD_COLOR[server.gpu.load] },
+          })),
+        },
+      ],
+    };
+  }, [data]);
+
+  /**
+   * 存储构成：一根堆叠横条（已用 + 剩余）。
+   *
+   * 不画饼图：只有两个分量时一根条比饼好读，而且这块面板已经有一张条形图，
+   * 再来一个圆环会让面板变吵（规范 §5.1「一块最多一个主要图」）。
+   * 「已用未知」时只画配置容量那一段并写明 —— 不用 0% 冒充（RES-09）。
+   */
+  const storageOption = useMemo(() => {
+    const total = summary?.storageTotalTB ?? 0;
+    const used = summary?.storageUsedTB ?? null;
+    const known = used !== null && Number.isFinite(used);
+    return {
+      ...CHART_BASE,
+      grid: { left: 0, right: 0, top: 0, bottom: 0 },
+      series: [
+        {
+          type: "bar",
+          stack: "storage",
+          barWidth: 16,
+          silent: !known,
+          label: {
+            show: true,
+            position: "inside" as const,
+            color: "#eaf3ff",
+            fontSize: 12,
+            formatter: known ? `已用 ${tb(used)}` : "",
+          },
+          itemStyle: { color: CHART.palette[0] },
+          data: [known ? Number(used.toFixed(4)) : 0],
+        },
+        {
+          type: "bar",
+          stack: "storage",
+          barWidth: 16,
+          silent: !known,
+          label: {
+            show: true,
+            position: "inside" as const,
+            color: CHART.axisText,
+            fontSize: 12,
+            formatter: known ? `剩余 ${tb(total - (used ?? 0))}` : "已用未知",
+          },
+          itemStyle: { color: "rgba(78,168,255,0.14)" },
+          data: [known ? Number((total - (used ?? 0)).toFixed(4)) : total],
+        },
+      ],
+    };
+  }, [summary]);
+
+  return (
+    <>
+      <Panel
+        title="平台数据"
+        extra={
+          <span className="pd-head">
+            {/*
+              夹具徽标：夹具是假输入，必须看得出来，不然「用夹具验过的数」
+              会被误当成真实主机采集结果。放在标题区而不是正文里 ——
+              正文高度是硬预算（四窗口不许滚动），一行提示会把图挤出去。
+              完整说明在弹窗副标题与「映射说明」里。
+            */}
+            {data?.fixture ? (
+              <span className="pd-badge" title={`验收夹具输入：${data.fixture.label}（不是真实主机采集）`}>
+                验收夹具
+              </span>
+            ) : null}
+            {/* 状态点：数据过期 / 断连时在标题区提示，不新增一行解释（§8.1） */}
+            <StatusChip
+              text={error ? "连接中断" : data ? QUALITY_TEXT[quality] : "采样中"}
+              tone={error || quality === "unavailable" ? "danger" : quality === "stale" ? "warn" : "ok"}
+              dot
+            />
+            {/*
+              按钮文案在窄面板里会被挤出去（面板 269px、标题区只剩 ~215px）：
+              用「详情」+ aria-label 保住可读名称，宽度省下一半。
+            */}
+            <Btn tone="ghost" onClick={() => setTab("storage")} aria-label="打开平台资源详情">
+              详情
+            </Btn>
+          </span>
+        }
+        className="ov__panel">
+        {data && summary ? (
+          <>
+            <ul className="pd-rows">
+              {rows.map((row) => {
+                const width = barWidth(row.ratio);
+                return (
+                  <li key={row.key}>
+                    <button
+                      type="button"
+                      className="pd-row"
+                      onClick={() => setTab(row.key)}
+                      title={`查看${row.label}明细`}>
+                      <span className="pd-row__label">{row.label}</span>
+                      <b className="pd-row__value">{row.value}</b>
+                      <i className="pd-bar">
+                        {width === null ? null : <u style={{ width: `${width}%` }} />}
+                      </i>
+                    </button>
+                    {row.note ? <em className="pd-row__note">{row.note}</em> : null}
+                  </li>
+                );
+              })}
+            </ul>
+
+            {/*
+              可视化一：逐台负载。§8.1 允许「短比例条 / 微型图」，
+              禁止的是逐台列表与多条历史曲线 —— 这条横向条形图一次讲完
+              「几台机器、各自多少占用」，比五行数字多一层信息。
+            */}
+            <h4 className="ov-sec ov-sec--tight">
+              逐台负载
+              <span className="ov-sec__note">
+                <NumberAnimation value={data.serverCount} active={ready} /> 台 · {LOAD_TEXT[summary.loadState]}
+              </span>
+            </h4>
+            <Chart
+              className="ov-chart ov-chart--load"
+              option={loadOption}
+              animate={ready}
+              ariaLabel={`每台服务器 GPU 占用：${data.servers
+                .map((server) => `${server.id} ${percent(server.gpu.percent)}`)
+                .join("，")}`}
+            />
+
+            {/*
+              可视化二：存储构成。§8.1 要求「平台存储严格表示按主机磁盘占用
+              映射的平台容量」—— 所以只画「已用 / 剩余」这一个构成，
+              不混入知识库文件数或数据库字节数。
+            */}
+            <h4 className="ov-sec ov-sec--tight">存储构成</h4>
+            <Chart
+              className="ov-chart ov-chart--storage"
+              option={storageOption}
+              animate={ready}
+              ariaLabel={`平台存储构成：已用 ${tb(summary.storageUsedTB)}，共 ${summary.storageTotalTB} TB`}
+            />
+
+          </>
+        ) : (
+          /* 首次加载 / 断连：占位高度与五行一致，不把窗口撑高也不缩塌（§10.3） */
+          <ul className="pd-rows pd-rows--placeholder" aria-busy={!error}>
+            {["存储", "内存", "GPU", "功耗", "网络"].map((label) => (
+              <li key={label}>
+                <span className="pd-row pd-row--static">
+                  <span className="pd-row__label">{label}</span>
+                  <b className="pd-row__value">—</b>
+                  <i className="pd-bar" />
+                </span>
+              </li>
+            ))}
+            <li className="pd-row__note">{error ? `连接中断：${error}` : "正在读取后端主机资源…"}</li>
+          </ul>
+        )}
+      </Panel>
+
+      {tab ? (
+        <ResourceModal initialTab={tab} onClose={() => setTab(null)} />
+      ) : null}
+    </>
   );
 }
 
@@ -489,6 +980,7 @@ function TodoEventPanel() {
  * ------------------------------------------------------------------ */
 
 export default function Overview() {
+  const ready = useEntranceSettled("/");
   const mode = useDashboardStore((state) => state.mode);
   const transitioning = useDashboardStore((state) => state.transitioning);
   const { currentOrder, toast } = useMumai();
@@ -526,10 +1018,10 @@ export default function Overview() {
 
       {/* 右栏：风险与工单 + 待办与最近事件 */}
       <div className="ov__side ov__side--right">
-        <Panel title="风险与工单" className="ov__panel">
+        <Panel title="工单看板" className="ov__panel ov-board ov-board--orders">
           <RiskOrderPanel />
         </Panel>
-        <TodoEventPanel />
+        <PlatformDataPanel />
       </div>
 
       {/* 面包屑与图例 */}
@@ -547,13 +1039,28 @@ export default function Overview() {
           className="legend"
           title={`${mode === "shanghai" ? "上海市" : "全国"}勘察检测点位 ${siteStats.total} 处`}>
           <span>
-            勘察检测点位 <b>{siteStats.total}</b>
+            勘察检测点位{" "}
+            <b>
+              {/*
+                必须显式写回 `display: inline`：`pages.css` 的
+                `.ov__actions .legend span { display: flex; gap: 6px }` 是**后代**选择器，
+                会把数字这个 span 也一起改成 flex 容器，基线与间距就跟原来的纯文本不一样了。
+                内联样式优先级高于那条规则，所以在这里按原样还原成行内元素。
+              */}
+              <NumberAnimation value={siteStats.total} active={ready} style={{ display: "inline" }} />
+            </b>
           </span>
           {legendStatuses.map((status) => (
             <span key={status} title={STATUS_ACTION[status]}>
               <i style={{ background: STATUS_COLOR[status] }} />
               {STATUS_TEXT[status]}
-              <b>{siteStats.byStatus[status]}</b>
+              <b>
+                <NumberAnimation
+                  value={siteStats.byStatus[status]}
+                  active={ready}
+                  style={{ display: "inline" }}
+                />
+              </b>
             </span>
           ))}
         </Legend>

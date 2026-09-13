@@ -6,7 +6,7 @@ from urllib.error import HTTPError
 
 
 def emit(state, message, **details):
-    print(json.dumps(dict(state=state, message=message, **details)), flush=True)
+    print(json.dumps(dict(state=state, message=message, updatedAt=time.time()*1000, **details)), flush=True)
 
 
 def ti(value):
@@ -37,8 +37,8 @@ def decode(key, data):
     return dict(keys=data[0])
 
 
-# Movement requests 50 Hz. The firmware may clamp this; UI reports measured cadence.
-PROFILES = [('motion','aa80','aa81','aa82','aa83',b'\x7f\x02',2),
+# Six-axis motion at the verified 10 Hz cadence; the unusable magnetometer stays disabled.
+PROFILES = [('motion','aa80','aa81','aa82','aa83',b'\x3f\x02',10),
             ('temperature','aa00','aa01','aa02','aa03',b'\x01',100),
             ('humidity','aa20','aa21','aa22','aa23',b'\x01',100),
             ('pressure','aa40','aa41','aa42','aa44',b'\x01',100),
@@ -72,26 +72,45 @@ async def run(args):
         emit('error','缺少绑定设备或 MUMAI_SENSOR_TOKEN',code='BLE_CONFIG_MISSING')
         return 2
     retry = 0
+    device = None
+    disconnect_count = 0
+    stream_id = str(uuid.uuid4())
+    seq = 0
     while True:
         worker = None
         pollers = []
         try:
             emit('connecting' if retry == 0 else 'reconnecting','正在查找已绑定设备',deviceId=args.device)
-            device = await BleakScanner.find_device_by_address(args.device, timeout=8)
+            if device is None:
+                device = await BleakScanner.find_device_by_address(args.device, timeout=8)
             if device is None:
                 raise RuntimeError('未找到已绑定设备；请开机并退出手机 SensorTag App')
             disconnected = asyncio.Event()
             async with BleakClient(device, disconnected_callback=lambda _: disconnected.set()) as client:
-                stream_id = str(uuid.uuid4())
+                connected_at = time.monotonic()
                 pending = {}
                 ready = asyncio.Event()
-                seq = 0
                 metadata = dict(deviceName=device.name or 'SensorTag',model='',firmware='')
                 for name, char in [('model','00002a24-0000-1000-8000-00805f9b34fb'),('firmware','00002a26-0000-1000-8000-00805f9b34fb')]:
                     try:
                         metadata[name] = bytes(await client.read_gatt_char(char)).decode(errors='replace').strip('\x00')
                     except Exception:
                         pass
+                connection_info = {}
+                async def read_connection():
+                    raw = bytes(await client.read_gatt_char(ti('ccc1')))
+                    interval, latency, timeout = struct.unpack('<HHH', raw)
+                    return dict(intervalMs=interval*1.25, latency=latency, supervisionTimeoutMs=timeout*10)
+                if client.services.get_characteristic(ti('ccc1')):
+                    try:
+                        connection_info['before'] = await read_connection()
+                        # Equal min/max avoids the order ambiguity in old TI documentation.
+                        # 30 ms interval, no slave latency, 6 s supervision tolerance.
+                        if client.services.get_characteristic(ti('ccc2')):
+                            await client.write_gatt_char(ti('ccc2'), struct.pack('<HHHH',24,24,0,600), response=True)
+                        connection_info['requested'] = dict(intervalMs=30,latency=0,supervisionTimeoutMs=6000)
+                    except Exception as error:
+                        connection_info['warning'] = str(error)
                 def callback(key):
                     def receive(_, data):
                         try:
@@ -102,6 +121,7 @@ async def run(args):
                     return receive
                 async def sender():
                     nonlocal seq
+                    upload_failed = False
                     while True:
                         await ready.wait()
                         ready.clear()
@@ -112,11 +132,18 @@ async def run(args):
                                     seq=seq,sampledAt=time.time()*1000,readings=values,**metadata)
                         try:
                             await asyncio.to_thread(post,args.api,body)
+                            if upload_failed:
+                                emit('online','BLE 与平台数据传输已恢复',code='BLE_ONLINE',uploadState='online',lastUploadAt=time.time()*1000)
+                                upload_failed = False
                         except HTTPError as error:
                             # Never log request headers or the collector token.
-                            emit('error',f'平台拒绝数据 HTTP {error.code}；请检查权限、批次和时钟',code='PLATFORM_REJECTED')
+                            if not upload_failed:
+                                emit('online',f'蓝牙仍连接，平台拒绝数据 HTTP {error.code}',code='PLATFORM_REJECTED',uploadState='error')
+                            upload_failed = True
                         except Exception:
-                            emit('error','平台连接失败，恢复后自动发送新数据',code='PLATFORM_UNREACHABLE')
+                            if not upload_failed:
+                                emit('online','蓝牙仍连接，平台传输暂时中断，正在恢复',code='PLATFORM_UNREACHABLE',uploadState='error')
+                            upload_failed = True
                 async def poll(char, key):
                     while client.is_connected:
                         callback(key)(char,await client.read_gatt_char(char))
@@ -148,7 +175,8 @@ async def run(args):
                         except Exception:
                             pass
                         if profile_info.get(key,{}).get('config') == 'ff':
-                            warnings.append(f'{key}: 固件报告传感器错误（配置 0xff），无有效读数')
+                            warnings.append(f'{key}: 固件报告传感器错误（配置 0xff），已关闭该采样通道')
+                            await client.write_gatt_char(ti(config), b'\x00', response=True)
                             continue
                         if 'notify' in characteristic.properties:
                             await client.start_notify(characteristic,callback(key))
@@ -172,18 +200,26 @@ async def run(args):
                             pass
                 if not active:
                     raise RuntimeError('未发现兼容 SensorTag 2 服务，请确认型号和固件')
-                emit('online','BLE 已连接；订阅 '+', '.join(active)+(('; 未提供 '+', '.join(missing)) if missing else ''),warnings=warnings,profiles=profile_info,code='BLE_ONLINE',**metadata)
+                if connection_info:
+                    try:
+                        connection_info['actual'] = await read_connection()
+                    except Exception:
+                        pass
+                emit('online','BLE 已连接；订阅 '+', '.join(active)+(('; 未提供 '+', '.join(missing)) if missing else ''),warnings=warnings,profiles=profile_info,connection=connection_info,disconnectCount=disconnect_count,code='BLE_ONLINE',**metadata)
                 retry = 0
                 await disconnected.wait()
-                emit('reconnecting','BLE 已断开，正在自动重连',code='BLE_DISCONNECTED')
+                disconnect_count += 1
+                emit('reconnecting','BLE 已断开，正在自动重连',code='BLE_DISCONNECTED',disconnectCount=disconnect_count,connectedForMs=round((time.monotonic()-connected_at)*1000))
         except Exception as error:
             emit('reconnecting',str(error),code='BLE_CONNECT_FAILED')
+            if retry >= 2:
+                device = None
         finally:
             for task in [worker,*pollers]:
                 if task:
                     task.cancel()
             await asyncio.gather(*[t for t in [worker,*pollers] if t],return_exceptions=True)
-        await asyncio.sleep(min(10,2**retry))
+        await asyncio.sleep(min(10,.5*2**retry))
         retry = min(retry+1,4)
 
 

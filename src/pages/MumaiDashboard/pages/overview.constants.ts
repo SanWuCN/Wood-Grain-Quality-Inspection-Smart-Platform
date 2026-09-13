@@ -10,8 +10,23 @@
  * 演示位置。所有业务数字仍然从 `../seed/scenario` 现算，不在此写死。
  */
 
+import type * as echarts from "echarts/core";
+import { CHART } from "../design";
 import type { Tone } from "../lib";
 import type { Order, OrderStatus } from "../seed/types";
+import type { SiteStatus } from "../seed/sites";
+import { STATUS_TEXT } from "../map/status";
+
+/**
+ * 点位状态中文名 → key 的反查表。
+ *
+ * 图表图例的 `formatter` 只拿得到「名字」这一项，而名字就是 `STATUS_TEXT`
+ * 的值，所以用它反查回 key 再取数量。**不在这里另写一份中文名** ——
+ * 地图、页面图例、图表三处必须永远是同一个口径。
+ */
+export const STATUS_KEY_BY_TEXT: Record<string, SiteStatus> = Object.fromEntries(
+  (Object.keys(STATUS_TEXT) as SiteStatus[]).map((key) => [STATUS_TEXT[key], key]),
+);
 
 /**
  * 设计稿底部状态条左侧的 slogan。
@@ -66,3 +81,43 @@ export const ORDER_COUNTERS: { key: string; label: string; tone: Tone; match: (o
   { key: "pending", label: "待处理", tone: "warn", match: (order) => order.status === "待处理" || order.status === "待复核" },
   { key: "running", label: "处理中", tone: "info", match: (order) => order.status === "处理中" },
 ];
+
+/**
+ * 全页共用的图表基底。
+ *
+ * 每张图只需要给 `series` 与自己的坐标轴/图例，**配色、Tooltip 外观、文字字体
+ * 由这里统一注入**，避免四张图各写一份样式后慢慢跑偏（规范 §10 P2
+ * 「统一 ECharts Palette 与 Tooltip」）。
+ */
+export const CHART_BASE: echarts.EChartsCoreOption = {
+  /* 展开成新数组：CHART.palette 是 `as const` 的只读元组，ECharts 要可变数组 */
+  color: [...CHART.palette],
+  textStyle: {
+    fontFamily: "var(--font-data-mixed)",
+    fontSize: 13,
+    color: CHART.axisText,
+  },
+  tooltip: {
+    backgroundColor: CHART.tooltipBg,
+    borderColor: CHART.tooltipBorder,
+    borderWidth: 1,
+    padding: [8, 12],
+    textStyle: { color: "#eaf3ff", fontSize: 13, fontFamily: "var(--font-data-mixed)" },
+    extraCssText: "border-radius:2px;box-shadow:none;",
+  },
+};
+
+/**
+ * GPU 负载档位 → 图表用色（PRD §9.5 的四个档位 + 未知）。
+ *
+ * 取值来自规范 §1.3 的状态色：空闲用中性灰（它不是一个「好」状态，
+ * 只是没在跑）、低负载绿、中负载黄、高负载红。**未知也是灰**，
+ * 但界面上必须配文字（「负载未知」），不能只靠颜色区分。
+ */
+export const LOAD_COLOR: Record<"idle" | "low" | "medium" | "high" | "unknown", string> = {
+  idle: "#687a91",
+  low: "#39d5a3",
+  medium: "#f2b84b",
+  high: "#ff5c70",
+  unknown: "#465a70",
+};

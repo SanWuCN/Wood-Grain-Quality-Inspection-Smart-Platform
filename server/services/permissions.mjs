@@ -39,27 +39,41 @@ export const ACTION_PERMISSION = {
   */
   "projection.set": "*",
   "projection.hold": "*",
+
+  /* ---- 数据与知识中心（PRD-数据与知识中心-v1.0 §13 权限矩阵） ----
+     读取权限不在这张表里：它由 /api/knowledge/* 的 requireKnowledgeRead 判定。
+     这张表只管写动作。 */
+  "asset.register": "knowledge:manage",
+  "asset.revise": "knowledge:manage",
+  "asset.updateMetadata": "knowledge:manage",
+  "asset.setInclusion": "knowledge:index",
+  "asset.delete": "knowledge:manage",
+  "knowledge.sync": "knowledge:index",
+  "knowledge.retry": "knowledge:index",
+  "knowledge.cancel": "knowledge:index",
+  "knowledge.activateVersion": "knowledge:index",
+  "knowledge.configure": "knowledge:index",
 };
 
 /** 四个账号 → 权限集合（与 src/pages/MumaiDashboard/auth.ts 的 ROLE_ACTIONS 同源） */
 const ALL = [...new Set(Object.values(ACTION_PERMISSION))].filter((item) => item !== "*");
 
 /*
- * 归档没有走命令总线（它是「读字节 + 写清单登记值」，不是实体状态机），
- * 所以这张表里没有对应的 action，权限名要单独列出来。
- * 与前端一致：沈 / 史 有归档校验与导出，饶 / 马 没有。
- *
- * `console:admin` 同理：排练控制台会重建会话、回滚整场状态，
- * 属于「管理员排练控制」而不是日常岗位动作（PRD §11：沈和史是否具有管理员权限
- * 由配置指定；这里按演示口径给这两位）。
+ * 数据与知识中心新增的三个细分权限（PRD §13）：
+ *   knowledge:read    查看总览、资产与图谱 —— 四个业务角色都可查看其所属项目
+ *   knowledge:manage  导入 / 更新资产、编辑分类与绑定对象
+ *   knowledge:search  证据检索 —— 沈、史、饶；马本期仍按现有权限控制，未经调整不开放
+ * 复用已有 knowledge:index（变更纳入规则、启动 / 取消任务、重试、切换索引）。
  */
+const KNOWLEDGE_PERMISSIONS = ["knowledge:read", "knowledge:search", "knowledge:manage", "knowledge:index"];
+
 const ARCHIVE_PERMISSIONS = ["archive:verify", "archive:export"];
 const CONSOLE_PERMISSIONS = ["console:admin"];
 
 export const ROLE_PERMISSIONS = {
   // 沈 / 史：评审要求「项目经理和人工智能架构师权限最大」
-  shen: [...new Set([...ALL, ...ARCHIVE_PERMISSIONS, ...CONSOLE_PERMISSIONS])],
-  shi: [...new Set([...ALL, ...ARCHIVE_PERMISSIONS, ...CONSOLE_PERMISSIONS])],
+  shen: [...new Set([...ALL, ...ARCHIVE_PERMISSIONS, ...CONSOLE_PERMISSIONS, ...KNOWLEDGE_PERMISSIONS])],
+  shi: [...new Set([...ALL, ...ARCHIVE_PERMISSIONS, ...CONSOLE_PERMISSIONS, ...KNOWLEDGE_PERMISSIONS])],
   rao: [
     "env:ack",
     "scan:capture",
@@ -69,6 +83,9 @@ export const ROLE_PERMISSIONS = {
     "sample:review",
     "training:submit",
     "knowledge:search",
+    // 饶负责导入与核对资料（PRD §13：导入 / 更新资产用 knowledge:manage + data:upload）
+    "knowledge:read",
+    "knowledge:manage",
   ],
   ma: [
     "map:save",
@@ -78,6 +95,12 @@ export const ROLE_PERMISSIONS = {
     "sample:review",
     "sample:collect",
     "revisit:plan",
+    /*
+      马只读数据与知识中心。
+      PRD §13 明确「证据检索 knowledge:search 给沈、史、饶；马本期仍按现有权限控制，
+      未经调整不开放」，所以这里只补 read，不补 search / manage / index。
+    */
+    "knowledge:read",
   ],
 };
 

@@ -13,6 +13,7 @@
  */
 
 import { readSession } from "../auth";
+import type { DeviceEvent, DeviceHardwareView, DeviceLedgerEntry } from "../device/types";
 
 /* ------------------------------------------------------------------ *
  * 类型（与服务端 contracts 对应）
@@ -292,6 +293,91 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
  * 接口
  * ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ *
+ * 平台资源（总览「平台数据」与资源弹窗的唯一数据源）
+ *
+ * 与服务端 `server/services/platform-resources.mjs` 的快照一一对应（PRD §10.2）。
+ * 单位口径固定：存储十进制 TB、内存与显存 GiB、网络十进制 B/s。
+ * 缺失一律是 `null`（不是 0、不是 -1），界面据此显示「—」。
+ * ------------------------------------------------------------------ */
+
+export type ResourceQuality = "fresh" | "stale" | "unavailable";
+export type LoadState = "idle" | "low" | "medium" | "high" | "unknown";
+
+export type PlatformServerResource = {
+  id: string;
+  volumeId: string | null;
+  storage: { totalTb: number | null; usedTb: number | null; freeTb: number | null; ratio: number | null };
+  memory: { totalGib: number | null; usedGib: number | null; ratio: number | null };
+  gpu: {
+    model: string;
+    percent: number | null;
+    load: LoadState;
+    vramTotalGib: number;
+    vramUsedGib: number | null;
+    vramRatio: number | null;
+  };
+  powerW: number | null;
+};
+
+export type PlatformMappingExplain = {
+  hostId: string;
+  note: string;
+  storageTotalTB: number;
+  memoryTotalGiB: number;
+  gpuModel: string;
+  vramTotalGiB: number;
+  powerRangeW: [number, number];
+  networkScale: number;
+  mappingVersion: string;
+  platform?: string;
+  arch?: string;
+  cpuCores?: number;
+  gpuSource?: string | null;
+  gpuName?: string | null;
+  networkInterfaces?: string[];
+  topologyVersion?: number;
+  epoch?: number;
+  errors?: Record<string, string | null>;
+  startedAt?: string;
+};
+
+export type PlatformResources = {
+  schemaVersion: number;
+  snapshotId: string;
+  hostId: string;
+  epoch: number;
+  topologyVersion: number;
+  mappingVersion: string;
+  sampledAt: string;
+  quality: ResourceQuality;
+  serverCount: number;
+  /** 一个有效卷都没识别到时给原因；界面据此显示「未识别存储卷」 */
+  noVolumeReason: string | null;
+  /** 验收夹具标识；真实采集时为 null。界面会把它标出来，不让夹具冒充实测 */
+  fixture: { name: string; label: string } | null;
+  summary: {
+    storageTotalTB: number;
+    storageUsedTB: number | null;
+    storageRatio: number | null;
+    memoryTotalGiB: number;
+    memoryUsedGiB: number | null;
+    memoryRatio: number | null;
+    gpuBasePercent: number | null;
+    loadState: LoadState;
+    powerTotalW: number | null;
+    uploadBytesPerSec: number | null;
+    downloadBytesPerSec: number | null;
+  };
+  servers: PlatformServerResource[];
+  metricQuality: { gpu: ResourceQuality; memory: ResourceQuality; storage: ResourceQuality; network: ResourceQuality };
+  metricSampledAt: { gpu: number | null; memory: number | null; storage: number | null; network: number | null };
+  mappingExplain: PlatformMappingExplain;
+};
+
+export type PlatformHistoryPoint = { at: string; atMs: number; uploadBytesPerSec: number | null; downloadBytesPerSec: number | null };
+export type PlatformHistory = { windowSec: number; scale: number; points: PlatformHistoryPoint[] };
+
 export const api = {
   async login(account: string, password: string) {
     const result = await request<{ token: string; actor: Actor; allowedActions: string[] }>("/api/auth/login", {
@@ -532,6 +618,53 @@ export const api = {
   /** 导出诊断包：会话 + 实体 + 快照 + 事件 + 预检，一份 JSON */
   consoleDiagnostics(sessionId: string) {
     return request<Record<string, unknown>>(`/api/console/diagnostics?sessionId=${encodeURIComponent(sessionId)}`);
+  },
+
+  /* ---- 平台资源（运行后端这台机器的真实占用） ---- */
+
+  /**
+   * 平台资源快照（主卡与弹窗共用同一份，PRD §10.2）。
+   *
+   * `fixture` 只在开发环境生效：验收要用 F1–F4 夹具验算映射公式，
+   * 生产构建里后端会忽略这个参数。
+   */
+  platformResources(fixture?: string) {
+    const query = fixture ? `?fixture=${encodeURIComponent(fixture)}` : "";
+    return request<PlatformResources>(`/api/platform/resources${query}`);
+  },
+
+  platformResourceHistory(windowSec = 60) {
+    return request<PlatformHistory>(`/api/platform/resources/history?windowSec=${windowSec}`);
+  },
+
+  /* ---- 手持终端（树莓派 / woodpulse）设备网关 ---- */
+
+  /**
+   * 硬件页数据：终端最后一次上报 + 平台算出来的链路状态。
+   *
+   * 读不到（设备从没上报过 / 服务不可达）时由调用方兜底 —— 硬件页在设备离线时
+   * 要退回种子数据继续演示，而不是整页报错。
+   */
+  deviceHardware(deviceId: string) {
+    return request<DeviceHardwareView>(`/api/devices/${encodeURIComponent(deviceId)}/hardware`);
+  },
+
+  deviceEvents(deviceId: string, limit = 40) {
+    return request<{ deviceId: string; events: DeviceEvent[] }>(
+      `/api/devices/${encodeURIComponent(deviceId)}/events?limit=${limit}`,
+    );
+  },
+
+  deviceLedger() {
+    return request<{ devices: DeviceLedgerEntry[]; status: Record<string, unknown>; serverTime: string }>("/api/devices");
+  },
+
+  /** 下发设备命令。终端的回执是异步的（accepted → executed），这里只负责发出去 */
+  deviceCommand(deviceId: string, type: string, args: Record<string, unknown> = {}) {
+    return request<{ command: { commandId: string; state: string; action: string }; pushed: boolean; hint: string }>(
+      `/api/devices/${encodeURIComponent(deviceId)}/commands`,
+      { method: "POST", body: JSON.stringify({ type, args }) },
+    );
   },
 };
 

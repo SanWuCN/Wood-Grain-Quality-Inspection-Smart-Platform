@@ -72,7 +72,14 @@ export function StatusChip({
   tone = "info",
   dot = true,
 }: {
-  text: string;
+  /**
+   * 文案本身可以是节点，不只是字符串。
+   *
+   * 放宽成 `ReactNode` 是为了让「延迟 12s」「3 项有问题」这类**带着会变的数**
+   * 的标签也能走数字动效组件：数字要逐帧改自己那个文本节点，就不能先被
+   * 拼成一个字符串再传进来。字符串仍然是 `ReactNode` 的子集，既有调用点不用改。
+   */
+  text: ReactNode;
   tone?: Tone;
   dot?: boolean;
 }) {
@@ -107,7 +114,11 @@ export function Metric({
   collected = true,
 }: {
   label: string;
-  value: string;
+  /**
+   * 同 `StatusChip.text`：允许传节点，好让会变的数走数字动效组件
+   * （数字只能在**自己的**文本节点上逐帧改写，拼进字符串就没法动了）。
+   */
+  value: ReactNode;
   unit?: string;
   note?: string;
   tone?: Tone;

@@ -135,7 +135,7 @@ export const VERSION_ITEMS: VersionItem[] = [
     label: "小车程序版本",
     current: "DEMO-CART-1.6.0",
     sourceMode: "replay",
-    target: "上位机 ROS1 Noetic · 演示车",
+    target: "上位机 ROS1 Noetic · 智能巡检车",
     reported: { live: "未获运动权限（只读监视）", demo: "DEMO-CART-1.6.0" },
     switchable: true,
     releases: [

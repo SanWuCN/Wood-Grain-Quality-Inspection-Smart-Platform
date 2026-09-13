@@ -15,6 +15,7 @@
 
 import type { ComponentProps, ReactNode } from "react";
 import styled from "styled-components";
+import NumberAnimation from "@/components/numberAnimation";
 import { ACCOUNTS, COLORS, HEADER_HEIGHT } from "./design";
 import { Icon, type IconName } from "./icons";
 
@@ -92,30 +93,41 @@ const SvgLayer = styled.div`
   }
 `;
 
-/** 品牌 + 标题：左上角，带切角底衬 */
+/**
+ * 品牌 + 标题：左上角，带切角底衬
+ *
+ * 品牌名用**团队字标本身**：`public/brand/mumai-wordmark-white.png`
+ * （原图抠掉蓝色背景、重新着白色，含前面的小符号）。
+ *
+ * 为什么不再用系统字体写「木脉智检」：团队字标用的是 MumaiDisplay
+ * （`public/font/pmzd.woff2`）那套偏斜、横画带切角的字，系统字体写出来
+ * 字形对不上；这里直接贴字标，顶栏和登录页的字形才一致。
+ * 所以左上角只有这一个图形，不再另外放一个符号（会和字标里自带的重复）。
+ * 副标题仍是系统字体的小字 —— 它本来就属于界面文案，不属于字标。
+ */
 const Brand = styled.div`
   position: absolute;
   left: 22px;
   top: 10px;
   z-index: 2;
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: flex-end;
+  gap: 12px;
   pointer-events: none;
   white-space: nowrap;
 
-  b {
-    font-size: 26px;
-    font-weight: 600;
-    letter-spacing: 0.16em;
-    color: ${COLORS.textPrimary};
-    text-shadow: 0 0 22px rgba(120, 158, 255, 0.65);
+  img {
+    height: 30px;
+    width: auto;
+    display: block;
+    filter: drop-shadow(0 0 14px rgba(120, 158, 255, 0.35));
   }
 
   span {
     color: rgba(232, 239, 255, 0.42);
     font-size: 11px;
     letter-spacing: 0.24em;
+    padding-bottom: 5px;
   }
 `;
 
@@ -311,8 +323,16 @@ export interface DemoHeaderProps extends ComponentProps<typeof TitleWrapper> {
    */
   onAccountChange?: (id: string) => void;
   time: Date;
-  /** 设备通道状态等，挂在右侧状态区最前面 */
+  /** 顶栏右侧的状态项（平台 / 智能车 / 扫描仪 / 模型），由 Header 传进来 */
   statusExtra?: ReactNode;
+  /**
+   * 右上「状态正常 N/M」的计数。
+   *
+   * 原来是写死的 `4/4`（对应旧的四路通道）—— 设备真掉线了它也不会变，
+   * 属于"看着像状态、其实是装饰"。现在由调用方按同一批状态项算出来，
+   * 和顶栏右侧那四项永远一致。
+   */
+  statusSummary?: { ok: number; total: number };
   /**
    * 「投到展示窗口」「退出登录」等动作按钮。
    *
@@ -331,6 +351,7 @@ export default function DemoHeader(props: DemoHeaderProps) {
     onAccountChange,
     time,
     statusExtra,
+    statusSummary,
     actions,
     ...rest
   } = props;
@@ -342,15 +363,56 @@ export default function DemoHeader(props: DemoHeaderProps) {
       </SvgLayer>
 
       <Brand>
-        <b>木脉智检</b>
+        {/*
+          团队字标（含符号），深色底用白色那一版；旁边的副标题是界面文案。
+          字标本体已经写了品牌名，因此这里不再有同义的隐藏文本，
+          alt 给「木脉智检」供辅助技术读取。
+        */}
+        <img src="/brand/mumai-wordmark-white.png" alt="木脉智检" />
         <span>古建筑智能巡检平台</span>
       </Brand>
 
       <TopRight>
-        <span className="device">
+        <span
+          className="device"
+          title={
+            statusSummary
+              ? `${statusSummary.total} 项状态里 ${statusSummary.ok} 项正常（平台 / 智能车 / 扫描仪 / 模型）`
+              : undefined
+          }>
           <i />
-          设备在线 <b>4/4</b>
+          {/*
+            「设备在线 4/4」原来写死 —— 现在由 Shell 按顶栏右侧那四项现算，
+            掉线时数字会跟着变，不会再出现「扫描仪离线但右上角仍写 4/4」。
+
+            分子与分母都交给 `NumberAnimation`：只看分母动、分子不动的话，
+            某一格掉线那一刻反而看不出是哪一边变了。两边都是整数（未传 digits 时
+            由样本值决定小数位 = 0），并且组件自带 tabular-nums，
+            所以从「0/4」滚到「4/4」的过程中右邻的 `<time>` 不会被挤动。
+            数字落在 `<b>` 里、`<b>` 又是 `.device` 的 flex 项：`.device` 没有
+            `span` 后代规则，数字只继承 `<b>` 的字号与 `.device b` 的主色，
+            不存在被某条 `.xx span` 规则截走字号/颜色的问题。
+            `statusSummary` 整个缺席时才落回原来的单个「—」：这时候没有任何
+            一项状态可数，写「—/—」会像「两个数都没采到」，比现在这版更含糊。
+          */}
+          状态正常{" "}
+          <b>
+            {statusSummary ? (
+              <>
+                <NumberAnimation value={statusSummary.ok} />
+                {"/"}
+                <NumberAnimation value={statusSummary.total} />
+              </>
+            ) : (
+              "—"
+            )}
+          </b>
         </span>
+        {/*
+          时钟不动：它每秒都重渲染一次，本来就是「直接落值」的文本 ——
+          给它上补间等于每 1 秒起一段 0.8s 的动画，两段首尾相咬，
+          屏幕上的秒数会永远追不上真实时间。会话号、seq 之类的标识同理。
+        */}
         <time>{time.toLocaleTimeString("zh-CN", { hour12: false })}</time>
         {actions}
         {onAccountChange ? (

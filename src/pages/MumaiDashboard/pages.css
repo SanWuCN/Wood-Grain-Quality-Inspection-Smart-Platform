@@ -1057,11 +1057,25 @@
   所以这里放一组同心圆环，外环顺时针、中环反向、内环脉冲 ——
   与场景里真正的 Bottom 展示盘同一套几何语言，揭幕淡出时视觉是连续的。
 */
+/*
+  团队 logo（与 index.html 的 #boot 同一版式）：只放整条字标，居中。
+  原来这里是「符号 + 系统字体写的品牌名」两件，字形和团队字标对不上；
+  现在直接用字标本体（含符号），字号也对得上。
+*/
+.map-veil__wordmark {
+  display: block;
+  width: auto;
+  height: 46px;
+  margin-bottom: 16px;
+  opacity: 0.96;
+  filter: drop-shadow(0 0 18px rgba(120, 158, 255, 0.35));
+}
+
 .map-veil__rings {
   position: relative;
   display: block;
-  width: 132px;
-  height: 132px;
+  width: 96px;
+  height: 96px;
   margin-bottom: 6px;
 }
 
@@ -1408,40 +1422,6 @@
   color: var(--text-primary);
 }
 
-/* 四路通道：一行一条 = 通道名 · 连接状态 · 更新时间。
-   `li` 必须自己排成一行（名称定宽、时间右对齐），否则 span / .chip / em
-   都是行内元素，会连成「地图●正常14:22:31」这种连读不出来的一坨。 */
-.ov-channels {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.ov-channels li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--fs-aux);
-}
-
-/* 通道名定宽成列，四个通道的状态词因此竖直对齐，能一眼扫下来 */
-.ov-channels li > span:first-child {
-  flex: 0 0 46px;
-  color: var(--ma-text-3);
-}
-
-/* 更新时间是右端锚点：等宽数字，避免 14:22:31 / 14:22:24 宽度跳动 */
-.ov-channels li > em {
-  margin-left: auto;
-  color: var(--ma-text-3);
-  font-family: var(--font-data);
-  font-style: normal;
-  font-variant-numeric: tabular-nums;
-}
-
 /* 风险与工单：三个计数排一行，靠留白与字号分层，不各自包一张边框卡（§4.3） */
 .ov-counts {
   display: flex;
@@ -1670,12 +1650,6 @@
   width: var(--mumai-icon-size, 14px);
 }
 
-/* 面板内最后一块：面板高度是固定的两行 grid（与地图留白对齐），
-   内容变薄后剩下的留白交给这一块吸收，避免面板底部出现一片空白 */
-.ov__panel--todo .ov-stats {
-  margin-top: auto;
-}
-
 /* 面板内的状态块压缩一点，避免和上面的列表争高度 */
 .ov__panel .state-block {
   margin-top: 7px;
@@ -1754,30 +1728,6 @@
   margin-right: 7px;
   color: var(--ma-text-3);
   font-family: var(--font-data);
-}
-
-/* 历史风险口径：标签在文字节点里，数字单独上色 */
-.ov-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4);
-  margin-top: var(--space-3);
-  font-size: var(--fs-aux);
-  color: var(--text-tertiary);
-}
-
-.ov-stats b {
-  margin-left: 4px;
-  color: var(--ma-text);
-  font-family: var(--font-data);
-}
-
-.ov-stats b.is-ok {
-  color: var(--ma-ok);
-}
-
-.ov-stats b.is-danger {
-  color: var(--ma-danger);
 }
 
 /* ------------------------------------------------------------------
@@ -2909,6 +2859,17 @@
   overflow-y: auto;
 }
 
+/*
+ * 异常排查用：整页不滚动，滚动交给两块面板自己的列表。
+ *
+ * 为什么按页签区分而不是全局改：其余页签（采集作业、硬件监看）的内容本来就是
+ * 一长列卡片，整页滚动是对的；只有异常排查是「两列并排、各自一个长列表」，
+ * 两边分开滚才看得出「左边还有多少没处理、右边还有哪几次启动」。
+ */
+.adapt-body--fixed {
+  overflow: hidden;
+}
+
 .adapt-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
@@ -3249,11 +3210,84 @@
    各按内容高度排；事件列表短，日志长，并排之后两列都不留白块。
    日志一条记录是时间 / 级别 / 来源 / 正文四段，右列给宽容度（1.4fr）保证不折行。
 */
+/*
+ * 异常排查：左「异常事件」/ 右「设备日志」。
+ *
+ * 两列必须**等高**，且整页不滚动（用户明确要求：「左边异常事件高度要和右边的
+ * 窗口高度一致，这个页面不要可以向下滚动」）。
+ * 所以这里不用 align-items: start —— 那会让每一列各按自己的内容高度撑开，
+ * 左边 17 条事件比右边长一大截，页面就跟着能滚了。
+ * 改成两列都占满这一屏高度，各自的列表**在面板内部滚动**：
+ *   · 左边事件列表：已结案的一多就会溢出，滚它自己
+ *   · 右边日志包列表：30 个包同理
+ * 这样任何一列内容变多都不会把整页顶下去。
+ */
 .triage {
   display: grid;
   grid-template-columns: minmax(360px, 0.9fr) minmax(0, 1.4fr);
   gap: var(--space-3);
-  align-items: start;
+  align-items: stretch;
+  /* 撑满 .adapt-body 的高度；min-height: 0 让内部滚动区能真正收到高度约束 */
+  height: 100%;
+  min-height: 0;
+}
+
+/*
+ * 面板本体在等高布局下的行为：
+ *   .tech-panel        外框，撑满格子
+ *   .tech-panel__inner 纵向 flex，min-height: 0 是关键 ——
+ *                      没有它，flex 子项的最小高度是内容高度，
+ *                      里面的列表就永远撑开、滚动条也不会出现
+ *   .tech-panel__body  再分成「固定筛选区 / 滚动列表 / 固定说明」三段
+ */
+.triage .tri-panel {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.triage .tri-panel .tech-panel__inner {
+  height: 100%;
+  min-height: 0;
+}
+
+/*
+ * body 自己**不滚**，改成纵向 flex 容器：
+ *   ① .pkt-filter        flex: 0 0 auto  → 固定在顶部，列表滚动时不动
+ *   ② .pkt-list__scroll  flex: 1         → 唯一滚动区（只有列表滚）
+ *   ③ .note              flex: 0 0 auto  → 固定在底部
+ *
+ * 用户的要求是「筛选区不要随着上滑而看不到」。常见做法 position: sticky
+ * 也行，但那需要给滚动区补负 margin 和背景色去遮住穿过的行，
+ * 而这里本来就是两列等高的固定布局 —— 直接不让它参与滚动更简单、也没有
+ * 背景色对齐的问题。
+ */
+.triage .tri-panel .tech-panel__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pkt-list__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/*
+ * 左侧「异常事件」同理：列表滚，底部的「标记待核验 / 核验通过并恢复」固定。
+ * 面板头的标题 + 计数不参与滚动（它本来就在 .tech-panel__head 里）。
+ */
+.evt-list__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.triage .tri-panel .adapt-actions {
+  flex: 0 0 auto;
 }
 
 .tri-panel,
@@ -3391,6 +3425,249 @@
   font-style: normal;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/*
+  已结案事件：结论直接长在列表里。
+  十几条结案记录如果要点开才知道「最后怎么解决的」，等于没结案 ——
+  所以列表里就给出结论，未结案的则没有这一行（它本来就还没结论）。
+*/
+.evt-list__conclusion {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--ma-green, var(--success));
+  font-size: var(--fs-aux);
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.evt-list__conclusion::before {
+  content: "结论：";
+  color: var(--ma-text-3);
+}
+
+/*
+  已结案的行整体压低对比：这一页要回答的是「还有什么没解决」，
+  结案的一多，未结案的就容易被淹掉。压暗不等于隐藏 —— 依然可点开看全过程。
+*/
+.evt-list li.is-settled button {
+  opacity: 0.72;
+}
+
+.evt-list li.is-settled button:hover {
+  opacity: 1;
+}
+
+/* ---- 日志包列表 ---- */
+
+/*
+  筛选区（时间 / 设备机号 / 结果 + 关键词）。
+  三行竖排而不是挤成一行：三组条件各自是一类，横着排会在 1366 档折成一堆
+  参差不齐的行，读起来分不清哪个按钮属于哪一组。每行最前面给一个固定宽度的
+  标签，「时间」「设备机号」「结果」三个词竖直对齐。
+*/
+.pkt-filter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pkt-filter__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.pkt-filter__label {
+  flex: 0 0 62px;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.pkt-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  /*
+    不给固定高度：列表的高度由面板剩余空间决定（.tri-panel__body 自己滚）。
+    原来写死 max-height: 460px 是为了「别把面板撑成几屏高」，但在两列等高的
+    布局里这个值反而会和面板实际高度打架 —— 面板高的时候列表不填满、
+    面板矮的时候又溢出。交给 flex 分配即可。
+  */
+}
+
+/* 与异常事件同一套交互：整行可点，只在悬停时提亮 */
+.pkt-list button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-2);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pkt-list button:hover {
+  background: var(--fill-weak);
+}
+
+/*
+  结果档的视觉区分：**只有出过问题的包才给彩色左边线**。
+  正常包保持中性 —— 三十行里二十七行都描边的话，剩下三行的问题就被淹了
+  （这正是原来「每个包都挂 WARN 徽标」的毛病）。
+*/
+.pkt-list li.is-需留意 button {
+  border-left: 2px solid var(--warning);
+  padding-left: calc(var(--space-2) - 2px);
+}
+
+.pkt-list li.is-异常 button {
+  border-left: 2px solid var(--danger);
+  padding-left: calc(var(--space-2) - 2px);
+}
+
+/*
+  本次会话那一包：极淡底色 + 强调色左边线。
+  与上面两档的左边线冲突时以「本次」为准（它的信息优先级更高）。
+  PRD §4「选中态同时有底色或边线、文字变化，不能仅变色」—— 这里三者都有。
+*/
+.pkt-list li.is-current button {
+  border-left: 2px solid var(--primary);
+  padding-left: calc(var(--space-2) - 2px);
+  background: var(--fill-weak);
+}
+
+.pkt__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.pkt__main b {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 600;
+}
+
+/* 日期与时刻用等宽数字：三十行的启动时刻竖直对齐才能扫读 */
+.pkt__time {
+  color: var(--text-tertiary);
+  font-family: var(--font-data);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.pkt__at {
+  color: var(--text-secondary);
+  font-family: var(--font-data);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.pkt__now {
+  padding: 0 6px;
+  border: 1px solid var(--border-active);
+  color: var(--primary);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.pkt__main i {
+  overflow: hidden;
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/*
+  把「这一包错在哪」提到列表里 —— 否则要逐包点开才知道哪一包有问题。
+  只显示一条（首个 ERROR，其次首个 WARN），多了会把列表撑成两屏。
+*/
+.pkt__issue {
+  overflow: hidden;
+  font-size: var(--fs-aux);
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pkt__issue.is-error {
+  color: var(--danger);
+}
+
+.pkt__issue.is-warn {
+  color: var(--warning);
+}
+
+.pkt__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+
+.pkt__n {
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.pkt__n.is-warn {
+  color: var(--warning);
+}
+
+.pkt__n.is-error {
+  color: var(--danger);
+}
+
+/* ---- 日志包内容弹窗内的检索框 ---- */
+
+.devlog-search {
+  margin-left: auto;
+}
+
+.devlog-search input {
+  width: 260px;
+  height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-default);
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-size: var(--fs-aux);
+}
+
+.devlog-search input::placeholder {
+  color: var(--text-tertiary);
+}
+
+/*
+  包内日志列表：两三百条要能连续翻，所以给一个受控高度让它自己滚，
+  而不是把弹窗撑到页面高度。等宽时间戳 + 固定列宽让同一来源的行竖直对齐，
+  扫读时能直接按列定位。
+*/
+.devlog--packet {
+  max-height: 46vh;
+  overflow-y: auto;
 }
 
 .evt-list__meta {
@@ -5105,7 +5382,7 @@
    所以两块新内容与原有页签并排时不会跳格。
    ------------------------------------------------------------------ */
 
-.hw-monitor,
+/* 固件及模型仍是等宽自适应列：那边是版本矩阵与配置表单，条目地位相同、没有主次 */
 .fw-config {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
@@ -5113,9 +5390,70 @@
   align-content: start;
 }
 
+/* ------------------------------------------------------------------
+   硬件详情 · 硬件监看（/hardware?tab=monitor）
+   ------------------------------------------------------------------
+   这一屏只讲**这一台扫描枪**：能不能采（设备状态 / 设备读数 / 通道状态）、
+   采到哪了（采集接收 / 终端遥测 / 设备预览）、出过什么事（事件 / 能力 / 台账）。
+   服务器算力不在这里 —— 那是总览「平台数据」与资源弹窗的事，重复一遍既占了
+   最要紧的位置，又容易让人以为「这台扫描枪的算力是 4090」。
+
+   ## 两个改动点
+
+   ① **`align-items: start`** —— 面板按内容定高。
+      原来靠默认的 `stretch`，同一行里短的那块会被拉成和最高那块一样高：
+      1920×1080 实测「通道状态」只有四行内容，却被撑到 516px，一格空出 266px
+      的卡片内空白，看起来像没加载完。改成 start 之后每块只占自己需要的高度。
+      注意它只决定「要不要撑满格子」，不改行高，所以整页高度与改造前一致。
+
+   ② **≥1700px 换成 12 栏**（`.hw-col-*`）—— 宽屏按内容给宽度，不平均分。
+      主角「设备状态」6 栏（约 940px）：设备插图 + 六条事实 + 四个版本读数
+      在 4 栏（458px）里会挤成两行；三五行的短面板给 3 栏（约 460px，与改造前
+      同宽，表格不会折行）。每一行都凑满 12 栏：6+3+3 / 6+3+3 / 3+3+6。
+
+   **1700 以下刻意保留原来的 `auto-fit minmax(380px,1fr)`**：那一档一行本来
+   就是三到四块，密度是对的，换成 12 栏只会让短面板掉到 330px 反而折行、
+   整页被拉高一倍。窄屏要的是密度，宽屏才有多余的宽度可以分配。
+   ------------------------------------------------------------------ */
+.hw-monitor {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
 .hw-panel,
 .fw-panel {
   min-width: 0;
+}
+
+/* 宽屏之前：主角面板横跨两列。「参考样本」那张 5 列表格也靠它拿到 ~940px ——
+   它的列全是「G-SAMPLE-01」「0° / 45° / 90°」这种不可断的长串，
+   一列（~460px）时每一格都会折行（实测过）。 */
+.hw-col-6 {
+  grid-column: span 2;
+}
+
+/* 视口窄到只剩一列时 span 2 会撑出隐式列，退回单列 */
+@media (max-width: 1100px) {
+  .hw-col-6 {
+    grid-column: auto;
+  }
+}
+
+/* ≥1700：12 栏，按内容分配宽度 */
+@media (min-width: 1700px) {
+  .hw-monitor {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .hw-col-6 {
+    grid-column: span 6;
+  }
+
+  .hw-col-3 {
+    grid-column: span 3;
+  }
 }
 
 /* ------------------------------------------------------------------
@@ -6179,19 +6517,10 @@
 }
 
 /* 参考样本是硬件监看里唯一的 5 列表格（批次 / 分组 / 材质来源 / 扫描次数 / 方向），
-   而它那几列全是不可断的标识串。占一列时列宽只有 ~88px，浏览器会在连字符处
-   折断：「G-SAMPLE-01」变成「G-」「SAMPLE-」「01」，「0° / 45° / 90°」变成两行
-   （实测整个表格每一格都折行）。让它横跨两列，表格就有 ~940px，整串显示。 */
-.hw-panel--samples {
-  grid-column: span 2;
-}
-
-/* 视口窄到网格只剩一列时 span 2 会撑出隐式列，退回单列 */
-@media (max-width: 1100px) {
-  .hw-panel--samples {
-    grid-column: auto;
-  }
-}
+   而它那几列全是不可断的标识串。三栏时列宽只有 ~88px，浏览器会在连字符处折断：
+   「G-SAMPLE-01」变成「G-」「SAMPLE-」「01」，「0° / 45° / 90°」变成两行
+   （实测整个表格每一格都折行）。宽度由 `.hw-col-6` 统一给（约 940px），
+   这里不再单独写 span —— 两套 span 规则叠在一起会互相覆盖。 */
 
 /* 四个版本读数铺开，窄屏自动折行。
    minmax 取 148px 而不是 120px：版本号是「FW-2.4.1」这种不可断的长串，
@@ -6404,6 +6733,145 @@
   font-size: var(--fs-aux);
 }
 
+/* ---- 真机接入（设备网关）：链路说明条 / 读数来源 / 事件 / 预览 ----
+   这一组是「硬件页接真机」时新增的：数据是不是真的、新不新、从哪来，
+   必须在版面上直接回答，不能让人从数字里猜。 */
+
+/* 整块退回种子数据、或真机数据已经旧了时的说明条 */
+.hw-notice {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-left: 2px solid var(--ma-info);
+  background: var(--fill-soft);
+  font-size: var(--fs-aux);
+}
+
+.hw-notice b {
+  color: var(--ma-text-1);
+  white-space: nowrap;
+}
+
+.hw-notice span {
+  color: var(--ma-text-3);
+}
+
+.hw-notice.is-warn {
+  border-left-color: var(--ma-warn);
+}
+
+.hw-notice.is-danger {
+  border-left-color: var(--ma-danger);
+}
+
+/* 读数的来源标记（实测 / 推算 / 估算）：小、靠左、不抢数值的位置 */
+.hw-readings__src {
+  padding: 0 4px;
+  border: 1px solid var(--border-subtle);
+  color: var(--ma-text-3);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.hw-readings__src[data-source="estimated"] {
+  border-color: var(--ma-warn);
+  color: var(--ma-warn);
+}
+
+.hw-readings__src[data-source="derived"] {
+  border-color: var(--ma-info);
+  color: var(--ma-info);
+}
+
+/* 设备卡脚下的系统信息与设备指令 */
+.hw-device__meta {
+  margin-top: calc(var(--space-2) * -1);
+}
+
+.hw-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.hw-actions .muted {
+  font-size: var(--fs-aux);
+}
+
+/* 设备事件流水：一行一条，时间 / 事件 / 摘要 / 距今 */
+.hw-events,
+.hw-commands {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-aux);
+}
+
+.hw-events li,
+.hw-commands li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.hw-events__at {
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hw-events b {
+  color: var(--ma-text-1);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hw-events .muted,
+.hw-commands .muted {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hw-events em {
+  margin-left: auto;
+  color: var(--ma-text-3);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.hw-commands code {
+  color: var(--ma-text-1);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+}
+
+.hw-commands {
+  margin-bottom: var(--space-3);
+}
+
+/* 低帧率预览：保持宽高比、不拉伸，且明确不是归档图像 */
+.hw-preview {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  background: var(--fill-soft);
+}
+
 /* ---- 版本配置矩阵 ---- */
 
 .fw-group + .fw-group {
@@ -6537,33 +7005,79 @@
   background: var(--primary);
 }
 
-.ov-tally__bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-  margin: 0;
-  padding: 0;
-  list-style: none;
+/* ------------------------------------------------------------------
+   总览页图表（ECharts）
+   ------------------------------------------------------------------
+   四张图共用一个高度档位，图本身不吃边框、不加发光（规范 §6.1：Glow 只给
+   地图 / 当前焦点 / 关键风险，普通 Panel 与正文都不发光）。
+   高度写死而不是 flex:1：ECharts 在 0 高度上 init 会画出空白，
+   由 ResizeObserver 拿到真实高度后再画；给固定高度是为了首帧就有尺寸。
+   ------------------------------------------------------------------ */
+.ov-chart {
+  width: 100%;
+  flex: 0 0 auto;
 }
 
-.ov-tally__bar li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-aux);
+/* 巡检概览的环形图：与右侧图例一行读完，占面板中段 */
+.ov-chart--donut {
+  height: 132px;
+  margin: var(--space-2) 0 var(--space-3);
+}
+
+/* 设备状态的四路通道条：4 条 + 阈值线 + 右侧数值 */
+.ov-chart--bars {
+  height: 112px;
+  margin-bottom: var(--space-2);
+}
+
+/* 待办面板底部的历史风险环图：最后一块，贴底吃掉剩余留白 */
+.ov-chart--donut-sm {
+  height: 104px;
+  margin: auto 0 0;
+}
+
+/* 「数据通道」标题右侧的口径说明：说明图怎么读，取代原来每行里的时间列 */
+.ov-sec__note {
+  margin-left: auto;
   color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
-.ov-tally__bar i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+/* 风险与工单：三档计数的占比条。
+   一根横条按档切段，宽度 = 该档数量 / 最大档数量（口径见 Overview.tsx 注释）。
+   段与段之间留 2px 缝，避免两个语义色直接相接看不出分界。 */
+.ov-counts__bar {
+  display: flex;
+  gap: 2px;
+  height: 3px;
+  margin: calc(-1 * var(--space-2)) 0 0;
 }
 
-.ov-tally__bar b {
-  color: var(--ma-text-2);
-  font-family: var(--font-data);
-  font-weight: 500;
+/* 占比条的口径说明：三档互斥，三段之和就是条的总长。写一行小字说明
+   这条在表达什么，不留给人猜 */
+.ov-counts__note {
+  margin: var(--space-1) 0 var(--space-3);
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.ov-counts__bar i {
+  display: block;
+  background: var(--fill-soft);
+}
+
+.ov-counts__bar i.is-danger {
+  background: var(--danger);
+}
+
+.ov-counts__bar i.is-warn {
+  background: var(--warning);
+}
+
+.ov-counts__bar i.is-info {
+  background: var(--primary);
 }
 
 /* 「本轮任务」脚注贴到面板底部（与 .ov__panel--todo .ov-stats 同一个手法）：
@@ -6574,6 +7088,24 @@
   padding-top: var(--space-3);
   color: var(--ma-text-3);
   font-size: var(--fs-aux);
+}
+
+/* 设备摘要行：三台设备各一段「编号 + 来源」，并排横排（372px 面板放得下）。
+   用 flex 默认的 nowrap 让三台排一行，读数时不用在两行之间来回找 */
+.ov-devices__brief {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  white-space: nowrap;
+}
+
+.ov-devices__brief b {
+  color: var(--ma-text-2);
+  font-family: var(--font-data);
+  font-weight: 500;
 }
 
 /* 设备列表：左侧名称 + 编号，右侧状态；两行之间用留白分隔 */
@@ -7191,4 +7723,768 @@
 .twin-view.is-hidden {
   visibility: hidden;
   pointer-events: none;
+}
+
+/* ------------------------------------------------------------------
+   小屏（≤800px 高，1366×768 就在这一档）的图表收敛
+   ------------------------------------------------------------------
+   这一档面板只有 ~292px 高，三张图按桌面尺寸排会把设备面板的通道条顶出可视区。
+   整档收一档高度，并隐藏占地方的设备插图 —— 规范 §8：小屏优先「减少内容」，
+   而不是把内容挤出屏幕。
+
+   ⚠️ 必须写在这里（基础样式**之后**）：同权重下 CSS 按出现顺序取胜，
+   把这段放到文件前半部分的 @media (max-height:800px) 里会被
+   `.ov-chart--bars { height:112px }` 反过来盖掉，调了半天没有效果。
+   ------------------------------------------------------------------ */
+@media (max-height: 800px) {
+  .ov-chart--donut {
+    height: 104px;
+    margin: var(--space-1) 0 var(--space-2);
+  }
+
+  .ov-chart--bars {
+    height: 84px;
+    margin-bottom: 0;
+  }
+
+  .ov-chart--donut-sm {
+    height: 84px;
+  }
+
+  .ov__panel .mumai-device-figure {
+    display: none;
+  }
+
+}
+
+/* ------------------------------------------------------------------
+   总览页「平台数据」面板（PRD §8.1：五行摘要）
+   ------------------------------------------------------------------
+   五行 = 存储 / 内存 / GPU / 功耗 / 网络，每行「名称 + 数字 + 短比例条」。
+   没有厚边框卡片：规范 §4.3「能用排版区分，就不要用框」。
+   行本身是按钮（点开对应页签），所以要有焦点环与 hover，但不加装饰发光。
+   ------------------------------------------------------------------ */
+.pd-rows {
+  display: flex;
+  flex-direction: column;
+  /* 行之间不加间距：每行自带比例条与两行排版，已经分得开。
+     这里省下的 ~20px 是给下面两张微型图的（面板高度是硬预算）。 */
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pd-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 2px var(--space-2);
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pd-row--static {
+  cursor: default;
+}
+
+.pd-row:hover .pd-row__label,
+.pd-row:focus-visible .pd-row__label {
+  color: var(--text-secondary);
+}
+
+.pd-row:focus-visible {
+  outline: 2px solid var(--mumai-focus, #8ad9e9);
+  outline-offset: 2px;
+}
+
+.pd-row__label {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+/* 数字用数据字体 + 等宽数字：网络速率每 2 秒变一次，等宽才不会左右抖 */
+.pd-row__value {
+  color: var(--ma-text-1);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.pd-row__value i {
+  margin-left: 6px;
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  font-weight: 400;
+}
+
+/* 比例条横跨整行，放在第二行，不挤压数字的宽度 */
+.pd-row .pd-bar {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+}
+
+.pd-row__note {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-style: normal;
+}
+
+/* 夹具徽标：只在标题区出现，不占正文高度 */
+.pd-badge {
+  padding: 0 6px;
+  border: 1px solid rgba(242, 184, 75, 0.45);
+  color: var(--warning);
+  font-size: var(--fs-aux);
+  white-space: nowrap;
+}
+
+/* 标题右侧：夹具徽标 + 状态点 + 资源详情入口，不新增一行。
+   不换行（nowrap）是硬要求：标题区一旦折行，面板高度预算立刻被吃掉 */
+.pd-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-1);
+}
+
+.pd-head .btn {
+  white-space: nowrap;
+}
+
+/* 窄面板（≤1440）里状态点只留圆点：文字进 title/aria，宽度让给「详情」按钮，
+   否则标题区会顶出面板右边界（实测 1366 越界 71px） */
+@media (max-width: 1440px), (max-height: 800px) {
+  /*
+    只留圆点、不要文字：用「宽度 0 + 隐藏溢出」而不是 font-size:0 ——
+    后者会把圆点本身也缩成 0，状态颜色就丢了。圆点是 flex 项，
+    flex:0 0 auto 保证它在 0 宽容器里仍然完整显示。
+  */
+  .pd-head .chip {
+    width: 0;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+  }
+
+  .pd-head .chip i {
+    flex: 0 0 auto;
+    margin: 0;
+  }
+}
+
+/*
+ * 资源弹窗（PRD §8.2）
+ * 页眉与页签固定，只有 .rm-body 滚动；窗口宽度跟 Modal 的 wide 走。
+ */
+.rm-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.rm-tabs {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.rm-tabs button {
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--ma-text-3);
+  font-size: var(--fs-table);
+  cursor: pointer;
+}
+
+.rm-tabs button:hover {
+  color: var(--text-secondary);
+}
+
+.rm-tabs button.is-active {
+  border-bottom-color: var(--primary);
+  color: var(--text-primary);
+}
+
+.rm-tabs button:focus-visible {
+  outline: 2px solid var(--mumai-focus, #8ad9e9);
+  outline-offset: -2px;
+}
+
+/* 正文：唯一滚动区 */
+.rm-body {
+  max-height: min(560px, calc(100vh - 320px));
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.rm-kv {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+}
+
+.rm-kv--dense {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-3);
+}
+
+.rm-kv dt {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.rm-kv dd {
+  margin: 2px 0 0;
+  color: var(--ma-text-1);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-sub);
+  font-variant-numeric: tabular-nums;
+}
+
+.rm-kv dd em {
+  color: var(--ma-text-3);
+  font-style: normal;
+}
+
+.rm-table {
+  margin: var(--space-2) 0 var(--space-3);
+}
+
+.rm-table__head,
+.rm-table__row {
+  display: grid;
+  grid-template-columns: minmax(56px, 0.7fr) repeat(4, minmax(0, 1fr));
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.rm-table__head {
+  height: 32px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-weight: 500;
+}
+
+.rm-table__row {
+  min-height: 44px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--ma-text-2);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-table);
+  font-variant-numeric: tabular-nums;
+}
+
+.rm-table__row:last-child {
+  border-bottom: 0;
+}
+
+.rm-id {
+  color: var(--ma-text-1);
+  font-weight: 600;
+}
+
+.rm-cell {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rm-cell b {
+  font-weight: 500;
+}
+
+.rm-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  font-size: var(--fs-aux);
+}
+
+.rm-pager .muted {
+  margin-right: auto;
+}
+
+.rm-chart {
+  height: 220px;
+  margin-top: var(--space-2);
+}
+
+.rm-explain {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.rm-explain summary {
+  color: var(--ma-text-2);
+  font-size: var(--fs-table);
+  cursor: pointer;
+}
+
+.rm-explain summary:focus-visible {
+  outline: 2px solid var(--mumai-focus, #8ad9e9);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------
+   硬件详情 · 算力占用 —— **已从硬件监看移除**
+   ------------------------------------------------------------------
+   原来这里给「算力占用」面板排版（`.hw-compute`：两列 label/value，给 GPU 基准、
+   显存、内存、存储、功耗、网络六行读数）。那一块读的是 `/api/platform/resources`，
+   讲的是**跑后端的那台服务器**，不是这台手持扫描枪；用户明确「这一页硬件主要是
+   扫描器的，不需要服务器数据」。服务器资源仍在总览「平台数据」与资源弹窗里讲。
+   组件、样式一并删掉，不要因为「看着像少了一块」再加回来。
+   ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------
+   总览四块面板 · 中小屏收敛（1672×940 与 1366×768）
+   ------------------------------------------------------------------
+   面板宽度在这一档从 372px 收到 330/261px、高度从 435px 收到 368/292px，
+   而「平台数据」的四块 KPI + 网络折线 + 明细入口是这四块里最高的内容。
+   实测 1672 溢出 65px、1366 溢出 152px（工单看板也溢出 39px）——
+   按规范 §8「小屏优先减少内容，而不是把字号压回去」，这里做的是：
+     · 折线再收一档（它在这一屏是辅助，数字才是主）
+     · KPI 数字降一档到辅助大数字（22px），占用条与口径行保留
+     · 工单列表收起态少一行
+   全部是「少显示一点」，没有把任何数字变小到看不清。
+
+   ⚠️ 与前面那条小屏规则同理：必须写在基础样式之后，否则会被覆盖。
+   ------------------------------------------------------------------ */
+@media (max-width: 1720px) {
+  .pd-rows {
+    gap: 0;
+  }
+
+  .pd-row__value {
+    font-size: var(--fs-table);
+  }
+}
+
+@media (max-width: 1440px), (max-height: 800px) {
+  /* 这一档「平台数据」只能用紧凑一档：四行摘要 + 更小的比例条 */
+  .pd-row {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .pd-row__value {
+    font-size: var(--fs-aux);
+  }
+}
+
+/* ------------------------------------------------------------------
+   总览四块面板 · 视口高度不足时的最后一档收敛（宽 <1440 或高 <800）
+   ------------------------------------------------------------------
+   这一档面板可视高度只剩 258px（1920 时是 393px）。前面已经把 KPI 字号与
+   折线高度收过一轮，这里收的是**辅助行**：
+     · 「平台数据」四块 KPI 的口径行（共 xx TB）压成 8px 行高、占用条压到 2px
+     · π「工单看板」的构成条口径说明压成单行 4px 行高、当前工单卡收一档
+   数字、图与说明都还在，只是不再各占一整行 —— 规范 §8「小屏优先减少内容，
+   而不是把内容挤出可视区」。
+   ------------------------------------------------------------------ */
+@media (max-width: 1440px), (max-height: 800px) {
+  .pd-bar {
+    height: 2px;
+  }
+
+  .pd-row {
+    padding: 0;
+  }
+
+  .ov-counts__note {
+    margin: 0 0 var(--space-2);
+    font-size: 12px;
+    line-height: 4px;
+  }
+
+  .ov-counts {
+    margin-bottom: 0;
+  }
+
+  .ov-coc {
+    padding: var(--space-2);
+  }
+
+  .ov-coc h3 {
+    font-size: var(--fs-table);
+  }
+
+  .ov-coc__sum {
+    margin-bottom: 0;
+  }
+}
+
+/* ------------------------------------------------------------------
+   设备状态 · 固定三行（PRD §6.1）
+   ------------------------------------------------------------------
+   一行一台：名称在左（可省略，完整名在 title 与详情页里），数据模式在中间，
+   状态 chip 在右。行是可点按钮，所以有 hover 与焦点环。
+   名称用正文档、模式用辅助档 —— 层级靠字号与颜色，不靠边框（规范 §4.3）。
+   ------------------------------------------------------------------ */
+.dev-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.dev-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dev-row:hover .dev-row__name {
+  color: var(--text-primary);
+}
+
+.dev-row:focus-visible {
+  outline: 2px solid var(--mumai-focus, #8ad9e9);
+  outline-offset: 2px;
+}
+
+.dev-row__name {
+  overflow: hidden;
+  color: var(--ma-text-2);
+  font-size: var(--fs-table);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-row__mode {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+/* 数据通道标题紧凑档：比常规 ov-sec 少一半下边距，省出一行的高度 */
+.ov-sec--tight {
+  margin-bottom: var(--space-1);
+}
+
+/* ------------------------------------------------------------------
+   工单看板（PRD §7 / §7.1）
+   ------------------------------------------------------------------
+   顶部三个互斥状态计数 → 口径说明一行 → 固定高度的循环列表。
+   列表视口允许裁剪移动中的离场/入场行（§4.3 的**唯一**例外），
+   静止时每条必须完整 —— 所以行高固定、位移按整行高走。
+   ------------------------------------------------------------------ */
+.ob-counts {
+  display: flex;
+  gap: var(--space-4);
+  margin-bottom: var(--space-1);
+}
+
+.ob-count {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+.ob-count strong {
+  color: var(--ma-text-1);
+  font-family: var(--font-data);
+  font-size: var(--fs-kpi);
+  font-weight: 600;
+  line-height: 1.05;
+}
+
+.ob-count span {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+/* 三个计数各自带语义色的小竖条：颜色有业务含义（待处理/处理中/待验收） */
+.ob-count.is-warn strong {
+  color: var(--warning);
+}
+
+.ob-count.is-info strong {
+  color: var(--primary);
+}
+
+.ob-count.is-ok strong {
+  color: var(--success);
+}
+
+.ob-note {
+  margin: 0 0 var(--space-2);
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.ob {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 视口：固定高度，允许裁剪移动中的行 */
+.ob-viewport {
+  overflow: hidden;
+}
+
+.ob-track {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  will-change: transform;
+}
+
+.ob-row {
+  display: grid;
+  grid-template-rows: auto auto;
+  align-content: center;
+  gap: 2px;
+  width: 100%;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ob-row:hover {
+  background: var(--fill-weak);
+}
+
+.ob-row:focus-visible {
+  outline: 2px solid var(--mumai-focus, #8ad9e9);
+  outline-offset: -2px;
+}
+
+.ob-row.is-selected {
+  border-left-color: var(--primary);
+  background: var(--fill-soft);
+}
+
+/* 第一行：编号 · 点位。允许单行省略，完整标题在 title 与详情页里（§4.3） */
+.ob-row__title {
+  overflow: hidden;
+  color: var(--ma-text-2);
+  font-size: var(--fs-table);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 第二行：风险 · 状态 · 日期。日期用数据字体，等宽避免跳动 */
+.ob-row__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-aux);
+}
+
+.ob-row__meta em {
+  color: var(--ma-text-3);
+  font-family: var(--font-data);
+  font-style: normal;
+}
+
+/* 「查看全部」弹窗：清单式，每行一个工单 */
+.ob-all {
+  display: flex;
+  flex-direction: column;
+}
+
+.ob-all__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ob-all__row:last-child {
+  border-bottom: 0;
+}
+
+.ob-all__row:hover {
+  background: var(--fill-weak);
+}
+
+.ob-all__row:focus-visible {
+  outline: 2px solid var(--mumai-focus, #8ad9e9);
+  outline-offset: -2px;
+}
+
+.ob-all__id {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--ma-text-2);
+  font-size: var(--fs-table);
+}
+
+.ob-all__id i {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-style: normal;
+}
+
+/* ------------------------------------------------------------------
+   1280×720（PRD §4.2 最短一档）
+   ------------------------------------------------------------------
+   这一档面板正文只剩 234px，实测「巡检概览」超 8px、「设备状态」超 22px。
+   PRD 的口径是「核心内容放不下即删去辅助层，而不是裁掉数据」：
+     · 巡检概览：删掉底部「本轮任务」脚注（§5 明确允许小屏隐藏该辅助行）
+     · 设备状态：通道图收一档（它是辅助，三行设备状态才是这一块的核心）
+     · 工单看板：口径说明与「工单」标题合并成一行
+   数字、单位、状态一律不动 —— 只减辅助层。
+   ------------------------------------------------------------------ */
+@media (max-width: 1320px), (max-height: 760px) {
+  .ov-tally__foot {
+    display: none;
+  }
+
+  .ov-chart--bars {
+    height: 64px;
+  }
+
+  .ob-note {
+    display: none;
+  }
+
+  /* 口径说明改挂在「工单」标题右侧，不再单独占一行 */
+  .ov-sec--tight .ov-sec__note {
+    display: none;
+  }
+
+  .dev-rows {
+    margin-bottom: var(--space-2);
+  }
+
+  .dev-row {
+    padding: 0;
+  }
+
+  .pd-rows {
+    gap: 0;
+  }
+}
+
+/* ------------------------------------------------------------------
+   平台数据 · 两张微型图（PRD §8.1）
+   ------------------------------------------------------------------
+   五行摘要下面是「逐台负载」条形图与「存储构成」堆叠条。
+   高度是算过的：四块面板在 1920 的可视高度 393px、1280 只剩 234px，
+   两张图合计必须能在最小那一档也放得下（1280 档由 @media 再收一档）。
+   ------------------------------------------------------------------ */
+.ov-chart--load {
+  height: 60px;
+  margin-bottom: var(--space-1);
+}
+
+/* 两张微型图的标题：比常规 ov-sec 矮一档（面板高度是硬预算，
+   五行数字 + 两张图必须同时落在 393px 内，标题让出这一档正好够） */
+.pd-rows + .ov-sec--tight {
+  margin-top: var(--space-1);
+  margin-bottom: 0;
+  font-size: var(--fs-table);
+}
+
+/* 第二张图的标题：紧贴上一张图，不再各占一整行 */
+.ov-chart--load + .ov-sec--tight {
+  margin-top: var(--space-1);
+  margin-bottom: 0;
+}
+
+/* 堆叠条只占一行条形的高度，标签画在条内 */
+.ov-chart--storage {
+  height: 26px;
+}
+
+@media (max-width: 1720px) {
+  .ov-chart--load {
+    height: 54px;
+  }
+
+  .ov-chart--storage {
+    height: 24px;
+  }
+}
+
+@media (max-width: 1440px), (max-height: 800px) {
+  .ov-chart--load {
+    height: 48px;
+  }
+
+  /*
+    隐藏「存储构成」而不是把它压成一条看不清的线：
+    它和存储行的短比例条表达的是同一个比例，压扁只是重复且更难读（PRD §4.2
+    「核心内容放不下即删去辅助层，而不是裁掉数据」）。
+  */
+  .ov-chart--storage {
+    display: none;
+  }
+
+  .ov-chart--load + .ov-sec--tight {
+    display: none;
+  }
+}
+
+@media (max-width: 1320px), (max-height: 760px) {
+  /* 1280×720 是 PRD §4.2 的最短一档（正文 234px）。前面几档已经把
+     存储构成与标题让掉了，这里再把逐台负载收一档、行距压掉，
+     正好落在预算内 —— 五行数字与状态一律不动。 */
+  .ov-chart--load {
+    height: 36px;
+    margin-bottom: 0;
+  }
+
+  .ov-sec--tight {
+    margin-top: 0;
+    font-size: var(--fs-aux);
+  }
+
+  .pd-row {
+    padding: 0;
+  }
+
+  .pd-row__value {
+    font-size: var(--fs-aux);
+  }
+
+  .pd-bar {
+    height: 2px;
+  }
 }

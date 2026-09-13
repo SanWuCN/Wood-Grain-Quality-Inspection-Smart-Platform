@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router";
+import NumberAnimation from "@/components/numberAnimation";
 import { Icon } from "../icons";
 import { Btn, DataTable, Modal, StateBlock, StatusChip, WaveChart } from "../ui";
 import { useMumai } from "../context";
@@ -55,16 +56,33 @@ function BootCheckModal({
   const done = Object.keys(signed).length;
   const allDone = done === BOOT_CHECKS.length;
 
+  /*
+    签署数是这一页随时会变的计数：每签一条 +1，(总项数 - 签署数) 跟着 -1。
+    两个都交给 `NumberAnimation`；检查单总项数 `BOOT_CHECKS.length` 是常量，
+    保持字面量不参与滚动（定值常量滚起来只是噪音）。
+  */
   return (
     <Modal
       wide
       title="设备启动检查"
-      subtitle={`${done}/${BOOT_CHECKS.length} 项已签署 · 全部签署后才能开始采集`}
+      subtitle={
+        /* `.modal__sub` 是 flex + 6px gap：整句裹成一个 span，
+           数字与后面的文案才不会被 gap 当成两个 flex item 撑开 */
+        <span>
+          <NumberAnimation value={done} />/{BOOT_CHECKS.length} 项已签署 · 全部签署后才能开始采集
+        </span>
+      }
       onClose={onClose}
       footer={
         <>
           <span className="muted">
-            {allDone ? "全部签署完成，可以开始采集" : `还有 ${BOOT_CHECKS.length - done} 项未签署`}
+            {allDone ? (
+              "全部签署完成，可以开始采集"
+            ) : (
+              <>
+                还有 <NumberAnimation value={BOOT_CHECKS.length - done} /> 项未签署
+              </>
+            )}
           </span>
           <Btn onClick={onClose}>取消</Btn>
           <Btn tone="primary" disabled={!allDone} onClick={onStart}>
@@ -138,20 +156,26 @@ export function CaptureTab() {
     toast("已标记当前批次最强回波，可清除", "ok");
   };
   if(!batch) return <StateBlock kind="empty" title="暂无采集批次"/>;
+  /*
+    会随操作变的数交给 `NumberAnimation`：启动检查签署进度、接收条数 / 百分比、
+    人工标记处数。**不参与滚动**的是记录字段与几何量 —— 批次号 / 构件号 / 轮次、
+    配置与模型版本、批次开始时间（编号、版本、时间戳），以及 `<progress>` 的
+    max/value 本身（进度条按数值直接画，滚动它只会让条子追不上数字）。
+  */
   return <div className="capture capture--workspace">
     <section className="capture-commandbar" aria-label="采集配置与操作">
       <div className="capture-commandbar__identity"><span className="capture-commandbar__eyebrow">当前采集作业</span><b>{batch.componentId}<small>{batch.zoneId} · {batch.round}</small></b></div>
       <label className="field capture-batch"><span>采集批次</span><select aria-label="切换采集批次" value={batch.batchId} onChange={(e)=>selectBatch(e.target.value)}>{SCAN_BATCHES.map((b)=><option key={b.batchId} value={b.batchId}>{b.batchId} · {b.round}</option>)}</select></label>
       <div className="capture-commandbar__versions"><span>配置 <b>{batch.configVersion}</b></span><span>模型 <b>{batch.modelVersion}</b></span><button type="button" onClick={()=>setConfigOpen(true)}>配置详情</button></div>
-      <div className="capture-commandbar__checks"><StatusChip text={phase==='running'?'采集中（演示）':phase==='checking'?'启动检查中':'待启动'} tone={phase==='running'?'ok':phase==='checking'?'warn':'muted'} dot/><button type="button" onClick={()=>{setCheckOpen(true);if(phase==='idle')setPhase('checking');}}>启动检查 {Object.keys(signed).length}/{BOOT_CHECKS.length}</button></div>
+      <div className="capture-commandbar__checks"><StatusChip text={phase==='running'?'采集中（演示）':phase==='checking'?'启动检查中':'待启动'} tone={phase==='running'?'ok':phase==='checking'?'warn':'muted'} dot/><button type="button" onClick={()=>{setCheckOpen(true);if(phase==='idle')setPhase('checking');}}>启动检查 <NumberAnimation value={Object.keys(signed).length}/>/{BOOT_CHECKS.length}</button></div>
       <div className="capture-commandbar__actions"><Btn tone="primary" disabled={phase==='running'} onClick={()=>{setCheckOpen(true);setPhase('checking');}}>{phase==='checking'?'继续检查':'启动采集'}</Btn><Btn disabled={phase!=='running'} onClick={()=>{setPhase('idle');pushEvent(`批次 ${batch.batchId} 演示采集已暂停`,"warn");toast('已暂停本页演示采集；扫描枪实时数据继续接收','info');}}>暂停采集</Btn></div>
     </section>
     <SensorWorkspace key={batch.batchId} batchId={batch.batchId} screen={<CaptureScreen/>} />
     <section className="capture-data" aria-label="采集数据详情">
       <div className="capture-data__header"><div className="capture-data__tabs" role="tablist" aria-label="采集数据视图">{[['receive','接收进度'],['wave','波形与标记'],['samples','参考样本']].map(([key,label])=><button role="tab" aria-selected={dataTab===key} aria-controls={`capture-data-${key}`} id={`capture-tab-${key}`} key={key} type="button" onClick={()=>setDataTab(key)}>{label}</button>)}</div><span className="muted">批次演示回放 · 姿态与实时数据独立接收</span></div>
       <div role="tabpanel" id={`capture-data-${dataTab}`} aria-labelledby={`capture-tab-${dataTab}`}>
-        {dataTab==='receive' ? <div className="capture-receive">{(['radar','image','result'] as const).map((key)=>{const item=batch.receive[key];const pct=item.expected?Math.min(100,Math.round(item.received/item.expected*100)):100;return <div key={key}><header><b>{key==='radar'?'雷达原始数据':key==='image'?'表面图像':'结果文件'}</b><StatusChip text={item.state} tone={RECEIVE_TONE[item.state]??'muted'} dot/></header><div><strong>{item.received}<small> / {item.expected}</small></strong><span>{pct}%</span></div><progress max={100} value={pct} aria-label={`${key==='radar'?'雷达数据':key==='image'?'图像':'结果文件'}接收进度`}/></div>;})}</div> : null}
-        {dataTab==='wave' ? <div className="capture-wave"><div className="capture-wave__actions"><span className="note">批次波形回放 · 人工标记 {manualMarks.length} 处</span><Btn disabled={!waveform?.points?.length} onClick={addMark}><Icon name="biz-manual-mark" size={16} aria-hidden/>人工标记</Btn><Btn disabled={!manualMarks.length} tone="ghost" onClick={()=>setManualMarks([])}>清除标记</Btn></div><WaveChart points={waveform?.points??[]} unit={waveform?.unit} axisLabel={waveform?.axisLabel} markers={[...(waveform?.markers??[]),...manualMarks.map((m)=>({...m,tone:'cyan' as const}))]}/></div> : null}
+        {dataTab==='receive' ? <div className="capture-receive">{(['radar','image','result'] as const).map((key)=>{const item=batch.receive[key];const pct=item.expected?Math.min(100,Math.round(item.received/item.expected*100)):100;return <div key={key}><header><b>{key==='radar'?'雷达原始数据':key==='image'?'表面图像':'结果文件'}</b><StatusChip text={item.state} tone={RECEIVE_TONE[item.state]??'muted'} dot/></header><div><strong><NumberAnimation value={item.received} group={false}/><small> / <NumberAnimation value={item.expected} group={false}/></small></strong><span><NumberAnimation value={pct} group={false}/>%</span></div><progress max={100} value={pct} aria-label={`${key==='radar'?'雷达数据':key==='image'?'图像':'结果文件'}接收进度`}/></div>;})}</div> : null}
+        {dataTab==='wave' ? <div className="capture-wave"><div className="capture-wave__actions"><span className="note">批次波形回放 · 人工标记 <NumberAnimation value={manualMarks.length}/> 处</span><Btn disabled={!waveform?.points?.length} onClick={addMark}><Icon name="biz-manual-mark" size={16} aria-hidden/>人工标记</Btn><Btn disabled={!manualMarks.length} tone="ghost" onClick={()=>setManualMarks([])}>清除标记</Btn></div><WaveChart points={waveform?.points??[]} unit={waveform?.unit} axisLabel={waveform?.axisLabel} markers={[...(waveform?.markers??[]),...manualMarks.map((m)=>({...m,tone:'cyan' as const}))]}/></div> : null}
         {dataTab==='samples' ? <DataTable head={["批次","分组","材种来源","扫描次数","方向"]} rows={REFERENCE_BATCHES.map((r)=>[r.batchId,r.groupId,r.material,String(r.scans),r.direction])}/> : null}
       </div>
     </section>

@@ -9,6 +9,7 @@
  */
 
 import { useMemo, useState } from "react";
+import NumberAnimation from "@/components/numberAnimation";
 import { Modal } from "../ui";
 import { Btn } from "../ui";
 import { COMPONENTS, CURRENT_RISKS } from "../seed/scenario";
@@ -53,7 +54,14 @@ export function WorkOrderCreateModal({
       footer={
         <>
           <span className="muted">
-            {valid ? `将登记 ${componentIds.length} 个构件、${riskIds.length} 条来源风险` : "构件与来源风险至少各选一项"}
+            {valid ? (
+              <>
+                将登记 <NumberAnimation value={componentIds.length} /> 个构件、
+                <NumberAnimation value={riskIds.length} /> 条来源风险
+              </>
+            ) : (
+              "构件与来源风险至少各选一项"
+            )}
           </span>
           <Btn onClick={onClose}>取消</Btn>
           <Btn

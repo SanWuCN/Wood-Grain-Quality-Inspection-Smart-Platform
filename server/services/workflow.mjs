@@ -16,7 +16,19 @@
 import { nowIso, parseJson } from "../storage/db.mjs";
 import { checkAction } from "./permissions.mjs";
 import { getFile, verifyFile } from "./assets.mjs";
-
+import { DEFAULT_SCOPE } from "../domains/knowledge-contract.mjs";
+import {
+  applyKnowledgeConfig,
+  currentServingVersion,
+  deleteAsset,
+  getAsset as getKnowledgeAsset,
+  getConfig as getKnowledgeConfig,
+  registerAsset,
+  reviseAsset,
+  setAssetInclusion,
+  updateAssetMetadata,
+} from "./knowledge-store.mjs";
+import { activateVersion, cancelJob, createJob, getJobRow as getJob } from "./knowledge-jobs.mjs";
 /* ------------------------------------------------------------------ *
  * 状态机定义
  * ------------------------------------------------------------------ */
@@ -552,6 +564,289 @@ for (const action of ["mission.ack", "mission.pause", "mission.resume", "mission
   HANDLERS[action] = missionTransition(action);
 }
 
+/* ------------------------------------------------------------------ *
+ * 数据与知识中心（PRD-数据与知识中心-v1.0 §12.4 命令表）
+ *
+ * 这些处理器都跑在 runCommand 的同一个事务里，所以它们**自己不开事务**，
+ * 失败直接抛错让外层 ROLLBACK。知识域的实体写在专用表里（万级行），
+ * 不能塞进 entities 表的 JSON 快照 —— 那样每次事件驱动的 refresh 都要搬几兆字节。
+ *
+ * 事件名统一 `knowledge.<动作>`，客户端收到后按 seq 拉同一快照，不做「总数 +1」。
+ * ------------------------------------------------------------------ */
+
+/** 知识域命令的公共上下文：会话、项目范围与当前服务版本 */
+function knowledgeCtx(ctx) {
+  const config = getKnowledgeConfig(ctx.db, ctx.sessionId);
+  return {
+    ...ctx,
+    projectId: ctx.payload?.projectId ?? DEFAULT_SCOPE.id,
+    servingVersion: currentServingVersion(ctx.db, ctx.sessionId),
+    config,
+  };
+}
+
+/** 把推理结果里的资产 DTO 读回来当命令结果（命令返回体必须与服务端真值一致） */
+function assetOutcome(ctx, assetId) {
+  const asset = getKnowledgeAsset(ctx.db, ctx.sessionId, assetId);
+  if (!asset) throw new WorkflowError(500, "ASSET_LOST", `资产 ${assetId} 写入后读不回来`);
+  return asset;
+}
+
+HANDLERS["asset.register"] = (rawCtx) => {
+  const ctx = knowledgeCtx(rawCtx);
+  const payload = ctx.payload ?? {};
+  const text = String(payload.text ?? "");
+  if (!text.trim()) {
+    /*
+      没有正文时**必须**走「待补充内容」这条路，不能登记成「待更新」再让任务失败。
+      但也要挡住「调用方以为传了正文、字段名写错」的情况：那种静默降级比报错更难查，
+      所以要求调用方显式声明 `noContent: true` 才允许空正文登记。
+    */
+    if (payload.noContent !== true) {
+      throw new WorkflowError(422, "CONTENT_REQUIRED", "登记资产必须提供 text，或显式声明 noContent: true 表示暂无提取文本");
+    }
+  }
+  const result = registerAsset(ctx.db, ctx.sessionId, {
+    type: payload.type ?? "document",
+    title: payload.title,
+    format: payload.format,
+    text,
+    businessCategories: payload.businessCategories,
+    objectIds: payload.objectIds ?? [],
+    primaryObjectId: payload.primaryObjectId ?? null,
+    buildingId: payload.buildingId ?? null,
+    zone: payload.zone ?? null,
+    sourceSystem: payload.sourceSystem,
+    sourceEntityId: payload.sourceEntityId,
+    mainSource: payload.mainSource,
+    owner: ctx.actorId,
+    fileName: payload.fileName,
+    fileId: payload.fileId ?? null,
+    sha256: payload.sha256 ?? null,
+    sizeBytes: payload.sizeBytes,
+    summary: payload.summary,
+    textMode: payload.textMode,
+    locatorKind: payload.locatorKind,
+    capturedAt: payload.capturedAt,
+    extra: payload.extra ?? {},
+  });
+  const asset = assetOutcome(ctx, result.assetId);
+  return {
+    entityKind: "knowledgeAsset",
+    entity: { id: asset.id, revision: asset.contentRevision, data: asset, updatedAt: asset.updatedAt },
+    result: { ...result, needsIndex: result.indexState === "待更新" },
+    events: [
+      {
+        type: "knowledge.asset.registered",
+        payload: {
+          assetId: result.assetId,
+          indexState: result.indexState,
+          availability: result.availability,
+          // 内容就绪的资产直接进更新队列（PRD §10.1 流程的最后一步）
+          enqueue: result.indexState === "待更新",
+        },
+      },
+    ],
+  };
+};
+
+HANDLERS["asset.revise"] = (rawCtx) => {
+  const ctx = knowledgeCtx(rawCtx);
+  if (!ctx.entityId) throw new WorkflowError(422, "ASSET_REQUIRED", "内容替换必须指定资产");
+  const payload = ctx.payload ?? {};
+  const outcome = reviseAsset(ctx.db, ctx.sessionId, {
+    assetId: ctx.entityId,
+    text: payload.text,
+    actorId: ctx.actorId,
+    fileId: payload.fileId ?? null,
+    sha256: payload.sha256 ?? null,
+    sizeBytes: payload.sizeBytes,
+    summary: payload.summary,
+    textMode: payload.textMode,
+    locatorKind: payload.locatorKind,
+    label: payload.label,
+  });
+  if (!outcome.ok) {
+    const status = outcome.code === "NOT_FOUND" ? 404 : 422;
+    throw new WorkflowError(status, outcome.code, outcome.message, { retryable: false });
+  }
+  const asset = assetOutcome(ctx, ctx.entityId);
+  return {
+    entityKind: "knowledgeAsset",
+    entity: { id: asset.id, revision: asset.contentRevision, data: asset, updatedAt: asset.updatedAt },
+    result: { ...outcome, // 旧索引继续服务，新版发布后才原子替换（PRD §10.2）
+      servingVersionUnchanged: ctx.servingVersion,
+    },
+    events: [{ type: "knowledge.asset.revised", payload: { assetId: ctx.entityId, revision: outcome.revision, previousRevision: outcome.previousRevision } }],
+  };
+};
+
+HANDLERS["asset.updateMetadata"] = (rawCtx) => {
+  const ctx = knowledgeCtx(rawCtx);
+  if (!ctx.entityId) throw new WorkflowError(422, "ASSET_REQUIRED", "元数据更新必须指定资产");
+  const outcome = updateAssetMetadata(ctx.db, ctx.sessionId, {
+    assetId: ctx.entityId,
+    title: ctx.payload?.title,
+    businessCategories: ctx.payload?.businessCategories,
+    owner: ctx.payload?.owner,
+  });
+  if (!outcome.ok) throw new WorkflowError(404, outcome.code, outcome.message);
+  const asset = assetOutcome(ctx, ctx.entityId);
+  return {
+    entityKind: "knowledgeAsset",
+    entity: { id: asset.id, revision: asset.metadataRevision, data: asset, updatedAt: asset.updatedAt },
+    result: { ...outcome, note: "仅名称 / 展示标签变化，不重建文本向量（PRD §9.2）" },
+    events: [{ type: "knowledge.asset.metadataChanged", payload: { assetId: ctx.entityId, metadataRevision: outcome.metadataRevision } }],
+  };
+};
+
+/** 纳入 / 移出索引：改的是纳入成员，不重建文本（PRD §9.2「纳入策略变化」） */
+HANDLERS["asset.setInclusion"] = (rawCtx) => {
+  const ctx = knowledgeCtx(rawCtx);
+  if (!ctx.entityId) throw new WorkflowError(422, "ASSET_REQUIRED", "纳入设置必须指定资产");
+  const include = ctx.payload?.include !== false;
+  const outcome = setAssetInclusion(ctx.db, ctx.sessionId, { assetId: ctx.entityId, include });
+  if (!outcome.ok) throw new WorkflowError(404, outcome.code, outcome.message);
+  const asset = assetOutcome(ctx, ctx.entityId);
+  return {
+    entityKind: "knowledgeAsset",
+    entity: { id: asset.id, revision: asset.metadataRevision, data: asset, updatedAt: asset.updatedAt },
+    result: outcome,
+    events: [{ type: "knowledge.asset.inclusionChanged", payload: { assetId: ctx.entityId, include, indexState: outcome.indexState } }],
+  };
+};
+
+HANDLERS["asset.delete"] = (rawCtx) => {
+  const ctx = knowledgeCtx(rawCtx);
+  if (!ctx.entityId) throw new WorkflowError(422, "ASSET_REQUIRED", "删除必须指定资产");
+  const outcome = deleteAsset(ctx.db, ctx.sessionId, { assetId: ctx.entityId });
+  if (!outcome.ok) throw new WorkflowError(404, outcome.code, outcome.message);
+  return {
+    entityKind: "knowledgeAsset",
+    entity: { id: ctx.entityId, revision: 0, data: { id: ctx.entityId, deletedAt: outcome.deletedAt }, updatedAt: outcome.deletedAt },
+    result: { ...outcome, note: "检索已即时屏蔽，随后由清理任务发布新版本（PRD §9.2）" },
+    events: [{ type: "knowledge.asset.deleted", payload: { assetId: ctx.entityId, chunksRemoved: outcome.chunksRemoved, servingVersion: outcome.servingVersion } }],
+  };
+};
+
+/**
+ * 启动一次索引更新。
+ *
+ * `scope` 决定范围：backlog（积压）/ errors（失败重试）/ changed（指定资产）/ all（全量重建）。
+ * 任务由 runner 按 tick 推进，进度来自完成记录数（PRD §9.3）。
+ */
+function startKnowledgeJob(ctx, scope) {
+  const payload = ctx.payload ?? {};
+  const created = createJob(ctx.db, {
+    sessionId: ctx.sessionId,
+    actorId: ctx.actorId,
+    scope,
+    assetIds: payload.assetIds ?? (ctx.entityId ? [ctx.entityId] : []),
+    projectId: ctx.projectId,
+    triggerSource: payload.triggerSource ?? `${ctx.actorId} 手动`,
+    kind: payload.kind ?? (scope === "all" ? "全量重建" : scope === "errors" ? "失败重试" : "增量更新"),
+    baseVersion: ctx.servingVersion,
+  });
+  if (!created.job) {
+    // 没有输入不是错误，但不能假装启动了一个任务（页面据 result.started 决定提示语）
+    return {
+      entityKind: "knowledgeJob",
+      entity: null,
+      result: { started: false, reason: created.reason, inputs: 0 },
+      events: [],
+    };
+  }
+  return {
+    entityKind: "knowledgeJob",
+    entity: { id: created.job.id, revision: 1, data: created.job, updatedAt: created.job.startedAt },
+    result: { started: true, jobId: created.job.id, targetVersion: created.targetVersion, inputs: created.inputs.length, scope },
+    events: [
+      {
+        type: "knowledge.job.started",
+        payload: { jobId: created.job.id, scope, targetVersion: created.targetVersion, inputs: created.inputs.length, baseVersion: ctx.servingVersion },
+      },
+    ],
+  };
+}
+
+HANDLERS["knowledge.sync"] = (rawCtx) => startKnowledgeJob(knowledgeCtx(rawCtx), rawCtx.payload?.scope ?? "backlog");
+HANDLERS["knowledge.retry"] = (rawCtx) => startKnowledgeJob(knowledgeCtx(rawCtx), "errors");
+
+HANDLERS["knowledge.cancel"] = (rawCtx) => {
+  const ctx = knowledgeCtx(rawCtx);
+  const jobId = ctx.entityId ?? ctx.payload?.jobId;
+  if (!jobId) throw new WorkflowError(422, "JOB_REQUIRED", "取消必须指定任务");
+  const outcome = cancelJob(ctx.db, ctx.sessionId, jobId);
+  if (!outcome.ok) {
+    const status = outcome.code === "NOT_FOUND" ? 404 : 409;
+    throw new WorkflowError(status, outcome.code, outcome.message, { retryable: false });
+  }
+  return {
+    entityKind: "knowledgeJob",
+    entity: { id: jobId, revision: 1, data: getJob(ctx.db, ctx.sessionId, jobId), updatedAt: nowIso() },
+    result: outcome,
+    events: [{ type: "knowledge.job.cancelled", payload: { jobId, status: outcome.status } }],
+  };
+};
+
+/** 切换历史服务版本（PRD §9.4）：只切检索层，原始资产库不回滚 */
+HANDLERS["knowledge.activateVersion"] = (rawCtx) => {
+  const ctx = knowledgeCtx(rawCtx);
+  const version = ctx.payload?.version ?? ctx.entityId;
+  if (!version) throw new WorkflowError(422, "VERSION_REQUIRED", "必须指定要切换到的索引版本");
+  const outcome = activateVersion(ctx.db, ctx.sessionId, { version, actorId: ctx.actorId });
+  if (!outcome.ok) {
+    // 已经是当前版本属于「重复操作」而不是失败：返回原状态，不产生事件。
+    // （界面按钮会因此保持禁用，不会弹一个没有意义的红色错误。）
+    if (outcome.code === "ALREADY_SERVING") {
+      return {
+        entityKind: "knowledgeIndex",
+        entity: { id: version, revision: 0, data: { id: version, servingVersion: version }, updatedAt: nowIso() },
+        result: { ...outcome, unchanged: true },
+        events: [],
+      };
+    }
+    const status = outcome.code === "NOT_FOUND" ? 404 : 409;
+    throw new WorkflowError(status, outcome.code, outcome.message, { retryable: false });
+  }
+  return {
+    entityKind: "knowledgeIndex",
+    entity: { id: version, revision: 1, data: { id: version, servingVersion: version }, updatedAt: nowIso() },
+    result: outcome,
+    events: [
+      {
+        type: "knowledge.index.activated",
+        payload: { previousVersion: outcome.previous, servingVersion: version, effective: outcome.effective },
+      },
+    ],
+  };
+};
+
+/**
+ * 配置变更（PRD §5.4）：参数调整必须产生**新的配置版本**，不能偷偷改变旧索引。
+ * 旧索引继续用它自己的 configRevision 服务，直到下一次重建。
+ */
+HANDLERS["knowledge.configure"] = (rawCtx) => {
+  const ctx = knowledgeCtx(rawCtx);
+  const payload = ctx.payload ?? {};
+  const outcome = applyKnowledgeConfig(ctx.db, ctx.sessionId, {
+    actorId: ctx.actorId,
+    patch: payload,
+  });
+  if (!outcome.ok) throw new WorkflowError(422, outcome.code, outcome.message);
+  return {
+    entityKind: "knowledgeConfig",
+    entity: { id: outcome.revision, revision: 1, data: outcome.config, updatedAt: nowIso() },
+    result: outcome,
+    events: [
+      {
+        type: "knowledge.config.created",
+        payload: { configRevision: outcome.revision, previousRevision: outcome.previousRevision, autoSync: outcome.config.autoSync, rebuildRequired: outcome.rebuildRequired },
+      },
+    ],
+  };
+};
+
 function requireEntity(ctx, kind) {
   const target = ctx.entityId ? readEntity(ctx.db, ctx.sessionId, kind, ctx.entityId) : null;
   if (!target) throw new WorkflowError(404, "NOT_FOUND", `找不到 ${kind} ${ctx.entityId ?? "(未指定)"}`);
@@ -587,7 +882,13 @@ export async function runCommand(db, { sessionId, actorId, action, entityId = nu
   const session = db.prepare("SELECT id, last_seq FROM sessions WHERE id=?").get(sessionId);
   if (!session) throw new WorkflowError(404, "NO_SESSION", `演示会话 ${sessionId} 不存在`);
 
-  const ctx = { db, sessionId, actorId, entityId, expectedRevision };
+  /*
+    ctx 里必须带上 payload：处理器签名虽然也接收 payload 作为第二个参数，
+    但知识域的那批处理器统一从 ctx 读（因为它们要在公共上下文里合并范围与配置）。
+    早先忘了塞这一个字段，`asset.register` 的正文一直是空的，
+    资产被静默登记成「待补充内容」——这正是 PRD §4.3 最不想看到的那种错。
+  */
+  const ctx = { db, sessionId, actorId, entityId, expectedRevision, payload };
 
   // 任务类动作先查状态机与 revision，再进处理器
   if (action.startsWith("mission.") && action !== "mission.create") {

@@ -1,1423 +1,1551 @@
 /* ==================================================================
-   知识库 · 上传 → 更新向量库 → 向量库可视化
+   数据与知识中心（/knowledge）· 布局、状态与响应式
    ------------------------------------------------------------------
-   唯一依据：docs/design/视觉设计规范-v1.0.md + src/styles/tokens.css
-     - 颜色只写 var(--token)：--primary 是唯一 UI 主色，--glow-cyan 只给光效；
-       红黄绿只表达业务状态
-     - 字号只用 26 / 22 / 16 / 13 / 12.5 / 11 这几级（= --fs-num / --fs-page /
-       --fs-panel / --fs-body / --fs-table / --fs-aux）
-     - 间距只用 --space-*（4/8/12/16/20/24/32/40）
-     - 普通 Panel 不发光：这里不写任何 box-shadow 光效
+   依据（按优先级）：
+     docs/design/视觉设计规范-v1.0.md         §2.2 字号 / §3.1 间距 /
+                                              §4 Panel·表格·按钮·状态 / §6.2 动效 / §8 分辨率
+     docs/PRD-数据与知识中心-v1.0.md          §5.2 布局规格 / §5.3–§5.5 三个页签 /
+                                              §6.1 视觉与文案 / §9.3 流水线
+     src/styles/tokens.css                   颜色 / 间距 / 动效 token，颜色一律 var(--token)
+
+   类名来自实际 DOM（pages/Knowledge.tsx + knowledge/views + knowledge/components）：
+     页面根 .kb > (.kb-header + .kb-tabs + .kb-offline? + .kb-body)
+     .kb-body 里只渲染一个页签根：.kb-overview / .kb-assets-view / .kb-indexes / .kb-search
+     关系图的 .kb-graph-* 由 RelationGraph 自带 PANEL_CSS，本文件一条都不写。
+
+   这一版替换的是旧「上传 → 更新向量库 → 三维可视化」实验页的全部样式：
+     旧的三维画布、终端日志、入库队列、拖拽上传区、折叠上传入口、图表容器、
+     版本清单等类在新 DOM 里不存在，整块删除；旧文件自绘的滚动条与 #3061DB
+     遗留色、10/14/15px 混合字号、成块的红黄绿填充全部清掉。
+
+   本页只做四件事：
+     ① 按工作区高度分行，1920×1080 与 1366×768 都不出现页面级滚动条
+     ② 每个面板最多一条内部滚动区，不做三层嵌套滚动
+     ③ 字号收敛到 §2.2 的七级，间距收敛到 4/8/12/16/20/24/32/40
+     ④ 状态只用「圆点/状态条 + 文字」，红黄绿表达语义，不做填充色与普通数字色
    ================================================================== */
 
-.page--knowledge {
-  --kb-scroll: rgba(78, 168, 255, 0.22);
+/* ------------------------------------------------------------------
+   1. 页面根：四行网格 + 全页唯一的尺寸变量表
+   ------------------------------------------------------------------
+   Shell 已把内容区裁成确定高度（顶栏 85px 以下、底部状态条 26px 以上），
+   .kb 只要 height:100% + 一条 minmax(0,1fr) 伸缩行；overflow:hidden 保证页面
+   本身永远没有滚动条。
+
+   .kb-offline 是条件渲染的第 3 行：用显式 grid-row 占位、用 margin 代替 gap ——
+   没有断线提示时那一行高度为 0 且不留空档（gap 会为空格子照样留出间距）。
+
+   字号写成数值而不是 tokens 的字号变量：tokens.css 的 --fs-* 已提前按尚未生效的
+   v1.1 草案写死（28/20/16/14/13），与本页依据的 v1.0 §2.2 不一致。层级集中在
+   这一段，1366 档（≤1599）只重定义变量，不会「改了一半」。
+   ------------------------------------------------------------------ */
+
+.kb {
+  /* 字号（§2.2）：页面标题 / KPI / 面板标题 / 模块标题 / 正文 / 表格 / 辅助 */
+  --kb-fs-title: 22px;
+  --kb-fs-kpi: 28px;
+  --kb-fs-panel: 16px;
+  --kb-fs-module: 14px;
+  --kb-fs-body: 13px;
+  --kb-fs-table: 12.5px;
+  --kb-fs-aux: 11px;
+  /* 行高按上面七级取固定像素：88 / 72 / 132 / 64 这些固定行高才算得准 */
+  --kb-lh-title: 30px;
+  --kb-lh-kpi: 32px;
+  --kb-lh-panel: 24px;
+  --kb-lh-module: 20px;
+  --kb-lh-body: 22px;
+  --kb-lh-table: 20px;
+  --kb-lh-aux: 16px;
+  /* 结构尺寸（PRD §5.2 的「≥1600 / 1280–1599」两档） */
+  --kb-pad-y: var(--space-4);
+  --kb-pad-x: var(--space-5);
+  --kb-gap: var(--space-4);
+  --kb-row-header: 48px;
+  --kb-row-tabs: 40px;
+  --kb-row-metrics: 88px;
+  --kb-row-tasks: 132px;
+  /* 右栏底部「更新任务」的固定高度：只放摘要行，细节进抽屉（--kb-panel-tasks 见 §6） */
+  --kb-panel-tasks: 172px;
+  --kb-row-head: 40px;
+  --kb-row-thead: 32px;
+  --kb-row-table: 36px;
+  --kb-drawer-w: 560px;
+
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: var(--kb-pad-y) var(--kb-pad-x);
+  overflow: hidden;
+  background: transparent;
+  font-family: var(--font-ui);
+  font-size: var(--kb-fs-body);
+  line-height: var(--kb-lh-body);
+  color: var(--text-secondary);
+}
+
+/* index.css 把 <small> 定在 13px（= 本页正文级），会多出一档字号，收回辅助级 */
+.kb small { font-size: var(--kb-fs-aux); }
+
+/* 编号 / 摘要 / 版本号：Inter + 等宽数字，纵向对齐不跳动（§2.1、§6.1） */
+.kb code {
+  font-family: var(--font-data);
+  font-size: var(--kb-fs-table);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
 }
 
 /* ------------------------------------------------------------------
-   页面骨架
+   2. 页眉：标题组（标题 + 演示标识 + 项目 + 服务状态）+ 动作组
    ------------------------------------------------------------------
-   规范 §3.3 的信息层级在这里落成三列：
-     左列 = 主任务①（上传资料，最窄，只放入口）
-     中列 = 主任务② + 状态（更新向量库：模式 / 按钮 / 六步 / 终端日志）
-     右列 = 辅助（向量库可视化三视图 + 索引状态）
-   最下面一行 = 历史（版本历史 / 资料清单）
-   图表是这一页要看的东西，所以右列拿剩下的全部宽度。
-
-   整页高度锁定在一屏内（overflow:hidden），所以右列显式给高度：
-   主任务列的内容多少都不会把图表挤扁。
+   §8「顶部标题、导航和关键状态不得折行」：整行 nowrap，空间不够时由第 23 节
+   压行高与内边距，不缩字号。动作组是平台 .btn，样式归 pages.css，本文件不动。
    ------------------------------------------------------------------ */
 
-.kb-body {
-  flex: 1;
+.kb-header {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-gap);
+  height: var(--kb-row-header);
+  margin-bottom: var(--kb-gap);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.kb-title { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+
+.kb-title h1 {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: var(--kb-fs-title);
+  font-weight: 600;
+  line-height: var(--kb-lh-title);
+  letter-spacing: 0.02em;
+  color: var(--text-title);
+  white-space: nowrap;
+}
+
+/* 项目范围：「项目 · 示例寺」——标签次要、值次要偏亮，不做成标签块 */
+.kb-scope { flex: 0 0 auto; font-size: var(--kb-fs-aux); color: var(--text-tertiary); white-space: nowrap; }
+.kb-scope strong { font-weight: 500; color: var(--text-secondary); }
+
+/* 服务状态组：两个状态标签 + 服务版本号，是这一页唯一的全局状态 */
+.kb-header-status { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.kb-header-status code { font-size: var(--kb-fs-aux); color: var(--text-tertiary); }
+
+.kb-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.kb-header-time { font-size: var(--kb-fs-aux); white-space: nowrap; }
+
+/* 轻量标记（「演示环境」）：细边框 + 辅助色文字，不做填充块（§4.6 同一思路） */
+.kb-chip {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  height: 20px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: var(--kb-fs-aux);
+  line-height: var(--kb-lh-aux);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------
+   3. 页签：只保留一条 2px 主色底边线
+   ------------------------------------------------------------------
+   §7.1「不要每个导航都画框」：未选中页签无边框无底色，选中态只加 2px --primary
+   底边线 + 主色文字。页签上的待更新/异常计数用中性色阶而不是红黄 —— 数字旁边
+   没有状态文字，颜色单独表达状态正是 §1.3 禁止的用法。
+   ------------------------------------------------------------------ */
+
+.kb-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-8);
+  height: var(--kb-row-tabs);
+  margin-bottom: var(--kb-gap);
+  min-width: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.kb-tab {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: var(--kb-fs-body);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--motion-fast), border-color var(--motion-fast);
+}
+
+.kb-tab:hover { color: var(--text-secondary); }
+.kb-tab.is-active { color: var(--text-primary); border-bottom-color: var(--primary); }
+
+.kb-tab-badge {
+  margin-left: var(--space-1);
+  font-family: var(--font-data);
+  font-size: var(--kb-fs-aux);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
+/* 异常计数比待更新更需要注意：用高一档的中性色，不引入状态色 */
+.kb-tab-badge--warn { color: var(--text-secondary); }
+
+.kb-tabs-note {
+  align-self: center;
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--kb-fs-aux);
+  line-height: var(--kb-lh-aux);
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------
+   4. 断线提示与主体
+   ------------------------------------------------------------------
+   .kb-offline 独占第 3 行（见第 1 节的显式行号）；.kb-body 是第 4 行，里面只有
+   一个页签根，四个页签根各自负责自己的行内滚动。
+   ------------------------------------------------------------------ */
+
+.kb-offline { grid-row: 3; margin-bottom: var(--kb-gap); }
+.kb-offline:empty { display: none; }
+
+.kb-body { grid-row: 4; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.kb-body > * { flex: 1 1 auto; min-width: 0; min-height: 0; }
+
+/* ------------------------------------------------------------------
+   5. 四个页签根：各自吃掉可用高度，滚动只在面板内部
+   ------------------------------------------------------------------
+   总览是两行：指标带（固定高度）+ 主体双栏（1fr）。更新任务已经移进右栏，
+   不再独占一整行 —— 纵向空间全部还给「资产库 / 索引库 / 关系图」三张主卡。
+   资产是「184px 分类侧栏 + 自适应列表」；索引是「状态卡 + 中部双栏 + 版本记录」；
+   检索是「检索栏 + 结果 40% / 证据 60%」。四个根都不自己滚。
+   ------------------------------------------------------------------ */
+
+/*
+  总览三行：指标行（固定）→ 两层数据说明（自适应，实测一行）→ 主体（吃掉剩余高度）。
+  说明行必须显式占一行：漏了它就会被塞进隐含行，把主体挤掉 24px，
+  左栏两张卡各少一行表格 —— 这个坑在双视口实测时抓到过一次。
+*/
+.kb-overview {
+  display: grid;
+  grid-template-rows: var(--kb-row-metrics) auto minmax(0, 1fr);
+  gap: var(--kb-gap);
   min-height: 0;
+}
+
+.kb-assets-view {
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr);
+  gap: var(--kb-gap);
+  min-height: 0;
+}
+
+.kb-indexes { display: flex; flex-direction: column; gap: var(--kb-gap); min-height: 0; overflow: hidden; }
+.kb-indexes > .kb-panel:last-child { flex: 1 1 0; min-height: 0; }
+
+/* 服务状态卡按内容高度，中部两栏与版本记录分摊剩余高度 */
+.kb-service { flex: 0 0 auto; }
+.kb-index-mid { flex: 1 1 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--kb-gap); min-height: 0; }
+
+.kb-search { display: flex; flex-direction: column; gap: var(--kb-gap); min-height: 0; overflow: hidden; }
+
+/* ------------------------------------------------------------------
+   5.1 六项指标：一条带分隔线的整条，不是六个亮框
+   ------------------------------------------------------------------
+   §4.3 明确反对「每个指标包一层亮框」：整条只有一个细边线，格与格之间用 1px
+   --border-subtle 分隔，层级靠字号与字重。六格都是按钮（点了跳到对应页签），
+   所以底座透明，只有 Hover 才出现浅填充。
+   88px 与 72px 的差值全部由「隐藏 .kb-metric-hint」消化 —— 减少内容，不缩字号（§8）。
+   指标值默认主文字色：tone 只表达语义，数字本身不着状态色（§1.3「状态色不作为
+   普通数字」），语义由指标标签承担。
+   ------------------------------------------------------------------ */
+
+/*
+  指标行：PRD §7.2 的六项，一屏一行。
+  列数写在 `repeat(6, …)` 而不是 `auto-fit`：六项是规范定死的数量，
+  用 auto-fit 在窄屏上会变成 5+1 或 4+2 的断行，指标行就不成行了。
+  1366 档仍是六列，只把内边距与字号收一档（见 §23）。
+*/
+.kb-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  min-height: 0;
+  border: 1px solid var(--border-subtle);
+  background: var(--panel-surface);
+  /* 六列固定，所以这里不需要滚动：内容放不下说明列宽算错了，让它显形而不是切成两页 */
+  overflow: hidden;
+}
+
+/* 两层数据的一句话说明：贴在指标行下方，横跨整行宽度（落在左栏列里会被挤成两行） */
+.kb-metrics-note {
+  /* 总览是两列网格，说明行必须显式跨越两列，否则只拿到左栏宽度 */
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-top: 0;
+  background: var(--panel-surface);
+  font-size: var(--kb-fs-aux);
+  line-height: var(--kb-lh-aux);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kb-metric {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--kb-scroll) transparent;
+  justify-content: center;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-left: 1px solid var(--border-subtle);
+  background: transparent;
+  font-family: var(--font-ui);
+  text-align: left;
+  transition: background var(--motion-fast);
 }
 
-.kb-body::-webkit-scrollbar {
-  width: 6px;
+.kb-metric:first-child { border-left: 0; }
+.kb-metric--link { cursor: pointer; }
+.kb-metric--link:hover { background: var(--fill-weak); }
+
+/* 标签 16 + 数值 32 + 提示 16 + 两个 4px 间隙 + 上下 8px 内边距 = 88px 整 */
+.kb-metric-label { overflow: hidden; font-size: var(--kb-fs-body); line-height: 16px; color: var(--text-tertiary); text-overflow: ellipsis; white-space: nowrap; }
+
+.kb-metric-value {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  font-family: var(--font-data-mixed);
+  font-size: var(--kb-fs-kpi);
+  font-weight: 600;
+  line-height: var(--kb-lh-kpi);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
 }
 
-.kb-body::-webkit-scrollbar-thumb {
-  background: var(--kb-scroll);
-}
+/* accent 只给关键比率（索引覆盖率）；warn / danger 显式声明不着状态色 */
+.kb-metric-value--accent { color: var(--primary); }
+.kb-metric-value--warn, .kb-metric-value--danger { color: var(--text-primary); }
+
+/* 单位（项 / 条 / %）视觉次要 */
+.kb-metric-value em, .kb-metric-unit { font-family: var(--font-ui); font-size: var(--kb-fs-body); font-style: normal; font-weight: 400; line-height: var(--kb-lh-body); color: var(--text-tertiary); }
+
+.kb-metric-hint { overflow: hidden; font-size: var(--kb-fs-aux); line-height: 16px; color: var(--text-tertiary); text-overflow: ellipsis; white-space: nowrap; }
+
+/* ------------------------------------------------------------------
+   6. 双栏与列容器
+   ------------------------------------------------------------------
+   左栏（资产库 + 索引卡）是主工作区，右栏是资产关系图：54% / 46%
+   （1280–1599 为 52% / 48%）。列内按 PRD §5.2 的 62% / 38% 用 flex-grow 权重
+   分配，单面板列自然占满，少一个面板也不留空档。
+   ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------
+   6. 总览主体：左右两栏 + 高度对齐
+   ------------------------------------------------------------------
+   §5.2 规定左右 54% / 46%（1280–1599 为 52% / 48%）。栏内的高度关系是：
+
+     左栏：数据资产库 + RAG 索引库，**等高**（各占一半），合计 = 主区高度；
+     右栏：资产关系（吃掉剩余）+ 更新任务（固定 --kb-panel-tasks），合计 = 主区高度。
+
+   于是「关系图高度 = 两个左侧面板高度之和」，四张卡片构成一个规整的矩形；
+   更新任务不再独占一整行，省的纵向空间全部还给两栏。
+   ------------------------------------------------------------------ */
 
 .kb-main {
-  flex: 0 0 auto;
   display: grid;
-  /*
-     三列的分工按 v1.1 §4.2「知识库：查询、回答与原文来源为主；资料和索引管理可进入；
-     向量图另设技术观察」重排：
-
-       管理列 340px  资料与索引管理（上传 + 更新向量库），收窄
-       检索列 1fr    检索与回答 —— 首屏主体，最宽
-       观察列 400px  技术观察（关系链 / 分布）+ 索引状态
-
-     原来中间是「更新向量库」384px、右侧才是可视化，而「相似度检索」还被埋在
-     右侧面板的第三个页签里 —— 最有价值的问答首屏根本看不到（评审 U01/V03）。
-  */
-  grid-template-columns: 340px minmax(0, 1fr) 400px;
-  gap: var(--space-3);
+  grid-template-columns: minmax(0, 54fr) minmax(0, 46fr);
+  gap: var(--kb-gap);
   min-width: 0;
-}
-
-/* 管理列：上传与更新竖排 */
-.kb-manage {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-width: 0;
-}
-
-/*
-   检索工作区：查询在上、证据与原文在下，中间的证据列表自己滚。
-   高度跟着 kb-main 的行高走，不写死 —— 字号调整时不再被吃掉内容。
-*/
-.kb-ask {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
   min-height: 0;
 }
 
-.kb-ask__body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
-  gap: var(--space-3);
-  min-height: 260px;
-}
+/* 关系图面板是 grid 项目，必须有确定高度才不会把它自己的画布撑开 */
+.kb-main > * { min-width: 0; min-height: 0; }
 
-.kb-ask__body > .kb-hits {
-  max-height: none;
-  overflow-y: auto;
-}
-
-.kb-ask__legend {
-  margin-left: auto;
-  color: var(--text-tertiary);
-  font-size: var(--fs-aux);
-}
-
-/*
- * 检索空态（UI 素材 v2.0：I05 只用于空态/引导，PRD §5）。
- * 插图在上、状态块在下，整体居中但不撑高：空态本就该是这一格里最轻的内容，
- * 高度限制在 140px，保证有命中时列表回到同样的位置，不发生跳动。
- */
-.kb-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  min-width: 0;
-  padding: var(--space-2) 0;
-}
-
-.kb-empty .mumai-illustration {
-  opacity: 0.85;
-}
-
-.kb-empty .state-block {
-  margin-top: 0;
-  width: 100%;
-  max-width: 420px;
-}
-
-/* 窄档：证据列表与原文改为上下排列，避免两列都被挤成一条 */
-@media (max-width: 1500px) {
-  .kb-ask__body {
-    grid-template-columns: minmax(0, 1fr);
-    min-height: 0;
-  }
-}
-
-/*
-   中列与左右列给一个**下限**，不再是硬高度。
-
-   原来写的是 `height: 466px`：v1.0 的 11–13px 字号下刚好装得下，
-   字号按 v1.1 提到 16px 正文 / 13px 辅助之后，六步流水线加终端日志的内容
-   超过 466px，而 `overflow: hidden` 会把超出的部分直接吃掉（实测少 240px）。
-   改成 min-height 之后内容撑开、由 `.kb-body` 这一条滚动区统一滚，
-   与评审 U01「知识库上半屏右侧大面积空置、重要内容被挤到下方」的方向一致 ——
-   本轮的完整重排（检索工作区）留到下一轮，这里先把「看不见」变成「看得到」。
-*/
-.kb-main > .tech-panel,
-.kb-main > .kb-run {
-  min-height: 466px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-/*
-   全平台通用规则（dashboard.css）里 `.tech-panel__body { flex: 1 }`，
-   上传面板只有入口，不该被拉到和日志一样高：这里让它按内容高度。
-*/
-.kb-main > .tech-panel > .tech-panel__inner > .tech-panel__body {
-  flex: 0 0 auto;
-}
-
-/* 中列：更新动作 + 六步在上，日志在下 */
-.kb-run {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-height: 0;
-}
-
-.kb-run > .tech-panel {
-  min-height: 0;
-}
-
-/* 终端日志：固定高度 + 内部滚动（通用规则里的 overflow:hidden 会截断日志） */
-.kb-run > .tech-panel:last-child > .tech-panel__inner > .tech-panel__body {
-  flex: 0 0 auto;
-  overflow: hidden;
-}
-
-.kb-console {
-  height: 82px;
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-page);
-  overflow-y: auto;
-  font-family: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
-  font-size: var(--fs-aux);
-  line-height: 1.55;
-  scrollbar-width: thin;
-  scrollbar-color: var(--kb-scroll) transparent;
-}
-
-.kb-main .tech-panel__inner {
-  display: flex;
-  flex-direction: column;
-}
-
-.kb-main .tech-panel__body {
-  min-height: 0;
-}
-
-/*
-   观察列内部改成上下两块：技术观察在上、索引状态在下。
-
-   原来是左右并排（1.62fr / 1fr），但观察列本身只占总宽的一小段，
-   再拆成两半之后三维关系链只剩 240px 宽 —— 图看不清、索引状态也挤成一条。
-   竖排之后两块各自拿到整列宽度，也符合「技术细节不占首屏」的层级。
-*/
-.kb-side {
-  flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-3);
-  min-width: 0;
-}
-
-.kb-side > .tech-panel {
-  min-height: 322px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.kb-up {
-  display: grid;
-  gap: var(--space-2);
-  align-content: start;
-}
-
-.kb-body .tech-panel__body > * + * {
-  margin-top: var(--space-2);
-}
-
-.kb-body .tech-panel__body > h4.sub {
-  margin-top: var(--space-3);
-}
-
-/* 滚动条：低对比，不抢注意力 */
-.kb-scroll {
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--kb-scroll) transparent;
-}
-
-.kb-scroll::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.kb-scroll::-webkit-scrollbar-thumb {
-  background: var(--kb-scroll);
-}
-
-.kb-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
+.kb-col { display: flex; flex-direction: column; gap: var(--kb-gap); min-width: 0; min-height: 0; }
+.kb-col--left > .kb-panel { flex: 1 1 0; min-height: 0; }
+.kb-col--right > .kb-graph-panel { flex: 1 1 0; min-height: 0; }
+.kb-col--right > .kb-tasks { flex: 0 0 var(--kb-panel-tasks); min-height: 0; }
 
 /* ------------------------------------------------------------------
-   1. 上传入口
+   7. 面板：细边线 + 低对比底，不发光、不切角
+   ------------------------------------------------------------------
+   §4.1 / §4.2：背景 rgba(9,19,33,.86)，边框 1px --border-subtle，标题栏 40px，
+   「//」用青色、标题 16px / 600。标题栏用 min-height 而不是 height：资产面板的
+   筛选工具条就在标题栏右侧，1366 下允许它长高，宁可标题栏变高也不裁掉控件。
+   `.kb-panel-body--static` 的面板不自己滚（内嵌列表或整卡按内容高度）。
    ------------------------------------------------------------------ */
 
-.kb-drop {
-  display: grid;
-  gap: 2px;
-  justify-items: center;
-  align-content: center;
-  padding: var(--space-2);
-  border: 1px dashed var(--border-hover);
-  background: var(--bg-page);
+.kb-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border-subtle);
+  background: var(--panel-surface);
+  overflow: hidden;
+}
+
+.kb-panel-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--kb-row-head);
+  padding: var(--space-1) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--kb-fs-body);
   color: var(--text-secondary);
-  font-size: var(--fs-body);
-  cursor: pointer;
-  transition: border-color var(--motion-fast), background var(--motion-fast);
 }
 
-.kb-drop.is-over {
-  border-color: var(--primary);
-  background: var(--fill-soft);
-}
-
-.kb-drop b {
-  color: var(--text-title);
-  font-size: var(--fs-panel);
+.kb-panel-head h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: var(--kb-fs-panel);
   font-weight: 600;
+  line-height: var(--kb-lh-panel);
+  letter-spacing: 0.02em;
+  color: var(--text-title);
+  white-space: nowrap;
 }
 
-.kb-drop em {
-  color: var(--text-tertiary);
-  font-style: normal;
-  font-size: var(--fs-aux);
-  line-height: var(--lh-aux);
-  text-align: center;
-}
+/* 「//」前缀：§4.2 规定用青色。全文件唯一使用 --glow-cyan 的地方，而且只是文字
+   颜色 —— 不带任何 text-shadow / box-shadow 光效。 */
+.kb-prefix { color: var(--glow-cyan); font-weight: 400; }
 
-.kb-drop__icon {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border-default);
-  color: var(--primary);
-  font-size: var(--fs-table);
-}
-
-.kb-actions {
+/* 右侧说明 + 工具条：整组推右，内部可换行，不挤压标题 */
+.kb-panel-note {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-}
-
-.kb-actions--nowrap {
-  margin-top: 0;
-}
-
-.kb-openfile {
-  display: inline-grid;
-}
-
-.kb-openfile input {
-  display: none;
-}
-
-.kb-actions__hint {
+  justify-content: flex-end;
+  gap: var(--space-1) var(--space-3);
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--kb-fs-aux);
   color: var(--text-tertiary);
-  font-size: var(--fs-aux);
 }
 
-/* 折叠式入口：粘贴文本 / 目录导入 */
-.kb-fold {
-  margin-top: var(--space-2);
-  border: 1px solid var(--border-subtle);
+.kb-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  /*
+    面板内边距取 12×14 而不是默认的 16：总览里有四张卡叠在同一屏，
+    每张各让出 4–8px，表格就能多显示两行 —— 这是用户反馈的「数据间距比较大」
+    里最直接的一条。§3.1 允许的最小内边距就是 12px，仍在规范内。
+  */
+  padding: var(--space-3) var(--space-4);
+  overflow: auto;
 }
 
-.kb-fold__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.kb-panel-body--static { overflow: hidden; }
+
+/* 高级筛选生效时的可移除标记：让「当前筛选了什么」在收起筛选栏之后仍然看得见 */
+.kb-filter-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-2); }
+.kb-chip--active {
+  height: auto;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border-hover);
+  background: rgba(78, 168, 255, 0.08);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--kb-fs-aux);
+}
+.kb-chip--active:hover { border-color: var(--border-active); color: var(--text-primary); }
+
+/* ------------------------------------------------------------------
+   8. 工具条与表单控件
+   ------------------------------------------------------------------
+   工具条住在面板标题栏右侧，所以不带边框与上下内边距（§4.3：能用留白区分就不加
+   线）。输入控件统一 28px 高 / 正文级字号；仅高度与边框，轮廓交给全局焦点环。
+   ------------------------------------------------------------------ */
+
+.kb-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; }
+
+.kb-input, .kb-select, .kb-textarea {
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-default);
+  background: var(--bg-page);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--kb-fs-body);
+  line-height: 28px;
+}
+
+.kb-input { width: 160px; }
+.kb-input::placeholder, .kb-textarea::placeholder { color: var(--text-disabled); }
+.kb-input--tiny { width: 120px; }
+.kb-input--search { width: auto; flex: 1 1 auto; min-width: 0; }
+
+.kb-textarea {
   width: 100%;
-  height: 32px;
+  min-height: 88px;
+  padding: var(--space-2);
+  line-height: var(--kb-lh-body);
+  resize: vertical;
+}
+
+/* 字段：标签在上、控件在下；复选字段改成一行 */
+.kb-field {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  font-size: var(--kb-fs-aux);
+  line-height: var(--kb-lh-aux);
+  color: var(--text-tertiary);
+}
+
+.kb-field--check { flex-direction: row; align-items: center; gap: var(--space-2); }
+.kb-field--check input { width: 14px; height: 14px; accent-color: var(--primary); }
+.kb-field .kb-input { width: 140px; }
+
+/* 索引配置（折叠区里）：参数一行多个，动作与限额说明在下方 */
+.kb-config { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.kb-config-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
+
+.kb-config-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--kb-fs-aux); }
+.kb-config-limits { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); font-size: var(--kb-fs-aux); }
+
+/* 分段控件（视图切换）：无填充块，只用主色文字 + 低对比底表达选中（§4.3） */
+.kb-seg { display: inline-flex; align-items: center; border: 1px solid var(--border-default); }
+
+.kb-seg button {
+  height: 26px;
   padding: 0 var(--space-3);
   border: 0;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
   font-family: var(--font-ui);
-  font-size: var(--fs-table);
-  text-align: left;
+  font-size: var(--kb-fs-body);
+  white-space: nowrap;
   cursor: pointer;
   transition: color var(--motion-fast), background var(--motion-fast);
 }
 
-.kb-fold__head:hover {
-  color: var(--text-primary);
-  background: var(--fill-weak);
-}
-
-.kb-fold__head i {
-  color: var(--text-tertiary);
-  font-style: normal;
-}
-
-.kb-fold__body {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border-top: 1px solid var(--border-subtle);
-  background: var(--bg-page);
-}
-
-.kb-fold__body textarea {
-  width: 100%;
-  min-height: 76px;
-  padding: var(--space-2);
-  border: 1px solid var(--border-default);
-  background: var(--bg-workspace);
-  color: var(--text-secondary);
-  font-family: var(--font-ui);
-  font-size: var(--fs-table);
-  line-height: var(--lh-table);
-  resize: vertical;
-  outline: none;
-}
-
-.kb-fold__body textarea:focus {
-  border-color: var(--border-hover);
-}
-
-.kb-fold__row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.kb-fold__row label {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  color: var(--text-tertiary);
-  font-size: var(--fs-aux);
-}
-
-.kb-fold__row select {
-  height: 28px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border-default);
-  background: var(--bg-workspace);
-  color: var(--text-secondary);
-  font-family: var(--font-ui);
-  font-size: var(--fs-aux);
-  outline: none;
-}
-
-.kb-inline-input {
-  height: 28px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border-default);
-  background: var(--bg-workspace);
-  color: var(--text-secondary);
-  font-family: var(--font-ui);
-  font-size: var(--fs-aux);
-  outline: none;
-}
-
-.kb-seeds {
-  display: grid;
-  gap: var(--space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.kb-seeds li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-2);
-  align-items: baseline;
-  color: var(--text-tertiary);
-  font-size: var(--fs-aux);
-}
-
-.kb-seeds b {
-  color: var(--text-secondary);
-  font-weight: 400;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.kb-seg button + button { border-left: 1px solid var(--border-subtle); }
+.kb-seg button:hover { color: var(--text-secondary); }
+.kb-seg button.is-active { background: var(--fill-soft); color: var(--primary); }
 
 /* ------------------------------------------------------------------
-   2. 入库队列
+   9. 筛选行
+   ------------------------------------------------------------------
+   默认可见筛选恒为 4 项：工具条里就是关键词 / 索引状态 / 来源 / 关联对象，
+   其余（业务分类、时间范围）由 tsx 在展开高级筛选时才渲染 .kb-filters--advanced，
+   所以不需要用 nth-child 隐藏多余项。
    ------------------------------------------------------------------ */
-
-.kb-queue {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  max-height: 118px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--kb-scroll) transparent;
-}
-
-.kb-queue::-webkit-scrollbar {
-  width: 6px;
-}
-
-.kb-queue::-webkit-scrollbar-thumb {
-  background: var(--kb-scroll);
-}
-
-.kb-queue__empty {
-  color: var(--text-tertiary);
-  font-size: var(--fs-aux);
-  line-height: var(--lh-aux);
-}
-
-.kb-queue__item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 2px var(--space-3);
-  align-items: center;
-  padding: 3px var(--space-2);
-  border: 1px solid transparent;
-  border-left: 2px solid var(--border-default);
-  background: var(--bg-page);
-}
-
-.kb-queue__item.is-running {
-  border-left-color: var(--primary);
-}
-
-.kb-queue__item.is-done {
-  border-left-color: var(--success);
-}
-
-.kb-queue__item.is-unchanged {
-  opacity: 0.72;
-}
-
-.kb-queue__name {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.kb-queue__name b {
-  color: var(--text-primary);
-  font-size: var(--fs-table);
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.kb-queue__name span {
-  color: var(--text-tertiary);
-  font-size: var(--fs-aux);
-}
-
-.kb-queue__stat {
-  display: grid;
-  gap: 1px;
-  justify-items: end;
-  font-family: var(--font-data-mixed);
-  font-size: var(--fs-aux);
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
-.kb-queue__stat em {
-  color: var(--text-tertiary);
-  font-style: normal;
-}
-
-.kb-queue__stat .is-estimated {
-  color: var(--warning);
-}
-
-.kb-queue__ops {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-.kb-queue__ops button {
-  height: 24px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border-default);
-  background: transparent;
-  color: var(--text-tertiary);
-  font-family: var(--font-ui);
-  font-size: var(--fs-aux);
-  cursor: pointer;
-  transition: color var(--motion-fast), border-color var(--motion-fast);
-}
-
-.kb-queue__ops button:hover:not(:disabled) {
-  color: var(--text-primary);
-  border-color: var(--border-hover);
-}
-
-.kb-queue__ops button:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.kb-bar {
-  grid-column: 1 / -1;
-  height: 3px;
-  background: var(--fill-weak);
-  overflow: hidden;
-}
-
-.kb-bar i {
-  display: block;
-  height: 100%;
-  background: var(--primary);
-  transition: width var(--motion-normal) linear;
-}
-
-/* ------------------------------------------------------------------
-   3. 更新向量库：模式 / 主按钮 / 六步流水线 / 终端日志
-   ------------------------------------------------------------------ */
-
-.kb-seg {
-  display: flex;
-  align-items: center;
-  /* 管理列收窄到 340px 之后，模式按钮与说明会挤出面板 20px，允许换行 */
-  flex-wrap: wrap;
-  gap: var(--space-1);
-}
-
-.kb-seg__label {
-  margin-right: var(--space-1);
-  color: var(--text-tertiary);
-  font-size: var(--fs-aux);
-}
-
-.kb-steps {
-  display: grid;
-  gap: 2px;
-  max-height: 208px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--kb-scroll) transparent;
-}
-
-.kb-steps::-webkit-scrollbar {
-  width: 6px;
-}
-
-.kb-steps::-webkit-scrollbar-thumb {
-  background: var(--kb-scroll);
-}
-
-.kb-steps li {
-  display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) auto;
-  gap: 0 var(--space-2);
-  align-items: start;
-}
-
-.kb-steps__dot {
-  width: 7px;
-  height: 7px;
-  margin-top: 5px;
-  border-radius: 50%;
-  background: var(--text-disabled);
-}
-
-.kb-steps li.is-active .kb-steps__dot {
-  background: var(--primary);
-}
-
-.kb-steps li.is-done .kb-steps__dot {
-  background: var(--success);
-}
-
-.kb-steps__copy {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.kb-steps__copy b {
-  color: var(--text-secondary);
-  font-size: var(--fs-table);
-  font-weight: 500;
-}
-
-.kb-steps li.is-active .kb-steps__copy b,
-.kb-steps li.is-done .kb-steps__copy b {
-  color: var(--text-primary);
-}
-
-.kb-steps__copy span {
-  color: var(--text-tertiary);
-  font-size: var(--fs-aux);
-  line-height: var(--lh-aux);
-}
-
-.kb-steps__meta {
-  display: grid;
-  justify-items: end;
-  gap: 1px;
-  font-family: var(--font-data-mixed);
-  font-size: var(--fs-aux);
-  color: var(--text-tertiary);
-  white-space: nowrap;
-}
-
-.kb-steps__meta em {
-  font-style: normal;
-}
-
-.kb-steps li.is-active .kb-steps__meta {
-  color: var(--text-accent);
-}
-
-.kb-steps li.is-done .kb-steps__meta {
-  color: var(--text-secondary);
-}
-
-.kb-overall {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-2);
-  align-items: center;
-  margin-top: var(--space-1);
-}
-
-.kb-overall__bar {
-  height: 4px;
-  background: var(--fill-weak);
-  overflow: hidden;
-}
-
-.kb-overall__bar i {
-  display: block;
-  height: 100%;
-  background: var(--primary);
-  transition: width var(--motion-normal) linear;
-}
-
-.kb-overall__text {
-  font-family: var(--font-data-mixed);
-  font-size: var(--fs-aux);
-  color: var(--text-secondary);
-  /* 管理列收窄后，进度读数不再 nowrap —— 否则它的固有宽度会把这一行顶出面板 */
-  white-space: normal;
-}
-
-/* 终端风格日志：等宽字体，自动滚到最新一行 */
-.kb-console {
-  flex: 1;
-  max-height: 96px;
-  min-height: 60px;
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-page);
-  overflow-y: auto;
-  font-family: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
-  font-size: var(--fs-aux);
-  line-height: 1.55;
-  scrollbar-width: thin;
-  scrollbar-color: var(--kb-scroll) transparent;
-}
-
-.kb-console__line {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
-  gap: var(--space-2);
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.kb-console__line time {
-  color: var(--text-disabled);
-}
-
-.kb-console__line.is-ok {
-  color: var(--success);
-}
-
-.kb-console__line.is-warn {
-  color: var(--warning);
-}
-
-.kb-console__line.is-danger {
-  color: var(--danger);
-}
-
-.kb-console__line.is-muted {
-  color: var(--text-tertiary);
-}
-
-.kb-console__line.is-cursor::after {
-  content: "▊";
-  margin-left: 2px;
-  color: var(--glow-cyan);
-  animation: kb-blink 1s steps(2, start) infinite;
-}
-
-@keyframes kb-blink {
-  50% {
-    opacity: 0;
-  }
-}
-
-/* ------------------------------------------------------------------
-   4. 向量库可视化（三个页签）
-   ------------------------------------------------------------------ */
-
-/*
-   Token 关系链：三维视图铺满整个面板主体，统计 / 图例 / 读数做成浮层压在画布上，
-   不再像散点图那样各占一行 —— 面板主体只有 250px 高，让给画布才看得清结构。
-   浮层一律 pointer-events: none，否则会挡住 OrbitControls 的拖拽。
-*/
-/*
-   三维视图给**确定高度**，不要写 height: 100%。
-
-   上一轮把 `.kb-side > .tech-panel` 的 height 改成 min-height 之后，
-   百分百高度失去了确定的包含块，浏览器解不开这个循环，画布被撑到一万多像素高。
-   三维视口本来就是「一块固定大小的观察窗」，写死高度反而更符合它的性质；
-   放大到弹窗时由 .kb3d--large 覆盖。
-*/
-.kb3d {
-  position: relative;
-  height: 300px;
-  background: var(--bg-page);
-}
-
-.kb3d canvas {
-  display: block;
-  cursor: grab;
-}
-
-.kb3d canvas:active {
-  cursor: grabbing;
-}
-
-.kb3d__hud,
-.kb3d__legend,
-.kb3d__readout {
-  position: absolute;
-  z-index: 2;
-  pointer-events: none;
-  padding: 2px var(--space-2);
-}
-
-/*
-   只有读数条要暗底：它长在图的中右侧，一定会压到节点和边上，薄薄一层会读不清。
-   HUD 与图例在四角、压不到图上，就不加底 —— 加底得多一个色值，而这一页的背景色
-   已经到预算上限了。底色直接用面板自身的 --panel-surface，不引入新色。
-*/
-.kb3d__readout {
-  background: var(--panel-surface);
-}
-
-.kb3d__hud {
-  top: var(--space-2);
-  left: var(--space-2);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px var(--space-4);
-  max-width: calc(100% - 72px);
-}
-
-.kb3d__hud span {
-  color: var(--text-tertiary);
-  font-size: var(--fs-aux);
-  white-space: nowrap;
-}
-
-.kb3d__hud b {
-  color: var(--text-primary);
-  font-family: var(--font-data-mixed);
-  font-weight: 600;
-  font-size: var(--fs-sub);
-}
-
-.kb3d__expand {
-  position: absolute;
-  top: var(--space-2);
-  right: var(--space-2);
-  z-index: 3;
-  height: 24px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border-default);
-  background: var(--panel-surface);
-  color: var(--text-tertiary);
-  font-family: var(--font-ui);
-  font-size: var(--fs-aux);
-  cursor: pointer;
-  transition: color var(--motion-fast), border-color var(--motion-fast);
-}
-
-.kb3d__expand:hover {
-  color: var(--text-primary);
-  border-color: var(--border-hover);
-}
-
-.kb3d__legend {
-  bottom: var(--space-2);
-  left: var(--space-2);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px var(--space-3);
-  max-width: 46%;
-}
-
-.kb3d__legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  color: var(--text-tertiary);
-  font-size: var(--fs-aux);
-}
-
-.kb3d__legend i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-/* 焦点读数：悬停 / 点选哪个块，就把它的邻居和相似度写出来 */
-.kb3d__readout {
-  right: var(--space-2);
-  bottom: var(--space-2);
-  display: grid;
-  gap: 2px;
-  justify-items: end;
-  max-width: 50%;
-  text-align: right;
-}
-
-.kb3d__readout > b {
-  color: var(--text-primary);
-  font-size: var(--fs-aux);
-  font-weight: 500;
-}
-
-.kb3d__readout code {
-  color: var(--text-accent);
-  font-family: ui-monospace, Consolas, monospace;
-}
-
-.kb3d__readout > span {
-  color: var(--text-tertiary);
-  font-size: var(--fs-aux);
-}
-
-.kb3d__readout p {
-  margin: 2px 0 0;
-  color: var(--text-secondary);
-  font-size: var(--fs-aux);
-  line-height: var(--lh-aux);
-}
-
-/* 块摘要：面板里最多两行，全文在「放大」弹窗里看 */
-.kb3d__excerpt {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
-}
-
-.kb3d__hint {
-  color: var(--text-disabled);
-  font-size: var(--fs-aux);
-}
-
-/*
-   邻居按钮：读数条里的邻居要能互相跳。
-   pointer-events 在这一层单独打开 —— 父层是 none，否则画布收不到拖拽。
-*/
-.kb3d__links {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--space-1);
-  pointer-events: auto;
-}
-
-.kb3d__links button {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  height: 20px;
-  padding: 0 var(--space-1);
-  border: 1px solid var(--border-subtle);
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: var(--fs-aux);
-  cursor: pointer;
-  transition: color var(--motion-fast), border-color var(--motion-fast);
-}
-
-.kb3d__links button:hover {
-  color: var(--text-primary);
-  border-color: var(--border-hover);
-}
-
-.kb3d__links button em {
-  color: var(--text-accent);
-  font-style: normal;
-  font-family: var(--font-data-mixed);
-}
-
-/* 放大到弹窗：这是给人看结构用的，给足画幅 */
-.kb3d--large {
-  height: 520px;
-  border: 1px solid var(--border-subtle);
-}
-
-.kb3d--large .kb3d__hud,
-.kb3d--large .kb3d__legend,
-.kb3d--large .kb3d__readout {
-  padding: var(--space-1) var(--space-2);
-}
-
-.kb3d--large .kb3d__readout {
-  max-width: 44%;
-}
-
-.kb-scrollpanel {
-  height: 252px;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--kb-scroll) transparent;
-}
-
-.kb-scrollpanel::-webkit-scrollbar {
-  width: 6px;
-}
-
-.kb-scrollpanel::-webkit-scrollbar-thumb {
-  background: var(--kb-scroll);
-}
-
-.kb-scrollpanel > * + * {
-  margin-top: var(--space-2);
-}
-
-.kb-scrollpanel > h4.sub {
-  margin-top: var(--space-3);
-}
-
-.kb-chart {
-  width: 100%;
-  min-height: 0;
-}
-
-.kb-viz__stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-4);
-  margin-bottom: var(--space-2);
-}
-
-.kb-viz__stats span {
-  color: var(--text-tertiary);
-  font-size: var(--fs-aux);
-}
-
-.kb-viz__stats b {
-  color: var(--text-primary);
-  font-family: var(--font-data-mixed);
-  font-weight: 600;
-  font-size: var(--fs-sub);
-}
-
-/* 相似度检索演示 */
-.kb-form {
-  display: flex;
-  gap: var(--space-2);
-}
-
-.kb-form input[type="search"] {
-  flex: 1;
-  min-width: 0;
-  height: 32px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border-default);
-  background: var(--bg-page);
-  color: var(--text-primary);
-  font-family: var(--font-ui);
-  font-size: var(--fs-table);
-  outline: none;
-}
-
-.kb-form input[type="search"]:focus {
-  border-color: var(--border-hover);
-}
-
-.kb-form input[type="search"]::placeholder {
-  color: var(--text-disabled);
-}
 
 .kb-filters {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
-  margin: var(--space-2) 0;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+  padding-bottom: var(--space-3);
+  font-size: var(--kb-fs-aux);
   color: var(--text-tertiary);
-  font-size: var(--fs-aux);
 }
 
-.kb-filters label {
+.kb-filters--advanced { border-bottom: 1px solid var(--border-subtle); margin-bottom: var(--space-3); }
+
+/* ------------------------------------------------------------------
+   10. 资产分类侧栏（184px，PRD §5.3）
+   ------------------------------------------------------------------
+   侧栏项是按钮，选中态用 2px 主色左边线 + 浅填充；计数用等宽数字。
+   1366 以下摊成横向滚动条（第 24 节）。
+   ------------------------------------------------------------------ */
+
+.kb-sidebar {
+  flex: 0 0 auto;
+  width: 184px;
+  min-width: 0;
+  padding: var(--space-2) 0;
+  border-right: 1px solid var(--border-subtle);
+  overflow-y: auto;
+}
+
+.kb-side-link {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-}
-
-.kb-filters select,
-.kb-filters input[type="date"] {
-  height: 26px;
-  padding: 0 var(--space-1);
-  border: 1px solid var(--border-default);
-  background: var(--bg-page);
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  height: 32px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-ui);
-  font-size: var(--fs-aux);
-  outline: none;
+  font-size: var(--kb-fs-body);
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--motion-fast), background var(--motion-fast), border-color var(--motion-fast);
 }
 
-.kb-hits {
+.kb-side-link:hover { background: var(--fill-weak); color: var(--text-primary); }
+.kb-side-link.is-active { border-left-color: var(--primary); background: var(--fill-soft); color: var(--primary); }
+.kb-side-link strong { font-family: var(--font-data); font-size: var(--kb-fs-aux); font-weight: 400; font-variant-numeric: tabular-nums; color: var(--text-tertiary); }
+.kb-side-link.is-active strong { color: var(--primary); }
+
+.kb-side-note {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-3) 0;
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--kb-fs-aux);
+  line-height: var(--kb-lh-aux);
 }
 
-.kb-hits li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px;
-  gap: var(--space-2) var(--space-3);
+/* ------------------------------------------------------------------
+   11. 资产列表页签
+   ------------------------------------------------------------------
+   面板主体滚一列，表格加宽时只在 .kb-table-wrap 上横向滚：垂直方向始终只有
+   面板主体这一条滚动条（PRD §5.2「不同时出现三层垂直滚动条」）。
+   ------------------------------------------------------------------ */
+
+.kb-assets-list { min-width: 0; min-height: 0; }
+
+.kb-table-wrap, .kb-table-wrap--scroll { min-width: 0; overflow-x: auto; overflow-y: visible; }
+
+/* 批量操作条：选中若干资产后出现，用主色浅底 + 细边线，不做悬浮 */
+.kb-bulkbar {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
   padding: var(--space-2) var(--space-3);
-  border-left: 2px solid transparent;
-  background: var(--bg-page);
+  border: 1px solid var(--border-default);
+  background: var(--fill-soft);
+  font-size: var(--kb-fs-body);
+  color: var(--text-primary);
+}
+
+.kb-more { display: flex; justify-content: center; padding: var(--space-3) 0 0; }
+
+/* ------------------------------------------------------------------
+   12. 表格：表头 32px / 行 36px / 表头 11px / 正文 12.5px
+   ------------------------------------------------------------------
+   §4.4 原值。数字列右对齐 + 等宽数字（§6.1）；状态列只放 .kb-state，不给整行
+   上色；首末列取消内边距，让表格与面板内边距对齐。
+   ------------------------------------------------------------------ */
+
+.kb-table { width: 100%; border-collapse: collapse; font-size: var(--kb-fs-table); line-height: var(--kb-lh-table); }
+
+.kb-table th {
+  height: var(--kb-row-thead);
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--kb-fs-aux);
+  font-weight: 500;
+  line-height: var(--kb-lh-aux);
+  letter-spacing: 0.02em;
+  color: var(--text-tertiary);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.kb-table td {
+  height: var(--kb-row-table);
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+.kb-table :where(th, td):first-child { padding-left: 0; }
+.kb-table :where(th, td):last-child { padding-right: 0; }
+
+/* 名称列过长时省略，不让一行把表格顶宽；完整名称在 title 与抽屉里 */
+.kb-table td:first-child { max-width: 320px; }
+.kb-cell-note { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 单元格第二行（资产编号 / 索引版本）：辅助级，跟在正文下面 */
+.kb-cell-sub { display: block; font-size: var(--kb-fs-aux); line-height: var(--kb-lh-aux); color: var(--text-tertiary); }
+
+.kb-table tbody tr { transition: background var(--motion-fast); }
+.kb-table tbody tr:hover { background: var(--fill-weak); }
+/* 选中行（§4.4：rgba(78,168,255,.10)）：批量勾选与「当前服务版本」都用它 */
+.kb-table tbody tr.is-selected { background: var(--fill-soft); }
+
+.kb-table .is-num { font-family: var(--font-data-mixed); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.kb-table .is-check { width: 1%; padding-right: 0; }
+.kb-table .is-check input { width: 14px; height: 14px; accent-color: var(--primary); vertical-align: middle; }
+.kb-table .is-state { width: 1%; white-space: nowrap; }
+
+/* 抽屉与导入清单里的表：宽度不变，行高收一档（抽屉没有整屏那么宽） */
+.kb-table--note th, .kb-table--import th { height: 28px; }
+.kb-table--note td, .kb-table--import td { height: 32px; }
+
+/* 行内文字链：详情 / 查看 / 高级筛选 / 资产名。默认主色，Hover 加下划线 */
+.kb-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-family: var(--font-ui);
+  font-size: var(--kb-fs-body);
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--motion-fast);
+}
+
+.kb-link:hover { color: var(--primary-hover); text-decoration: underline; }
+.kb-link:disabled { color: var(--text-disabled); cursor: not-allowed; text-decoration: none; }
+/* 资产名：正文级主色文字，Hover 才变主色，避免整列发蓝 */
+.kb-link--strong { color: var(--text-primary); font-weight: 500; }
+.kb-link--strong:hover { color: var(--primary); }
+
+/* ------------------------------------------------------------------
+   13. 状态标签：彩色圆点 + 文本 + 细边框
+   ------------------------------------------------------------------
+   §4.6 / PRD §6.1：不做整块高饱和填充，且状态永远带文字。圆点在 DOM 里是
+   <i>，与文字同色；边框保持中性。
+   ------------------------------------------------------------------ */
+
+.kb-state {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: var(--space-1);
+  height: 20px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  font-size: var(--kb-fs-aux);
+  line-height: var(--kb-lh-aux);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.kb-state i { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+.kb-state--ok { color: var(--success); }
+.kb-state--warn { color: var(--warning); }
+.kb-state--danger { color: var(--danger); }
+.kb-state--info { color: var(--info); }
+.kb-state--muted { color: var(--text-tertiary); }
+
+/* ------------------------------------------------------------------
+   14. 索引卡：状态行、键值网格、覆盖分布、可用性
+   ------------------------------------------------------------------
+   覆盖条的五段只用「主色阶 + 中性灰」：§1.3 要求状态色只表达语义，而这里每一段
+   都是一个没有文字的填充块。各段含义由旁边的数字行（已覆盖 / 待更新 / 异常 /
+   未纳入）与覆盖行文字说明，颜色只负责分辨相邻段。
+   --n 是百分比（tsx 传 `${pct}%`），所以用 flex-basis 而不是 flex-grow。
+   分段可点，因此整段是可聚焦元素，焦点环由第 21 节统一给。
+   ------------------------------------------------------------------ */
+
+.kb-status-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.kb-status-main { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; font-size: var(--kb-fs-body); }
+.kb-version { font-family: var(--font-data); font-size: var(--kb-fs-module); font-weight: 600; color: var(--text-primary); }
+
+.kb-index-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2) var(--space-4); }
+
+.kb-index-grid :where(span, dt) {
+  display: block;
+  overflow: hidden;
+  font-size: var(--kb-fs-aux);
+  line-height: var(--kb-lh-aux);
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-index-grid :where(strong, b, dd) {
+  margin: 0;
+  font-family: var(--font-data-mixed);
+  font-size: var(--kb-fs-module);
+  font-weight: 600;
+  line-height: var(--kb-lh-module);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+/* 覆盖堆叠条：已覆盖 / 处理中 / 待更新 / 异常 / 未纳入 */
+.kb-progress { display: flex; gap: 2px; height: 6px; margin: var(--space-2) 0; background: var(--fill-weak); overflow: hidden; }
+.kb-progress span { flex: 0 1 var(--n, 0); min-width: 2px; }
+.kb-progress .is-covered { background: var(--primary); }
+.kb-progress .is-processing { background: var(--fill-active); }
+.kb-progress .is-pending { background: var(--text-tertiary); }
+.kb-progress .is-error { background: var(--text-secondary); }
+.kb-progress .is-excluded { background: var(--fill-strong); }
+.kb-progress [role="button"] { cursor: pointer; }
+.kb-progress [role="button"]:hover { filter: brightness(1.15); }
+
+/* 覆盖行：分类名 + 覆盖条 + 数字说明（总览的折叠区与索引页共用） */
+.kb-coverage-row {
+  display: grid;
+  grid-template-columns: 72px minmax(120px, 1fr) minmax(0, auto);
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  min-width: 0;
+}
+
+.kb-coverage-row .kb-progress { margin: 0; }
+.kb-coverage-num { font-size: var(--kb-fs-aux); line-height: var(--kb-lh-aux); text-align: right; }
+
+/* 可用性小结：资产可用性四态计数（PRD §9.1 与索引状态分开表达） */
+.kb-availability { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin-top: var(--space-2); }
+.kb-availability-item { display: inline-flex; align-items: baseline; gap: var(--space-1); font-size: var(--kb-fs-aux); color: var(--text-tertiary); }
+.kb-availability-item strong { font-family: var(--font-data); font-size: var(--kb-fs-table); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+
+/* 通用行与文字级：把视图里散落的 .kb-row / .kb-small / .kb-muted 收成三个工具类 */
+.kb-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-width: 0; }
+.kb-small { font-size: var(--kb-fs-aux); line-height: var(--kb-lh-aux); }
+.kb-muted { color: var(--text-tertiary); }
+
+/* ------------------------------------------------------------------
+   15. 六类资产：分类格 + 分布条
+   ------------------------------------------------------------------
+   分布条不引入六种色相（§5.1「单图主色系列不超过 3 种」）：六段共用 --primary，
+   用一档透明度阶分辨相邻段，分类名与数量写在上面的六格里 —— 颜色不承担分类语义。
+   段间 2px 与条高 4px 是描边级尺寸，不参与 4/8 间距节奏。
+   ------------------------------------------------------------------ */
+
+/*
+  十二类资产：4 列 × 3 行。列数按「一屏能看全 12 类且每格放得下三个数字」定：
+  6 列时每格只有 90px 左右，「可展开 / 覆盖」两个数字会挤成两行；
+  3 列则要四行，把下面的列表挤没了。1366 档降到 3 列 × 4 行（见 §23）。
+*/
+.kb-types { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); }
+
+.kb-type {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: var(--kb-fs-aux);
+  line-height: var(--kb-lh-aux);
+  text-align: left;
   cursor: pointer;
   transition: background var(--motion-fast), border-color var(--motion-fast);
 }
 
-.kb-hits li:hover {
-  background: var(--bg-panel-hover);
-}
+.kb-type:hover { border-color: var(--border-subtle); background: var(--fill-weak); }
+.kb-type strong { font-family: var(--font-data-mixed); font-size: var(--kb-fs-panel); font-weight: 600; line-height: var(--kb-lh-panel); font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.kb-type em { font-style: normal; }
 
-.kb-hits li.is-active {
-  border-left-color: var(--primary);
-  background: var(--fill-soft);
-}
-
-.kb-hits__copy {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.kb-hits__copy b {
-  color: var(--text-primary);
-  font-size: var(--fs-table);
-  font-weight: 500;
-}
-
-.kb-hits__copy span {
-  color: var(--text-tertiary);
-  font-size: var(--fs-aux);
-  line-height: var(--lh-aux);
-}
-
-.kb-hits__copy em {
-  color: var(--text-tertiary);
-  font-style: normal;
-  font-size: var(--fs-aux);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.kb-hits__rank {
-  display: grid;
-  gap: var(--space-1);
-  justify-items: end;
-}
-
-.kb-hits__rank b {
-  color: var(--text-accent);
-  font-family: var(--font-data-mixed);
-  font-size: var(--fs-sub);
-  font-weight: 600;
-}
-
-.kb-hits__rank i {
-  display: block;
-  width: 100%;
-  height: 3px;
-  background: var(--fill-weak);
-}
-
-.kb-hits__rank i em {
-  display: block;
-  height: 100%;
-  background: var(--primary);
-}
-
-.kb-snippet {
-  margin-top: var(--space-2);
-  padding: var(--space-3);
-  border-left: 2px solid var(--border-active);
-  background: var(--bg-page);
-}
-
-.kb-snippet mark {
-  padding: 0 1px;
-  background: var(--fill-strong);
-  color: var(--text-primary);
-}
-
-.kb-snippet dl {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-1) var(--space-3);
-  margin: 0 0 var(--space-2);
-}
-
-.kb-snippet dl > div {
-  display: flex;
-  gap: var(--space-2);
-  font-size: var(--fs-aux);
-}
-
-.kb-snippet dt {
-  color: var(--text-tertiary);
-  white-space: nowrap;
-}
-
-.kb-snippet dd {
-  margin: 0;
-  color: var(--text-secondary);
-  font-family: var(--font-data-mixed);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.kb-stack { display: flex; gap: 2px; height: 4px; margin: var(--space-3) 0; background: var(--fill-weak); overflow: hidden; }
+.kb-stack-seg { flex: 0 1 var(--n, 0); min-width: 2px; background: var(--primary); }
+.kb-stack-seg--document { opacity: 1; }
+.kb-stack-seg--image { opacity: 0.86; }
+.kb-stack-seg--video { opacity: 0.72; }
+.kb-stack-seg--workOrder { opacity: 0.6; }
+.kb-stack-seg--logBatch { opacity: 0.48; }
+.kb-stack-seg--record { opacity: 0.36; }
 
 /* ------------------------------------------------------------------
-   5. 历史与资料清单
+   16. 更新任务区与六阶段流水线
+   ------------------------------------------------------------------
+   高度固定（--kb-panel-tasks，≥1600 为 172px / 1366 档 148px），位置在右栏底部、
+   与「资产关系」并排。面板主体不滚（--static），摘要行交给 .kb-task-list 滚，
+   保证「最多一条垂直滚动条」。
+
+   行内只放摘要：状态 + 类型与来源 + 版本与计数 + 时间 + 两个文字操作。
+   阶段明细、逐项结果与错误码在「任务详情」抽屉里 —— 把细节铺在这一百多像素里
+   会把关系图一起挤下去。1366 档不缩字号，而是只留两条并隐藏流水线条 ——
+   §8「小屏优先减少内容」。
    ------------------------------------------------------------------ */
 
-.kb-bottom {
-  flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
-  gap: var(--space-3);
-  min-height: 0;
-}
+.kb-tasks { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 
-.kb-bottom > .tech-panel {
-  min-height: 150px;
-  min-width: 0;
-  overflow: hidden;
-}
+/* 任务区的面板主体不滚（--static），由内层列表滚：主体必须先是 flex 列，
+   内层才拿得到确定高度 —— 否则内容会被 overflow:hidden 直接切掉 */
+.kb-tasks .kb-panel-body { display: flex; flex-direction: column; }
 
-.kb-bottom .tech-panel__body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.kb-versions {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  max-height: 60px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--kb-scroll) transparent;
-}
-
-.kb-versions__row {
-  display: grid;
-  grid-template-columns: 76px minmax(0, 1fr) auto;
-  gap: var(--space-1) var(--space-3);
-  align-items: center;
-  padding: var(--space-1) var(--space-2);
-  border-left: 2px solid var(--border-subtle);
-  background: var(--bg-page);
-}
-
-.kb-versions__row.is-current {
-  border-left-color: var(--primary);
-  background: var(--fill-weak);
-}
-
-.kb-versions__row > b {
-  color: var(--text-primary);
-  font-family: var(--font-data-mixed);
-  font-size: var(--fs-table);
-  font-weight: 600;
-}
-
-.kb-versions__copy {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.kb-versions__copy span {
-  color: var(--text-secondary);
-  font-size: var(--fs-aux);
-}
-
-.kb-versions__copy em {
-  color: var(--text-tertiary);
-  font-style: normal;
-  font-size: var(--fs-aux);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.kb-docs {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  max-height: 54px;
-  min-height: 54px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--kb-scroll) transparent;
-}
+.kb-task-list { flex: 1 1 auto; min-height: 0; margin: 0; padding: 0; list-style: none; overflow-y: auto; }
 
 /*
-   资料清单的每一行是一个按钮：点一下把 docId 写进 URL，落点面板展开它的分块。
-   视觉与原来一致（行底色 + 两列基线对齐），只是多了可点与选中态。
+  任务行只放摘要：状态 + 任务类型/来源 + 版本与计数 + 时间，右侧两个文字操作。
+  阶段明细、逐项结果、错误码全部在「任务详情」抽屉里看 —— 这一区只有一百多像素，
+  把细节铺在这里会把关系图一起挤下去。
 */
-.kb-docs__item {
-  display: block;
-  background: var(--bg-page);
-  border-left: 2px solid transparent;
+.kb-task-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--kb-fs-table);
 }
+.kb-task-item:last-child { border-bottom: 0; }
 
-.kb-docs__row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-1) var(--space-3);
-  align-items: baseline;
-  width: 100%;
-  padding: var(--space-1) var(--space-2);
+.kb-task-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kb-task-title { flex: 1 1 160px; min-width: 0; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.kb-task-meta { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-task-time { flex: none; font-variant-numeric: tabular-nums; }
+.kb-task-actions { flex: none; display: inline-flex; align-items: center; gap: var(--space-2); }
+.kb-link--danger { color: var(--danger); }
+.kb-task-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--kb-fs-aux);
+}
+
+/* 标题栏里的紧凑流水线：检测变更 → 提取内容 → 分块 → 构建索引 → 一致性校验 → 发布 */
+.kb-pipeline { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); font-size: var(--kb-fs-aux); line-height: var(--kb-lh-aux); color: var(--text-tertiary); }
+.kb-stage { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
+.kb-stage b { font-weight: 400; color: var(--text-disabled); }
+/* 兼容钩子：.kb-stage 若带运行状态，只改文字层级，不在这里加圆点（这一行是紧凑条） */
+.kb-stage.is-active { color: var(--text-primary); }
+.kb-stage.is-done { color: var(--text-secondary); }
+.kb-stage.is-failed { color: var(--danger); }
+
+/* 任务卡里的六阶段：状态条 + 阶段名 + 进度文字，状态永远有文字 */
+.kb-stage-list { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+
+/* 抽屉里空间充足，六个阶段改成竖排逐条列出，能看清每阶段的处理数 */
+.kb-stage-list--drawer { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); margin-bottom: var(--space-3); }
+
+.kb-stage-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--border-subtle);
+  font-size: var(--kb-fs-aux);
+  line-height: var(--kb-lh-aux);
+  color: var(--text-tertiary);
+}
+
+.kb-stage-item strong { font-size: var(--kb-fs-table); font-weight: 500; color: var(--text-secondary); }
+.kb-stage-item span { overflow: hidden; text-overflow: ellipsis; }
+.kb-stage-item.is-wait { border-left-color: var(--border-subtle); }
+.kb-stage-item.is-active { border-left-color: var(--primary); }
+.kb-stage-item.is-active strong { color: var(--text-primary); }
+.kb-stage-item.is-done { border-left-color: var(--success); }
+.kb-stage-item.is-failed { border-left-color: var(--danger); color: var(--danger); }
+.kb-stage-item.is-failed strong { color: var(--danger); }
+
+/* 运行中任务卡：一张卡一件事，卡内三段（标识 / 阶段 / 结果） */
+.kb-job-cards { display: flex; flex-direction: column; gap: var(--space-3); }
+.kb-job-card { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--border-subtle); background: var(--bg-page); }
+
+/* 任务明细清单（任务详情折叠区、历史任务、资产索引页签共用） */
+.kb-job-item-list { display: flex; flex-direction: column; gap: 0; max-height: 240px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+
+.kb-job-item-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  min-height: 26px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--kb-fs-table);
+  color: var(--text-secondary);
+}
+
+.kb-job-item-list li:last-child { border-bottom: 0; }
+.kb-job-item-list em { font-style: normal; color: var(--warning); }
+
+/* ------------------------------------------------------------------
+   17. 检索验证：检索栏 + 结果 40% / 证据 60%
+   ------------------------------------------------------------------
+   PRD §5.5。结果与证据是两个各自滚动的面板，互不嵌套。结果卡固定两行摘要；
+   分数是这一页的关键数据，允许用唯一主色。
+   低相关候选整组降一级（虚线边框 + 降透明度），一眼能和合格证据分开。
+   ------------------------------------------------------------------ */
+
+.kb-search-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  background: var(--panel-surface);
+}
+
+.kb-search-bar .kb-input { height: 32px; line-height: 32px; }
+
+.kb-search-empty { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow: auto; }
+.kb-search-empty > .kb-panel { flex: 0 0 auto; }
+/* 无查询时示例面板要吃掉剩余高度：否则整页中间会出现一大块空场，
+   违背规范 §3.3「信息按主任务 → 状态 → 辅助分层」的版面节奏。 */
+.kb-search > .kb-panel:only-of-type { flex: 1 1 auto; min-height: 0; }
+
+.kb-search-split { flex: 1 1 auto; display: grid; grid-template-columns: minmax(0, 40fr) minmax(0, 60fr); gap: var(--kb-gap); min-width: 0; min-height: 0; }
+.kb-search-split > * { min-width: 0; min-height: 0; }
+.kb-hit-list, .kb-evidence { min-width: 0; min-height: 0; }
+
+.kb-hits { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.kb-hits--low { gap: var(--space-1); opacity: 0.86; }
+
+/* 结果卡（整块是按钮）：标题 / 类型 · 对象 · 来源定位 / 两行摘要 / 版本提示 */
+.kb-hit {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-left: 2px solid transparent;
+  background: var(--bg-panel);
   font-family: var(--font-ui);
   text-align: left;
   cursor: pointer;
-  transition: color var(--motion-fast), background var(--motion-fast);
+  transition: border-color var(--motion-fast), background var(--motion-fast);
 }
 
-.kb-docs__row:hover {
-  background: var(--fill-weak);
-}
+.kb-hits--low .kb-hit { border-style: dashed; }
+.kb-hit:hover { border-color: var(--border-hover); }
+.kb-hit.is-selected { border-color: var(--border-active); border-left-color: var(--primary); background: var(--fill-soft); }
 
-.kb-docs__item.is-active {
-  background: var(--fill-weak);
-  border-left-color: var(--primary);
-}
+.kb-hit-head { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.kb-hit-head strong { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: var(--kb-fs-module); font-weight: 600; line-height: var(--kb-lh-module); color: var(--text-primary); text-overflow: ellipsis; white-space: nowrap; }
+.kb-hit-index { flex: 0 0 auto; font-family: var(--font-data); font-size: var(--kb-fs-aux); font-variant-numeric: tabular-nums; color: var(--text-disabled); }
+.kb-hit-score { flex: 0 0 auto; font-family: var(--font-data); font-size: var(--kb-fs-body); font-variant-numeric: tabular-nums; color: var(--primary); }
 
-.kb-docs__item.is-active .kb-docs b {
-  color: var(--text-primary);
-}
+.kb-hit-meta { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); font-size: var(--kb-fs-aux); line-height: var(--kb-lh-aux); color: var(--text-tertiary); }
 
-.kb-docs b {
-  color: var(--text-secondary);
-  font-size: var(--fs-aux);
-  font-weight: 400;
+.kb-hit-snippet {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  margin: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: var(--kb-fs-body);
+  line-height: var(--kb-lh-body);
+  color: var(--text-secondary);
 }
 
-.kb-docs span {
+/* 版本提示（「来源版本 v1，存在更新」）：一句语义提示，不是装饰 */
+.kb-hit-note { font-size: var(--kb-fs-aux); line-height: var(--kb-lh-aux); color: var(--warning); }
+
+/* 唯一证据详情区 */
+.kb-evidence-body { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.kb-evidence-head { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.kb-evidence-head h3 { margin: 0; font-size: var(--kb-fs-module); font-weight: 600; line-height: var(--kb-lh-module); color: var(--text-primary); }
+.kb-evidence-tags { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
+
+/* 完整片段：保留换行、长串可断行，超过一屏在块内滚（PRD §5.5 唯一证据区） */
+.kb-evidence-text {
+  max-height: 320px;
+  margin: 0;
+  padding: var(--space-3);
+  overflow: auto;
+  border-left: 2px solid var(--border-active);
+  background: var(--bg-page);
+  font-family: var(--font-ui);
+  font-size: var(--kb-fs-body);
+  line-height: var(--kb-lh-body);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.kb-evidence-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* 无查询时的三条工作场景示例 */
+.kb-example-list { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.kb-example-list li { min-width: 0; }
+
+/* ------------------------------------------------------------------
+   18. 折叠区（检索详情 / 配置 / 分块 / 历史）
+   ------------------------------------------------------------------
+   默认收起，只露摘要行与方向箭头。箭头是 DOM 里的 ▾，展开时用 scaleY 翻转方向
+   —— 一次状态反馈（180ms），不是循环旋转（§6.2）。
+   ------------------------------------------------------------------ */
+
+.kb-collapse { border-top: 1px solid var(--border-subtle); font-size: var(--kb-fs-body); }
+
+.kb-collapse > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
   color: var(--text-tertiary);
-  font-family: var(--font-data-mixed);
-  font-size: var(--fs-aux);
-  white-space: nowrap;
+  font-size: var(--kb-fs-body);
+  list-style: none;
+  cursor: pointer;
+  transition: color var(--motion-fast);
 }
 
-.kb-rollback {
-  height: 24px;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border-default);
+.kb-collapse > summary::-webkit-details-marker { display: none; }
+.kb-collapse > summary:hover { color: var(--text-secondary); }
+.kb-collapse-caret { margin-left: auto; color: var(--text-tertiary); transition: transform var(--motion-fast); }
+.kb-collapse[open] > summary .kb-collapse-caret { transform: scaleY(-1); }
+.kb-collapse-body { padding: var(--space-2) 0 var(--space-3); }
+
+/* ------------------------------------------------------------------
+   19. 抽屉（数据说明 / 导入资料 / 资产详情 / 任务详情）
+   ------------------------------------------------------------------
+   默认 560px，大屏（≥1600）640px；.kb-drawer--wide 用于资产详情这类宽内容。
+   覆盖整屏是模态流程该有的样子：遮罩压住顶栏与工作区，关闭按钮与 Esc 都能退。
+   进出各 180ms，属 §6.2 的状态反馈时长。
+   ------------------------------------------------------------------ */
+
+.kb-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  background: var(--overlay-scrim);
+  animation: kb-fade-in var(--motion-fast) ease-out both;
+}
+
+.kb-drawer {
+  display: flex;
+  flex-direction: column;
+  width: var(--kb-drawer-w);
+  max-width: 100vw;
+  min-height: 0;
+  border-left: 1px solid var(--border-default);
+  background: var(--panel-surface-2);
+  animation: kb-drawer-in var(--motion-fast) ease-out both;
+}
+
+.kb-drawer-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--kb-row-header);
+  padding: var(--space-2) var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+
+/* 宽档抽屉（资产详情）：比常规抽屉再宽一档，窄屏最多占满 */
+.kb-drawer--wide { width: min(100vw, calc(var(--kb-drawer-w) + 80px)); }
+
+.kb-drawer-head > div { flex: 1 1 auto; min-width: 0; }
+.kb-drawer-head h2 { margin: 0; font-size: var(--kb-fs-panel); font-weight: 600; line-height: var(--kb-lh-panel); letter-spacing: 0.02em; color: var(--text-title); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kb-drawer-head p { margin: var(--space-1) 0 0; font-size: var(--kb-fs-aux); line-height: var(--kb-lh-aux); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 副标题：编号 + 两个状态标签并排，不折行 */
+.kb-drawer-sub { display: inline-flex; align-items: center; gap: var(--space-2); }
+
+.kb-drawer-close {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--text-tertiary);
-  font-family: var(--font-ui);
-  font-size: var(--fs-aux);
+  font-size: var(--kb-fs-module);
+  line-height: 1;
   cursor: pointer;
   transition: color var(--motion-fast), border-color var(--motion-fast);
 }
 
-.kb-rollback:hover {
-  color: var(--text-primary);
-  border-color: var(--border-hover);
+.kb-drawer-close:hover { border-color: var(--border-hover); color: var(--text-primary); }
+
+/* 抽屉内的四页签（内容 / 元数据 / 索引 / 历史）复用 .kb-tab，只换容器高度 */
+.kb-drawer-tabs { display: flex; align-items: stretch; gap: var(--space-6); height: 36px; margin-bottom: var(--space-4); border-bottom: 1px solid var(--border-subtle); }
+
+.kb-drawer-body { flex: 1 1 auto; min-height: 0; padding: var(--space-4) var(--space-5); overflow: auto; }
+
+.kb-drawer-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: var(--space-2) var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.kb-drawer-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2); }
+
+@keyframes kb-drawer-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes kb-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* ------------------------------------------------------------------
-   7. 引用深链（PRD FR-05）：#/knowledge?doc=<docId>&chunk=<chunkId>
+   20. 详情排版：段落、键值、预览、分块、时间线、关联
    ------------------------------------------------------------------
-   中列原来是单块面板；引用落点面板只在 URL 带参数时出现，
-   所以包一层 flex 容器（不改变无参数时的观感：检索工作区仍然占满整列）。
+   全部靠字号 / 颜色 / 留白分层：label 辅助色、value 主文字色，不加框（§4.3）。
+   两处长文本（.kb-content-preview、.kb-evidence-text）保留换行并在块内滚，
+   绝不把抽屉顶宽（PRD §5.3 内容页签）。
    ------------------------------------------------------------------ */
 
-.kb-ask-col {
+.kb-detail-section { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+
+.kb-detail-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: var(--space-1) var(--space-3); align-items: start; }
+.kb-detail-label { font-size: var(--kb-fs-aux); line-height: var(--kb-lh-body); color: var(--text-tertiary); }
+.kb-detail-note { font-size: var(--kb-fs-table); font-style: normal; line-height: var(--kb-lh-table); color: var(--text-tertiary); }
+/* 语义提示句（「当前 v2 / 索引 v1，旧版继续服务」）：允许用状态色写文字，
+   但数字本身不着色 —— 与第 14 节的覆盖条同一口径 */
+.kb-detail-note--warn { color: var(--warning); }
+.kb-detail-text { margin: 0; font-size: var(--kb-fs-body); line-height: var(--kb-lh-body); color: var(--text-primary); }
+.kb-detail-h3 { margin: var(--space-2) 0 0; font-size: var(--kb-fs-module); font-weight: 600; line-height: var(--kb-lh-module); color: var(--text-secondary); }
+.kb-detail-footnote { margin: var(--space-3) 0 0; font-size: var(--kb-fs-aux); line-height: var(--kb-lh-aux); color: var(--text-tertiary); }
+
+.kb-content-preview {
+  max-height: 320px;
+  margin: 0;
+  padding: var(--space-3);
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-page);
+  font-family: var(--font-ui);
+  font-size: var(--kb-fs-table);
+  line-height: var(--kb-lh-table);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.kb-note-paragraph { margin: 0 0 var(--space-4); font-size: var(--kb-fs-body); line-height: var(--kb-lh-body); color: var(--text-secondary); }
+.kb-note-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; font-size: var(--kb-fs-body); line-height: var(--kb-lh-body); color: var(--text-secondary); }
+
+/* 键值行：dl > div > (dt + dd)，列数由 tsx 的 gridTemplateColumns 决定 */
+.kb-kv { display: grid; gap: var(--space-2) var(--space-4); margin: 0; }
+.kb-kv > div { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.kb-kv dt { font-size: var(--kb-fs-aux); line-height: var(--kb-lh-aux); color: var(--text-tertiary); }
+.kb-kv dd { margin: 0; font-size: var(--kb-fs-body); line-height: var(--kb-lh-body); color: var(--text-primary); overflow-wrap: anywhere; }
+
+/* 分块清单：编号 + 定位 + 字数在上，正文在中，摘要/向量在下 */
+.kb-chunk-list { margin: 0; padding: 0; list-style: none; }
+.kb-chunk-list > li { padding: var(--space-3) 0; border-bottom: 1px solid var(--border-subtle); }
+
+.kb-chunk-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); font-size: var(--kb-fs-aux); line-height: var(--kb-lh-aux); color: var(--text-tertiary); }
+.kb-chunk-head em { font-style: normal; }
+
+.kb-chunk-list > li p { margin: var(--space-2) 0; font-size: var(--kb-fs-table); line-height: var(--kb-lh-table); color: var(--text-secondary); overflow-wrap: anywhere; }
+.kb-chunk-meta { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); font-size: var(--kb-fs-aux); line-height: var(--kb-lh-aux); color: var(--text-disabled); }
+
+/* 版本 / 事件时间线：竖线与节点都由伪元素画，DOM 里只有 li */
+.kb-timeline { position: relative; margin: 0; padding: 0 0 0 var(--space-5); list-style: none; }
+
+.kb-timeline::before { content: ""; position: absolute; top: var(--space-2); bottom: var(--space-2); left: 3px; width: 1px; background: var(--border-subtle); }
+
+.kb-timeline > li { position: relative; padding-bottom: var(--space-3); font-size: var(--kb-fs-body); line-height: var(--kb-lh-body); color: var(--text-secondary); }
+
+.kb-timeline > li::before { content: ""; position: absolute; top: var(--space-2); left: calc(var(--space-5) * -1); width: 6px; height: 6px; border-radius: 50%; background: var(--text-disabled); }
+
+.kb-timeline-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); }
+.kb-timeline-head em, .kb-timeline > li p { font-size: var(--kb-fs-aux); line-height: var(--kb-lh-aux); }
+.kb-timeline-head em { font-family: var(--font-data); font-style: normal; font-variant-numeric: tabular-nums; color: var(--text-tertiary); }
+.kb-timeline > li p { margin: var(--space-1) 0 0; color: var(--text-tertiary); }
+
+/* 关联关系：类型 · 标题 · 证据引用 · 来源 */
+.kb-relation-list { display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0; list-style: none; }
+
+.kb-relation-list li {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  min-height: 28px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--kb-fs-table);
 }
 
-/* 检索工作区：撑满中列剩余高度，与「面板直接作为网格项被拉伸」时表现一致 */
-.kb-ask-col > .tech-panel:not(.kb-cite) {
-  flex: 1 1 auto;
-  min-height: 466px;
-  min-width: 0;
+.kb-relation-type { flex: 0 0 auto; min-width: 72px; font-size: var(--kb-fs-aux); color: var(--text-tertiary); }
+.kb-relation-origin { font-size: var(--kb-fs-aux); color: var(--text-disabled); }
+
+/* ------------------------------------------------------------------
+   21. 导入抽屉的拖放区、空态、骨架与提示
+   ------------------------------------------------------------------
+   空态最多两行文案 + 一个动作按钮（PRD §5.3）。骨架是静态低对比块：§6.2 禁止
+   持续闪烁与循环动画，所以不做扫光。行内提示沿用平台 .toast 的形态 —— 2px 左侧
+   状态条 + 普通文字，成功/警告不填充整块，错误可以写错误色文字（§1.3）。
+   ------------------------------------------------------------------ */
+
+.kb-drop {
+  display: grid;
+  place-items: center;
+  gap: var(--space-1);
+  padding: var(--space-6) var(--space-4);
+  border: 1px dashed var(--border-hover);
+  background: var(--bg-page);
+  color: var(--text-secondary);
+  font-size: var(--kb-fs-body);
+  line-height: var(--kb-lh-body);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+
+.kb-drop:hover { border-color: var(--primary); background: var(--fill-weak); }
+
+.kb-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2); min-height: 120px; padding: var(--space-6) var(--space-4); text-align: center; }
+.kb-empty strong { font-size: var(--kb-fs-module); font-weight: 600; line-height: var(--kb-lh-module); color: var(--text-secondary); }
+
+.kb-empty em {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  max-width: 360px;
   overflow: hidden;
+  font-size: var(--kb-fs-body);
+  font-style: normal;
+  line-height: var(--kb-lh-body);
+  color: var(--text-tertiary);
 }
 
-/* 落点面板按内容高度：它是「打开了哪一处」的结论，不该被拉成整列高 */
-.kb-ask-col > .kb-cite {
+.kb-empty-action { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); margin-top: var(--space-1); }
+
+.kb-skeleton { height: var(--kb-lh-body); background: var(--fill-weak); }
+.kb-skeleton + .kb-skeleton { margin-top: var(--space-2); }
+
+.kb-toast {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-left: 2px solid var(--info);
+  background: var(--fill-weak);
+  font-size: var(--kb-fs-body);
+  line-height: var(--kb-lh-body);
+  color: var(--text-secondary);
+}
+
+.kb-toast--ok { border-left-color: var(--success); }
+.kb-toast--warn { border-left-color: var(--warning); }
+.kb-toast--danger { border-left-color: var(--danger); color: var(--danger); }
+
+/* ------------------------------------------------------------------
+   22. 键盘焦点与滚动条
+   ------------------------------------------------------------------
+   一条规则覆盖本页所有可聚焦元素（含结果卡、指标卡、分类项、覆盖条分段这些
+   「长得不像按钮的按钮」）。全文件没有一处 outline:none。
+   滚动条沿用 index.css 的统一细条，本页不再自绘。
+   ------------------------------------------------------------------ */
+
+.kb :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------
+   23. 1366 档（≤1599）：先压行高与内边距，再减内容，不动字号
+   ------------------------------------------------------------------
+   PRD §5.2 的 1280–1599 一档。正文仍是 13px、表格仍是 12.5px，省下来的高度来自
+   页眉 44 / 页签 36 / 指标 72 / 任务 64 / 表格行 32，以及「指标区隐藏 hint、
+   任务区只留第一条、六阶段折成两行」—— §8 要求小屏减少内容而不是缩小所有字号。
+   ------------------------------------------------------------------ */
+
+@media (max-width: 1599px) {
+  .kb {
+    --kb-pad-y: var(--space-3);
+    --kb-pad-x: var(--space-4);
+    --kb-gap: var(--space-3);
+    --kb-row-header: 44px;
+    --kb-row-tabs: 36px;
+    --kb-row-metrics: 72px;
+    --kb-row-tasks: 64px;
+    --kb-row-table: 32px;
+    /* 任务卡在 1366 档压到 130px：头部 32 + 两条摘要，其余进抽屉 */
+    --kb-panel-tasks: 130px;
+  }
+
+  /* 72px 装不下「标签 + 数字 + 提示」三行：去掉提示，而不是把 13px 压成 11px */
+  .kb-metric-hint { display: none; }
+  .kb-metric { padding: var(--space-2) var(--space-3); }
+  .kb-panel-body { padding: var(--space-3); }
+  .kb-main { grid-template-columns: minmax(0, 52fr) minmax(0, 48fr); }
+  /*
+   * 1366×768 下内容区只有约 445px 给主体：右栏「关系图 + 任务卡」必须压到
+   * 加起来不超过它，否则关系图会被挤出可视区（PRD §5.2 允许这一档的图谱降到 290px）。
+   * 组件给的行内 min-height 是 290，这里按同值收紧并让任务卡减到 130。
+   */
+  .kb-col--right > .kb-graph-panel { min-height: 290px; }
+  .kb-col--right > .kb-tasks { flex-basis: var(--kb-panel-tasks); }
+  .kb-types { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-1) var(--space-2); }
+  .kb-index-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kb-config-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kb-stage-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .kb-input { width: 132px; }
+  .kb-input--tiny { width: 104px; }
+  .kb-detail-row { grid-template-columns: 80px minmax(0, 1fr); }
+  .kb-coverage-row { grid-template-columns: 64px minmax(96px, 1fr) minmax(0, auto); }
+
+  /* 任务区只剩 148px：标题栏压到 32px，最多两条摘要，其余进任务抽屉 */
+  .kb-tasks .kb-panel-head { min-height: var(--space-8); }
+  .kb-tasks .kb-panel-body { padding: 0 var(--space-3); }
+  .kb-task-item:nth-child(n + 3) { display: none; }
+  .kb-task-foot { display: none; }
+  .kb-pipeline { display: none; }
+}
+
+/* ------------------------------------------------------------------
+   24. 1280 档（≤1279）：单列 + 自然滚动
+   ------------------------------------------------------------------
+   PRD §5.2：1280px 以下改单列，允许页面自然滚动。Shell 的内容区是
+   overflow:hidden，页面要「自然滚动」只能由页面根承担，所以这里把 .kb 自己变成
+   那一条滚动区；面板改为按内容高度排，分类侧栏摊成横向滚动条。
+   关系图组件自带样式，这里只管它的容器高度（固定 460px）。
+   ------------------------------------------------------------------ */
+
+@media (max-width: 1279px) {
+  .kb { height: auto; min-height: 100%; grid-template-rows: auto auto auto auto; overflow-x: hidden; overflow-y: auto; }
+
+  .kb-body { overflow: visible; }
+  .kb-body > * { flex: 0 0 auto; }
+
+  .kb-overview { grid-template-rows: auto auto auto; }
+  .kb-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .kb-metric { min-height: 72px; border-top: 1px solid var(--border-subtle); }
+  .kb-metric:nth-child(-n + 3) { border-top: 0; }
+
+  .kb-main { grid-template-columns: minmax(0, 1fr); }
+  .kb-col > .kb-panel, .kb-main > * { min-height: 320px; flex: 0 0 auto; }
+  .kb-main > *:last-child { min-height: 460px; }
+
+  .kb-assets-view { grid-template-columns: minmax(0, 1fr); }
+
+  .kb-sidebar {
+    display: flex;
+    gap: var(--space-2);
+    width: auto;
+    padding: var(--space-2) var(--space-3);
+    border-right: 0;
+    border-bottom: 1px solid var(--border-subtle);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .kb-side-link { flex: 0 0 auto; width: auto; height: 28px; padding: 0 var(--space-2); border-left: 0; border-bottom: 2px solid transparent; }
+  .kb-side-link.is-active { border-bottom-color: var(--primary); }
+  .kb-side-note { display: none; }
+
+  .kb-index-mid, .kb-search-split { grid-template-columns: minmax(0, 1fr); }
+  .kb-indexes > .kb-panel:last-child, .kb-index-mid { flex: 0 0 auto; min-height: 280px; }
+  .kb-search-split > * { min-height: 280px; }
+
+  .kb-drawer, .kb-drawer--wide { width: 100%; }
+}
+
+/* 抽屉宽度：默认 560px，大屏 640px；.kb-drawer--wide 再上一档（PRD §5.2） */
+@media (min-width: 1600px) {
+  .kb { --kb-drawer-w: 640px; }
+}
+
+/* ------------------------------------------------------------------
+   25. 降低动效偏好
+   ------------------------------------------------------------------
+   本文件只在抽屉进出、hover 与折叠箭头翻转上用动效。这里一次性关掉；状态本身
+   （边框、颜色、方向）仍然变化，不改成淡入淡出。
+   ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  .kb *,
+  .kb *::before,
+  .kb *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ------------------------------------------------------------------
+   26. 引用深链落点面板（PRD FR-05）：#/knowledge?doc=<docId>&chunk=<chunkId>
+   ------------------------------------------------------------------
+   这段样式与 `pages/Knowledge.tsx` 的「原文定位」面板 markup 一一对应，
+   只在 URL 带 doc / chunk 参数时命中元素（无参数时不渲染该面板）。
+   与合并前那一版的差别只有一个：落点面板原来挂在旧页面的中列容器 `.kb-ask-col` 里，
+   本页重写后中列已由四个页签视图接管，所以落点面板改为 `.kb-body` 的第一个子项，
+   `.kb-ask-col` 那几条外层布局规则随之不再需要。
+   ------------------------------------------------------------------ */
+
+.kb-body > .kb-cite {
+  /* 落点面板按内容高度：它是「打开了哪一处」的结论，不该被拉成整列高 */
   flex: 0 0 auto;
   min-height: 0;
-  min-width: 0;
   overflow: hidden;
 }
 
-.kb-ask-col > .kb-cite > .tech-panel__inner > .tech-panel__body {
+.kb-body > .kb-cite > .tech-panel__inner > .tech-panel__body {
   flex: 0 0 auto;
+  overflow: visible;
 }
 
 .kb-cite__body {
   display: grid;
   gap: var(--space-2);
   min-width: 0;
+  /* 原文可能很长：落点面板内部自己滚，不把下面的页签内容挤出视野 */
+  max-height: 46vh;
+  overflow: auto;
 }
 
 .kb-cite__doc {
@@ -1513,74 +1641,14 @@
   font-family: var(--font-data-mixed);
 }
 
-/* ------------------------------------------------------------------
-   8. 三档分辨率（规范 §8）：1672×940 / 1280×720 下压辅助信息，主交互不删
-   ------------------------------------------------------------------ */
-
-@media (max-height: 940px) {
-  .kb-main > .tech-panel,
-  .kb-main > .kb-run,
-  .kb-ask-col > .tech-panel:not(.kb-cite) {
-    min-height: 428px;
-  }
-
-  .kb-side > .tech-panel {
-    min-height: 296px;
-  }
-
-  .kb-bottom > .tech-panel {
-    min-height: 138px;
-  }
-
-  .kb-steps {
-    max-height: 180px;
-  }
-
-  .kb-queue {
-    max-height: 96px;
-  }
+.kb-cite__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
-@media (max-height: 780px) {
-  .kb-main > .tech-panel,
-  .kb-main > .kb-run,
-  .kb-ask-col > .tech-panel:not(.kb-cite) {
-    min-height: 392px;
-  }
-
-  .kb-side > .tech-panel {
-    min-height: 264px;
-  }
-
-  .kb-chart {
-    height: 190px !important;
-  }
-
-  .kb3d--large {
-    height: 400px;
-  }
-
-  .kb3d__legend {
-    max-width: 38%;
-  }
-
-  .kb-bottom > .tech-panel {
-    min-height: 128px;
-  }
-
-  .kb-steps {
-    max-height: 158px;
-  }
-
-  .kb-queue {
-    max-height: 84px;
-  }
-
-  .kb-console {
-    height: 64px;
-  }
-
-  .kb-overall {
-    margin-top: 0;
-  }
+.kb-cite__hint {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
 }

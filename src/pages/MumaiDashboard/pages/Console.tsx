@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import { Btn, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
 import { api, isApiError, type RehearsalOverview } from "../api/client";
@@ -131,13 +132,25 @@ export default function Console() {
       )}
 
       <div className="cs-layout">
-        <Panel title="演示会话" extra={<span className="muted">{overview?.sessions.length ?? 0} 场</span>}>
+        {/*
+          三个面板头部的计数（场 / 个）与每行里的实体数、事件序号都走数字动效：
+          本页没有轮询，数字只在「首次读取」和「新建 / 捕获 / 恢复 / 删除」之后变，
+          即典型的**入场计数 + 动作后平滑更新**。保留 `?? 0`：
+          第一次读取还没回来时这一格原本就写 0 场 / 0 个，动效只是把 0 → N 这一段补上。
+          `场景 xxx`、`阶段 P05`、会话号是标识不是读数，保持静态。
+
+          口径分两种：**数量**（场数 / 快照数 / 实体数）用组件默认的千分位；
+          **序号**（`事件 1001` 这种从 1000 起算的单调序号）给 `group={false}` ——
+          序号按标识书写，没有千分位，滚动起来也不能凭空变成「1,001」。
+        */}
+        <Panel title="演示会话" extra={<span className="muted"><NumberAnimation value={overview?.sessions.length ?? 0} /> 场</span>}>
           <ul className="cs-sessions">
             {(overview?.sessions ?? []).map((session) => (
               <li key={session.id} className={session.id === currentSessionId ? "is-current" : ""}>
                 <b>{session.id}</b>
                 <span>
-                  场景 {session.scenarioId} · 阶段 {session.stage} · 实体 {session.entityCount} · 事件 {session.lastSeq}
+                  场景 {session.scenarioId} · 阶段 {session.stage} · 实体 <NumberAnimation value={session.entityCount} /> · 事件{" "}
+                  <NumberAnimation value={session.lastSeq} group={false} />
                 </span>
                 <em>建立于 {session.createdAt.slice(0, 19).replace("T", " ")}</em>
                 {session.id === currentSessionId ? <StatusChip text="当前会话" tone="ok" /> : null}
@@ -146,7 +159,7 @@ export default function Console() {
           </ul>
         </Panel>
 
-        <Panel title="阶段快照" extra={<span className="muted">{overview?.snapshots.length ?? 0} 个</span>}>
+        <Panel title="阶段快照" extra={<span className="muted"><NumberAnimation value={overview?.snapshots.length ?? 0} /> 个</span>}>
           <div className="cs-capture">
             <label>
               阶段
@@ -177,7 +190,7 @@ export default function Console() {
                 <li key={snapshot.id}>
                   <b>{snapshot.label}</b>
                   <span>
-                    {snapshot.stage} · {snapshot.entityCount} 个实体 · {actorName(snapshot.createdBy)}
+                    {snapshot.stage} · <NumberAnimation value={snapshot.entityCount} /> 个实体 · {actorName(snapshot.createdBy)}
                   </span>
                   <em>{snapshot.createdAt.slice(0, 19).replace("T", " ")}</em>
                   <span className="cs-snapshots__ops">

@@ -203,6 +203,19 @@ await send("Emulation.setDeviceMetricsOverride", {
   deviceScaleFactor: 1,
   mobile: false,
 });
+/**
+ * --reduced-motion：把 prefers-reduced-motion 模拟成 reduce。
+ *
+ * 走 CDP 的媒体特性模拟，而不是在页面里改写 window.matchMedia ——
+ * 后者对「模块加载时就取过一次 matchMedia 结果」的代码无效，
+ * 也测不出 CSS 里那条 @media (prefers-reduced-motion) 是否真的生效。
+ * 必须在 Page.navigate 之前设置，首帧就是降级态（评审 V13 要验的就是这个）。
+ */
+if (process.argv.includes("--reduced-motion")) {
+  await send("Emulation.setEmulatedMedia", {
+    features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+  });
+}
 if (initScript) {
   await send("Page.addScriptToEvaluateOnNewDocument", { source: initScript });
 }

@@ -16,7 +16,8 @@
  * （react-refresh 要求组件文件不导出非组件）。
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import { Btn, Modal, StatusChip } from "../ui";
 import { DATA_PACKAGES, SAMPLES } from "../seed/scenario";
@@ -44,7 +45,7 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
   const [reviewOpen, setReviewOpen] = useState(false);
   /** 人工核验结论：recordId → 采纳 / 排除 */
   const [decisions, setDecisions] = useState<Record<string, "accept" | "exclude">>({});
-  const [precheck, setPrecheck] = useState<{ at: string; checks: { label: string; ok: boolean; detail: string }[] } | null>(null);
+  const [precheck, setPrecheck] = useState<{ at: string; checks: { label: string; ok: boolean; detail: ReactNode }[] } | null>(null);
   const [outcome, setOutcome] = useState<(CleanOutcome & { at: string }) | null>(null);
   const [versionLabel, setVersionLabel] = useState<string | null>(null);
 
@@ -57,14 +58,51 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
     const withLabel = SAMPLES.filter((sample) => sample.labelBasis).length;
     const unknown = SAMPLES.filter((sample) => sample.knownState === "未知待核验").length;
     const groups = new Set(SAMPLES.map((sample) => sample.groupId)).size;
+    /*
+      预检查的 `detail` 从字符串放宽成节点：这几项里带的是**样本量级**（记录数 /
+      覆盖条数 / 分组数 / 未知标签数），预检查跑出来时应该滚到位，而不是直接拍一个
+      数字上去。原来拼模板串就把数字写死了，节点化之后数字才能自己逐帧改。
+    */
     setPrecheck({
       at: clockStamp(),
       checks: [
-        { label: "记录数", ok: records > 0, detail: `${records} 条记录` },
+        {
+          label: "记录数",
+          ok: records > 0,
+          detail: (
+            <>
+              <NumberAnimation value={records} /> 条记录
+            </>
+          ),
+        },
         { label: "格式声明", ok: Boolean(dataset?.rawLevel), detail: `${dataset?.name ?? "—"} · ${dataset?.rawLevel ?? "—"}` },
-        { label: "标签依据覆盖", ok: withLabel === records, detail: `${withLabel}/${records} 条有 label_basis` },
-        { label: "物理样本分组", ok: groups > 0, detail: `${groups} 个组` },
-        { label: "未知标签单列", ok: true, detail: `${unknown} 条标为未知待核验，不进入监督训练` },
+        {
+          label: "标签依据覆盖",
+          ok: withLabel === records,
+          detail: (
+            <>
+              <NumberAnimation value={withLabel} />/<NumberAnimation value={records} /> 条有 label_basis
+            </>
+          ),
+        },
+        {
+          label: "物理样本分组",
+          ok: groups > 0,
+          detail: (
+            <>
+              <NumberAnimation value={groups} /> 个组
+            </>
+          ),
+        },
+        {
+          label: "未知标签单列",
+          ok: true,
+          detail: (
+            <>
+              <NumberAnimation value={unknown} /> 条标为未知待核验，不进入监督训练
+            </>
+          ),
+        },
       ],
     });
     setStage("precheck");
@@ -104,7 +142,18 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
           stage === "versioned" ? (
             <StatusChip text={versionLabel ?? "已生成"} tone="ok" />
           ) : (
-            <StatusChip text={`第 ${stepIndex + 1} / ${STAGE_ORDER.length} 步 · ${STAGE_LABEL[stage]}`} tone="info" />
+            /* 当前步号跟着流程走；总步数 `STAGE_ORDER.length` 是常量，保持字面量。
+               文案裹成单个 span：`.chip` 是 inline-flex + 5px gap，
+               散开的文本节点会被 gap 当成独立 flex item 撑开 */
+            <StatusChip
+              text={
+                <span>
+                  第 <NumberAnimation value={stepIndex + 1} group={false} /> / {STAGE_ORDER.length} 步 ·{" "}
+                  {STAGE_LABEL[stage]}
+                </span>
+              }
+              tone="info"
+            />
           )
         }
         className="fw-panel fw-panel--wide">
@@ -131,7 +180,16 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
               </select>
             </label>
             <span className="muted">
-              {dataset?.frames === null ? "帧数待解析" : `${dataset?.frames ?? 0} 帧`} · 采集于 {dataset?.capturedAt}
+              {/* 帧数跟着所选数据集变（选另一个包就是另一个量级），走数字动效 */}
+              {dataset?.frames === null ? (
+                "帧数待解析"
+              ) : (
+                <>
+                  {/* `group={false}`：帧数是记录条数，原样不带千分位 */}
+                  <NumberAnimation value={dataset?.frames ?? 0} group={false} /> 帧
+                </>
+              )}{" "}
+              · 采集于 {dataset?.capturedAt}
             </span>
             <Btn tone="primary" onClick={() => setStage("configure")}>
               下一步：配置算法与阈值
@@ -183,18 +241,25 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
 
         {stage === "cleaned" && outcome ? (
           <div className="dc-stage dc-stage--block">
+            {/* 清洗产出的四个口径是一排 KPI：整排一起滚（执行时间是时间戳，保持原样） */}
             <ul className="dc-kpi">
               <li>
                 <small>输入</small>
-                <b>{SAMPLES.length}</b>
+                <b>
+                  <NumberAnimation value={SAMPLES.length} />
+                </b>
               </li>
               <li>
                 <small>保留</small>
-                <b>{outcome.kept}</b>
+                <b>
+                  <NumberAnimation value={outcome.kept} />
+                </b>
               </li>
               <li className={outcome.flagged.length ? "is-warn" : ""}>
                 <small>疑似异常项</small>
-                <b>{outcome.flagged.length}</b>
+                <b>
+                  <NumberAnimation value={outcome.flagged.length} />
+                </b>
               </li>
               <li>
                 <small>执行时间</small>
@@ -204,7 +269,10 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
             <div className="adapt-actions">
               <Btn onClick={() => setOutcome({ ...runClean(SAMPLES, thresholds), at: clockStamp() })}>重跑</Btn>
               <Btn tone="primary" disabled={!outcome.flagged.length} onClick={() => setReviewOpen(true)}>
-                下一步：人工核验 {outcome.flagged.length} 条
+                {/* `.btn` 是 inline-flex + 8px gap：文案保持一个 span，间距与原样一致 */}
+                <span>
+                  下一步：人工核验 <NumberAnimation value={outcome.flagged.length} /> 条
+                </span>
               </Btn>
             </div>
           </div>
@@ -215,15 +283,21 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
             <ul className="dc-kpi">
               <li className="is-ok">
                 <small>采纳为异常</small>
-                <b>{accepted}</b>
+                <b>
+                  <NumberAnimation value={accepted} />
+                </b>
               </li>
               <li>
                 <small>排除（误报）</small>
-                <b>{excluded}</b>
+                <b>
+                  <NumberAnimation value={excluded} />
+                </b>
               </li>
               <li className={undecided ? "is-warn" : ""}>
                 <small>待定</small>
-                <b>{undecided}</b>
+                <b>
+                  <NumberAnimation value={undecided} />
+                </b>
               </li>
             </ul>
             <div className="adapt-actions">
@@ -244,15 +318,21 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
               </li>
               <li>
                 <small>保留记录</small>
-                <b>{outcome?.kept ?? 0}</b>
+                <b>
+                  <NumberAnimation value={outcome?.kept ?? 0} />
+                </b>
               </li>
               <li>
                 <small>已确认异常</small>
-                <b>{accepted}</b>
+                <b>
+                  <NumberAnimation value={accepted} />
+                </b>
               </li>
               <li>
                 <small>已排除</small>
-                <b>{excluded}</b>
+                <b>
+                  <NumberAnimation value={excluded} />
+                </b>
               </li>
             </ul>
           </div>
@@ -322,12 +402,18 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
         <Modal
           wide
           title="疑似异常项核验"
-          subtitle={`${total} 条待核验 · 采纳为异常或排除误报`}
+          subtitle={
+            /* `.modal__sub` 是 flex + 6px gap：整句裹成一个 span，
+               否则「N」「条待核验 · …」会各成一个 flex item 被 gap 撑开 */
+            <span>
+              <NumberAnimation value={total} /> 条待核验 · 采纳为异常或排除误报
+            </span>
+          }
           onClose={() => setReviewOpen(false)}
           footer={
             <>
               <span className="muted">
-                已核验 {accepted + excluded}/{total}
+                已核验 <NumberAnimation value={accepted + excluded} />/{total}
               </span>
               <Btn onClick={() => setReviewOpen(false)}>稍后继续</Btn>
               <Btn

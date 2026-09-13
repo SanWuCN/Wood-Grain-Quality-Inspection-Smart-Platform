@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
+import NumberAnimation from "@/components/numberAnimation";
 import { useMumai } from "./context";
 import { Icon } from "./icons";
 import { Illustration } from "./illustrations";
@@ -121,6 +122,29 @@ const nextTurnId = () => (turnSeq += 1);
  * 注意：`searchDocs` 与共享实现**算法完全相同**（都是字符重叠 Top-K），
  * 所以这次合并是行为等价的替换，不是改判定。
  */
+/**
+ * 事实值全部是**字符串**（见 agent/facts.ts 的 `FactRow`）：有的是纯数字（"0.842"）、
+ * 有的是「数字 + 单位/说明」（"87%"、"12 项待复核"）、还有构件编号（"Z04 上部"）、
+ * 时间（"2026-09-10 16:40"）与区间（"3/12 已通过"）。
+ *
+ * 只有**以数字开头、后面不再夹数字**的值才拆出数字交给 NumberAnimation ——
+ * 编号与时间不是「会变的数」，滚动它们只会变成噪音；区间（"3/12"）也不拆，
+ * 免得把一半的比值滚成一个孤立的数。小数位与千分位按原字符串还原，
+ * 因此动画落值后的文本与改造前逐字一致（展示精度不变）。
+ */
+function splitFactValue(value: string): { amount: number; digits: number; group: boolean; suffix: string } | null {
+  const matched = /^(-?\d[\d,]*(?:\.\d+)?)(\D*)$/.exec(value);
+  if (!matched) return null;
+  const amount = Number(matched[1].replace(/,/g, ""));
+  if (!Number.isFinite(amount)) return null;
+  const [, fraction] = matched[1].split(".");
+  return {
+    amount,
+    digits: fraction ? fraction.length : 0,
+    group: matched[1].includes(","),
+    suffix: matched[2],
+  };
+}
 
 export default function SmallWoodPanel() {
   const {
@@ -531,12 +555,27 @@ export default function SmallWoodPanel() {
                 <div className="xm__facts">
                   <small>业务状态（结构化数据）</small>
                   <ul>
-                    {turn.facts.map((fact) => (
-                      <li key={fact.k}>
-                        <span>{fact.k}</span>
-                        <b>{fact.v}</b>
-                      </li>
-                    ))}
+                    {turn.facts.map((fact) => {
+                      // 事实值是字符串，能拆出数字的才滚动，其余（编号 / 时间 / 区间）原样渲染
+                      const numeric = splitFactValue(fact.v);
+                      return (
+                        <li key={fact.k}>
+                          <span>{fact.k}</span>
+                          <b>
+                            {numeric ? (
+                              <NumberAnimation
+                                value={numeric.amount}
+                                digits={numeric.digits}
+                                group={numeric.group}
+                                suffix={numeric.suffix}
+                              />
+                            ) : (
+                              fact.v
+                            )}
+                          </b>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               ) : null}

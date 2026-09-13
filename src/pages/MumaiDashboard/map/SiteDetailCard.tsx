@@ -13,6 +13,11 @@
  *
  * 样式用 styled-components 就地定义：本任务不允许改 `pages.css` / `tokens.css`
  * （那两份文件有并行任务在改），用 CSS-in-JS 可以不碰全局样式表。
+ *
+ * 数字动效（`src/components/numberAnimation.tsx`）：本浮层出现的数字只有经纬度
+ * （`siteCoordinateText`）与最近勘察时间（`site.survey.at`），两个都是 `seed/sites.ts`
+ * 里的定值 —— 浮层打开期间不会变，按组件口径属于「定值常量 / 日期」，**不参与滚动**；
+ * 检测项只以文字标签成列，没有以数字呈现的计数。因此这一份刻意一处都没动。
  */
 
 import { useEffect, useMemo, useRef } from "react";

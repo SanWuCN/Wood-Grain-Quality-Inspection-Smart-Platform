@@ -16,34 +16,48 @@ import type { Permission } from "./auth";
 import { Icon, type IconName } from "./icons";
 import { StatusChip } from "./ui";
 import type { Tone } from "./lib";
-import type { ChannelStatus } from "./seed/types";
 import DemoHeader from "./DemoHeader";
 
-const channelTone: Record<ChannelStatus["state"], Tone> = {
-  online: "ok",
-  stale: "warn",
-  offline: "danger",
+/**
+ * 顶栏右侧的一个状态项。
+ *
+ * 原来是四路通道（地图 / 位姿 / 视频 / 车辆）带更新时间戳 —— 那四行对看板的人
+ * 没有信息量：地图与位姿本来就归巡检车、手持端只有视频一路，时间戳还是种子里的
+ * 固定值（14:22:31 这种，永远不动）。现在换成四个**观众真的会问**的对象，
+ * 每一项的状态都来自真实来源：
+ *
+ *   平台    —— 浏览器与共享服务的实时通道（`useSharedStore().status`）
+ *   智能车  —— 当前巡检任务的状态（`useMumai().mission.state`）
+ *   扫描仪  —— 手持终端链路（`useDeviceLink`：真机在线 / 延迟 / 离线 / 未接入）
+ *   模型    —— 当前演示模型版本（终端上报优先，否则平台版本台账）
+ *
+ * 时间与来源不再挤在版面上，全部放进 `title`（悬停可见）。
+ */
+export type HeaderStatusItem = {
+  key: string;
+  label: string;
+  /**
+   * 状态词：正常 / 执行中 / 真机在线 / 延迟 12s …
+   *
+   * 类型从 `string` 放宽到 `ReactNode`：扫描仪那一格的秒数是从手持终端链路快照里
+   * 算出来的**会变的数**（`useDeviceLink` 的 ageSec，5 秒一轮），拼成模板串就等于
+   * 把它写死了 —— 只能整块重画，也上不了数字动效。改成节点后可以把
+   * `<NumberAnimation>` 放进状态词中间；`StatusChip` 的 `text` 同样吃 `ReactNode`。
+   * 另外三格仍然传字符串，渲染结果与之前逐字一致。
+   */
+  text: ReactNode;
+  tone: Tone;
+  /** 悬停说明：来源、时间、原因 —— 原来占版面的那一列时间戳挪到这里 */
+  title: string;
 };
 
-const channelStateText: Record<ChannelStatus["state"], string> = {
-  online: "正常",
-  stale: "延迟",
-  offline: "断开",
-};
-
-/** 四路通道状态：地图 / 位姿 / 视频 / 车辆（PRD 3.2「任一路断流只影响该通道」） */
-function ChannelStrip({ channels, onOpen }: { channels: ChannelStatus[]; onOpen?: () => void }) {
+function StatusStrip({ items, onOpen }: { items: HeaderStatusItem[]; onOpen?: () => void }) {
   return (
-    <div className="appshell__channels" role="group" aria-label="设备通道状态">
-      {channels.map((channel) => (
-        <button
-          key={channel.key}
-          type="button"
-          onClick={onOpen}
-          title={`${channel.source} · 更新于 ${channel.updatedAt}`}>
-          <span className="appshell__channels-label">{channel.label}</span>
-          <StatusChip text={channelStateText[channel.state]} tone={channelTone[channel.state]} />
-          <em>{channel.updatedAt}</em>
+    <div className="appshell__channels" role="group" aria-label="平台与设备状态">
+      {items.map((item) => (
+        <button key={item.key} type="button" onClick={onOpen} title={item.title}>
+          <span className="appshell__channels-label">{item.label}</span>
+          <StatusChip text={item.text} tone={item.tone} />
         </button>
       ))}
     </div>
@@ -51,7 +65,10 @@ function ChannelStrip({ channels, onOpen }: { channels: ChannelStatus[]; onOpen?
 }
 
 export interface HeaderProps {
-  channels: ChannelStatus[];
+  /** 顶栏右侧的状态项：平台 / 智能车 / 扫描仪 / 模型（由 Shell 组装） */
+  statusItems: HeaderStatusItem[];
+  /** 顶栏左上「状态正常 N/M」的计数，与 statusItems 同源，不另写死一个数 */
+  statusSummary: { ok: number; total: number };
   /** icon 为 v2 素材包的 nav-* 图标名，与 DemoHeader 的导航图标一致 */
   navItems: readonly {
     readonly key: string;
@@ -75,11 +92,11 @@ export interface HeaderProps {
   /** 打开排练控制台（仅 console:admin） */
   onConsole?: () => void;
   onOpenDevices?: () => void;
-  extra?: ReactNode;
 }
 
 export default function Header({
-  channels,
+  statusItems,
+  statusSummary,
   navItems,
   activeNav,
   onNav,
@@ -89,7 +106,6 @@ export default function Header({
   onPresent,
   onConsole,
   onOpenDevices,
-  extra,
 }: HeaderProps) {
   // 本地时钟：顶栏时间每秒走一格
   const [time, setTime] = useState(() => new Date());
@@ -108,12 +124,8 @@ export default function Header({
         onNav={onNav}
         account={{ name: account.name, role: account.role }}
         time={time}
-        statusExtra={
-          <>
-            <ChannelStrip channels={channels} onOpen={onOpenDevices} />
-            {extra}
-          </>
-        }
+        statusSummary={statusSummary}
+        statusExtra={<StatusStrip items={statusItems} onOpen={onOpenDevices} />}
         actions={
           <>
             {/*

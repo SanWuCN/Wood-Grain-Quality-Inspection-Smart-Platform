@@ -27,7 +27,8 @@
  *   PRD 明确把「真实训练服务」列为 P1，首版不得假装已经接上。
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import {
   Btn,
@@ -114,6 +115,16 @@ function Spark({
 const fmtMetric = (metric: NodeMetric, value: number) =>
   metric.digits === undefined ? String(Math.round(value)) : value.toFixed(metric.digits);
 
+/**
+ * 两个「变化量」的口径：漏检 / 误报变化（`+2` / `-1`）与召回变化（`+3.4%`）。
+ *
+ * 提成模块级常量是因为它们要交给 `NumberAnimation` 逐帧复用：补间中间帧是小数，
+ * 所以整数那一格补一次 `Math.round`，百分比那一格沿用原来的 `toFixed(1)`——
+ * 落值与原实现逐字一致，滚动途中也不会先冒出「+0.5000000001」这种写法。
+ */
+const fmtSignedInt = (value: number) => `${value > 0 ? "+" : ""}${Math.round(value)}`;
+const fmtSignedPct = (value: number) => `${value > 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
+
 /* ------------------------------------------------------------------ *
  * ① 训练任务与配置
  * ------------------------------------------------------------------ */
@@ -158,7 +169,18 @@ function ConfigPanel({
       title="训练任务"
       extra={
         running ? (
-          <StatusChip text={`装载中 ${progress}%`} tone="info" dot />
+          /* 装载进度是回放期间持续变化的值，走数字动效。
+             `.chip` 是 inline-flex + 5px gap：整段文案裹成一个 span，
+             数字才不会被 gap 当成独立 flex item 撑开 */
+          <StatusChip
+            text={
+              <span>
+                装载中 <NumberAnimation value={progress} group={false} />%
+              </span>
+            }
+            tone="info"
+            dot
+          />
         ) : dirty ? (
           <StatusChip text="配置已改动" tone="warn" dot />
         ) : (
@@ -173,6 +195,8 @@ function ConfigPanel({
         </span>
       </div>
 
+      {/* 三个 KPI 一排：会跟着配置草稿变的两个数走数字动效，
+          数据集版本是版本号（不是量），保持原样 */}
       <ul className="fw-kpi">
         <li>
           <small>数据集版本</small>
@@ -180,11 +204,16 @@ function ConfigPanel({
         </li>
         <li>
           <small>学习率</small>
-          <b>{fmtNum(draft.lr ?? lr?.value ?? 0, 4)}</b>
+          <b>
+            <NumberAnimation value={draft.lr ?? lr?.value ?? 0} format={(value) => fmtNum(value, 4)} />
+          </b>
         </li>
         <li>
           <small>最大轮数</small>
-          <b>{draft.epochs ?? epochs?.value ?? 0}</b>
+          <b>
+            {/* 轮数是计数器（序列），不是「多少个」：`group={false}` 保住原样写法 */}
+            <NumberAnimation value={draft.epochs ?? epochs?.value ?? 0} group={false} />
+          </b>
         </li>
       </ul>
 
@@ -236,7 +265,9 @@ function TrainingConfigModal({
       footer={
         <>
           {invalid.length > 0 ? (
-            <span className="fw-params__error">{invalid.length} 项超出范围，无法提交</span>
+            <span className="fw-params__error">
+              <NumberAnimation value={invalid.length} /> 项超出范围，无法提交
+            </span>
           ) : dirty ? (
             <span className="muted">配置已改动，提交后随本次 job 一起记录</span>
           ) : (
@@ -252,7 +283,14 @@ function TrainingConfigModal({
               onSubmit();
               onClose();
             }}>
-            {running ? `装载中 ${progress}%` : "提交训练任务"}
+            {running ? (
+              /* `.btn` 是 inline-flex + 8px gap：文案保持一个 span，间距与原样一致 */
+              <span>
+                装载中 <NumberAnimation value={progress} group={false} />%
+              </span>
+            ) : (
+              "提交训练任务"
+            )}
           </Btn>
         </>
       }>
@@ -399,8 +437,13 @@ function ConsolePanel({
   onToggle: () => void;
   /** 0–100，播放进度 */
   progress: number;
-  /** 右上角的两段元信息：任务号 / 节点与行数 */
-  meta: { task: string; tail: string };
+  /**
+   * 右上角的两段元信息：任务号 / 节点与行数。
+   *
+   * `tail` 收节点：行数跟着回放长，要放 `NumberAnimation` 就不能先拼成字符串
+   * （任务号那一段仍然是字符串拼的，因为它是 id 不是量）。
+   */
+  meta: { task: string; tail: ReactNode };
   onRun: () => void;
 }) {
   const bodyRef = useRef<HTMLOListElement>(null);
@@ -423,14 +466,51 @@ function ConsolePanel({
       title="任务控制台"
       extra={
         <span className="fw-console__actions">
-          {counts.error > 0 ? <StatusChip text={`${counts.error} 条错误`} tone="danger" dot /> : null}
-          {counts.warn > 0 ? <StatusChip text={`${counts.warn} 条告警`} tone="warn" dot /> : null}
-          {/* 日志折叠（v1.1 §4.2）：折叠时只收起日志体，运行按钮始终在 */}
+          {/* 错误 / 告警条数随日志推进变化；`dot` 与配色不动，只把数交给动效组件。
+              文案裹成单个 span：`.chip` 的 5px gap 只应出现在圆点与文案之间 */}
+          {counts.error > 0 ? (
+            <StatusChip
+              text={
+                <span>
+                  <NumberAnimation value={counts.error} /> 条错误
+                </span>
+              }
+              tone="danger"
+              dot
+            />
+          ) : null}
+          {counts.warn > 0 ? (
+            <StatusChip
+              text={
+                <span>
+                  <NumberAnimation value={counts.warn} /> 条告警
+                </span>
+              }
+              tone="warn"
+              dot
+            />
+          ) : null}
+          {/* 日志折叠（v1.1 §4.2）：折叠时只收起日志体，运行按钮始终在。
+              `title` 里那一份行数保持字符串（title 是字符串属性，动效组件进不去）。
+              `.btn` 是 inline-flex + 8px gap，所以按钮里的文案同样裹成一个 span */}
           <Btn tone="ghost" onClick={onToggle} title={open ? "收起日志" : `展开日志（${lines.length} 行）`}>
-            {open ? "收起日志" : `日志 ${lines.length} 行`}
+            {open ? (
+              "收起日志"
+            ) : (
+              <span>
+                {/* 行数是计数器：长任务的日志会过千，加千分位就与原界面不一致 */}
+                日志 <NumberAnimation value={lines.length} group={false} /> 行
+              </span>
+            )}
           </Btn>
           <Btn tone="ghost" disabled={running} onClick={onRun}>
-            {running ? `运行中 ${progress}%` : "运行"}
+            {running ? (
+              <span>
+                运行中 <NumberAnimation value={progress} group={false} />%
+              </span>
+            ) : (
+              "运行"
+            )}
           </Btn>
         </span>
       }
@@ -483,8 +563,10 @@ function ConsolePanel({
         </div>
       ) : (
         <p className="fw-console__folded">
-          日志已折叠（{lines.length} 行，{counts.error} 错误 / {counts.warn} 告警）。
-          运行或点「日志 {lines.length} 行」展开 —— 首屏留给曲线与结论。
+          {/* 行数走 `group={false}`（日志行数会过千）；错误 / 告警是「多少条」，保留千分位 */}
+          日志已折叠（<NumberAnimation value={lines.length} group={false} /> 行，
+          <NumberAnimation value={counts.error} /> 错误 / <NumberAnimation value={counts.warn} /> 告警）。
+          运行或点「日志 <NumberAnimation value={lines.length} group={false} /> 行」展开 —— 首屏留给曲线与结论。
         </p>
       )}
     </Panel>
@@ -558,7 +640,9 @@ function NodePanel({
       <h4 className="sub">
         本轮占用
         <span className="muted">
-          epoch {Math.max(1, cursor)}/{totalEpochs}
+          {/* epoch 是「第几轮 / 共几轮」的计数器，不是数量：`group={false}` 保住原样 */}
+          epoch <NumberAnimation value={Math.max(1, cursor)} group={false} />/
+          <NumberAnimation value={totalEpochs} group={false} />
         </span>
       </h4>
       <ul className="fw-node">
@@ -570,8 +654,10 @@ function NodePanel({
           return (
             <li key={metric.key} className={warn ? "is-warn" : ""}>
               <span className="fw-node__label">{metric.label}</span>
+              {/* 当前值跟着回放走：小数位由 `fmtMetric` 定，滚动途中与落值同口径；
+                  紧跟着的 `<em>` 是单位，保持独立元素（不并进 suffix） */}
               <b>
-                {fmtMetric(metric, value)}
+                <NumberAnimation value={value} format={(item) => fmtMetric(metric, item)} />
                 <em>{metric.unit}</em>
               </b>
               <span className="fw-node__bar">
@@ -579,7 +665,7 @@ function NodePanel({
               </span>
               <Spark series={metric.series} cursor={index} warn={warn} />
               <small title="整轮峰值">
-                峰值 {fmtMetric(metric, peak[metric.key])}
+                峰值 <NumberAnimation value={peak[metric.key]} format={(item) => fmtMetric(metric, item)} />
               </small>
             </li>
           );
@@ -642,10 +728,20 @@ function LossPanel({ experiment, drawn, dominant = false }: { experiment: Experi
       extra={
         <span className="fw-console__actions">
           <span className="muted">
-            epoch {Math.min(drawn, total)}/{total}
+            epoch <NumberAnimation value={Math.min(drawn, total)} group={false} />/
+            <NumberAnimation value={total} group={false} />
           </span>
           {overfit ? (
-            <StatusChip text={`验证损失自第 ${overfit.minEpoch} 轮起抬升`} tone="danger" dot />
+            /* 发散点轮次是从验证损失序列里算出来的（换案例就换值），走数字动效 */
+            <StatusChip
+              text={
+                <span>
+                  验证损失自第 <NumberAnimation value={overfit.minEpoch} group={false} /> 轮起抬升
+                </span>
+              }
+              tone="danger"
+              dot
+            />
           ) : (
             <StatusChip text="训练 / 验证同向收敛" tone="ok" dot />
           )}
@@ -761,7 +857,19 @@ function DataPanel({
       extra={
         <span className="fw-console__actions">
           <SourceTag label="模拟采集" />
-          {pending > 0 ? <StatusChip text={`${pending} 个待审核`} tone="warn" dot /> : null}
+          {pending > 0 ? (
+            /* 待审核数会随着导入数据包变化（导入的包一律先进待审核区）；
+               文案裹成单个 span，避开 `.chip` 的 flex gap */
+            <StatusChip
+              text={
+                <span>
+                  <NumberAnimation value={pending} /> 个待审核
+                </span>
+              }
+              tone="warn"
+              dot
+            />
+          ) : null}
           <Btn tone="ghost" onClick={onImport}>
             导入数据包
           </Btn>
@@ -771,7 +879,8 @@ function DataPanel({
       <Toolbar
         note={
           <span className="muted">
-            原始级别 {rawCount}/{packages.length} · 可复算
+            {/* 导入数据包会改这两个数（分母是当前清单条数），走数字动效 */}
+            原始级别 <NumberAnimation value={rawCount} />/<NumberAnimation value={packages.length} /> · 可复算
           </span>
         }>
         {PKG_FILTERS.map((item) => (
@@ -998,9 +1107,22 @@ function ImportModal({
         <span>
           <b>{file ? file.name : "点击选择数据包"}</b>
           <em>
-            {file
-              ? `${(file.bytes / 1024 / 1024).toFixed(1)} MB`
-              : `支持 ${ALLOWED_EXT.join(" / ")}`}
+            {/* 选中本地文件后这个 MB 数是会变的量：按 1 位小数滚到位（与原来的
+                `toFixed(1)` 同口径），单位跟数字同在一个文本节点里，用 `suffix`。
+                `display: inherit` 是为了躲开 `.pkg-drop span` 那条后代选择器 ——
+                它把 drop 区里的每个 span 都设成 flex 纵向排列，会砸掉这里的行内排版 */}
+            {file ? (
+              <NumberAnimation
+                value={file.bytes / 1024 / 1024}
+                digits={1}
+                suffix=" MB"
+                /* MB 是量测值：不加千分位，1,024.0 MB 不是原来的写法 */
+                group={false}
+                style={{ display: "inherit" }}
+              />
+            ) : (
+              `支持 ${ALLOWED_EXT.join(" / ")}`
+            )}
           </em>
         </span>
       </label>
@@ -1058,7 +1180,11 @@ function ComparisonPanel({ experiment, dominant = false }: { experiment: Experim
       title="独立测试集对比"
       extra={
         <StatusChip
-          text={`同一测试集 ${evaluation.testSetIds.length} 条`}
+          text={
+            <span>
+              同一测试集 <NumberAnimation value={evaluation.testSetIds.length} /> 条
+            </span>
+          }
           tone={evaluation.testSetConsistent ? "ok" : "danger"}
         />
       }
@@ -1075,30 +1201,35 @@ function ComparisonPanel({ experiment, dominant = false }: { experiment: Experim
       </div>
 
       <div className="delta-row">
+        {/* 漏检 / 误报变化是带符号的差值：颜色看真值，数字走动效（中间帧补 round，
+            不会出现小数；正号由 `fmtSignedInt` 补，与原来的写法一致） */}
         <span>
           漏检变化{" "}
           <b className={fnDelta > 0 ? "is-danger" : "is-ok"}>
-            {fnDelta > 0 ? "+" : ""}
-            {fnDelta}
+            <NumberAnimation value={fnDelta} format={fmtSignedInt} />
           </b>
         </span>
         <span>
           误报变化{" "}
           <b className={fpDelta > 0 ? "is-warn" : "is-ok"}>
-            {fpDelta > 0 ? "+" : ""}
-            {fpDelta}
+            <NumberAnimation value={fpDelta} format={fmtSignedInt} />
           </b>
         </span>
         <span>
           逐样本{" "}
           <b>
-            {evaluation.summary.improved} 改善 / {evaluation.summary.regressed} 退化 /{" "}
-            {evaluation.summary.same} 不变
+            <NumberAnimation value={evaluation.summary.improved} /> 改善 /{" "}
+            <NumberAnimation value={evaluation.summary.regressed} /> 退化 /{" "}
+            <NumberAnimation value={evaluation.summary.same} /> 不变
           </b>
         </span>
       </div>
 
       <h4 className="sub">按材种回归</h4>
+      {/* 整行都是算出来的量（测试样本数 / 召回 / 召回变化 / 精确率 / F1），
+          交给动效组件滚动；`fmtPct` `fmtNum` 直接复用，小数位不变。
+          召回与 F1 在「没有正样本」这类分组下是 null —— 原来就写「不适用」，
+          用 `fallback` 保持这个写法，不让它变成默认的「—」 */}
       <DataTable
         compact
         head={["材种", "测试样本", "旧版召回", "新版召回", "召回变化", "新版精确率", "新版 F1"]}
@@ -1110,18 +1241,36 @@ function ComparisonPanel({ experiment, dominant = false }: { experiment: Experim
               : item.next.recall - item.old.recall;
           return [
             <b key={`m-${item.material}`}>{item.material}</b>,
-            String(size),
-            fmtPct(item.old.recall),
-            fmtPct(item.next.recall),
+            <NumberAnimation key={`s-${item.material}`} value={size} />,
+            <NumberAnimation
+              key={`or-${item.material}`}
+              value={item.old.recall}
+              format={fmtPct}
+              fallback="不适用"
+            />,
+            <NumberAnimation
+              key={`nr-${item.material}`}
+              value={item.next.recall}
+              format={fmtPct}
+              fallback="不适用"
+            />,
             <span
               key={`d-${item.material}`}
               className={recallDelta === null ? undefined : recallDelta < 0 ? "is-warn" : "is-ok"}>
-              {recallDelta === null
-                ? "不适用"
-                : `${recallDelta > 0 ? "+" : ""}${(recallDelta * 100).toFixed(1)}%`}
+              <NumberAnimation value={recallDelta} format={fmtSignedPct} fallback="不适用" />
             </span>,
-            fmtPct(item.next.precision),
-            fmtNum(item.next.f1),
+            <NumberAnimation
+              key={`np-${item.material}`}
+              value={item.next.precision}
+              format={fmtPct}
+              fallback="不适用"
+            />,
+            <NumberAnimation
+              key={`f1-${item.material}`}
+              value={item.next.f1}
+              format={fmtNum}
+              fallback="不适用"
+            />,
           ];
         })}
       />
@@ -1135,6 +1284,8 @@ function ComparisonPanel({ experiment, dominant = false }: { experiment: Experim
       ) : null}
 
       <h4 className="sub">逐样本预测对比</h4>
+      {/* 两列分数是逐样本量测值（与融合页的置信度 / 幅值同一类）：保留两位、
+          不开千分位，滚到位置；样本号 / 组号 / 材种 / 判定是标识与文案，保持原样 */}
       <DataTable
         compact
         head={["样本", "组", "材种", "标签", "旧分", "新分", "新版判定", "对比"]}
@@ -1145,8 +1296,18 @@ function ComparisonPanel({ experiment, dominant = false }: { experiment: Experim
             row.groupId,
             row.material,
             row.label === 1 ? "有缺陷" : "正常",
-            row.scoreOld.toFixed(2),
-            row.scoreNew.toFixed(2),
+            <NumberAnimation
+              key={`so-${row.sampleId}`}
+              value={row.scoreOld}
+              digits={2}
+              group={false}
+            />,
+            <NumberAnimation
+              key={`sn-${row.sampleId}`}
+              value={row.scoreNew}
+              digits={2}
+              group={false}
+            />,
             <StatusChip
               key={`v-${row.sampleId}`}
               text={correct ? "正确" : row.label === 1 ? "漏检" : "误报"}
@@ -1492,7 +1653,12 @@ export function TrainingTab() {
           task: `${jobs.find((item) => item.key === job)?.runId ?? ""} · ${
             jobs.find((item) => item.key === job)?.command ?? ""
           }`,
-          tail: `${TRAIN_NODE.host} · ${lines.length} 行`,
+          /* 行数跟着回放长；主机名是常量。行数是计数器，不开千分位 */
+          tail: (
+            <>
+              {TRAIN_NODE.host} · <NumberAnimation value={lines.length} group={false} /> 行
+            </>
+          ),
         }}
         onRun={runConsole}
       />
