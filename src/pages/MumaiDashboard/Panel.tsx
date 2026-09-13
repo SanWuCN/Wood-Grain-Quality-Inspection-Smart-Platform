@@ -11,22 +11,37 @@
  */
 
 import { forwardRef, type PropsWithChildren, type ReactNode } from "react";
+import { Icon, type IconName } from "./icons";
 
 export interface PanelProps {
   title: string;
+  /**
+   * 标题左侧的业务图标（UI 素材 v2.0，PRD §5「清洗、分组、适配、校验使用业务图标」）。
+   *
+   * 为什么做成 Panel 的属性而不是让页面自己塞：
+   * 面板标题是「这个面板在做什么」的唯一入口，图标要和 "// 标题" 的基线一起排版
+   * （PRD §5「统一大小、标签基线」），散在各页面里会出现四种间距。
+   * 业务卡尺寸按 PRD §4 取 24px。
+   *
+   * 图标旁总有同义中文标题，因此对辅助技术隐藏。
+   */
+  icon?: IconName;
   extra?: ReactNode;
   className?: string;
 }
 
 export const Panel = forwardRef<HTMLElement, PropsWithChildren<PanelProps>>(function Panel(
-  { title, extra, children, className = "" },
+  { title, icon, extra, children, className = "" },
   ref,
 ) {
   return (
     <section className={`tech-panel ${className}`} ref={ref}>
       <div className="tech-panel__inner">
         <header className="tech-panel__head">
-          <h2>{title}</h2>
+          <h2>
+            {icon ? <Icon name={icon} size={24} tone="secondary" aria-hidden /> : null}
+            {title}
+          </h2>
           {extra ? <div className="tech-panel__extra">{extra}</div> : null}
         </header>
         <div className="tech-panel__body">{children}</div>

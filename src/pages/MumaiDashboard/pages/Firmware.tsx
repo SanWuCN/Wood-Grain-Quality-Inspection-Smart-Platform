@@ -26,6 +26,7 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { Panel } from "../Panel";
 import { Btn, Modal, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
+import { Icon } from "../icons";
 import { useMumai } from "../context";
 import { DatasetTab, FusionTab } from "./adaptTabs";
 import { DeliveryTab } from "./DeliveryCenter";
@@ -37,12 +38,18 @@ import {
   type VersionItem,
 } from "../seed/versions";
 
+/*
+  页签图标（PRD §5「固件及模型：清洗、分组、适配、校验使用业务图标」）。
+  与 design.ts 的 ADAPT_TABS 有重叠但**不是同一组**：本页第一个页签是「全局配置」，
+  按 PRD §3.3「参数调整与系统设置分开」用 action-settings，不是业务图标。
+   交付用 asset-folder（与报告归档的 nav-report 区分：这里是待下发的包）。
+*/
 const TABS = [
-  { key: "config", label: "全局配置" },
-  { key: "dataset", label: "数据集" },
-  { key: "training", label: "训练验证" },
-  { key: "delivery", label: "更新交付" },
-  { key: "fusion", label: "融合分析" },
+  { key: "config", label: "全局配置", icon: "action-settings" },
+  { key: "dataset", label: "数据集", icon: "biz-data-cleaning" },
+  { key: "training", label: "训练验证", icon: "biz-package-verify" },
+  { key: "delivery", label: "更新交付", icon: "asset-folder" },
+  { key: "fusion", label: "融合分析", icon: "biz-multimodal" },
 ] as const;
 
 const GROUPS: VersionItem["group"][] = ["硬件", "算法", "平台"];
@@ -456,6 +463,8 @@ export default function Firmware() {
         }>
         {TABS.map((item) => (
           <Btn key={item.key} active={tab === item.key} onClick={() => setTab(item.key)}>
+            {/* 页签图标 16px（PRD §4「工具栏 16 至 20px」），旁有同义中文标签 → 对辅助技术隐藏 */}
+            <Icon name={item.icon} size={16} aria-hidden />
             {item.label}
           </Btn>
         ))}

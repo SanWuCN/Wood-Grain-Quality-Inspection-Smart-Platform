@@ -20,6 +20,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { Panel } from "../Panel";
 import { Btn, DataTable, KV, Metric, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
+import { DeviceFigure } from "../illustrations";
+import { Icon } from "../icons";
 import { useMumai } from "../context";
 import { CaptureTab } from "./CaptureRun";
 import { TriageTab } from "./TriageLog";
@@ -35,10 +37,18 @@ import { VERSION_ITEMS } from "../seed/versions";
 import type { DeviceReading } from "../seed/types";
 import type { Tone } from "../lib";
 
+/*
+  页签图标（PRD §5「硬件详情与采集：mapping、cart、设备离线等按用途接入」）。
+  本页三个页签是设备侧的三件事，图标按语义取：
+    采集作业 → nav-capture        取景框（采集）
+    异常排查 → status-warning     告警（异常排查）
+    硬件监看 → status-device-offline 的**反向语义**不能用（那是离线）；
+               这里用 identity-agent（设备主体）表达「看设备本身的状态」
+*/
 const TABS = [
-  { key: "capture", label: "采集作业" },
-  { key: "triage", label: "异常排查" },
-  { key: "monitor", label: "硬件监看" },
+  { key: "capture", label: "采集作业", icon: "nav-capture" },
+  { key: "triage", label: "异常排查", icon: "status-warning" },
+  { key: "monitor", label: "硬件监看", icon: "identity-agent" },
 ] as const;
 
 const CHANNEL_TONE: Record<string, Tone> = {
@@ -290,24 +300,36 @@ function MonitorTab() {
         title="设备状态"
         extra={<StatusChip text="模拟采集" tone="warn" dot />}
         className="hw-panel">
+        {/*
+          PRD §5 硬件详情与采集：「I03 放设备卡，采集相机、二维响应和关键结果保持主体」，
+          「不把设备插图当实时相机帧」。
+          因此插图放在设备状态卡的左上角、120–180px 高的小图位（DESIGN-SYSTEM 的
+          「设备卡 120–180px」），并明确标注为示意图；右侧仍是设备字段与读数，
+          主体依旧是数据而不是插图。
+        */}
+        <div className="hw-device">
+          <DeviceFigure id="i03-scanner" caption={DEVICES.scanner.name} height={132} />
+          <div className="hw-device__facts">
+            <KV
+              columns={1}
+              items={[
+                { k: "设备", v: DEVICES.scanner.name },
+                { k: "设备编号", v: DEVICES.scanner.id },
+                { k: "数据来源", v: <SourceTag label="模拟采集" /> },
+                {
+                  k: "连接",
+                  v: <StatusChip text="已连接 · 只读监视" tone="ok" dot />,
+                },
+              ]}
+            />
+          </div>
+        </div>
         <div className="hw-metrics">
           <Metric label="固件版本" value={versionOf("scanner-firmware")} />
           <Metric label="采集配置" value={versionOf("scanner-config")} />
           <Metric label="运行模型" value={versionOf("model")} />
           <Metric label="推理流水线" value={versionOf("pipeline")} />
         </div>
-        <KV
-          columns={2}
-          items={[
-            { k: "设备", v: DEVICES.scanner.name },
-            { k: "设备编号", v: DEVICES.scanner.id },
-            { k: "数据来源", v: <SourceTag label="模拟采集" /> },
-            {
-              k: "连接",
-              v: <StatusChip text="已连接 · 只读监视" tone="ok" dot />,
-            },
-          ]}
-        />
       </Panel>
 
       <ReadingsPanel />
@@ -382,6 +404,7 @@ export default function Hardware() {
         }>
         {TABS.map((item) => (
           <Btn key={item.key} active={tab === item.key} onClick={() => setTab(item.key)}>
+            <Icon name={item.icon} size={16} aria-hidden />
             {item.label}
           </Btn>
         ))}

@@ -330,7 +330,14 @@ export default function RvizView({
                 : "未配置串流地址：在 Mapping.tsx 的 RVIZ_STREAM.url 填入后端地址即可"
             }
             onClick={() => setLive((value) => !value)}>
-            <Icon name="layers" />
+            {/*
+              PRD §3.3 迁移表：「cube、layers → 按页面选择 nav-model、nav-twin、
+              biz-gaussian-scene；不做单一全局替换」。
+              这里的 layers 表达的是「在两层画面之间切换」（参考画面 ↔ 真实串流），
+              既不是模型也不是孪生，v2 素材里没有同义替代，因此保留原图形，
+              只统一到 16px 工具栏档位（PRD §4）。
+            */}
+            <Icon name="layers" size={16} aria-hidden />
             {usingStream ? "切回参考画面" : "切换真实串流"}
           </button>
         </div>

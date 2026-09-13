@@ -4,7 +4,7 @@ import { Icon } from "./icons";
 export default function WorkOrderModal({ order, onClose }: { order: WorkOrder; onClose: () => void }) {
   return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
     <article className="order-modal" role="dialog" aria-modal="true" aria-labelledby="order-title" onMouseDown={(event) => event.stopPropagation()}>
-      <header><div><span>复核工单</span><h2 id="order-title">{order.id}</h2></div><button onClick={onClose} aria-label="关闭工单"><Icon name="close"/></button></header>
+      <header><div><span>复核工单</span><h2 id="order-title">{order.id}</h2></div><button type="button" className="mumai-icon-button" onClick={onClose} aria-label="关闭工单"><Icon name="action-close" size={16} aria-hidden/></button></header>
       <div className="order-modal__summary">
         <div><small>点位</small><strong>{order.district} · {order.site}</strong></div><div><small>构件</small><strong>{order.component} 下部</strong></div><div><small>风险等级</small><strong className="danger">{order.level}</strong></div><div><small>当前状态</small><strong className="warning">{order.status}</strong></div>
       </div>

@@ -1,0 +1,38 @@
+/* ==================================================================
+   木脉智检 · UI 视觉素材 v2.0 主题变量（作用域版）
+   ------------------------------------------------------------------
+   来源：木脉智检UI视觉素材-v2.0-20260913/tokens.css
+   生成：node tools/copy-ui-v2-assets.mjs（请勿手工编辑，改素材包后重跑）
+
+   PRD §4 要求：素材 tokens.css 原本用 :root，复制后改为**平台根容器作用域**，
+   组件读该作用域变量，不把平台其他组件全部变成素材预览里的底色。
+   因此这里的选择器是 .mumai-ui-v2，由 AppShell / 登录页的根节点挂上该 class。
+
+   本轮这些变量只服务于 v2 图标与插图的着色（Icon 组件按 tone 取用），
+   不改写平台既有的 --bg-page / --primary / --text-* 等设计系统 token。
+   ================================================================== */
+
+.mumai-ui-v2 {
+  --mumai-surface-base: #0B1420;
+  --mumai-surface-panel: #122235;
+  --mumai-icon-default: #DCE5ED;
+  --mumai-icon-secondary: #A7B5C3;
+  --mumai-icon-disabled: #627080;
+  --mumai-accent: #6BCBE0;
+  --mumai-selected-background: #173B4B;
+  --mumai-success: #68D6A5;
+  --mumai-warning: #F0BD63;
+  --mumai-error: #FF969C;
+  --mumai-focus: #8AD9E9;
+  --mumai-timber: #A67C52;
+}
+
+/* 本轮仅面向桌面平台。浅色底仅用于图标反差回归，不作为触屏主题交付。 */
+
+/* 木脉智检补充的映射注释（PRD §4 变量用途表）：
+   --mumai-surface-base / --mumai-surface-panel  → 与平台 --bg-page / --bg-panel 同族，
+                                                    仅用于 v2 插图的底衬，不覆盖全局卡片背景
+   --mumai-icon-disabled                         → 不可操作控件；不代表设备离线
+   --mumai-accent / --mumai-selected-background  → 导航当前项与主要操作反馈
+   状态色（success / warning / error）           → 图标加短文字，不大面积染色
+*/

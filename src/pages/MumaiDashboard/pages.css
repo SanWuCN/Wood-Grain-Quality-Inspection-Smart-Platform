@@ -73,9 +73,26 @@
   gap: 8px;
 }
 
+/*
+  小木头部的第一枚 svg 现在有两个来源：
+    · v2 的 I04 头像（img，不是 svg）
+    · 其他位置遗留的文字图标
+  这里只对 svg 生效，并且改读 --mumai-icon-size：
+  写死 20px 会覆盖 Icon 组件的 size 属性（PRD §3.2 点名的覆盖关系）。
+  color 保留原来的强调色设定，v2 图标会走自己的 tone 变量覆盖它。
+*/
 .xm__head svg {
-  width: 20px;
+  width: var(--mumai-icon-size, 20px);
+  height: var(--mumai-icon-size, 20px);
   color: var(--ma-glow);
+}
+
+/* v2 头像：展开区 40–48px（PRD §5），按实际有效内容微调裁切 */
+.xm__head img {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: contain;
 }
 
 .xm__head span {
@@ -99,7 +116,7 @@
 }
 
 .xm__head button svg {
-  width: 16px;
+  width: var(--mumai-icon-size, 16px);
 }
 
 .xm__meta {
@@ -165,7 +182,7 @@
 }
 
 .xm__tool svg {
-  width: 12px;
+  width: var(--mumai-icon-size, 12px);
 }
 
 .xm__tool em {
@@ -330,7 +347,7 @@
 }
 
 .xm__input button svg {
-  width: 15px;
+  width: var(--mumai-icon-size, 15px);
 }
 
 .xm__foot {
@@ -390,6 +407,15 @@
   letter-spacing: 0.02em;
   cursor: pointer;
   transition: border-color var(--motion-fast), background var(--motion-fast), color var(--motion-fast);
+  /*
+    UI 素材 v2.0 起部分按钮带图标（页签、人工标记等）。
+    inline-flex + 8px 间距 = PRD §4「文字与图标间距建议 8px」；
+    高度与行高保持不变，不影响既有的可操作尺寸（PRD §4「按钮大小沿用现有尺寸」）。
+  */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .btn:hover:not(:disabled) {
@@ -1298,11 +1324,28 @@
   z-index: 10;
   color: var(--ma-text-3);
   font-size: var(--fs-aux);
+  /*
+    UI 素材 v2.0：提示图标从 12px 提到 16px（PRD §3.2 的允许档位）之后，
+    行内 SVG 的基线盒会把这一行撑成两行，而这块是 absolute 定位在
+    底部脚注上方 —— 折行后会压到地图与脚注上。
+    改成 inline-flex 居中 + 8px 间距（PRD §4「文字与图标间距建议 8px」），
+    并保持不折行：这句提示本来就是一行短语。
+
+    右侧留出 64px：小木浮标（.appshell__fab，52px 宽 + 12px 边距）就钉在同一角落，
+    原来的行内图标把它挤开之前看不出冲突，改成 flex 之后末尾几个字会钻到浮标下面 ——
+    实测「与勘察记录」四个字被浮标压住。留出安全区而不是把提示挪走，
+    提示继续保持「贴着右下角、指着地图」的位置关系。
+  */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  padding-right: 64px;
 }
 
 .ov__hint svg {
-  width: 12px;
-  vertical-align: -2px;
+  width: var(--mumai-icon-size, 16px);
+  height: var(--mumai-icon-size, 16px);
 }
 
 .ov__foot {
@@ -1624,7 +1667,7 @@
 }
 
 .ov-coc__go svg {
-  width: 14px;
+  width: var(--mumai-icon-size, 14px);
 }
 
 /* 面板内最后一块：面板高度是固定的两行 grid（与地图留白对齐），
@@ -1850,9 +1893,15 @@
   color: var(--ma-text-2);
 }
 
+/*
+  任务附件图标。
+  UI 素材 v2.0：颜色改用 v2 语义变量（secondary），不再用平台发光蓝
+  —— PRD §4 的 v2 图标色表里，附件这类辅助信息属于次级图标。
+  尺寸走 --mumai-icon-size：组件给了 size 就听组件的（PRD §3.2 覆盖关系）。
+*/
 .orders-attachments svg {
-  width: 14px;
-  color: var(--ma-glow);
+  width: var(--mumai-icon-size, 14px);
+  color: var(--mumai-icon-secondary, var(--ma-glow));
 }
 
 .orders-attachments em {
@@ -1952,7 +2001,7 @@
 }
 
 .env-checks svg {
-  width: 13px;
+  width: var(--mumai-icon-size, 13px);
 }
 
 .env-checks em {
@@ -2167,7 +2216,7 @@
 }
 
 .rviz__source .btn svg {
-  width: 13px;
+  width: var(--mumai-icon-size, 13px);
 }
 
 /* 旧的自绘格子图样式保留：其它地方可能还在用 */
@@ -2442,8 +2491,8 @@
 }
 
 .map-site svg {
-  width: 13px;
-  height: 13px;
+  width: var(--mumai-icon-size, 13px);
+  height: var(--mumai-icon-size, 13px);
   color: var(--ma-warn);
 }
 
@@ -2738,7 +2787,7 @@
 }
 
 .scene-checks svg {
-  width: 13px;
+  width: var(--mumai-icon-size, 13px);
 }
 
 .scene-checks em {
@@ -3250,6 +3299,40 @@
   flex-direction: column;
   gap: var(--space-3);
   min-width: 0;
+}
+
+/*
+ * 人工标记入口（UI 素材 v2.0 接入，PRD §5 / §8）。
+ * 面板标题右侧的次级操作：文字 + 笔形图标，尺寸克制，不与「接收情况」的
+ * 数据主体抢视觉重量。计数与「清除」只在有标记时出现，默认不占位。
+ */
+.cap-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cap-mark em {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-style: normal;
+  font-size: var(--fs-aux);
+  color: var(--text-tertiary);
+}
+
+.cap-mark__clear {
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  font-size: var(--fs-aux);
+  color: var(--text-accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.cap-mark__clear:hover {
+  color: var(--primary-hover);
 }
 
 /* 窄视口退回单列：两列并排时每列不足 340px，键值对会折成每行两个字 */
@@ -4746,7 +4829,7 @@
 }
 
 .present__switch svg {
-  width: 15px;
+  width: var(--mumai-icon-size, 15px);
 }
 
 /* ------------------------------------------------------------------
@@ -6101,6 +6184,29 @@
   white-space: nowrap;
 }
 
+/* ---- 设备卡：插图 + 设备字段（UI 素材 v2.0 接入，PRD §5） ----
+   插图在左、字段在右，插图高度限制在 132px（DESIGN-SYSTEM「设备卡 120–180px」），
+   保证卡片下半部仍是版本读数与通道状态这些真正的监看信息。
+   窄档退回上下排列，字段不再被挤成两行。 */
+.hw-device {
+  display: grid;
+  grid-template-columns: minmax(96px, 132px) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.hw-device__facts {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .hw-device {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+  }
+}
+
 /* ---- 设备读数（硬件监看） ---- */
 
 /* 一行一条读数：名称 / 数值 / 量程条 / 判定。
@@ -6548,8 +6654,8 @@
 }
 
 .modal__close svg {
-  width: 16px;
-  height: 16px;
+  width: var(--mumai-icon-size, 16px);
+  height: var(--mumai-icon-size, 16px);
 }
 
 .modal__body {

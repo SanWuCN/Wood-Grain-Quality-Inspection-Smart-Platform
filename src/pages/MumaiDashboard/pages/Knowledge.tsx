@@ -25,6 +25,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import { useMumai } from "../context";
 import { Panel } from "../Panel";
 import { Btn, Modal, SourceTag, StateBlock, StatusChip } from "../ui";
+import { Illustration } from "../illustrations";
 import {
   CURRENT_RISKS,
   HISTORY_STATS,
@@ -1312,11 +1313,20 @@ export default function Knowledge() {
                     ))}
                   </ul>
                 ) : (
-                  <StateBlock
-                    kind="empty"
-                    title="当前资料未检索到"
-                    hint="本地索引无命中，或已被筛选条件排除。"
-                  />
+                  /*
+                    PRD §5 知识库与小木：「I05 只用于空态/引导」。
+                    这里是检索区的空态，也是 I05 唯一该出现的位置；有命中时列表直接
+                    顶上来，插图完全不参与，不会把回答与引用挤下首屏
+                    （PRD 同段：「回答、引用和业务结果不能被大头像挤下首屏」）。
+                  */
+                  <div className="kb-empty">
+                    <Illustration id="i05-knowledge-guidance" height={140} />
+                    <StateBlock
+                      kind="empty"
+                      title="当前资料未检索到"
+                      hint="本地索引无命中，或已被筛选条件排除。"
+                    />
+                  </div>
                 )}
 
                 {activeHit ? (

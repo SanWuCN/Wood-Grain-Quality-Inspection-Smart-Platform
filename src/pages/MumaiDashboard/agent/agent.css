@@ -1001,8 +1001,8 @@
 }
 
 .xm__voice-open svg {
-  width: 14px;
-  height: 14px;
+  width: var(--mumai-icon-size, 14px);
+  height: var(--mumai-icon-size, 14px);
 }
 
 /* 尊重用户的「减少动效」偏好 */

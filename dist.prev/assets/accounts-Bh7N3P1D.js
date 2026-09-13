@@ -1,0 +1,1 @@
+var e={shen:`沈 · 项目经理`,shi:`史 · 人工智能架构师`,rao:`饶 · 全栈开发工程师`,ma:`马昱天 · 具身智能工程师`};function t(t){return t?e[t]??t:`—`}export{t as n,e as t};

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#020711" />
+    <meta name="description" content="木脉智检古建筑智能巡检平台演示" />
+    <title>木脉智检 · 古建筑智能巡检平台</title>
+    <!--
+      首屏加载态（用户报「刚打开网页还是有四五秒蓝屏」）。
+
+      为什么必须写在这里：原来加载遮罩是挂在 `mapDemo` 组件里的，
+      而那个组件本身就是加载慢的东西 —— 在它挂载之前，页面上**什么都没有**，
+      连顶栏都没有（用户截图里就是这个状态）。实测 t=2s 时
+      `document.querySelector(".map-veil")` 是 null。
+
+      这段标记与样式**内联在 HTML 里**，不经过任何 JS 模块：浏览器首屏就画出来，
+      底圈圈从第一帧就在转。React 挂载时 `createRoot().render()` 会替换
+      `#root` 的子节点，这段自动消失，不需要额外清理代码。
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #04070f;
+      }
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(60% 45% at 50% 52%, rgba(28, 52, 88, 0.55), transparent 70%),
+          #04070f;
+      }
+      #boot .core {
+        display: grid;
+        justify-items: center;
+        gap: 10px;
+      }
+      #boot .rings {
+        position: relative;
+        display: block;
+        width: 132px;
+        height: 132px;
+        margin-bottom: 6px;
+      }
+      #boot .ring {
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        border: 1px solid rgba(143, 194, 255, 0.34);
+      }
+      #boot .ring.outer {
+        border-color: transparent;
+        border-top-color: #8fc2ff;
+        border-right-color: rgba(143, 194, 255, 0.5);
+        animation: bootspin 2.6s linear infinite;
+      }
+      #boot .ring.mid {
+        inset: 16px;
+        border-style: dashed;
+        border-color: rgba(143, 194, 255, 0.28);
+        animation: bootspin 4.2s linear infinite reverse;
+      }
+      #boot .ring.inner {
+        inset: 34px;
+        border-color: rgba(143, 194, 255, 0.5);
+        animation: bootpulse 1.8s ease-in-out infinite;
+      }
+      #boot b {
+        color: #e8f3ff;
+        font: 600 20px/1.2 "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+        letter-spacing: 0.22em;
+      }
+      #boot .ascii {
+        color: #5d7ea8;
+        font: 13px/1.2 ui-monospace, Consolas, monospace;
+        letter-spacing: 0.34em;
+      }
+      #boot .line {
+        position: relative;
+        display: block;
+        width: 168px;
+        height: 1px;
+        overflow: hidden;
+        background: rgba(143, 194, 255, 0.16);
+      }
+      #boot .line::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        width: 42%;
+        background: linear-gradient(90deg, transparent, #8fc2ff, transparent);
+        animation: bootsweep 1.15s ease-in-out infinite;
+      }
+      @keyframes bootspin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes bootpulse {
+        0%,
+        100% {
+          transform: scale(0.86);
+          opacity: 0.45;
+        }
+        50% {
+          transform: scale(1.06);
+          opacity: 0.95;
+        }
+      }
+      @keyframes bootsweep {
+        0% {
+          transform: translateX(-110%);
+        }
+        100% {
+          transform: translateX(240%);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot .ring,
+        #boot .line::after {
+          animation: none;
+        }
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-Dfn0bzdi.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/react-fUea0rnc.js">
+    <link rel="modulepreload" crossorigin href="/assets/chunk-4WY6JWTD-vAOiIUKR.js">
+    <link rel="modulepreload" crossorigin href="/assets/client-DMoT_y_x.js">
+    <link rel="modulepreload" crossorigin href="/assets/context-PMTNcRR9.js">
+    <link rel="modulepreload" crossorigin href="/assets/accounts-Bh7N3P1D.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-DkLdwklc.css">
+  </head>
+  <body>
+    <div id="root">
+      <div id="boot">
+        <div class="core">
+          <span class="rings" aria-hidden="true">
+            <i class="ring outer"></i>
+            <i class="ring mid"></i>
+            <i class="ring inner"></i>
+          </span>
+          <b>木脉智检</b>
+          <span class="ascii">MAP INITIALIZING</span>
+          <i class="line"></i>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

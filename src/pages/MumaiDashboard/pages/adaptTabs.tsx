@@ -166,6 +166,8 @@ export function DatasetTab() {
 
       <Panel
         title="分组检查"
+        /* PRD §5：物理样本分组用 biz-sample-group（不是二维码似的九点结构） */
+        icon="biz-sample-group"
         extra={
           <StatusChip
             text={grouping.passed ? "校验通过" : "存在问题"}
@@ -331,7 +333,11 @@ export function FusionTab() {
     */
     <div className="adapt-grid adapt-grid--fusion">
       <div className="adapt-col">
-        <Panel title="数据完整性" extra={<SourceTag label={`规则 ${FUSION_RECORD.ruleVersion}`} />}>
+        <Panel
+          title="数据完整性"
+          /* 融合前的输入校验：PRD §5「校验使用业务图标」 */
+          icon="biz-package-verify"
+          extra={<SourceTag label={`规则 ${FUSION_RECORD.ruleVersion}`} />}>
           <DataTable
             head={["检查项", "结果", "说明"]}
             rows={FUSION_RECORD.completeness.map((item) => [

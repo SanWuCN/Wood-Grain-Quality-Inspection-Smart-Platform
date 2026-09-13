@@ -10,7 +10,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ACCOUNTS } from "./design";
 import type { Permission } from "./auth";
-import { Icon } from "./icons";
+import { Icon, type IconName } from "./icons";
 import { StatusChip } from "./ui";
 import type { Tone } from "./lib";
 import type { ChannelStatus } from "./seed/types";
@@ -49,7 +49,12 @@ function ChannelStrip({ channels, onOpen }: { channels: ChannelStatus[]; onOpen?
 
 export interface HeaderProps {
   channels: ChannelStatus[];
-  navItems: readonly { readonly key: string; readonly label: string }[];
+  /** icon 为 v2 素材包的 nav-* 图标名，与 DemoHeader 的导航图标一致 */
+  navItems: readonly {
+    readonly key: string;
+    readonly label: string;
+    readonly icon: IconName;
+  }[];
   activeNav: string;
   onNav: (label: string) => void;
   accountId: string;
@@ -119,7 +124,12 @@ export default function Header({
                 className="appshell__present"
                 onClick={onConsole}
                 title="排练控制台：新建演示会话、捕获与恢复阶段快照">
-                <Icon name="database" />
+                {/*
+                  PRD §3.3 迁移表：「database、wave、arrow 保留原图标 ——
+                  新包没有同义替代时继续使用」。排练控制台的会话/快照属于数据语义，
+                  v2 的 44 枚里没有会话或快照图标，因此保留 database，不改图形。
+                */}
+                <Icon name="database" size={20} aria-hidden />
                 排练控制台
               </button>
             ) : null}
@@ -128,7 +138,11 @@ export default function Header({
               className="appshell__present"
               onClick={onPresent}
               title="投屏">
-              <Icon name="arrow" />
+              {/*
+                PRD §3.3：「arrow 保留原图标」。投到展示窗口是「把当前画面送出去」，
+                v2 的 action-* 里没有对应语义（action-upload 是上传文件），保留箭头。
+              */}
+              <Icon name="arrow" size={20} aria-hidden />
               投到展示窗口
             </button>
             <button
@@ -136,7 +150,11 @@ export default function Header({
               className="appshell__logout"
               onClick={onLogout}
               title={`退出登录：${account.name} · ${account.role}（账号 ${account.login}）`}>
-              <Icon name="user" />
+              {/*
+                PRD §3.3：user → identity-user（账号身份，已迁移）。
+                按钮本身有中文文字，图标对辅助技术隐藏。
+              */}
+              <Icon name="identity-user" size={20} aria-hidden />
               <b>{account.name}</b>
               <small>{account.role}</small>
               <em>退出</em>

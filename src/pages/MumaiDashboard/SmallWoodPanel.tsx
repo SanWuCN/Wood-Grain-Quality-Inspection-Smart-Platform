@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useMumai } from "./context";
 import { Icon } from "./icons";
+import { Illustration } from "./illustrations";
 import { SourceTag, StateBlock, StatusChip } from "./ui";
 import AgentHost from "./agent/AgentHost";
 import { openAgent } from "./agent";
@@ -384,7 +385,12 @@ export default function SmallWoodPanel() {
       <AgentHost />
       <header className="xm__head">
         <div>
-          <Icon name="bot" />
+          {/*
+            PRD §5 知识库与小木：「展开区 40–48px」。
+            这里是展开后的面板头部，是 I04 头像真正合适的尺寸；
+            收起态的浮标用线性标识（见 Shell.tsx 的说明）。
+          */}
+          <Illustration id="i04-xiaomu" height={44} avatar alt="小木助手头像" />
           <span>
             <b>小木助手</b>
             <small>
@@ -398,11 +404,19 @@ export default function SmallWoodPanel() {
             className="xm__voice-open"
             onClick={() => openAgent()}
             title="小木">
-            <Icon name="wave" />
+            {/*
+              PRD §3.3：「wave 保留原图标 —— 数据波形不改成装饰融合图标」。
+              这里是语音入口，波形表示声音输入，保留原图形。
+            */}
+            <Icon name="wave" size={16} aria-hidden />
             语音
           </button>
-          <button type="button" onClick={() => setAssistantOpen(false)} aria-label="关闭小木">
-            <Icon name="close" />
+          <button
+            type="button"
+            className="mumai-icon-button"
+            onClick={() => setAssistantOpen(false)}
+            aria-label="关闭小木">
+            <Icon name="action-close" size={16} aria-hidden />
           </button>
         </div>
       </header>
@@ -437,7 +451,13 @@ export default function SmallWoodPanel() {
               <div className="xm__tools">
                 {turn.intent.tools.map((key) => (
                   <span key={key} className="xm__tool">
-                    <Icon name="sliders" />
+                    {/*
+                      PRD §3.3 迁移表：「sliders → 原参数滑杆或 action-settings；
+                      参数调整与系统设置分开，不全局替换成齿轮」。
+                      这里是「工具已就绪」的状态标记（不是参数滑杆），
+                      按迁移表归到 action-settings。
+                    */}
+                    <Icon name="action-settings" size={16} aria-hidden />
                     {toolLabel(key)}
                     <em>就绪</em>
                   </span>
@@ -519,7 +539,13 @@ export default function SmallWoodPanel() {
           aria-label="向小木提问"
         />
         <button type="submit" aria-label="发送">
-          <Icon name="arrow" />
+          {/*
+            PRD §3.3：「send → 对应 action-*，保留原事件和禁用条件」。
+            这里刻意仍用 arrow：v2 的 action-send 是纸飞机，换上去会改变这个
+            一直在用的发送按钮外观；本轮以统一素材为主，不借机改交互图形。
+            语义名登记在迁移表里，后续需要换图形时只改这一处。
+          */}
+          <Icon name="arrow" size={20} aria-hidden />
         </button>
       </form>
 

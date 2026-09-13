@@ -114,26 +114,46 @@ export type Account = (typeof ACCOUNTS)[number];
  * 排练控制台刻意**不在这里** —— 它是管理员排练时用的，不是业务岗位的日常动作
  * （PRD §11「管理员排练控制独立于日常岗位」）。放在顶栏的账号菜单旁边，
  * 只有具备 console:admin 的角色看得见，导航栏保持业务八项不变。
+ *
+ * icon 一列来自 UI 视觉素材 v2.0（2026-09-13）：按 PRD §5「公共导航与工具栏：
+ * 使用 8 枚 nav 图标，统一大小、标签基线和当前项」接入，PRD §4 规定导航图标默认
+ * 20px。八个 key 与素材包的 8 枚 nav-* 图标一一对应，没有重复用同一枚。
+ *
+ * nav-capture 用在「硬件详情」是按页面语义而非图标字面：这一页的主体是采集相机、
+ * 二维响应与设备状态，取景框语义比齿轮准确。页面内部的参数调整控件仍走
+ * action-settings，两者不混用（PRD §3.3 迁移表：参数调整与系统设置分开）。
  */
 export const NAV_ITEMS = [
-  { key: "overview", label: "任务总览", path: "/" },
-  { key: "orders", label: "工单档案", path: "/orders" },
-  { key: "mapping", label: "建图巡检", path: "/mapping" },
-  { key: "twin", label: "数字孪生", path: "/twin" },
-  { key: "hardware", label: "硬件详情", path: "/hardware" },
-  { key: "firmware", label: "固件及模型", path: "/firmware" },
-  { key: "knowledge", label: "知识库", path: "/knowledge" },
-  { key: "archive", label: "报告归档", path: "/archive" },
+  { key: "overview", label: "任务总览", path: "/", icon: "nav-overview" },
+  { key: "orders", label: "工单档案", path: "/orders", icon: "nav-orders" },
+  { key: "mapping", label: "建图巡检", path: "/mapping", icon: "nav-mapping" },
+  { key: "twin", label: "数字孪生", path: "/twin", icon: "nav-twin" },
+  { key: "hardware", label: "硬件详情", path: "/hardware", icon: "nav-capture" },
+  { key: "firmware", label: "固件及模型", path: "/firmware", icon: "nav-model" },
+  { key: "knowledge", label: "知识库", path: "/knowledge", icon: "nav-knowledge" },
+  { key: "report", label: "报告归档", path: "/archive", icon: "nav-report" },
 ] as const;
 
-/** 检测适配下的六个页签（PRD 2.2） */
+/**
+ * 检测适配下的六个页签（PRD 2.2）
+ *
+ * icon 一列是 UI 视觉素材 v2.0 的业务图标，按 PRD §5「固件及模型：清洗、分组、
+ * 适配、校验使用业务图标」接入，页签尺寸用 16px（PRD §4「工具栏 16 至 20px」）。
+ * 对应关系：
+ *   采集     → nav-capture        取景框（与一级导航「硬件详情」同一枚，同语义复用）
+ *   异常排查 → status-warning     告警（异常排查是状态语义，用 status-* 系列）
+ *   数据集   → biz-sample-group   物理样本分组（CHANGELOG：九点密集结构改为三组分离主块）
+ *   训练验证 → biz-package-verify 包裹与校验（验证结果的校验语义）
+ *   更新交付 → biz-material-adapt 样本片与调参滑杆（材料适配/版本适配）
+ *   融合分析 → biz-multimodal     图像与波形汇入结果点（多模态融合）
+ */
 export const ADAPT_TABS = [
-  { key: "capture", label: "采集" },
-  { key: "triage", label: "异常排查" },
-  { key: "dataset", label: "数据集" },
-  { key: "training", label: "训练验证" },
-  { key: "delivery", label: "更新交付" },
-  { key: "fusion", label: "融合分析" },
+  { key: "capture", label: "采集", icon: "nav-capture" },
+  { key: "triage", label: "异常排查", icon: "status-warning" },
+  { key: "dataset", label: "数据集", icon: "biz-sample-group" },
+  { key: "training", label: "训练验证", icon: "biz-package-verify" },
+  { key: "delivery", label: "更新交付", icon: "biz-material-adapt" },
+  { key: "fusion", label: "融合分析", icon: "biz-multimodal" },
 ] as const;
 
 /** 工单状态机（PRD 3.8） */

@@ -1,0 +1,70 @@
+id,file_path,purpose,size,variant,processing_result,source,version,page_location,acceptance_status
+action-close,icons/common/action-close.svg,关闭,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,通用操作,静态视觉通过
+action-download,icons/common/action-download.svg,下载,24x24 viewBox,standard,光学与结构精修,原创可编辑SVG/代码绘制,v2.0,通用操作,静态视觉通过
+action-expand,icons/common/action-expand.svg,展开场景,24x24 viewBox,standard,光学与结构精修,原创可编辑SVG/代码绘制,v2.0,数字孪生/通用操作,静态视觉通过
+action-filter,icons/common/action-filter.svg,筛选,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,通用操作,静态视觉通过
+action-pause,icons/common/action-pause.svg,暂停,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,通用操作,静态视觉通过
+action-play,icons/common/action-play.svg,开始,24x24 viewBox,standard,光学与结构精修,原创可编辑SVG/代码绘制,v2.0,通用操作,静态视觉通过
+action-refresh,icons/common/action-refresh.svg,刷新,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,通用操作,静态视觉通过
+action-save,icons/common/action-save.svg,保存,24x24 viewBox,standard,光学与结构精修,原创可编辑SVG/代码绘制,v2.0,通用操作,静态视觉通过
+action-search,icons/common/action-search.svg,搜索,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,通用操作,静态视觉通过
+action-send,icons/common/action-send.svg,发送,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,知识库,静态视觉通过
+action-settings,icons/common/action-settings.svg,设置,24x24 viewBox,standard,按PRD重画,原创可编辑SVG/代码绘制,v2.0,通用操作,静态视觉通过
+action-upload,icons/common/action-upload.svg,上传,24x24 viewBox,standard,光学与结构精修,原创可编辑SVG/代码绘制,v2.0,通用操作,静态视觉通过
+asset-file,icons/common/asset-file.svg,文件资源,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,资源列表,静态视觉通过
+asset-folder,icons/common/asset-folder.svg,文件夹资源,24x24 viewBox,standard,光学与结构精修,原创可编辑SVG/代码绘制,v2.0,资源列表,静态视觉通过
+asset-image,icons/common/asset-image.svg,图像资源,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,资源列表,静态视觉通过
+asset-video,icons/common/asset-video.svg,视频资源,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,资源列表,静态视觉通过
+identity-agent,icons/common/identity-agent.svg,小木身份,24x24 viewBox,standard,光学与结构精修,原创可编辑SVG/代码绘制,v2.0,知识库/小木,静态视觉通过
+identity-user,icons/common/identity-user.svg,用户身份,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,全局,静态视觉通过
+nav-capture,icons/common/nav-capture.svg,采集作业导航,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,一级导航/设备与采集,静态视觉通过
+nav-knowledge,icons/common/nav-knowledge.svg,知识库导航,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,一级导航/知识库,静态视觉通过
+nav-mapping,icons/common/nav-mapping.svg,建图巡检导航,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,一级导航,静态视觉通过
+nav-model,icons/common/nav-model.svg,模型适配导航,24x24 viewBox,standard,按PRD重画,原创可编辑SVG/代码绘制,v2.0,一级导航/模型适配,静态视觉通过
+nav-orders,icons/common/nav-orders.svg,工单档案导航,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,一级导航,静态视觉通过
+nav-overview,icons/common/nav-overview.svg,态势总览导航,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,一级导航,静态视觉通过
+nav-report,icons/common/nav-report.svg,报告归档导航,24x24 viewBox,standard,光学与结构精修,原创可编辑SVG/代码绘制,v2.0,一级导航/报告归档,静态视觉通过
+nav-twin,icons/common/nav-twin.svg,数字孪生导航,24x24 viewBox,standard,光学与结构精修,原创可编辑SVG/代码绘制,v2.0,一级导航/数字孪生,静态视觉通过
+status-device-offline,icons/common/status-device-offline.svg,设备离线状态,24x24 viewBox,standard,新增,原创可编辑SVG/代码绘制,v2.0,设备与采集,静态视觉通过
+status-error,icons/common/status-error.svg,错误状态,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,全局状态,静态视觉通过
+status-lock,icons/common/status-lock.svg,权限锁定状态,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,全局状态,静态视觉通过
+status-offline,icons/common/status-offline.svg,服务离线状态,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,全局状态,静态视觉通过
+status-running,icons/common/status-running.svg,任务运行状态,24x24 viewBox,standard,光学与结构精修,原创可编辑SVG/代码绘制,v2.0,全局状态,静态视觉通过
+status-success,icons/common/status-success.svg,成功状态,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,全局状态,静态视觉通过
+status-warning,icons/common/status-warning.svg,警告状态,24x24 viewBox,standard,保留并同墙校正,原创可编辑SVG/代码绘制,v2.0,全局状态,静态视觉通过
+biz-data-cleaning,icons/business/biz-data-cleaning.svg,自动清洗,24x24 viewBox,standard,光学与结构精修,原创可编辑SVG/代码绘制,v2.0,模型适配,静态视觉通过
+biz-gaussian-scene,icons/business/biz-gaussian-scene.svg,高斯场景引导,24x24 viewBox,standard,按PRD重画,原创可编辑SVG/代码绘制,v2.0,数字孪生,静态视觉通过
+biz-handheld-scanner-alt,icons/business/biz-handheld-scanner-alt.svg,扫描设备入口候选,24x24 viewBox,alternate,新增,原创可编辑SVG/代码绘制,v2.0,设备与采集,候选可验收
+biz-handheld-scanner,icons/business/biz-handheld-scanner.svg,扫描设备入口,24x24 viewBox,standard,光学与结构精修,原创可编辑SVG/代码绘制,v2.0,设备与采集,静态视觉通过
+biz-inspection-cart,icons/business/biz-inspection-cart.svg,巡检车入口,24x24 viewBox,standard,光学与结构精修,原创可编辑SVG/代码绘制,v2.0,设备与采集,静态视觉通过
+biz-manual-mark,icons/business/biz-manual-mark.svg,人工标记,24x24 viewBox,standard,按PRD重画,原创可编辑SVG/代码绘制,v2.0,设备与采集,静态视觉通过
+biz-material-adapt,icons/business/biz-material-adapt.svg,材料适配,24x24 viewBox,standard,按PRD重画,原创可编辑SVG/代码绘制,v2.0,模型适配,静态视觉通过
+biz-multimodal,icons/business/biz-multimodal.svg,多模态分析,24x24 viewBox,standard,按PRD重画,原创可编辑SVG/代码绘制,v2.0,模型适配,静态视觉通过
+biz-package-verify,icons/business/biz-package-verify.svg,包体验证,24x24 viewBox,standard,光学与结构精修,原创可编辑SVG/代码绘制,v2.0,模型适配,静态视觉通过
+biz-sample-group,icons/business/biz-sample-group.svg,样本分组,24x24 viewBox,standard,按PRD重画,原创可编辑SVG/代码绘制,v2.0,模型适配,静态视觉通过
+biz-timber-column,icons/business/biz-timber-column.svg,木柱构件,24x24 viewBox,standard,按PRD重画,原创可编辑SVG/代码绘制,v2.0,建图/数字孪生,静态视觉通过
+action-expand-small,icons/small/action-expand-small.svg,展开场景,16x16显示/24x24 viewBox,small,16px专用简化重画,原创可编辑SVG/代码绘制,v2.0,数字孪生/通用操作,静态视觉通过
+biz-material-adapt-small,icons/small/biz-material-adapt-small.svg,材料适配,16x16显示/24x24 viewBox,small,16px专用简化重画,原创可编辑SVG/代码绘制,v2.0,模型适配,静态视觉通过
+biz-multimodal-small,icons/small/biz-multimodal-small.svg,多模态分析,16x16显示/24x24 viewBox,small,16px专用简化重画,原创可编辑SVG/代码绘制,v2.0,模型适配,静态视觉通过
+biz-sample-group-small,icons/small/biz-sample-group-small.svg,样本分组,16x16显示/24x24 viewBox,small,16px专用简化重画,原创可编辑SVG/代码绘制,v2.0,模型适配,静态视觉通过
+nav-report-small,icons/small/nav-report-small.svg,报告归档导航,16x16显示/24x24 viewBox,small,16px专用简化重画,原创可编辑SVG/代码绘制,v2.0,一级导航/报告归档,静态视觉通过
+xiaomu-line-24,illustrations/xiaomu-line-24.svg,小木小尺寸线性替代,24x24,linear,精简助手头像,原创可编辑SVG/代码绘制,v2.0,知识库/小木,静态视觉通过
+xiaomu-line-32,illustrations/xiaomu-line-32.svg,小木小尺寸线性替代,32px显示/24x24 viewBox,linear,精简助手头像,原创可编辑SVG/代码绘制,v2.0,知识库/小木,静态视觉通过
+I01-ancient-timber-background-low-contrast-master,illustrations/I01-ancient-timber-background-low-contrast.png,古建木构主视觉,1600x900,master-low-contrast,按PRD构图优化,Codex内置imagegen生成/本地后处理,v2.0,登录/项目入口,平台静态试装通过
+I01-ancient-timber-background-low-contrast-web,illustrations/I01-ancient-timber-background-low-contrast.webp,古建木构主视觉,1600x900,web-low-contrast,按PRD构图优化,Codex内置imagegen生成/本地后处理,v2.0,登录/项目入口,平台静态试装通过
+I01-ancient-timber-hero-master,illustrations/I01-ancient-timber-hero.png,古建木构主视觉,1600x900,master,按PRD构图优化,Codex内置imagegen生成/本地后处理,v2.0,登录/项目入口,平台静态试装通过
+I01-ancient-timber-hero-web,illustrations/I01-ancient-timber-hero.webp,古建木构主视觉,1600x900,web,按PRD构图优化,Codex内置imagegen生成/本地后处理,v2.0,登录/项目入口,平台静态试装通过
+I02-inspection-cart-CONCEPT-pending-photo-master,illustrations/I02-inspection-cart-CONCEPT-pending-photo.png,巡检车概念占位,1024x1024,master,按PRD构图优化,AI生成概念图/无实物照片,v2.0,设备卡,概念占位/待实物照片
+I02-inspection-cart-CONCEPT-pending-photo-web,illustrations/I02-inspection-cart-CONCEPT-pending-photo.webp,巡检车概念占位,1024x1024,web,按PRD构图优化,AI生成概念图/无实物照片,v2.0,设备卡,概念占位/待实物照片
+I03-scanner-device-master,illustrations/I03-scanner-device.png,实物扫描仪,1024x1024,master,保形提亮与透明边缘精修,用户提供PPT第11页设备图/边缘精修,v2.0,设备与采集,平台静态试装通过
+I03-scanner-device-web,illustrations/I03-scanner-device.webp,实物扫描仪,1024x1024,web,保形提亮与透明边缘精修,用户提供PPT第11页设备图/边缘精修,v2.0,设备与采集,平台静态试装通过
+I04-xiaomu-assistant-master,illustrations/I04-xiaomu-assistant.png,小木助手头像,1024x1024,master,按PRD重制候选,Codex内置imagegen生成/本地后处理,v2.0,知识库/小木,平台静态试装通过
+I04-xiaomu-assistant-web,illustrations/I04-xiaomu-assistant.webp,小木助手头像,1024x1024,web,按PRD重制候选,Codex内置imagegen生成/本地后处理,v2.0,知识库/小木,平台静态试装通过
+I04-xiaomu-candidate-A-rounded-master,illustrations/I04-xiaomu-candidate-A-rounded.png,小木助手头像,1024x1024,master-candidate-A,按PRD重制候选,Codex内置imagegen生成/本地后处理,v2.0,知识库/小木,平台静态试装通过
+I04-xiaomu-candidate-A-rounded-web,illustrations/I04-xiaomu-candidate-A-rounded.webp,小木助手头像,1024x1024,web-candidate-A,按PRD重制候选,Codex内置imagegen生成/本地后处理,v2.0,知识库/小木,平台静态试装通过
+I04-xiaomu-candidate-B-timber-symbol-master,illustrations/I04-xiaomu-candidate-B-timber-symbol.png,小木助手头像,1024x1024,master-candidate-B,按PRD重制候选,Codex内置imagegen生成/本地后处理,v2.0,知识库/小木,平台静态试装通过
+I04-xiaomu-candidate-B-timber-symbol-web,illustrations/I04-xiaomu-candidate-B-timber-symbol.webp,小木助手头像,1024x1024,web-candidate-B,按PRD重制候选,Codex内置imagegen生成/本地后处理,v2.0,知识库/小木,平台静态试装通过
+I05-knowledge-guidance-master,illustrations/I05-knowledge-guidance.png,知识资料导入引导,1200x900,master,按PRD构图优化,Codex内置imagegen生成/本地后处理,v2.0,知识库,平台静态试装通过
+I05-knowledge-guidance-web,illustrations/I05-knowledge-guidance.webp,知识资料导入引导,1200x900,web,按PRD构图优化,Codex内置imagegen生成/本地后处理,v2.0,知识库,平台静态试装通过
+I06-gaussian-scene-guidance-master,illustrations/I06-gaussian-scene-guidance.png,场景导入引导,1200x900,master,按PRD构图优化,Codex内置imagegen生成/本地后处理,v2.0,数字孪生,平台静态试装通过
+I06-gaussian-scene-guidance-web,illustrations/I06-gaussian-scene-guidance.webp,场景导入引导,1200x900,web,按PRD构图优化,Codex内置imagegen生成/本地后处理,v2.0,数字孪生,平台静态试装通过

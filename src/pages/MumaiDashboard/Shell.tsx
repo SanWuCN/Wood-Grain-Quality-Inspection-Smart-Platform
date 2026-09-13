@@ -29,6 +29,7 @@ import {
 import Header from "./Header";
 import SmallWoodPanel from "./SmallWoodPanel";
 import { Icon } from "./icons";
+import { Illustration } from "./illustrations";
 import { useMumai } from "./context";
 import { holderLabel, VIEW_LABEL, viewTypeForPath, writeFocus } from "./focus";
 import { useShellEntrance } from "./entrance";
@@ -37,6 +38,10 @@ import { useConfigStore } from "./mapDemo/stores";
 import { COMPONENTS, CURRENT_RISKS, DEVICES, SCAN_BATCHES } from "./seed/scenario";
 import "./appshell.css";
 import "./pages.css";
+// UI 视觉素材 v2.0：主题变量作用域 + 图标/插图样式（PRD §4）
+// 必须放在平台样式之后 —— 作用域内的 v2 变量要能覆盖同名的兜底色
+import "./styles/ui-assets-v2.css";
+import "./ui-assets-v2-icons.css";
 
 /** 无权限提示：说明原因 + 一个能回到本角色工作区的按钮，不白屏、不报错 */
 function PermissionNotice({ pathname }: { pathname: string }) {
@@ -250,7 +255,7 @@ export default function Shell() {
 
   if (isPresent) {
     return (
-      <div className="appshell appshell--present">
+      <div className="appshell appshell--present mumai-ui-v2">
         <Suspense fallback={<div className="appshell__boot"><strong>正在打开大屏</strong></div>}>
           <Outlet />
         </Suspense>
@@ -259,7 +264,9 @@ export default function Shell() {
   }
 
   return (
-    <div className="appshell" style={{ ["--appshell-header" as string]: `${HEADER_HEIGHT}px` }}>
+    <div
+      className="appshell mumai-ui-v2"
+      style={{ ["--appshell-header" as string]: `${HEADER_HEIGHT}px` }}>
       <Header
         channels={channels}
         navItems={permittedNav}
@@ -337,8 +344,21 @@ export default function Shell() {
           type="button"
           className={`appshell__fab ${assistantOpen ? "is-open" : ""}`}
           onClick={() => setAssistantOpen(!assistantOpen)}
-          aria-label="小木助手">
-          <Icon name="bot" />
+          aria-label="小木助手"
+          aria-expanded={assistantOpen}>
+          {/*
+            PRD §5 知识库与小木：「默认 I04 头像 32–40px；展开区 40–48px」、
+            「16/24px 使用线性图标」。
+
+            52px 圆内只有 34px 的画面，而 I04 是深色设备头像，缩到 34px 后主体
+            只剩十几个像素、在深底上对比度也不够（实测截图里几乎看不出是什么）。
+            因此这里按 PRD 的口径做**分层**：
+              · 小尺寸入口（34px）用素材包的小木线性版（xiaomu-line-24）
+              · I04 实拍头像放到展开区，用 40–48px 呈现（见 SmallWoodPanel）
+            两者都是素材包内的正式资源，没有自绘替代物。
+          */}
+          <Illustration id="i04-xiaomu" height={34} avatar alt="" className="appshell__fab-avatar" />
+          <Icon name="identity-agent" size={24} className="appshell__fab-icon" aria-hidden />
           <span>小木</span>
         </button>
       ) : null}

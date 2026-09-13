@@ -382,7 +382,13 @@ export default function Orders() {
             <ul className="orders-attachments">
               {selected.attachments.map((item) => (
                 <li key={item.assetId}>
-                  <Icon name="database" />
+                  {/*
+                    PRD §3.3 迁移表：「book → nav-knowledge 或 asset-file；
+                    知识导航用 knowledge，具体附件按文件类型」。
+                    这里是任务附件列表，所以按附件文件语义取 asset-file，
+                    不用 nav-knowledge（那是知识库导航）。
+                  */}
+                  <Icon name="asset-file" size={16} aria-hidden />
                   <b>{item.name}</b>
                   <em>
                     {item.kind} · {item.sizeText}
@@ -491,7 +497,19 @@ export default function Orders() {
                 <ul className="env-checks">
                   {checks.map((check) => (
                     <li key={check.key} className={check.ok ? "is-ok" : "is-bad"}>
-                      <Icon name={check.ok ? "check" : "alert"} />
+                      {/*
+                        PRD §3.3：「check 用于审核入口时应按业务另选，不能机械映射
+                        所有场景」。这里是**校验结果**展示，是完成/告警语义，
+                        因此用 status-success / status-warning，
+                        而不是保留日历勾（check 的原图形留给审核入口）。
+                        颜色由 tone 提供，图形本身也能区分，不只靠颜色（PRD §4）。
+                      */}
+                      <Icon
+                        name={check.ok ? "status-success" : "status-warning"}
+                        size={16}
+                        tone={check.ok ? "success" : "warning"}
+                        aria-hidden
+                      />
                       {check.label}
                       <em>{check.message}</em>
                     </li>

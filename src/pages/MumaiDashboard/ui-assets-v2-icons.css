@@ -1,0 +1,205 @@
+/* ==================================================================
+   木脉智检 · UI 视觉素材 v2.0 —— 图标与插图样式
+   ------------------------------------------------------------------
+   依据：木脉智检UI素材交接与平台部署修改PRD-v1.0 §3.2 / §4 / §5
+
+   职责：
+     1) 图标语义色（tone）落到 CSS 变量，色值不散写在组件里
+     2) 16/20/24/32 四档尺寸，图标与中文标签 8px 间距
+     3) 插图容器固定宽高比 + object-fit: contain（不拉伸）
+     4) 运行圆环只在真实运行态旋转，并遵守 prefers-reduced-motion
+
+   作用域说明（PRD §4）：
+     tone 变量读的是 .mumai-ui-v2 作用域里的 --mumai-* 变量
+     （由 src/pages/MumaiDashboard/styles/ui-assets-v2.css 提供）。
+     这里**不覆盖**平台既有的 --bg-page / --primary / --text-* token，
+     所以挂上该 class 不会把其他组件变成素材预览里的底色。
+   ================================================================== */
+
+/* ------------------------------------------------------------------
+   1. 已接入 v2 素材的根容器
+   ------------------------------------------------------------------
+   PRD §4：实际布局根节点增加 mumai-ui-v2 类，组件读该作用域变量。
+   AppShell 根节点、登录页根节点挂这个 class；这里只补一条兜底，
+   万一某个子树没挂 class，fallback 值保证图标仍然可见。
+   ------------------------------------------------------------------ */
+
+.mumai-ui-v2 {
+  /* tone 到 v2 主题变量的映射；变量本身在 ui-assets-v2.css 里 */
+  --mumai-icon-default: #dce5ed;
+  --mumai-icon-secondary: #a7b5c3;
+  --mumai-icon-accent: #6bcbe0;
+  --mumai-icon-success: #68d6a5;
+  --mumai-icon-warning: #f0bd63;
+  --mumai-icon-error: #ff969c;
+  --mumai-icon-disabled: #627080;
+}
+
+/* ------------------------------------------------------------------
+   2. 图标本体
+   ------------------------------------------------------------------ */
+
+.mumai-icon {
+  display: block;
+  flex: 0 0 auto;
+  /* 语义色：组件把 --mumai-icon-tone 指到对应变量，这里统一消费 */
+  color: var(--mumai-icon-tone, var(--mumai-icon-default, currentColor));
+  /* 尺寸兜底：组件已写 width/height 属性，这里保证 CSS 覆盖时也不失真 */
+  width: var(--mumai-icon-size, 20px);
+  height: var(--mumai-icon-size, 20px);
+  overflow: visible;
+}
+
+/* 图标 + 中文标签：PRD §4 建议间距 8px */
+.mumai-icon-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/*
+   纯图标控件的点击热区。
+   PRD §4：「不要把24px图标本体当成按钮全部热区」——热区由外层 button 的
+   min-width / min-height 提供，这里只保证图标居中不参与布局撑高。
+*/
+.mumai-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.mumai-icon-button:disabled {
+  cursor: not-allowed;
+}
+
+/* 禁用态：图标降对比但**保留语义**（PRD §4：不能代表设备离线） */
+.mumai-icon-button:disabled .mumai-icon {
+  color: var(--mumai-icon-disabled, #627080);
+}
+
+/* 键盘焦点：2px 可见焦点环（PRD §4 + DESIGN-SYSTEM） */
+.mumai-icon-button:focus-visible {
+  outline: 2px solid var(--mumai-focus, #8ad9e9);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------
+   3. 插图（PRD §5）
+   ------------------------------------------------------------------
+   设置宽高比避免加载跳动，object-fit 为 contain，不拉伸。
+   ------------------------------------------------------------------ */
+
+.mumai-illustration {
+  display: block;
+  object-fit: contain;
+  object-position: center;
+  /* 透明背景：插图本身是透明 PNG/WebP，不给容器加底色 */
+  background: transparent;
+  /* 比例由组件的 width/height 属性提供，这里按容器自适应 */
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* 头像类插图：只做圆角裁切，不切掉头部（PRD §5） */
+.mumai-illustration--avatar {
+  border-radius: 50%;
+  object-fit: contain;
+  background: var(--mumai-surface-panel, #122235);
+}
+
+/* 低对比背景层：登录页用，压在表单之下（PRD §5 登录与项目入口） */
+.mumai-illustration--backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.55;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* 空态 / 引导插图（I05 / I06） */
+.mumai-illustration--guide {
+  opacity: 0.9;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ------------------------------------------------------------------
+   4. 设备与采集：关键结果仍是主体，插图只做辅助（PRD §5）
+   ------------------------------------------------------------------ */
+
+.mumai-device-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.mumai-device-figure figcaption {
+  font-size: var(--fs-aux, 13px);
+  color: var(--text-tertiary, #70849c);
+  text-align: center;
+}
+
+/*
+   I02 是概念占位（PRD §1「不能当作实物照片」）。
+   给它一个明确的标识，避免被当成设备实拍。
+*/
+.mumai-device-figure--concept figcaption::after {
+  content: "（概念示意）";
+  color: var(--mumai-icon-warning, #f0bd63);
+}
+
+/* ------------------------------------------------------------------
+   5. 运行态圆环
+   ------------------------------------------------------------------
+   PRD §4：「运行圆环仅在真实页面状态为运行时旋转，完成后停止；
+   适配减少动态效果设置。」旋转由 .is-running 显式开启，不是默认行为。
+   ------------------------------------------------------------------ */
+
+.mumai-icon.is-running {
+  animation: mumai-icon-spin 1.1s linear infinite;
+  transform-origin: 50% 50%;
+}
+
+@keyframes mumai-icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mumai-icon.is-running {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------
+   6. 状态展示：图形 + 短文字（PRD §4「图标加短文字；不大面积染色」）
+   ------------------------------------------------------------------ */
+
+.mumai-status-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.mumai-status-inline--success {
+  color: var(--mumai-icon-success, #68d6a5);
+}
+
+.mumai-status-inline--warning {
+  color: var(--mumai-icon-warning, #f0bd63);
+}
+
+.mumai-status-inline--error {
+  color: var(--mumai-icon-error, #ff969c);
+}

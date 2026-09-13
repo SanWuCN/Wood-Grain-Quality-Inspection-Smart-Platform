@@ -84,6 +84,17 @@
   color: var(--glow-cyan);
 }
 
+/*
+  面板标题左侧的业务图标（UI 素材 v2.0，PRD §5「业务卡 24px」）。
+  标题行是 align-items: baseline（为了让 "//" 与中文标题对齐），
+  SVG 参与基线对齐时会被抬到文字上方，所以只把图标本身改成居中对齐，
+  不动这一行的对齐方式 —— 那会连带影响所有既有面板标题的排版。
+*/
+.tech-panel__head h2 > .mumai-icon {
+  align-self: center;
+  margin-right: 2px;
+}
+
 .tech-panel__extra {
   flex: 0 0 auto;
   color: var(--text-tertiary);
@@ -136,7 +147,7 @@
 }
 
 .stat__icon svg {
-  width: 22px;
+  width: var(--mumai-icon-size, 22px);
   transform: none;
 }
 
@@ -210,7 +221,7 @@
 }
 
 .risk-counters .stat__icon svg {
-  width: 17px;
+  width: var(--mumai-icon-size, 17px);
 }
 
 .risk-counters .stat__copy {
@@ -455,7 +466,7 @@
     margin-right: var(--space-2);
   }
   .stat__icon svg {
-    width: 17px;
+    width: var(--mumai-icon-size, 17px);
   }
   .stat__copy strong {
     font-size: var(--fs-num);

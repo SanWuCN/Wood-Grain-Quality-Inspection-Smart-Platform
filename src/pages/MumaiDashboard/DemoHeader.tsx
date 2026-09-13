@@ -16,7 +16,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import styled from "styled-components";
 import { ACCOUNTS, COLORS, HEADER_HEIGHT } from "./design";
-import { Icon } from "./icons";
+import { Icon, type IconName } from "./icons";
 
 const ACCOUNT_OPTIONS = ACCOUNTS.map((item) => ({
   id: item.id,
@@ -137,16 +137,47 @@ const NavLayer = styled.nav`
     color: rgba(232, 239, 255, 0.62);
     cursor: pointer;
     white-space: nowrap;
-    transition: color 0.2s, text-shadow 0.2s;
+    transition: color 0.2s, text-shadow 0.2s, background-color 0.2s;
+
+    /*
+       PRD §4/§5：导航图标 20px，图标与中文标签间距 8px，统一大小与标签基线。
+       PRD §4：「选中态同时有底色或边线、文字变化，不能仅变色」——
+       所以 .is-active 给了底色 + 文字提亮 + 下边线，三重变化。
+    */
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+
+    .mumai-icon {
+      /* 默认态用 v2 的次级图标色，避免八个图标比中文标签更抢眼 */
+      color: var(--mumai-icon-secondary, rgba(232, 239, 255, 0.62));
+      transition: color 0.2s;
+    }
 
     &:hover {
       color: #ffffff;
+      background: var(--mumai-selected-background, rgba(48, 97, 219, 0.18));
+
+      .mumai-icon {
+        color: var(--mumai-icon-default, #dce5ed);
+      }
     }
 
     &.is-active {
       color: #ffffff;
       text-shadow: 0 0 12px rgba(120, 158, 255, 0.9);
-      box-shadow: inset 0 -2px 0 ${COLORS.panelStroke};
+      background: var(--mumai-selected-background, rgba(48, 97, 219, 0.28));
+      box-shadow: inset 0 -2px 0 var(--mumai-accent, ${COLORS.panelStroke});
+
+      .mumai-icon {
+        color: var(--mumai-accent, #6bcbe0);
+      }
+    }
+
+    /* 键盘焦点：2px 可见焦点环（PRD §4） */
+    &:focus-visible {
+      outline: 2px solid var(--mumai-focus, #8ad9e9);
+      outline-offset: 2px;
     }
   }
 `;
@@ -258,7 +289,8 @@ const ChannelLayer = styled.div`
 `;
 
 export interface DemoHeaderProps extends ComponentProps<typeof TitleWrapper> {
-  navItems: readonly { readonly key: string; readonly label: string }[];
+  /** icon 为 v2 素材包的 nav-* 图标名（design.ts 的 NAV_ITEMS 提供） */
+  navItems: readonly { readonly key: string; readonly label: string; readonly icon: IconName }[];
   activeNav: string;
   onNav: (name: string) => void;
   account: { name: string; role: string };
@@ -303,7 +335,8 @@ export default function DemoHeader(props: DemoHeaderProps) {
         {actions}
         {onAccountChange ? (
           <label className="account-select">
-            <Icon name="user" />
+            {/* PRD §3.3：user → identity-user（账号身份） */}
+            <Icon name="identity-user" size={16} aria-hidden />
             <select
               value={ACCOUNT_OPTIONS.find((item) => item.name === account.name)?.id ?? "shen"}
               onChange={(event) => onAccountChange(event.target.value)}
@@ -324,15 +357,25 @@ export default function DemoHeader(props: DemoHeaderProps) {
       </TopRight>
 
       <NavLayer aria-label="主导航">
-        {navItems.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            className={activeNav === item.label ? "is-active" : ""}
-            onClick={() => onNav(item.label)}>
-            {item.label}
-          </button>
-        ))}
+        {navItems.map((item) => {
+          const active = activeNav === item.label;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              className={active ? "is-active" : ""}
+              onClick={() => onNav(item.label)}
+              // 当前项给辅助技术一个明确状态，不只靠颜色（PRD §4）
+              aria-current={active ? "page" : undefined}>
+              {/*
+                PRD §4：导航图标默认 20px。
+                图标旁有同义中文标签，因此对辅助技术隐藏（PRD §3.2 / DESIGN-SYSTEM）。
+              */}
+              <Icon name={item.icon} size={20} aria-hidden />
+              {item.label}
+            </button>
+          );
+        })}
       </NavLayer>
 
       <ChannelLayer>{statusExtra}</ChannelLayer>

@@ -1,0 +1,261 @@
+{
+  "source": "木脉智检UI视觉素材-v2.0-20260913.zip",
+  "generatedAt": "2026-09-13T05:44:47.602Z",
+  "note": "由 tools/copy-ui-v2-assets.mjs 生成；原素材目录只读保留，未做任何修改。",
+  "publicRoot": "public/ui-assets/v2/（PNG 回退 + 设计归档）",
+  "webpRoot": "src/assets/ui-v2/illustrations/（WebP 主用，构建期加内容哈希）",
+  "defaultLoadPath": [
+    {
+      "id": "i01-hero",
+      "files": [
+        "I01-ancient-timber-hero.webp",
+        "I01-ancient-timber-hero.png"
+      ],
+      "width": 1600,
+      "height": 900,
+      "alt": "古建木构主视觉插图",
+      "usage": "登录与项目入口"
+    },
+    {
+      "id": "i01-background",
+      "files": [
+        "I01-ancient-timber-background-low-contrast.webp",
+        "I01-ancient-timber-background-low-contrast.png"
+      ],
+      "width": 1600,
+      "height": 900,
+      "alt": "低对比古建木构背景层",
+      "usage": "登录与项目入口背景层"
+    },
+    {
+      "id": "i02-cart-concept",
+      "files": [
+        "I02-inspection-cart-CONCEPT-pending-photo.webp",
+        "I02-inspection-cart-CONCEPT-pending-photo.png"
+      ],
+      "width": 1024,
+      "height": 1024,
+      "alt": "巡检车概念示意（占位图，非实物照片）",
+      "usage": "待接入引导"
+    },
+    {
+      "id": "i03-scanner",
+      "files": [
+        "I03-scanner-device.webp",
+        "I03-scanner-device.png"
+      ],
+      "width": 1024,
+      "height": 1024,
+      "alt": "手持扫描仪设备外观",
+      "usage": "硬件详情与采集"
+    },
+    {
+      "id": "i04-xiaomu",
+      "files": [
+        "I04-xiaomu-assistant.webp",
+        "I04-xiaomu-assistant.png"
+      ],
+      "width": 1024,
+      "height": 1024,
+      "alt": "小木助手头像",
+      "usage": "知识库与小木"
+    },
+    {
+      "id": "i05-knowledge-guidance",
+      "files": [
+        "I05-knowledge-guidance.webp",
+        "I05-knowledge-guidance.png"
+      ],
+      "width": 1200,
+      "height": 900,
+      "alt": "知识资料汇聚与检索引导插图",
+      "usage": "知识库空态"
+    },
+    {
+      "id": "i06-gaussian-scene",
+      "files": [
+        "I06-gaussian-scene-guidance.webp",
+        "I06-gaussian-scene-guidance.png"
+      ],
+      "width": 1200,
+      "height": 900,
+      "alt": "高斯场景导入引导插图",
+      "usage": "数字孪生无场景时"
+    }
+  ],
+  "notCopied": [
+    {
+      "id": "i04-xiaomu-candidate-b",
+      "file": "I04-xiaomu-candidate-B-timber-symbol.webp",
+      "note": "小木候选 B（抽象木构符号），默认不切换"
+    },
+    {
+      "id": "i02-scanner-alt",
+      "file": "biz-handheld-scanner-alt.svg",
+      "note": "扫描仪备选轮廓，默认不切换"
+    }
+  ],
+  "copied": [
+    {
+      "group": "illustration-webp",
+      "id": "i01-hero",
+      "dest": "src\\assets\\ui-v2\\illustrations\\I01-ancient-timber-hero.webp",
+      "bytes": 90260,
+      "sha256_12": "f4b2137a5cb1"
+    },
+    {
+      "group": "illustration-png-fallback",
+      "id": "i01-hero",
+      "dest": "public\\ui-assets\\v2\\illustrations\\I01-ancient-timber-hero.png",
+      "bytes": 471165,
+      "sha256_12": "2e9156087619"
+    },
+    {
+      "group": "illustration-webp",
+      "id": "i01-background",
+      "dest": "src\\assets\\ui-v2\\illustrations\\I01-ancient-timber-background-low-contrast.webp",
+      "bytes": 33922,
+      "sha256_12": "99ac1d89ac6c"
+    },
+    {
+      "group": "illustration-png-fallback",
+      "id": "i01-background",
+      "dest": "public\\ui-assets\\v2\\illustrations\\I01-ancient-timber-background-low-contrast.png",
+      "bytes": 371996,
+      "sha256_12": "4b45b4c42214"
+    },
+    {
+      "group": "illustration-webp",
+      "id": "i02-cart-concept",
+      "dest": "src\\assets\\ui-v2\\illustrations\\I02-inspection-cart-CONCEPT-pending-photo.webp",
+      "bytes": 65416,
+      "sha256_12": "81caba9fc3dc"
+    },
+    {
+      "group": "illustration-png-fallback",
+      "id": "i02-cart-concept",
+      "dest": "public\\ui-assets\\v2\\illustrations\\I02-inspection-cart-CONCEPT-pending-photo.png",
+      "bytes": 522589,
+      "sha256_12": "b71b6423f5dd"
+    },
+    {
+      "group": "illustration-webp",
+      "id": "i03-scanner",
+      "dest": "src\\assets\\ui-v2\\illustrations\\I03-scanner-device.webp",
+      "bytes": 53318,
+      "sha256_12": "7ea76a3e8912"
+    },
+    {
+      "group": "illustration-png-fallback",
+      "id": "i03-scanner",
+      "dest": "public\\ui-assets\\v2\\illustrations\\I03-scanner-device.png",
+      "bytes": 478646,
+      "sha256_12": "9a49247b00af"
+    },
+    {
+      "group": "illustration-webp",
+      "id": "i04-xiaomu",
+      "dest": "src\\assets\\ui-v2\\illustrations\\I04-xiaomu-assistant.webp",
+      "bytes": 49110,
+      "sha256_12": "babf79c810bc"
+    },
+    {
+      "group": "illustration-png-fallback",
+      "id": "i04-xiaomu",
+      "dest": "public\\ui-assets\\v2\\illustrations\\I04-xiaomu-assistant.png",
+      "bytes": 687717,
+      "sha256_12": "f3130bf42713"
+    },
+    {
+      "group": "illustration-webp",
+      "id": "i05-knowledge-guidance",
+      "dest": "src\\assets\\ui-v2\\illustrations\\I05-knowledge-guidance.webp",
+      "bytes": 58794,
+      "sha256_12": "ce9c1fb69130"
+    },
+    {
+      "group": "illustration-png-fallback",
+      "id": "i05-knowledge-guidance",
+      "dest": "public\\ui-assets\\v2\\illustrations\\I05-knowledge-guidance.png",
+      "bytes": 308766,
+      "sha256_12": "ddccc7969c03"
+    },
+    {
+      "group": "illustration-webp",
+      "id": "i06-gaussian-scene",
+      "dest": "src\\assets\\ui-v2\\illustrations\\I06-gaussian-scene-guidance.webp",
+      "bytes": 56708,
+      "sha256_12": "c1c6ac497b22"
+    },
+    {
+      "group": "illustration-png-fallback",
+      "id": "i06-gaussian-scene",
+      "dest": "public\\ui-assets\\v2\\illustrations\\I06-gaussian-scene-guidance.png",
+      "bytes": 415594,
+      "sha256_12": "4c0625f59e8c"
+    },
+    {
+      "group": "xiaomu-line",
+      "id": "xiaomu-line-24",
+      "dest": "src\\assets\\ui-v2\\illustrations\\xiaomu-line-24.svg",
+      "bytes": 376,
+      "sha256_12": "a35c9eb5f283"
+    },
+    {
+      "group": "xiaomu-line",
+      "id": "xiaomu-line-32",
+      "dest": "src\\assets\\ui-v2\\illustrations\\xiaomu-line-32.svg",
+      "bytes": 376,
+      "sha256_12": "29db6037b285"
+    },
+    {
+      "group": "css",
+      "id": "ui-assets-v2",
+      "dest": "src/pages/MumaiDashboard/styles/ui-assets-v2.css",
+      "bytes": 1987,
+      "sha256_12": "-"
+    },
+    {
+      "group": "doc",
+      "id": "asset-manifest.csv",
+      "dest": "docs\\design\\ui-v2\\asset-manifest.csv",
+      "bytes": 13336,
+      "sha256_12": "9b29b4c0c771"
+    },
+    {
+      "group": "doc",
+      "id": "QA.md",
+      "dest": "docs\\design\\ui-v2\\QA.md",
+      "bytes": 2520,
+      "sha256_12": "59d19b7d5242"
+    },
+    {
+      "group": "doc",
+      "id": "README-验收说明.md",
+      "dest": "docs\\design\\ui-v2\\README-验收说明.md",
+      "bytes": 2794,
+      "sha256_12": "3d9769c76b69"
+    },
+    {
+      "group": "doc",
+      "id": "CHANGELOG.md",
+      "dest": "docs\\design\\ui-v2\\CHANGELOG.md",
+      "bytes": 2549,
+      "sha256_12": "33fc193916f5"
+    },
+    {
+      "group": "doc",
+      "id": "DESIGN-SYSTEM.md",
+      "dest": "docs\\design\\ui-v2\\DESIGN-SYSTEM.md",
+      "bytes": 1519,
+      "sha256_12": "9973761a6a08"
+    },
+    {
+      "group": "doc",
+      "id": "validation-results.json",
+      "dest": "docs\\design\\ui-v2\\validation-results.json",
+      "bytes": 4041,
+      "sha256_12": "d5fbee1ba04f"
+    }
+  ]
+}

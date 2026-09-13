@@ -342,7 +342,11 @@ export default function Mapping() {
           */}
           {site ? (
             <div className="map-site">
-              <Icon name="pin" />
+              {/*
+                PRD §3.3：「真地图定位保留 pin」。这里是地图上的点位标识，
+                属于真实定位语义，不是人工标记（人工标记走 biz-manual-mark）。
+              */}
+              <Icon name="pin" size={16} aria-hidden />
               <b>{site.name}</b>
               <span className="map-site__region">{siteRegion(site)}</span>
               {highlighted.length > 0 ? (

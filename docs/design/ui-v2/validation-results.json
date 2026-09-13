@@ -1,0 +1,177 @@
+{
+  "status": "PASS",
+  "checkedAt": "2026-09-13",
+  "scope": "desktop platform assets and static previews",
+  "counts": {
+    "common": 33,
+    "business": 11,
+    "small": 5,
+    "illustrationSvg": 2,
+    "raster": 18
+  },
+  "rasterInfo": [
+    {
+      "file": "illustrations/I01-ancient-timber-background-low-contrast.png",
+      "width": 1600,
+      "height": 900,
+      "format": "png",
+      "alphaMin": 0,
+      "alphaMax": 45,
+      "bytes": 371996
+    },
+    {
+      "file": "illustrations/I01-ancient-timber-background-low-contrast.webp",
+      "width": 1600,
+      "height": 900,
+      "format": "webp",
+      "alphaMin": 0,
+      "alphaMax": 45,
+      "bytes": 33922
+    },
+    {
+      "file": "illustrations/I01-ancient-timber-hero.png",
+      "width": 1600,
+      "height": 900,
+      "format": "png",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 471165
+    },
+    {
+      "file": "illustrations/I01-ancient-timber-hero.webp",
+      "width": 1600,
+      "height": 900,
+      "format": "webp",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 90260
+    },
+    {
+      "file": "illustrations/I02-inspection-cart-CONCEPT-pending-photo.png",
+      "width": 1024,
+      "height": 1024,
+      "format": "png",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 522589
+    },
+    {
+      "file": "illustrations/I02-inspection-cart-CONCEPT-pending-photo.webp",
+      "width": 1024,
+      "height": 1024,
+      "format": "webp",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 65416
+    },
+    {
+      "file": "illustrations/I03-scanner-device.png",
+      "width": 1024,
+      "height": 1024,
+      "format": "png",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 478646
+    },
+    {
+      "file": "illustrations/I03-scanner-device.webp",
+      "width": 1024,
+      "height": 1024,
+      "format": "webp",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 53318
+    },
+    {
+      "file": "illustrations/I04-xiaomu-assistant.png",
+      "width": 1024,
+      "height": 1024,
+      "format": "png",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 687717
+    },
+    {
+      "file": "illustrations/I04-xiaomu-assistant.webp",
+      "width": 1024,
+      "height": 1024,
+      "format": "webp",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 49110
+    },
+    {
+      "file": "illustrations/I04-xiaomu-candidate-A-rounded.png",
+      "width": 1024,
+      "height": 1024,
+      "format": "png",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 687717
+    },
+    {
+      "file": "illustrations/I04-xiaomu-candidate-A-rounded.webp",
+      "width": 1024,
+      "height": 1024,
+      "format": "webp",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 49110
+    },
+    {
+      "file": "illustrations/I04-xiaomu-candidate-B-timber-symbol.png",
+      "width": 1024,
+      "height": 1024,
+      "format": "png",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 773997
+    },
+    {
+      "file": "illustrations/I04-xiaomu-candidate-B-timber-symbol.webp",
+      "width": 1024,
+      "height": 1024,
+      "format": "webp",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 53830
+    },
+    {
+      "file": "illustrations/I05-knowledge-guidance.png",
+      "width": 1200,
+      "height": 900,
+      "format": "png",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 308766
+    },
+    {
+      "file": "illustrations/I05-knowledge-guidance.webp",
+      "width": 1200,
+      "height": 900,
+      "format": "webp",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 58794
+    },
+    {
+      "file": "illustrations/I06-gaussian-scene-guidance.png",
+      "width": 1200,
+      "height": 900,
+      "format": "png",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 415594
+    },
+    {
+      "file": "illustrations/I06-gaussian-scene-guidance.webp",
+      "width": 1200,
+      "height": 900,
+      "format": "webp",
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "bytes": 56708
+    }
+  ],
+  "failures": []
+}

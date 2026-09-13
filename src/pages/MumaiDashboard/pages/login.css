@@ -30,9 +30,17 @@
 }
 
 /* ------------------------------------------------------------------
-   背景层 1/2/3/4：网格 → 等高线 → 扫描光带 → 檐柱线稿
+   背景层 0/1/2/3/4：I01 摄影层 → 网格 → 等高线 → 扫描光带 → 檐柱线稿
    统一装在 .login__bg 里：卡片在下、背景在上会互相吃对比度，
    所以整层固定在卡片之下（z-index 0），并整体参与「先淡入」这一步
+
+   I01 两层（UI 素材 v2.0，PRD §5「可接 I01 主视觉和低对比背景层，
+   登录表单仍是主操作」）：
+     · login__photo--bg   低对比层，铺满视口；素材本身 alpha 上限只有 45，
+                          这里再压一档，保证整屏对比度低于表单
+     · login__photo--hero 主视觉，落在左栏品牌区之后；透明度压到 0.22，
+                          只提供木构质感，不与标题和表单争焦点
+   两层都放在网格之下，避免图片把网格的秩序感盖掉。
    ------------------------------------------------------------------ */
 .login__bg {
   position: absolute;
@@ -40,6 +48,38 @@
   z-index: 0;
   pointer-events: none;
 }
+
+.login__photo--bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* 低对比背景层：铺满、裁切、再压一档透明度 */
+  object-fit: cover;
+  opacity: 0.5;
+}
+
+.login__photo--hero {
+  position: absolute;
+  right: -6%;
+  top: 50%;
+  width: min(1000px, 58vw);
+  height: auto;
+  transform: translateY(-50%);
+  /*
+    主视觉压到很低的透明度：它是氛围，不是第二个焦点。
+    靠右放置而不是居中 —— 卡片已经占了屏幕中间，主视觉居中会被卡片切掉一半，
+    两半各露一点反而看不出是什么构件；靠右能让斗拱轮廓完整露在卡片外侧。
+  */
+  opacity: 0.26;
+  object-fit: contain;
+}
+
+/*
+   I01 两层是静态图，本身没有动画，因此不需要在 prefers-reduced-motion 下
+  改透明度 —— 那反而会把上面按对比度调好的值（0.5 / 0.22）覆盖掉。
+   整个 .login__bg 的淡入由 index.css 的全局 reduced-motion 规则兜住。
+*/
 
 /* 1. 8px 网格底纹：只做秩序感，不产生第二个视觉焦点 */
 .login__grid {
@@ -416,9 +456,9 @@
 }
 
 .login__error svg {
-  flex: 0 0 13px;
-  width: 13px;
-  height: 13px;
+  flex: 0 0 var(--mumai-icon-size, 13px);
+  width: var(--mumai-icon-size, 13px);
+  height: var(--mumai-icon-size, 13px);
 }
 
 /* 说明行：表单里的最后一条静态信息，与左栏事实矩阵同一语汇 */
@@ -451,8 +491,8 @@
 }
 
 .login__submit svg {
-  width: 16px;
-  height: 16px;
+  width: var(--mumai-icon-size, 16px);
+  height: var(--mumai-icon-size, 16px);
 }
 
 /* 提交中：文字换「正在登录」+ 一枚细环，按钮同时 disabled 防重复提交 */

@@ -54,7 +54,8 @@ function MapView() {
         type="button"
         className="present__switch"
         onClick={() => requestMapMode(mode === "china" ? "shanghai" : "china")}>
-        <Icon name="arrow" />
+        {/* PRD §3.3：arrow 保留原图标；展示窗口按钮比操作界面大一档（PRD §4 工具栏 16–20px） */}
+        <Icon name="arrow" size={20} aria-hidden />
         {mode === "china" ? "上海" : "全国"}
       </button>
     </div>

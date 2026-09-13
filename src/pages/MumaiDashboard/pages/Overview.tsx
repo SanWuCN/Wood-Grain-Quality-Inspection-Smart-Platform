@@ -37,6 +37,7 @@ import { useDashboardStore, requestMapMode } from "../map/store";
 import Map from "../mapDemo";
 import { Panel } from "../Panel";
 import { Icon } from "../icons";
+import { DeviceFigure } from "../illustrations";
 import { StatusChip } from "../ui";
 import { useMumai } from "../context";
 import { STATUS_ACTION, STATUS_COLOR, STATUS_TEXT } from "../map/status";
@@ -204,6 +205,14 @@ function DevicePanel() {
       title="设备状态"
       extra={<span className="muted">{MISSION.mapVersion}</span>}
       className="ov__panel">
+      {/*
+        PRD §5 任务总览：「插图限设备摘要，不覆盖地图和任务信息」——
+        所以插图只出现在左栏这张设备摘要卡里，地图与右侧工单区完全不受影响。
+        PRD §3.1 / §5 又要求 I02「可在待接入引导使用概念图，不放在『设备实拍』标题下」：
+        真车是一台尚未接入的实体（DEVICES.realCart 只读监视），这里用概念图给它一个
+        视觉落点。caption 只写「待接入」——「概念示意」由 DeviceFigure 依据
+        illustrationManifest 的 conceptPlaceholder 自动补，不在这里重复写。
+      */}
       <ul className="ov-devices">
         {devices.map((device) => (
           <li key={device.id}>
@@ -215,6 +224,8 @@ function DevicePanel() {
           </li>
         ))}
       </ul>
+
+      <DeviceFigure id="i02-cart-concept" caption="巡检车（待接入）" height={104} />
 
       <h4 className="ov-sec">数据通道</h4>
       <ul className="ov-channels">
@@ -393,7 +404,8 @@ function RiskOrderPanel() {
             className="btn btn--primary ov-coc__go"
             onClick={() => navigate(`/orders?order=${selected.id}`)}>
             查看工单
-            <Icon name="arrow" />
+            {/* PRD §3.3：arrow 保留原图标（新包没有同义替代），只统一到 20px 操作档 */}
+            <Icon name="arrow" size={20} aria-hidden />
           </button>
         </div>
       </article>
@@ -559,12 +571,16 @@ export default function Overview() {
             }
           }}>
           {mode === "china" ? "进入上海" : "返回全国"}
-          <Icon name="arrow" />
+          <Icon name="arrow" size={20} aria-hidden />
         </button>
       </div>
 
       <div className="ov__hint">
-        <Icon name="pin" /> 点击点位查看工单与勘察记录
+        {/*
+          PRD §3.3：「真地图定位保留 pin」。这里是地图上的点位提示，
+          属于真实地图定位语义，不用 biz-manual-mark（那是人工标记）。
+        */}
+        <Icon name="pin" size={16} aria-hidden /> 点击点位查看工单与勘察记录
       </div>
 
       <footer className="ov__foot">

@@ -103,6 +103,31 @@
   font-size: var(--fs-aux);
 }
 
+/*
+ * 检索空态（UI 素材 v2.0：I05 只用于空态/引导，PRD §5）。
+ * 插图在上、状态块在下，整体居中但不撑高：空态本就该是这一格里最轻的内容，
+ * 高度限制在 140px，保证有命中时列表回到同样的位置，不发生跳动。
+ */
+.kb-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2) 0;
+}
+
+.kb-empty .mumai-illustration {
+  opacity: 0.85;
+}
+
+.kb-empty .state-block {
+  margin-top: 0;
+  width: 100%;
+  max-width: 420px;
+}
+
 /* 窄档：证据列表与原文改为上下排列，避免两列都被挤成一条 */
 @media (max-width: 1500px) {
   .kb-ask__body {

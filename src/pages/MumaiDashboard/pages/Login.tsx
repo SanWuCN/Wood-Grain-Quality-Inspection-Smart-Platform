@@ -27,8 +27,12 @@ import { Navigate, useLocation, useNavigate } from "react-router";
 import { gsap } from "gsap";
 import { dropInvalidSession, login, readSession, workspacePath, writeSession } from "../auth";
 import { Icon } from "../icons";
+import { Illustration } from "../illustrations";
 import "../appshell.css";
 import "../pages.css";
+// UI 视觉素材 v2.0：登录页在外壳之外，需要自己引入主题作用域与图标/插图样式（PRD §4）
+import "../styles/ui-assets-v2.css";
+import "../ui-assets-v2-icons.css";
 import "./login.css";
 
 /** 入场编排：与 --motion-page(560ms) 同一量级，整体 1.0s 收尾（规范 §6.2） */
@@ -301,9 +305,19 @@ export function Login() {
     `login__field ${error && !value ? "is-error" : ""}`.trim();
 
   return (
-    <div className="login" ref={rootRef}>
-      {/* 背景四层统一放进 .login__bg：作为一个整体在卡片之下，也整体先淡入 */}
+    <div className="login mumai-ui-v2" ref={rootRef}>
+      {/*
+        背景各层统一放进 .login__bg：作为一个整体在卡片之下，也整体先淡入。
+        UI 素材 v2.0（PRD §5「登录与项目入口：可接 I01 主视觉和低对比背景层，
+        登录表单仍是主操作；已有合适布局可少改」）：
+          · I01 低对比背景层 —— 铺满视口，只提供木构氛围，对比度不足以抢焦点
+          · I01 主视觉      —— 落在卡片左栏（品牌区）之上，压到很低的透明度
+        两张图都走 illustrationManifest 的 id，不写文件路径；
+        且都是纯装饰，alt 传空字符串（对辅助技术隐藏）。
+      */}
       <div className="login__bg" aria-hidden="true">
+        <Illustration id="i01-background" backdrop alt="" className="login__photo--bg" />
+        <Illustration id="i01-hero" backdrop alt="" className="login__photo--hero" />
         <div className="login__grid" />
         <div className="login__terrain" ref={terrainRef}>
           <ContourLines />
@@ -345,7 +359,8 @@ export function Login() {
           <label className={fieldClass(loginName)}>
             <span>账号（姓名拼音）</span>
             <span className="login__control">
-              <Icon className="login__control-icon" name="user" />
+              {/* PRD §3.3：user → identity-user（账号身份） */}
+              <Icon className="login__control-icon" name="identity-user" size={16} aria-hidden />
               <input
                 name="login"
                 value={loginName}
@@ -365,7 +380,13 @@ export function Login() {
           <label className={fieldClass(password)}>
             <span>密码</span>
             <span className="login__control">
-              <Icon className="login__control-icon" name="order" />
+              {/*
+                密码字段原本借用 order（工单）图标，语义不对。
+                v2 素材提供了 status-lock（锁），是密码输入的标准语义；
+                它同时是「状态」类图标，但这里表达的是「需要凭据」，不涉及设备在线状态，
+                与 PRD §4「禁用不能代表设备离线」那条约束不冲突。
+              */}
+              <Icon className="login__control-icon" name="status-lock" size={16} aria-hidden />
               <input
                 name="password"
                 type="password"
@@ -384,7 +405,8 @@ export function Login() {
           <p className="login__error" role="alert">
             {error ? (
               <>
-                <Icon name="alert" />
+                {/* PRD §3.3：alert → status-warning；错误用 error tone，同时有文字，不只靠颜色 */}
+                <Icon name="status-warning" size={16} tone="error" aria-hidden />
                 {error}
               </>
             ) : null}
@@ -406,7 +428,8 @@ export function Login() {
             ) : (
               <>
                 登录
-                <Icon name="arrow" />
+                {/* PRD §3.3：arrow 保留原图标 */}
+                <Icon name="arrow" size={20} aria-hidden />
               </>
             )}
           </button>

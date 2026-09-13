@@ -110,8 +110,16 @@
   transition: border-color var(--motion-fast), background var(--motion-fast);
 }
 
+/*
+  顶栏动作按钮里的图标尺寸。
+  UI 素材 v2.0 起改读 --mumai-icon-size（由 Icon 组件按 size 属性写入）：
+  原来这里写死 14px 会把组件的 size 覆盖掉（CSS 宽度优先于 SVG 的 width 属性），
+  正是 PRD §3.2「旧组件调用方若通过 CSS 设置宽高，迁移时检查覆盖关系，
+  避免 size 属性无效」点名的情形。fallback 20px 对应 PRD §4「工具栏 16 至 20px」。
+*/
 .appshell__present svg {
-  width: 14px;
+  width: var(--mumai-icon-size, 20px);
+  height: var(--mumai-icon-size, 20px);
 }
 
 .appshell__present:hover {
@@ -231,8 +239,34 @@
   transition: background var(--motion-fast);
 }
 
-.appshell__fab svg {
-  width: 22px;
+/*
+  小木浮标内容物（UI 素材 v2.0 起）。
+  PRD §5 要求入口头像 32–40px，但 52px 圆里只有 34px 的画面，I04 实拍头像缩到
+  这个尺寸后主体只剩十几个像素、在深底上几乎看不出是什么。因此按 PRD 的
+  「16/24px 使用线性图标」做**分层呈现**：
+    收起态 → 线性小木标识（24px，形状在小尺寸下仍可辨）
+    展开态 → I04 实拍头像（34px，落在 32–40px 区间内）
+  两者都是素材包内的正式资源。切换只改 display，不做动画，避免浮标抖动。
+*/
+.appshell__fab img {
+  width: 34px;
+  height: 34px;
+  /* 头像按有效内容微调裁切，不切掉头部（PRD §5） */
+  object-fit: contain;
+  border-radius: 50%;
+  display: none;
+}
+
+.appshell__fab .appshell__fab-icon {
+  display: block;
+}
+
+.appshell__fab.is-open img {
+  display: block;
+}
+
+.appshell__fab.is-open .appshell__fab-icon {
+  display: none;
 }
 
 .appshell__fab span {
@@ -445,7 +479,10 @@
 
 @media (max-height: 800px) {
   .appshell__fab { width: 44px; height: 44px; bottom: 42px; }
-  .appshell__fab svg { width: 18px; }
+  /* 小木线性标识从 24px 收到 20px，仍落在 PRD §3.2 的允许档位内 */
+  .appshell__fab svg { width: 20px; }
+  /* 展开态的 I04 头像仍落在 PRD §5 的 32–40px 区间内 */
+  .appshell__fab img { width: 32px; height: 32px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -22,6 +22,7 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { Panel } from "../Panel";
 import { Btn, DataTable, Modal, SourceTag, StateBlock, StatusChip, WaveChart } from "../ui";
+import { Icon } from "../icons";
 import { useMumai } from "../context";
 import {
   BOOT_CHECKS,
@@ -202,6 +203,17 @@ export function CaptureTab() {
   const [signed, setSigned] = useState<Record<string, string>>({});
   /** 启动检查弹窗：清单与签署在二级窗口里，一级页面只留状态 */
   const [checkOpen, setCheckOpen] = useState(false);
+  /**
+   * 人工标记（PRD §5「人工标记用新笔形图标」/ §8「操作…人工标记入口…可逆页面交互」）。
+   *
+   * 这是**页面内的可逆操作**：标记只加在这份本地列表里，不写回种子、不发设备指令、
+   * 不触发任何运动（PRD §6 第五阶段：「素材测试不触发运动指令」）。
+   * 换批次时清空，避免上一批的标记落到下一批的波形上。
+   *
+   * 这里刻意不改 waveMarkers 的业务结论 —— 种子里的标记是数据，
+   * 人工标记是操作痕迹，两者在图上分开着色，不混淆。
+   */
+  const [manualMarks, setManualMarks] = useState<{ x: number; label: string }[]>([]);
 
   const selectBatch = (nextBatchId: string) => {
     const next = new URLSearchParams(params);
@@ -212,6 +224,8 @@ export function CaptureTab() {
     setPhase("idle");
     setSigned({});
     setCheckOpen(false);
+    // 人工标记同样不跨批次携带
+    setManualMarks([]);
   };
 
   const allSigned = Object.keys(signed).length === BOOT_CHECKS.length;
@@ -424,14 +438,78 @@ export function CaptureTab() {
           </Panel>
         )}
 
-        <Panel title="接收情况" className="cap-panel">
+        <Panel
+          title="接收情况"
+          extra={
+            /*
+              人工标记入口（PRD §5 / §8）。
+              这是「可逆页面交互」：标记加在本地列表里，可以逐条撤掉，
+              不写回种子、不下发设备指令、不触发运动（PRD §6 第五阶段）。
+              纯图标按钮给中文 aria-label（PRD §3.2）。
+            */
+            <span className="cap-mark">
+              {manualMarks.length > 0 ? (
+                <em>
+                  人工标记 {manualMarks.length} 处
+                  <button
+                    type="button"
+                    className="cap-mark__clear"
+                    onClick={() => {
+                      setManualMarks([]);
+                      toast("已清除本次的人工标记", "info");
+                    }}>
+                    清除
+                  </button>
+                </em>
+              ) : null}
+              <Btn
+                tone="ghost"
+                disabled={!(waveform?.points?.length ?? 0)}
+                onClick={() => {
+                  const points = waveform?.points ?? [];
+                  if (points.length === 0) return;
+                  /*
+                    落在当前最强回波上：标记的意义是「我觉得这个频点要看」，
+                    所以默认取幅值最大的那个点，而不是随便取中点。
+                    同一点重复标记时序号递进，看得出是两次操作。
+                  */
+                  let peak = 0;
+                  points.forEach((point, index) => {
+                    if (point.y > points[peak].y) peak = index;
+                  });
+                  const at = points[peak].x;
+                  const existing = manualMarks.filter((mark) => mark.x === at).length;
+                  setManualMarks([
+                    ...manualMarks,
+                    { x: at, label: existing > 0 ? `人工标记 ${existing + 1}` : "人工标记" },
+                  ]);
+                  pushEvent(
+                    `批次 ${batch.batchId} 在频点 ${at.toFixed(4)} 添加人工标记`,
+                    "info",
+                  );
+                  toast("已在该频点添加人工标记", "ok");
+                }}
+                title="在实时波形上添加人工标记（仅本次页面操作，可清除）">
+                <Icon name="biz-manual-mark" size={16} aria-hidden />
+                人工标记
+              </Btn>
+            </span>
+          }
+          className="cap-panel">
           <DataTable head={["数据类型", "已接收 / 预期", "状态"]} rows={receiveRows} />
           <h4 className="sub">实时波形</h4>
           <WaveChart
             points={waveform?.points ?? []}
             unit={waveform?.unit}
             axisLabel={waveform?.axisLabel}
-            markers={waveform?.markers ?? []}
+            /*
+              报告里的标记（种子数据）用红色，人工标记用青色分开着色 ——
+              两者语义不同，不能让操作痕迹看起来像系统结论。
+            */
+            markers={[
+              ...(waveform?.markers ?? []),
+              ...manualMarks.map((mark) => ({ ...mark, tone: "cyan" as const })),
+            ]}
           />
         </Panel>
 

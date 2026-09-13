@@ -895,7 +895,13 @@ export default function Twin() {
               <ul className="scene-checks">
                 {(currentSceneEntity.data.checkResult?.checks ?? []).map((check) => (
                   <li key={check.key} className={check.pass ? "is-ok" : "is-bad"}>
-                    <Icon name={check.pass ? "check" : "alert"} />
+                    {/* 场景校验结果：完成/告警语义，用 status-*，与工单页口径一致 */}
+                    <Icon
+                      name={check.pass ? "status-success" : "status-warning"}
+                      size={16}
+                      tone={check.pass ? "success" : "warning"}
+                      aria-hidden
+                    />
                     {check.label}
                     <em>{check.detail}</em>
                   </li>

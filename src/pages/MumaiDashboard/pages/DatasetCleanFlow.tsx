@@ -98,6 +98,8 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
     <>
       <Panel
         title="数据集清洗"
+        /* PRD §5「固件及模型：清洗、分组、适配、校验使用业务图标」 */
+        icon="biz-data-cleaning"
         extra={
           stage === "versioned" ? (
             <StatusChip text={versionLabel ?? "已生成"} tone="ok" />

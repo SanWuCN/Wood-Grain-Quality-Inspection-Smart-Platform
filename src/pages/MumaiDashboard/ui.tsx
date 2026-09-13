@@ -550,7 +550,8 @@ export function Modal({
             {subtitle ? <p className="modal__sub">{subtitle}</p> : null}
           </div>
           <button type="button" className="modal__close" onClick={onClose} aria-label="关闭">
-            <Icon name="close" />
+            {/* PRD §3.3：close → action-close。纯图标按钮的可访问名在外层 button 上 */}
+            <Icon name="action-close" size={16} aria-hidden />
           </button>
         </header>
         <div className="modal__body">{children}</div>
