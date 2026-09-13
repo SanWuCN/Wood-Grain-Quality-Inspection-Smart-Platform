@@ -20,49 +20,15 @@
 
 import { CanvasTexture, SRGBColorSpace, type Texture } from "three";
 
-/** GeoJSON MultiPolygon 的 coordinates */
-export interface SurfaceRegion {
-  name: string;
-  polygons: number[][][][];
-}
-
 export interface MapSurfaceOptions {
   /** DEM 彩色地形图（已按经纬度包围盒裁好，见 tools/build-terrain.mjs） */
   surface: CanvasImageSource & { width: number; height: number };
-  regions: SurfaceRegion[];
   /** 输出长边上限 */
   maxSize?: number;
   /** 低地颜色 */
   lowColor?: [number, number, number];
   /** 高地颜色 */
   highColor?: [number, number, number];
-  /** 行政边界颜色 */
-  borderColor?: string;
-  /** 边界线宽（贴图像素） */
-  borderWidth?: number;
-}
-
-const mercY = (lat: number) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
-
-/** 经纬度包围盒（取所有环，与 tools/build-terrain.mjs 的口径一致） */
-function lngLatBounds(regions: SurfaceRegion[]) {
-  let minLng = Infinity;
-  let minLat = Infinity;
-  let maxLng = -Infinity;
-  let maxLat = -Infinity;
-  for (const region of regions) {
-    for (const polygon of region.polygons) {
-      for (const ring of polygon) {
-        for (const [lng, lat] of ring) {
-          if (lng < minLng) minLng = lng;
-          if (lng > maxLng) maxLng = lng;
-          if (lat < minLat) minLat = lat;
-          if (lat > maxLat) maxLat = lat;
-        }
-      }
-    }
-  }
-  return { minLng, minLat, maxLng, maxLat };
 }
 
 /** 取亮度分位数，用来做局部对比拉伸（避免整体偏暗或整体过曝） */
@@ -101,15 +67,14 @@ function luminanceRange(data: Uint8ClampedArray, lowPct = 0.02, highPct = 0.985)
 export function createMapSurfaceTexture(options: MapSurfaceOptions): Texture {
   const {
     surface,
-    regions,
     maxSize = 2048,
     // 《视觉设计规范 v1.0》§5.2：地图主体 #526B80（冷灰蓝 / 金属蓝灰）、
     // 地图轮廓 #63CBFF。这里把主体色当作色带中值向两端拉开明暗，
     // 既守住规范的中性冷灰蓝基调，又保留地形起伏的可读性。
     lowColor = [45, 63, 79],
     highColor = [150, 178, 200],
-    borderColor = "#63CBFF",
-    borderWidth = 3.4,
+
+
   } = options;
 
   const srcW = surface.width;
@@ -157,47 +122,16 @@ export function createMapSurfaceTexture(options: MapSurfaceOptions): Texture {
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, w, h);
 
-  // 3. 行政边界：先粗描一层做外发光，再叠一层细亮线做核心
-  const { minLng, minLat, maxLng, maxLat } = lngLatBounds(regions);
-  const spanLng = maxLng - minLng || 1;
-  const yTop = mercY(maxLat);
-  const spanMerc = yTop - mercY(minLat) || 1;
-  const toPx = (lng: number, lat: number): [number, number] => [
-    ((lng - minLng) / spanLng) * w,
-    ((yTop - mercY(lat)) / spanMerc) * h,
-  ];
-
-  const trace = () => {
-    ctx.beginPath();
-    for (const region of regions) {
-      for (const polygon of region.polygons) {
-        const ring = polygon[0];
-        if (!ring || ring.length < 3) continue;
-        for (let i = 0; i < ring.length; i++) {
-          const [x, y] = toPx(ring[i][0], ring[i][1]);
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.closePath();
-      }
-    }
-  };
-
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-
-  ctx.strokeStyle = "rgba(64,170,255,0.55)";
-  ctx.lineWidth = borderWidth * 3.2;
-  ctx.shadowColor = "rgba(110,200,255,0.9)";
-  ctx.shadowBlur = borderWidth * 3;
-  trace();
-  ctx.stroke();
-
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = borderColor;
-  ctx.lineWidth = borderWidth;
-  trace();
-  ctx.stroke();
+  /*
+   * 行政边界**不再烤进贴图**（⑥）。
+   *
+   * 这里原来画两层：一层 rgba(64,170,255,0.55) + shadowBlur 的辉光，
+   * 一层 #63CBFF 的亮蓝核心 —— 那就是「省界发蓝、发糊」的来源。
+   * Demo2 的省界是真实几何（lineSegments + lineBasicMaterial #ffffff），
+   * 贴图只负责地形。边界改由 base.tsx 的 <RegionEdges> 画。
+   *
+   * 顺带省掉两次全图路径描边（2048² 上 shadowBlur 很贵）。
+   */
 
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;

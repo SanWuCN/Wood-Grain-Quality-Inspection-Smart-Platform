@@ -2,15 +2,20 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Center, OrbitControls } from "@react-three/drei";
 import {
   Box2,
+  Box3,
+  ClampToEdgeWrapping,
+  DoubleSide,
   Fog,
+  LineSegments,
   Mesh,
+  NoColorSpace,
   ShaderMaterial,
   Shape,
+  ShapeGeometry,
+  Texture,
   Vector2,
   Vector3,
-  Box3,
   type Group,
-  type Texture,
 } from "three";
 import { geoMercator } from "d3-geo";
 import { useFrame, useThree } from "@react-three/fiber";
@@ -30,7 +35,9 @@ import { chinaSites, shanghaiSites } from "../data";
 import { useImage } from "./useImage";
 
 import chinaSurface from "@/assets/map/china_surface.png";
+import chinaNormal from "@/assets/map/china_normal.png";
 import shanghaiSurface from "@/assets/map/shanghai_surface.png";
+import shanghaiNormal from "@/assets/map/shanghai_normal.png";
 import Cones from "./cone";
 
 /**
@@ -231,17 +238,40 @@ export default function Base(props: BaseProps) {
     surfaceKey === "shanghai" ? shanghaiSurface : chinaSurface,
   );
 
+  /**
+   * 法线贴图（⑦）：Demo2 的顶面靠它出金属起伏。
+   *
+   * 法线贴图是**线性**数据，不能按 sRGB 解释 —— 设错会让起伏方向整体偏掉，
+   * 看起来像「地形被压平了」。
+   */
+  const normalImage = useImage(
+    surfaceKey === "shanghai" ? shanghaiNormal : chinaNormal,
+  );
+  const normalTexture = useMemo(() => {
+    if (!normalImage) return null;
+    const tex = new Texture(normalImage);
+    tex.colorSpace = NoColorSpace;
+    tex.wrapS = tex.wrapT = ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    return tex;
+  }, [normalImage]);
+
+  useEffect(
+    () => () => {
+      normalTexture?.dispose();
+    },
+    [normalTexture],
+  );
+
+  /** 起伏强度。Demo2 用默认 1；我们叠了 DEM 底图，0.9 更不容易出噪点 */
+  const normalScale = useMemo(() => new Vector2(0.9, 0.9), []);
+
   const mapTexture = useMemo(() => {
     if (!demImage) return null;
     return createMapSurfaceTexture({
       surface: demImage,
-      regions: data.features.map((feature) => ({
-        name: feature.properties.name,
-        polygons: feature.geometry.coordinates,
-      })),
       // 上海只有 922×1020，硬放大反而糊；按地图复杂度给不同精度
       maxSize: data.features.length > 20 ? 2048 : 1600,
-      borderWidth: data.features.length > 20 ? 3.4 : 2.6,
     });
   }, [demImage, data]);
 
@@ -365,8 +395,15 @@ export default function Base(props: BaseProps) {
       { x: 1, y: 1, z: 1, duration: 1, ease: "circ.out" },
       MAP_PUSH_DURATION,
     );
+    /*
+     * 淡入要连 LineSegments 一起推（⑥）。
+     *
+     * Demo2 的判据是 `obj instanceof Mesh || obj instanceof LineSegments`，
+     * 我们的移植版只写了 Mesh —— 于是省界白线的 opacity 永远停在 0，
+     * 这也是「Demo2 那三行白线在这个项目里丢了」的直接原因。
+     */
     group.traverse((obj) => {
-      if (obj instanceof Mesh) {
+      if (obj instanceof Mesh || obj instanceof LineSegments) {
         tl.to(
           obj.material,
           { opacity: 1, duration: 1, ease: "circ.out" },
@@ -410,7 +447,7 @@ export default function Base(props: BaseProps) {
       group.position.set(0, 0, 0);
       group.scale.set(1, 1, 1);
       group.traverse((obj) => {
-        if (obj instanceof Mesh) {
+        if (obj instanceof Mesh || obj instanceof LineSegments) {
           const list = Array.isArray(obj.material) ? obj.material : [obj.material];
           for (const material of list) material.opacity = 1;
         }
@@ -464,6 +501,8 @@ export default function Base(props: BaseProps) {
                   bbox={bbox}
                   data={region}
                   texture={mapTexture}
+                  normalTexture={normalTexture}
+                  normalScale={normalScale}
                   onClick={
                     region.name.startsWith("上海")
                       ? () => onSelectRegion?.(region.name)
@@ -536,17 +575,27 @@ function City(props: {
     center: Vector3;
     points: Vector2[][];
   };
-  /** 顶面贴图：DEM 明暗 + 行政边界，整幅共用一张；未加载完时为 null */
+  /** 顶面贴图：DEM 地形明暗，整幅共用一张；未加载完时为 null */
   texture: Texture | null;
+  /** 法线贴图：金属起伏（⑦） */
+  normalTexture: Texture | null;
+  normalScale: Vector2;
   /** 仅上海区域挂载：点击下钻到上海 */
   onClick?: () => void;
 }) {
-  const { bbox, data, depth, texture, onClick } = props;
+  const { bbox, data, depth, texture, normalTexture, normalScale, onClick } = props;
   const groupRef = useRef<Group>(null!);
   const materialRef = useRef<ShaderMaterial>(null!);
   const vector3 = useRef(new Vector3(1, 1, 1));
 
-  const shape = useMemo(() => data.points.map((e) => new Shape(e)), [data.points]);
+  /**
+   * 顶面几何。白线用它的边（⑥），所以必须留一份。
+   * Demo2 也是这么做的：shapeGeometry 既给 ShapeBox 也给 edgesGeometry。
+   */
+  const [shape, shapeGeometry] = useMemo(() => {
+    const shapes = data.points.map((e) => new Shape(e));
+    return [shapes, new ShapeGeometry(shapes)];
+  }, [data.points]);
 
   useFrame((_, delta) => {
     groupRef.current.scale.lerp(vector3.current, 0.1);
@@ -575,13 +624,26 @@ function City(props: {
       }}>
       <ShapeBox bbox={bbox} args={[shape, { depth, bevelEnabled: false }]}>
         {/*
-          顶面改成不受光照影响的贴图。原 Demo2 用 meshStandardMaterial + 法线贴图，
-          但方向光在地图背面，换个地区就没光了 —— 缩到总览整块地图一片死黑。
+          顶面：Demo2 的冷灰金属语言（⑦）。
+
+          两处**有意**的偏离，都因为我们的地图与 Demo2 规模不同：
+            · 保留 DEM 贴图当 diffuse。用户要求「保留山脉起伏细节」
+              「青藏高原、西南山地必须能清楚看到地形纹理」，
+              Demo2 那种纯 #293b41 平色做不到。
+            · 基色由 #293b41 提到 #8ea6bd。Demo2 场景里只有四川一块，
+              我们的地图大 13 倍、还带雾，照抄会整体压暗成黑影 ——
+              上一轮就是撞上这个才退回了 basic 材质。
+          metalness / roughness / normalMap 保持 Demo2 原值。
         */}
-        <meshBasicMaterial
+        <meshStandardMaterial
           attach="material-0"
           map={texture ?? undefined}
-          color={texture ? "#ffffff" : "#28486e"}
+          normalMap={normalTexture ?? undefined}
+          normalScale={normalScale}
+          color={texture ? "#8ea6bd" : "#28486e"}
+          metalness={0.5}
+          roughness={0.7}
+          side={DoubleSide}
           transparent
           opacity={0}
         />
@@ -593,6 +655,15 @@ function City(props: {
           depth={depth}
         />
       </ShapeBox>
+      {/*
+        行政区内部边界（⑥）—— Demo2 base.tsx 的同款做法：
+        edgesGeometry 取顶面几何的边，lineBasicMaterial 纯白细线。
+        position.z 抬到 depth 之上，否则会被顶面 z-fighting 吃掉。
+      */}
+      <lineSegments position={[0, 0, depth + 0.05]} raycast={() => null}>
+        <edgesGeometry args={[shapeGeometry]} />
+        <lineBasicMaterial transparent color="#ffffff" opacity={0} />
+      </lineSegments>
     </object3D>
   );
 }
