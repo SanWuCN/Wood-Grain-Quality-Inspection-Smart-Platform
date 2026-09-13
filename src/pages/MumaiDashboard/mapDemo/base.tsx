@@ -264,7 +264,13 @@ export default function Base(props: BaseProps) {
   );
 
   /** 起伏强度。Demo2 用默认 1；我们叠了 DEM 底图，0.9 更不容易出噪点 */
-  const normalScale = useMemo(() => new Vector2(0.9, 0.9), []);
+  /**
+   * 起伏强度由 0.9 提到 1.15。
+   *
+   * 上一轮截图里顶面读起来像一块平白 —— 地形是有了但不够"立"。
+   * 提到 1.15 让山脊与河谷的明暗差更明确，同时还没到出噪点的程度。
+   */
+  const normalScale = useMemo(() => new Vector2(1.15, 1.15), []);
 
   const mapTexture = useMemo(() => {
     if (!demImage) return null;
@@ -344,7 +350,14 @@ export default function Base(props: BaseProps) {
      * 整幅图被均匀压暗 —— 这是"灰蒙蒙"的直接来源。推到 1.7 倍之后只有最远端
      * 吃到一点雾，保留纵深提示但不吃主体。
      */
-    scene.fog = new Fog("#000000", fitDistance * 1.7, fitDistance * 3.1);
+    /*
+     * 雾起点由 1.7 收回 1.3 倍。
+     *
+     * 1.7 时雾几乎不起作用，地图远端与近端一样亮，整块顶面糊成一片白。
+     * 1.3 让远端有一点纵深衰减 —— 顶面的明度差由此建立，
+     * 侧壁的深蓝也才压得住顶面。
+     */
+    scene.fog = new Fog("#000000", fitDistance * 1.3, fitDistance * 2.8);
     return () => {
       scene.fog = null;
     };
@@ -666,7 +679,14 @@ function City(props: {
           map={texture ?? undefined}
           normalMap={normalTexture ?? undefined}
           normalScale={normalScale}
-          color={texture ? "#b9cbdc" : "#28486e"}
+          /*
+           * 基色由 #b9cbdc 收回 #93aabf。
+           *
+           * 上一轮为救回可见性提到了接近白；能看见之后立刻显出问题：
+           * 顶面太亮，与侧壁的蓝糊成一片，四层分不开。收回一档冷灰蓝，
+           * 顶面才回到 Demo2 那种「冷灰金属」的语气。
+           */
+          color={texture ? "#93aabf" : "#28486e"}
           /*
            * metalness / roughness 相对 Demo2 调过（0.5/0.7 → 0.32/0.55）。
            *
