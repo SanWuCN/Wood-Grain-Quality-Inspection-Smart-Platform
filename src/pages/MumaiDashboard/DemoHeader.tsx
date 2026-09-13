@@ -19,6 +19,7 @@
 import { useMemo } from "react";
 import type { ComponentProps, ReactNode } from "react";
 import styled from "styled-components";
+import NumberAnimation from "@/components/numberAnimation";
 import { ACCOUNTS, COLORS, HEADER_HEIGHT } from "./design";
 import { Icon, type IconName } from "./icons";
 import PillNav, { type PillNavItem } from "./PillNav";
@@ -281,16 +282,17 @@ const NavLayer = styled(PillNav)`
     display: block;
     border-radius: 50%;
     /*
-      悬停填色：--glow-cyan 的淡青渐变 + 顶部一道高光边，不是实心亮色。
+      悬停填色：从底边亮到中间暗的「青色玻璃」渐变 ——
 
-      实心 #5DE4FF 会把整枚药丸点亮，在深蓝黑顶栏里跳得厉害，还必须把文字与图标
-      一起压成深色才读得清，与规范 §11「普通交互不发光、减少彩色」相冲。
-      改成淡青底 + 亮字之后强度落在平台既有的选中底色那一档（--fill-*）；
-      渐变让圆长上来时有体积感（配合 PillNav 里那段 1.06→1 的弹出），
-      不是一块平铺的色。
+      上一版用 14% 的平涂淡青，实测叠在顶栏底色上只有 rgb(14,38,53)，
+      与「已选中」药丸的蓝底 rgb(27,56,89) 几乎分不出来 —— 用户看到的是
+      「旁边那一枚怎么一直是暗的」，读起来就像状态没清掉。
+      现在底边用 --fill-glow-strong、往中间收到 --fill-glow：中段压在文字上仍是
+      深底（亮字的对比度不受影响），但整枚药丸的青色调一眼可见，
+      而且明显比选中项更「青」，不会和选中态混淆。
     */
-    background-image: linear-gradient(0deg, rgba(93, 228, 255, 0.2), rgba(93, 228, 255, 0.08));
-    box-shadow: inset 0 1px 0 0 rgba(93, 228, 255, 0.55);
+    background-image: linear-gradient(0deg, var(--fill-glow-strong), var(--fill-glow));
+    box-shadow: inset 0 1px 0 0 rgba(93, 228, 255, 0.7);
     pointer-events: none;
     will-change: transform;
   }
@@ -359,7 +361,8 @@ const NavLayer = styled(PillNav)`
 
   /*
     减少动态效果（规范 §6.2 / 评审 V13）：不跑 gsap 的滚入动效，
-    悬停改为静态底色，行为仍然明确。
+    悬停改为静态底色 —— 这一档没有圆，底色要更实、文字要转深色才读得清，
+    因此这里的取色与有动画时相反（那边是青色玻璃底 + 亮字）。
   */
   @media (prefers-reduced-motion: reduce) {
     .mumai-pill {
@@ -369,7 +372,17 @@ const NavLayer = styled(PillNav)`
     .mumai-pill:hover,
     .mumai-pill:focus-visible {
       background: var(--fill-strong);
-      color: var(--text-primary);
+      border-color: var(--border-hover);
+    }
+
+    && .mumai-pill:hover,
+    && .mumai-pill:focus-visible {
+      color: var(--bg-page);
+    }
+
+    && .mumai-pill:hover .mumai-icon,
+    && .mumai-pill:focus-visible .mumai-icon {
+      color: var(--bg-page);
     }
 
     .mumai-pill-circle {
@@ -616,9 +629,32 @@ export default function DemoHeader(props: DemoHeaderProps) {
           {/*
             「设备在线 4/4」原来写死 —— 现在由 Shell 按顶栏右侧那四项现算，
             掉线时数字会跟着变，不会再出现「扫描仪离线但右上角仍写 4/4」。
+
+            分子与分母都交给 `NumberAnimation`：只看分母动、分子不动的话，
+            某一格掉线那一刻反而看不出是哪一边变了。两边都是整数（`digits` 默认
+            由 sample 决定 = 0 位小数），并且组件带 tabular-nums，
+            所以从「0/4」滚到「4/4」的过程中右邻的 `<time>` 不会被挤动。
+            `statusSummary` 整个缺席时才落回原来的单个「—」：这时候没有任何
+            一项状态可数，写「—/—」会像「两个数都没采到」，比现在这版更含糊。
           */}
-          状态正常 <b>{statusSummary ? `${statusSummary.ok}/${statusSummary.total}` : "—"}</b>
+          状态正常{" "}
+          <b>
+            {statusSummary ? (
+              <>
+                <NumberAnimation value={statusSummary.ok} />
+                {"/"}
+                <NumberAnimation value={statusSummary.total} />
+              </>
+            ) : (
+              "—"
+            )}
+          </b>
         </span>
+        {/*
+          时钟不动：它每秒都重渲染一次，本来就是「直接落值」的文本 ——
+          给它上补间等于每 1 秒起一段 0.8s 的动画，两段首尾相咬，
+          屏幕上的秒数会永远追不上真实时间。会话号、seq 之类的标识同理。
+        */}
         <time>{time.toLocaleTimeString("zh-CN", { hour12: false })}</time>
         {actions}
         {onAccountChange ? (

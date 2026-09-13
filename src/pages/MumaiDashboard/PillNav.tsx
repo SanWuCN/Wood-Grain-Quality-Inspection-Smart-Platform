@@ -66,13 +66,12 @@ export interface PillNavProps {
  * 高亮动效的时长（秒）。
  *
  * 0.26s 落在规范 §6.2 的 micro-interaction 档（180–260ms）内 ——
- * 上一版 0.32s 略超出这一档，手感上就是「慢半拍」。收起比展开更快（0.18s），
- * 指针扫过一排药丸时不会拖尾。
+ * 上一版 0.32s 略超出这一档，手感上就是「慢半拍」。
+ * 收起 0.16s 比展开更快：指针扫过一排药丸时，上一枚必须比下一枚填得更快，
+ * 否则会出现「两枚同时是亮的」——用户看到的就是上一个 bug 视频里的样子。
  */
 const DUR_FILL = 0.26;
-const DUR_OUT = 0.18;
-/** 文字与图标换色：比圆的位移快，手快速划过时颜色不会慢半拍 */
-const DUR_TINT = 0.1;
+const DUR_OUT = 0.16;
 
 /**
  * 圆的最终缩放。
@@ -171,12 +170,13 @@ export default function PillNav({
         /** 文字整体上移一个药丸高 + 8px（规范 §4 的图标—标签间距也是 8px） */
         const shift = height + 8;
 
-        /** 圆与文字/图标的终态色：进入补间与「直接落位」两条路径共用同一份定义 */
-        const HOT_COLOR = "var(--text-primary)";
-
-        /** 滚入层压在淡青圆上，用最亮的文字色 —— 与 CSS 的 .is-hot 规则一致 */
-        const setColor = (isHot: boolean) => {
-          if (isHot) gsap.set([pill, roll], { color: HOT_COLOR });
+        /**
+         * 只有「减少动态效果」那条路需要写文字色：那条路没有圆，靠 CSS 的静态
+         * 悬停底色（--fill-strong 亮底）来表达，文字必须转深色才读得清。
+         * 有动画时文字始终是 --text-primary，由 CSS 的 .is-hot 规则给，这里不碰。
+         */
+        const landColor = (isHot: boolean) => {
+          if (isHot) gsap.set([pill, roll], { color: "var(--bg-page)" });
           else gsap.set([pill, roll], { clearProps: "color" });
         };
 
@@ -184,17 +184,17 @@ export default function PillNav({
           gsap.set(circle, { scale: isHot ? FILL_SCALE : 0 });
           gsap.set(stack, { y: isHot ? -shift : 0, opacity: isHot ? 0 : 1 });
           gsap.set(roll, { y: isHot ? 0 : shift, opacity: isHot ? 1 : 0 });
-          setColor(isHot);
         };
 
         if (reduced) {
           /*
-            不跑动画：圆留在 0 缩放，颜色变化交给 CSS 的悬停静态态，
-            因此这里连 color 都不写，只把两层内容摆回基准位置。
+            不跑动画：圆留在 0 缩放，底色变化交给 CSS 的悬停静态态，
+            这里只把两层内容摆回基准位置、并把文字落位。
           */
           gsap.set(circle, { xPercent: -50, scale: 0, transformOrigin: "50% 100%" });
           gsap.set(stack, { y: 0, opacity: 1 });
           gsap.set(roll, { y: shift, opacity: 0 });
+          gsap.set(pill, { clearProps: "color" });
           continue;
         }
 
@@ -209,24 +209,31 @@ export default function PillNav({
            时间线上所有 tween 都带 overwrite: "auto" —— 上游的做法。
            tweenTo 会不断新建 tween，没有 overwrite 时新旧两段会同时写同一批
            属性，快速划过一排药丸就会出现「圆只填了一半」的残影。
+
+           这里**没有文字换色的 tween**：悬停时文字保持 --text-primary（由 CSS 的
+           .is-hot 规则给），所以不需要一条每帧写内联 color 的轨道 ——
+           那条轨道除了与 CSS 过渡互相插值（上一版的卡顿来源之一），
+           还会在圆还没填上来时先把文字点亮（暗底亮字先于亮底出现，看着更涩）。
         */
         /*
           圆的位移：先「弹」一下再落到终值。
           scale 从 1.06 收到 1（前 18%），看起来像圆从底下弹上来顶住药丸，
-          而不是匀速铺开 —— 上一版少了这一段，观感发涩。
-          注意**不能**在这里叠一个 gsap.fromTo：那会覆盖整条时间线对 scale 的
-          写入，进场正常、离场就再也缩放不回去了。
+          而不是匀速铺开。
+          注意**不能**在这里叠一个另起的 gsap.fromTo：那会覆盖整条时间线对 scale
+          的写入，进场正常、离场就再也缩放不回去了。
         */
-        tl.to(roll, { y: 0, opacity: 1, duration: DUR_FILL * 0.66, ease: "power3.out", overwrite: "auto" }, DUR_FILL * 0.34);
         tl.fromTo(
           circle,
           { scale: 1.06 },
           { scale: FILL_SCALE, duration: DUR_FILL * 0.18, ease: "power2.out", overwrite: "auto" },
           0,
         );
-        tl.to(stack, { y: -shift, opacity: 0, duration: DUR_FILL * 0.6, ease: "power3.out", overwrite: "auto" }, 0);
-        // 文字与图标换色：文字色比圆的位移快，视觉上「一进来就亮」
-        tl.to(pill, { color: HOT_COLOR, duration: DUR_TINT, ease: "power2.out", overwrite: "auto" }, 0);
+        tl.to(stack, { y: -shift, opacity: 0, duration: DUR_FILL * 0.62, ease: "power3.out", overwrite: "auto" }, 0);
+        /*
+          滚入的那一份在圆填到一半时进场（0.3 处）。它自己的颜色由 CSS 给定
+          （.mumai-pill.is-hot .mumai-pill-roll → --text-primary），这里不重复写。
+        */
+        tl.to(roll, { y: 0, opacity: 1, duration: DUR_FILL * 0.7, ease: "power3.out", overwrite: "auto" }, DUR_FILL * 0.3);
 
         let tween: gsap.core.Tween | null = null;
 
@@ -258,9 +265,9 @@ export default function PillNav({
               ease: "power3.out",
               overwrite: "auto",
               onComplete: () => {
-                // 反向走完把圆精确归零（中途改变窗口尺寸会留下残值），并撤掉内联文字色
+                // 反向走完把圆精确归零：中途改变窗口尺寸会让量出来的 scale 留下残值
                 gsap.set(circle, { scale: 0 });
-                setColor(false);
+                landColor(false);
               },
             });
           }
