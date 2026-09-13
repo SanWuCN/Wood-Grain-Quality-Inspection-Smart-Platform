@@ -62,11 +62,17 @@ export interface PillNavProps {
   ariaLabel?: string;
 }
 
-/** 滚入动效的时长（秒）。0.32s 落在规范 §6.2 的 micro-interaction 档（180–260ms）附近 */
-const DUR_FILL = 0.32;
-const DUR_OUT = 0.22;
+/**
+ * 高亮动效的时长（秒）。
+ *
+ * 0.26s 落在规范 §6.2 的 micro-interaction 档（180–260ms）内 ——
+ * 上一版 0.32s 略超出这一档，手感上就是「慢半拍」。收起比展开更快（0.18s），
+ * 指针扫过一排药丸时不会拖尾。
+ */
+const DUR_FILL = 0.26;
+const DUR_OUT = 0.18;
 /** 文字与图标换色：比圆的位移快，手快速划过时颜色不会慢半拍 */
-const DUR_TINT = 0.12;
+const DUR_TINT = 0.1;
 
 /**
  * 圆的最终缩放。
@@ -86,7 +92,10 @@ const FILL_SCALE = 1;
  * 这张表让「指针离开整条导航」这类收尾逻辑能一次把所有药丸落回常态，
  * 不需要在 DOM 上挂自定义属性。
  */
-const PILL_CONTROL = new WeakMap<HTMLElement, { enter: () => void; leave: () => void }>();
+const PILL_CONTROL = new WeakMap<
+  HTMLElement,
+  { enter: () => void; leave: () => void; sync: () => void }
+>();
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
@@ -201,33 +210,35 @@ export default function PillNav({
            tweenTo 会不断新建 tween，没有 overwrite 时新旧两段会同时写同一批
            属性，快速划过一排药丸就会出现「圆只填了一半」的残影。
         */
-        tl.to(circle, { scale: FILL_SCALE, duration: DUR_FILL, ease: "power3.out", overwrite: "auto" }, 0);
+        /*
+          圆的位移：先「弹」一下再落到终值。
+          scale 从 1.06 收到 1（前 18%），看起来像圆从底下弹上来顶住药丸，
+          而不是匀速铺开 —— 上一版少了这一段，观感发涩。
+          注意**不能**在这里叠一个 gsap.fromTo：那会覆盖整条时间线对 scale 的
+          写入，进场正常、离场就再也缩放不回去了。
+        */
+        tl.to(roll, { y: 0, opacity: 1, duration: DUR_FILL * 0.66, ease: "power3.out", overwrite: "auto" }, DUR_FILL * 0.34);
+        tl.fromTo(
+          circle,
+          { scale: 1.06 },
+          { scale: FILL_SCALE, duration: DUR_FILL * 0.18, ease: "power2.out", overwrite: "auto" },
+          0,
+        );
         tl.to(stack, { y: -shift, opacity: 0, duration: DUR_FILL * 0.6, ease: "power3.out", overwrite: "auto" }, 0);
         // 文字与图标换色：文字色比圆的位移快，视觉上「一进来就亮」
         tl.to(pill, { color: HOT_COLOR, duration: DUR_TINT, ease: "power2.out", overwrite: "auto" }, 0);
-        /*
-           滚入的那一份在圆填到一半时进场（0.34 处）。它自己的颜色由 CSS 给定
-           （.mumai-pill.is-hot .mumai-pill-roll → --text-primary），
-           这里不重复写，避免两处各说一套。
-        */
-        tl.to(roll, { y: 0, opacity: 1, duration: DUR_FILL * 0.66, ease: "power3.out", overwrite: "auto" }, DUR_FILL * 0.34);
 
         let tween: gsap.core.Tween | null = null;
-        let hot = false;
 
         /**
          * 高亮 / 收起。
          *
-         * hot 这个标记是**防卡死的关键**：pointerenter 与 pointerleave
-         * 可以在同一帧里前后脚到（手快速划过一排药丸、指针在边界抖动），
-         * 这时 tweenTo 建出来的补间还没跑第一帧就被下一次调用 kill 掉，
-         * 元素就停在「圆填了一半」或「圆填满了但指针已经走了」的状态上不动了。
-         * 有了标记，离开时只在**确实处于高亮态**才反向；万一反向补间也被打断，
-         * 下面 leave 里的 land(false) 直接落位，不会再留残影。
+         * 每次调用**都真的改变状态**，不做「已经是这个值就返回」的短路：
+         * 状态一旦因为丢事件而与 DOM 不一致，短路只会把错误状态永久锁住 ——
+         * 上一版正是这么卡住的（标记说「不高亮」，圆却还在药丸上）。
+         * 现在重复调用只是重复写一遍同样的值，代价可以忽略。
          */
         const setHot = (next: boolean) => {
-          if (next === hot) return;
-          hot = next;
           if (next) hotPills.add(pill);
           else hotPills.delete(pill);
 
@@ -261,8 +272,23 @@ export default function PillNav({
 
         const onEnter = () => setHot(true);
         const onLeave = () => setHot(false);
+        /** 看门狗用：这一枚此刻是否真的该处于高亮态 */
+        const shouldBeHot = () => pill.matches(":hover") || pill.contains(document.activeElement);
+        /**
+         * 看门狗用：把这一枚扳回事实状态。
+         *
+         * 这里**绕开 hot 标记**直接比对 DOM（is-hot 类）与事实：
+         * 标记本身也可能因为丢事件而与实际不一致，用它当参照物等于让两个
+         * 可能都错的东西互相印证。is-hot 类由 setHot 与 DOM 同步维护，
+         * 拿它当「界面现在看起来是什么样」的准绳最可靠。
+         */
+        const sync = () => {
+          const actual = pill.classList.contains("is-hot");
+          const expected = shouldBeHot();
+          if (actual !== expected) setHot(expected);
+        };
 
-        PILL_CONTROL.set(pill, { enter: onEnter, leave: onLeave });
+        PILL_CONTROL.set(pill, { enter: onEnter, leave: onLeave, sync });
 
         pill.addEventListener("pointerenter", onEnter);
         pill.addEventListener("pointerleave", onLeave);
@@ -285,21 +311,31 @@ export default function PillNav({
     build();
 
     /*
-       兜底：指针离开整条导航时，把所有药丸强制落回常态。
-       指针事件丢一个（切窗口、系统弹窗、鼠标移出浏览器）就可能留下一个
-       「填满但不该填」的圆，这条收尾保证界面不会卡在那个状态。
+       自愈看门狗。
+
+       指针事件是会丢的（切窗口、系统弹窗、缩放的瞬间、指针在药丸边界抖动），
+       上一版的做法是「给想到的每种情况补一条收尾」，那治不了没枚举到的那一种。
+       换个思路：**不猜事件，只看事实** —— 每个药丸的真实状态随时可以从
+       :hover 与 document.activeElement 读出来，于是只要两者与高亮标记不符，
+       就把它扳回来。用户划得再快、事件丢得再多次，界面最多错一帧。
+
+       pointermove 只在导航这一小条上触发（不像 document 那样全页监听），
+       一次遍历 8 个元素、只读 matches/contains，不做布局读写，代价可忽略。
     */
-    const onRootLeave = () => {
+    const syncHot = () => {
       for (const pill of Array.from(root.querySelectorAll<HTMLElement>(".mumai-pill"))) {
-        PILL_CONTROL.get(pill)?.leave();
+        PILL_CONTROL.get(pill)?.sync();
       }
     };
-    root.addEventListener("pointerleave", onRootLeave);
-    window.addEventListener("blur", onRootLeave);
+    root.addEventListener("pointermove", syncHot);
+    root.addEventListener("pointerleave", syncHot);
+    window.addEventListener("blur", syncHot);
 
     /*
        只在宽度真正变化时重建：字体加载完成、角色权限变化（导航项数量变了）
        都会让药丸宽度变，重建后圆才盖得满。高度变化不重建（避免悬停时抖动）。
+       重建之后立刻对齐一次状态：build() 会把「重建时高亮的」药丸按终态摆好，
+       而重建那一瞬间指针可能已经离开，得按事实纠正回来。
     */
     let lastWidth = 0;
     const observer = new ResizeObserver((entries) => {
@@ -307,11 +343,17 @@ export default function PillNav({
       if (Math.abs(width - lastWidth) < 1) return;
       lastWidth = width;
       build();
+      syncHot();
     });
     observer.observe(root);
 
     // 自托管字体会在首帧之后才生效，中文标签宽度会跳一次，那时必须重新量
-    document.fonts?.ready.then(build).catch(() => {});
+    document.fonts?.ready
+      .then(() => {
+        build();
+        syncHot();
+      })
+      .catch(() => {});
 
     const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
     const onMotionChange = () => build();
@@ -320,8 +362,9 @@ export default function PillNav({
     return () => {
       observer.disconnect();
       media?.removeEventListener?.("change", onMotionChange);
-      root.removeEventListener("pointerleave", onRootLeave);
-      window.removeEventListener("blur", onRootLeave);
+      root.removeEventListener("pointermove", syncHot);
+      root.removeEventListener("pointerleave", syncHot);
+      window.removeEventListener("blur", syncHot);
       cleanups.splice(0).forEach((fn) => fn());
     };
   }, [items, activeKey]);

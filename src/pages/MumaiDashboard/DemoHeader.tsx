@@ -200,14 +200,15 @@ const NavLayer = styled(PillNav)`
     border: 1px solid transparent;
     border-radius: 9999px;
     /*
-      background-color / color 交给 CSS 过渡（浅底 → 实心亮底这类颜色切换），
-      位移与缩放交给 gsap（圆的填充、文字的滚入滚出）。
-      两者分开，不会互相覆盖。
+      background-color / border-color 交给 CSS 过渡（悬停淡青底 → 选中底的切换）；
+      位移、缩放与**文字色**交给 gsap。
+
+      文字色必须排除在这条过渡之外：gsap 每帧都在写内联 color，浏览器再对每个
+      新值做一次 180ms 过渡，等于把同一条动画插值两遍 —— 手感就是「发涩、跟不上」。
     */
     transition:
       background-color var(--motion-fast, 180ms) ease,
-      border-color var(--motion-fast, 180ms) ease,
-      color var(--motion-fast, 180ms) ease;
+      border-color var(--motion-fast, 180ms) ease;
     background: transparent;
     color: var(--text-secondary);
     font-family: var(--font-ui);
@@ -280,16 +281,16 @@ const NavLayer = styled(PillNav)`
     display: block;
     border-radius: 50%;
     /*
-      悬停填色：--glow-cyan 的 14% 淡青，不是实心亮色。
+      悬停填色：--glow-cyan 的淡青渐变 + 顶部一道高光边，不是实心亮色。
 
-      上一个版本用实心 #5DE4FF 把整枚药丸点亮 —— 在深蓝黑顶栏里跳得厉害，
-      而且必须把文字与图标一起压成深色才读得清，与规范 §11「普通交互不发光、
-      减少彩色、减少无意义装饰」相冲。改成淡青底 + 亮字后：圆照样长出来、
-      长满整枚药丸，但强度落在平台既有的选中底色那一档（--fill-*），
-      和当前项是同一个音量，谁也不会盖过谁。
+      实心 #5DE4FF 会把整枚药丸点亮，在深蓝黑顶栏里跳得厉害，还必须把文字与图标
+      一起压成深色才读得清，与规范 §11「普通交互不发光、减少彩色」相冲。
+      改成淡青底 + 亮字之后强度落在平台既有的选中底色那一档（--fill-*）；
+      渐变让圆长上来时有体积感（配合 PillNav 里那段 1.06→1 的弹出），
+      不是一块平铺的色。
     */
-    background: rgba(93, 228, 255, 0.14);
-    box-shadow: inset 0 1px 0 0 rgba(93, 228, 255, 0.5);
+    background-image: linear-gradient(0deg, rgba(93, 228, 255, 0.2), rgba(93, 228, 255, 0.08));
+    box-shadow: inset 0 1px 0 0 rgba(93, 228, 255, 0.55);
     pointer-events: none;
     will-change: transform;
   }
