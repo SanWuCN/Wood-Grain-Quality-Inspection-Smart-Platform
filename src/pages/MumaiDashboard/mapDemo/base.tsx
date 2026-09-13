@@ -471,7 +471,21 @@ export default function Base(props: BaseProps) {
            * 所以省侧壁不点亮，另用外轮廓单独挤出一层来提供厚度。
            */
           if (material.userData?.skipReveal) continue;
-          tl.to(material, { opacity: 1, duration: 1, ease: "circ.out" }, MAP_PUSH_DURATION);
+          /*
+           * 分段揭示（Demo2 的加载流程）：底圈 → 地图轮廓 → 细节/贴图。
+           *
+           * 用户的原话是「一开始是一个底圈圈，然后是地图轮廓，然后是地图细节、
+           * 贴图」。所以各图元按 `userData.revealAt` 错开落位，而不是一起淡入：
+           *   OutlineBody 的侧壁（国境线轮廓）最先，紧跟镜头推完
+           *   省份顶面与地表贴图随后
+           *   省界白线最后，让边界「描」在已经铺好的地形上
+           * 没标 revealAt 的沿用 MAP_PUSH_DURATION（与 Demo2 同一时刻）。
+           */
+          const at =
+            typeof material.userData?.revealAt === "number"
+              ? (material.userData.revealAt as number)
+              : MAP_PUSH_DURATION;
+          tl.to(material, { opacity: 1, duration: 1, ease: "circ.out" }, at);
         }
       }
     });
@@ -526,7 +540,13 @@ export default function Base(props: BaseProps) {
 
     // 兜底：万一 gsap 因为掉帧 / HMR / StrictMode 重挂没跑完，也把画面推到终态，
     // 否则各材质会永远停在 opacity 0，整幅地图完全透明。
-    const safety = window.setTimeout(settle, (MAP_PUSH_DURATION + 1.4) * 1000);
+    /*
+     * 兜底推迟到 5.4s。
+     *
+     * 分段揭示最晚一段（省界白线）在 3.35s 起、4.35s 完；原来 3.9s 的兜底
+     * 会把最后一段硬切掉，前两段也就白分了。
+     */
+    const safety = window.setTimeout(settle, (MAP_PUSH_DURATION + 2.9) * 1000);
 
     return () => {
       window.clearTimeout(notify);
@@ -563,7 +583,7 @@ export default function Base(props: BaseProps) {
           for (const material of list) material.opacity = 1;
         }
       });
-    }, 5000);
+    }, 5600);
     return () => window.clearTimeout(timer);
   }, []);
 
@@ -791,6 +811,8 @@ function City(props: {
            * 顶面才回到 Demo2 那种「冷灰金属」的语气。
            */
           color={texture ? "#93aabf" : "#28486e"}
+          /* 第二阶段揭示：轮廓之后才铺地形 */
+          userData={{ revealAt: 3.05 }}
           /*
            * metalness / roughness 相对 Demo2 调过（0.5/0.7 → 0.32/0.55）。
            *
@@ -827,7 +849,13 @@ function City(props: {
       */}
       <lineSegments position={[0, 0, depth + 0.05]} raycast={() => null}>
         <edgesGeometry args={[shapeGeometry]} />
-        <lineBasicMaterial transparent color="#ffffff" opacity={0} />
+        {/* 第三阶段：省界白线最后描上，让边界落在已经铺好的地形上 */}
+        <lineBasicMaterial
+          transparent
+          color="#ffffff"
+          opacity={0}
+          userData={{ revealAt: 3.35 }}
+        />
       </lineSegments>
     </object3D>
   );
