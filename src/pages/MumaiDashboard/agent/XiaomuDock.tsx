@@ -23,7 +23,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Illustration } from "../illustrations";
+import XiaomuFace from "./XiaomuFace";
 import { ask, type Runtime } from "./executor";
 import { closeAgent, hasForeignModal, nextInteractionId } from "./api";
 import { useAgentNavigate, useAgentSession } from "./agentSession";
@@ -582,7 +582,18 @@ export default function XiaomuDock() {
         aria-label={`小木（${DOCK_STATE_LABEL[dockState]}），${visible ? "点击收起" : "点击展开"}`}
         title={`小木 · ${DOCK_STATE_LABEL[dockState]}（点击${visible ? "收起" : "展开"}，Esc 关闭）`}
       >
-        <Illustration id="i04-xiaomu" height={112} avatar className="xd__figure" alt="小木" />
+        {/*
+          形象本体换成**内联矢量角色**（`XiaomuFace`），不再是 I04 位图素材。
+
+          原来这里是一张静态素材 + 一圈会呼吸的光环，七个状态在形象上看不出差别：
+          图片里没有可以被单独选中的眼、眉、嘴，所以"状态"只能靠整张图晃一晃
+          和徽标文字表达。用户要的是"小木有具体的表情"，那就必须把五官画成元素。
+          素材本身没动 —— AppShell 的浮标与 SmallWoodPanel 还在用同一个 id。
+
+          状态**没有**再往下传一层 props：`.xd` 根节点上的 `data-state` 已经是
+          唯一来源，脸内部用 `.xd[data-state=…] .xf__…` 选择器取用（见 xiaomuDock.css）。
+        */}
+        <XiaomuFace />
         <span className="xd__ring" aria-hidden="true" />
         {/* 状态文字始终存在：关掉动效后仍能靠它分辨状态（FR-06） */}
         <span className="xd__badge">{DOCK_STATE_LABEL[dockState]}</span>

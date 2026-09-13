@@ -2,13 +2,16 @@
  * 右下角常驻小木与气泡（PRD FR-06 / FR-07 / AC-05）
  *
  * 尺寸与边距是按 PRD 的硬指标写的，不是随手调的：
- *   · 形象主体 72–96px          → 取 76px（含状态徽标后仍不超 96px）
- *   · 距右、下边缘 20–28px       → 取 24px
+ *   · 形象主体：FR-06 建议 72–96px，本处按用户要求放大到 **120px**
+ *                （短屏 ≤820px 收一档到 72；验收口径的上限见验收界面.mjs 的 avatarMax=128）
+ *   · 距右、下边缘 20–28px       → 取 24px（下边缘因避让浮标上移到 120，理由见 .xd 的注释）
  *   · 气泡最大宽度 420px         → max-width: 420px
  *   · 1366×768 下不遮挡超过约 1/4 → 气泡高度上限 46vh，且窄屏再收一档
  *
  * 动效只用 transform / opacity（PRD §9）：
  * 地图和三维页面是这个项目的性能瓶颈，动 width/box-shadow 会让它们掉帧。
+ * 形象本体是 `XiaomuFace.tsx` 的内联 SVG：五官形状按状态写死在 CSS 里，
+ * 动画只做叠加（细节见文件下半部分"脸"那一段的说明）。
  */
 
 .xd {
@@ -72,33 +75,37 @@
 .xd__avatar {
   position: relative;
   /*
-   * 形象尺寸：76 → **112**（用户要求"大一些"）。
-   * 放大后容器 bottom 必须同步抬高，否则会重新盖住右下角的「小木助手」浮标
-   * （`.appshell__fab`：right:16 / bottom:52 / 52×52）—— 那正是当初把
-   * bottom 从 24 改到 64 的原因。现在 bottom:120，形象占 120–232，
-   * 浮标占 52–104，两者不再相交。
+   * 形象尺寸：76 → 112 → **120**。
+   *
+   * 112 是用户"大一些"那一次定的；这次形象本体换成矢量脸之后又加了 8px：
+   * 五官（眼白 20 unit、瞳孔 10.8、眼睑线 3）在 112 下每个特征只有十几像素，
+   * 表情的细节——尤其"半闭的眼皮"和"两条眯眼线"——看不出区别。
+   * 120 仍在 FR-06 那份验收口径的上限 128 以内（验收界面.mjs 的 avatarMax）。
+   * 容器 bottom 不动：bottom:120 锚的是**下沿**，形象占 120–240，
+   * 右下角「小木助手」浮标（`.appshell__fab`：right:16 / bottom:52 / 52×52）
+   * 占 52–104，两者仍然不相交。
    */
-  width: 112px;
-  height: 112px;
+  width: 120px;
+  height: 120px;
   padding: 5px;
   border: none;
-  /* 方圆形：与 I04 素材本身的轮廓一致（那是个圆角方形音箱，不是圆脸） */
+  /* 方圆形：与小木那个圆角木块头的轮廓一致（不是圆脸） */
   border-radius: 26%;
-  background: radial-gradient(circle at 50% 34%, #ffffff 0%, #eef4fd 58%, #dbe6f7 100%);
+  /**
+   * 底色从冷调浅蓝改成**暖木色**的奶油底。
+   *
+   * 形象本体现在是木色的（见 .xf__head 的木纹渐变），冷蓝底会把暖木衬得发灰；
+   * 换成同色系的暖底之后，木块与背景是一个体系里的两层，
+   * 与平台"木脉智检"的木色/暖色基调也对得上。
+   * 明度仍然贴着白（顶部 #fffdf7），形象在深色页面上依旧是亮的那一块。
+   */
+  background: radial-gradient(circle at 50% 30%, #fffdf7 0%, #fbf1de 58%, #f0e0c5 100%);
   box-shadow:
     0 10px 26px rgba(16, 32, 60, 0.24),
     inset 0 0 0 1px rgba(255, 255, 255, 0.75);
   cursor: pointer;
   overflow: visible;
   transition: transform 0.18s ease-out, box-shadow 0.18s ease-out;
-}
-
-/* 短屏（1366×768 这类）把形象收一档，避免和气泡一起顶到顶部 */
-@media (max-height: 820px) {
-  .xd__avatar {
-    width: 96px;
-    height: 96px;
-  }
 }
 
 .xd__avatar:hover {
@@ -110,46 +117,52 @@
 }
 
 /**
- * ⚠ 这里**不要**写 `object-fit: cover` —— 这是实测踩出来的一个视觉缺陷。
+ * ⚠ 形象本体**不要**做放大裁切（这里原来写的是 `object-fit: cover` 的教训）。
  *
- * I04 素材是「圆角方形智能音箱 + 大片留白」的构图（1024×1024，主体居中）。
- * 初版为了让头像"填满"，写了：
- *     object-fit: cover; object-position: 50% 28%;
- * 结果画面被放大并上移裁切，**只剩中间那块深色面板** ——
- * 截图里小木变成"认不出的一团暗色"，看不出是设备。
- *
- * 项目既有的 `.mumai-illustration--avatar` 本来就是 `object-fit: contain`
- * （正确的做法），我这一行属于**用局部样式覆盖了正确的全局约定**。
- * 现在把这个覆盖去掉，只保留尺寸约束。
+ * 那时形象是 I04 位图素材（「圆角方形音箱 + 大片留白」的构图），为了"填满"
+ * 写了 `object-fit: cover; object-position: 50% 28%;`，结果画面被放大上移裁切、
+ * 只剩中间那块深色面板，截图里"认不出是什么"。现在 `.xd__figure` 是
+ * `XiaomuFace` 那个内联 SVG：内容按 100×100 的 viewBox 等比缩放到容器里，
+ * 造型本来就按盒子画满，**既不需要也不可能**靠裁切放大。
+ * 所以这里只保留尺寸约束，别再加固定的 width/height 数值或 overflow 裁切 ——
+ * 那会让短屏（≤820px）那一档的等比缩放失效。
  */
 .xd__figure {
   width: 100%;
   height: 100%;
-  border-radius: 20%;
   display: block;
 }
 
-/* 状态圈：用 transform 做呼吸，不用 box-shadow 动画（后者每帧重绘） */
+/**
+ * 状态圈：保留（它是"在听/在想"的呼吸感来源），但**更含蓄**。
+ *
+ * 上一版是 `inset:-4px` + 50% 圆 + 2px 冷蓝描边，形象换成木色圆角木块之后，
+ * 一个正圆套在圆角方块外面会显得"框歪了"，而且冷蓝边比脸还抢眼。
+ * 现在：跟着头像的圆角走（26%）、描边收细、基础不透明度降一档，
+ * **每个状态的配色一条都没删**（颜色本身就是状态信息，见下方配色段）。
+ * 动画仍然只用 transform/opacity（PRD §9：地图与三维页是性能瓶颈）。
+ */
 .xd__ring {
   position: absolute;
-  inset: -4px;
-  border-radius: 50%;
-  border: 2px solid rgba(120, 150, 200, 0.5);
+  inset: -5px;
+  border-radius: 26%;
+  border: 1.5px solid rgba(150, 122, 84, 0.4);
   transform: scale(1);
   animation: xd-breathe 3.2s ease-in-out infinite;
   pointer-events: none;
 }
 
 @keyframes xd-breathe {
-  0%, 100% { transform: scale(1); opacity: 0.55; }
-  50% { transform: scale(1.06); opacity: 0.95; }
+  0%, 100% { transform: scale(1); opacity: 0.42; }
+  50% { transform: scale(1.05); opacity: 0.78; }
 }
 
-/* ── 状态姿态：同一张素材，靠姿态与动效"活"起来（宠物感）─────────────
+/* ── 状态姿态：身体语言（形象本体的体态，与下面的"脸"分工不同）───────
  *
- * 只有一张 I04 素材，所以不换图，而是给**形象本体**（`.xd__figure`）按状态
- * 套不同的姿态动画 —— 这正是桌宠的常规做法：用户感知到的是"它在听/在想/在说"，
- * 而不是"图标换了"。七个状态各有可辨的体态：
+ * 注：形象本体从 I04 位图换成了 `XiaomuFace` 的矢量角色，但这一段的体态动画
+ * **照旧挂在 `.xd__figure` 上** —— 它管的是"整个人怎么动"（凑近、歪头、抖），
+ * 而下面那一段管的是"五官什么形状"。两层分开写，改表情时不会误伤体态。
+ * 七个状态各有可辨的体态：
  *
  *   idle         轻微呼吸起伏（几乎察觉不到，不抢注意力）
  *   listening    放大 + 向用户方向前倾（"凑过来听"），同时光环脉冲加快
@@ -171,12 +184,18 @@
 .xd[data-state="speaking"] .xd__figure { animation: xd-speak 0.52s ease-in-out infinite; }
 .xd[data-state="confirming"] .xd__figure { animation: xd-nudge 1.1s ease-in-out infinite; }
 .xd[data-state="error"] .xd__figure {
-  filter: grayscale(0.7) brightness(0.94);
+  /*
+   * 原来写的是 `grayscale(0.7)` —— 那时形象是灰色的智能音箱素材，去饱和很自然。
+   * 现在的形象本体是木色的，整体去色会把它变成一块"发灰的木头"，
+   * 看着像渲染坏了而不是"出错"。改成压饱和度 + 压一点明度：
+   * 木块还在，但明显"蔫了"，与 error 的脸（眯眼线 + 皱眉 + 汗）配合。
+   */
+  filter: saturate(0.45) brightness(0.96);
   animation: xd-shake 0.42s ease-in-out 3;
 }
 
 /* 正在听：光环脉冲更快、更亮，与体态一起表达"我在听" */
-.xd[data-state="listening"] .xd__ring { animation-duration: 1.2s; border-width: 3px; }
+.xd[data-state="listening"] .xd__ring { animation-duration: 1.2s; border-width: 2.5px; }
 .xd[data-state="thinking"] .xd__ring,
 .xd[data-state="recognizing"] .xd__ring { animation-duration: 2s; }
 .xd[data-state="error"] .xd__ring { animation: none; }
@@ -215,6 +234,310 @@
   0%, 100% { transform: translateX(0); }
   25% { transform: translateX(-5px); }
   75% { transform: translateX(5px); }
+}
+
+/* ══ 脸：七套五官（`XiaomuFace.tsx` 那个内联 SVG 的部件）═════════════
+ *
+ * ── 为什么表情要写成"静止形状 + 动画"两层 ──────────────────────────
+ * FR-06 / AC-05 要求"关掉动效后状态仍然分得清"。而动画一旦被
+ * `prefers-reduced-motion` 压掉（index.css 的全局规则把 duration 压到 0.01ms、
+ * iteration-count 压到 1，动画跑完就落回**基础样式**），元素剩下的就只有基础样式。
+ * 所以七个状态各有一套**完整的静止五官**（眼睛睁多大、瞳孔多大、看哪边、
+ * 眉毛多高、嘴是什么形状），动画只在这之上加"活气"。
+ * 自检口径很直接：把下面所有 @keyframes 删掉，七张脸依然互不相同。
+ *
+ * ── 为什么状态是从祖先选择器读的，而不是再传一层 props ──────────────
+ * `.xd` 根节点上的 `data-state` 已经是"用户看得见的那七种状态"的唯一来源
+ * （XiaomuDock.tsx 的 dockState）。再往下传一层，等于把同一份信息写两遍：
+ * 两处迟早不一致 —— 本项目在"状态双份"上已经踩过坑。
+ *
+ * ── 变换的三个坑（都在这里一次性说明，下面不再重复）────────────────
+ * 1. SVG 子元素上做 CSS transform **必须**声明 `transform-box: fill-box`，
+ *    否则 reference box 默认是整张 SVG 的 view-box：scale/rotate 会围绕
+ *    整张图的中心而不是部件自己的中心，瞳孔一放大就整体位移。
+ * 2. 同一个元素上不能既放状态的静止 transform 又放动画 —— 动画播放期间会
+ *    整体接管该元素的 transform。所以"看哪"（.xf__gaze，会动）与
+ *    "瞳孔多大"（.xf__pupil，静止）拆成两层，互不覆盖。
+ * 3. 眨眼做成"整只眼压扁 + 眼睑线浮出"两个元素同周期：分别写在
+ *    .xf__lid 与 .xf__eyelash 上，两边关键帧百分比严格对齐才会同步。
+ */
+.xf__body,
+.xf__sprout,
+.xf__leaf,
+.xf__brow,
+.xf__eye-open,
+.xf__lid,
+.xf__lid-alt,
+.xf__gaze,
+.xf__pupil,
+.xf__mouth,
+.xf__mark,
+.xf__sweat {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* ── 造型：木块、木纹、小苗、腮红（静态，七个状态共用）── */
+.xf__head {
+  fill: url(#xf-wood);
+  stroke: #c08f4d;
+  stroke-width: 1.3;
+  stroke-opacity: 0.5;
+}
+.xf__sheen {
+  fill: none;
+  stroke: #fffaee;
+  stroke-width: 2.6;
+  stroke-opacity: 0.5;
+  stroke-linecap: round;
+}
+.xf__grain {
+  fill: none;
+  stroke: #c9974f;
+  stroke-width: 2;
+  stroke-opacity: 0.22;
+  stroke-linecap: round;
+}
+.xf__stem {
+  fill: none;
+  stroke: #7aa85c;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+.xf__leaf {
+  fill: url(#xf-leaf);
+  stroke: #5f9450;
+  stroke-width: 0.8;
+  stroke-opacity: 0.5;
+}
+.xf__blush { fill: #e08a5a; opacity: 0.26; }
+
+/* ── 五官：深胡桃色，不用纯黑（纯黑在暖木色上过硬，与平台的克制描边不一致）── */
+.xf__brow {
+  fill: none;
+  stroke: #4a3626;
+  stroke-width: 2.8;
+  stroke-linecap: round;
+}
+.xf__sclera {
+  fill: #fffdf8;
+  stroke: #c8a878;
+  stroke-width: 0.9;
+  stroke-opacity: 0.5;
+}
+.xf__pupil { fill: #402d20; }
+.xf__glint { fill: #ffffff; opacity: 0.92; }
+/* 眼睑线：只在眨眼合上那一刻浮出来（默认不可见，静止态不参与造型） */
+.xf__eyelash {
+  fill: none;
+  stroke: #4a3626;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  opacity: 0;
+}
+/* 笑意眼 / 眯眼线：两条互斥的线形，默认都不显示，由状态择一打开 */
+.xf__eye-arc,
+.xf__eye-flat {
+  fill: none;
+  stroke: #4a3626;
+  stroke-width: 3;
+  stroke-linecap: round;
+  display: none;
+}
+/* 嘴：七个形状都在 DOM 里，默认全关，状态各自打开一条 */
+.xf__mouth { display: none; }
+.xf__mouth--smile,
+.xf__mouth--pursed,
+.xf__mouth--flat,
+.xf__mouth--smirk,
+.xf__mouth--frown {
+  fill: none;
+  stroke: #4a3626;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+}
+.xf__mouth--o { fill: #4a3626; }
+.xf__mouth-cavity { fill: #4a3626; }
+.xf__tongue { fill: #e0836d; }
+/* 说话时嘴从**上沿**往下开合（下颌动作），不是从中心缩放 */
+.xf__mouth--open { transform-box: fill-box; transform-origin: top center; }
+
+/* ── 状态标记：思考的「?」、等确认的三个点、出错的一滴汗 ── */
+.xf__mark { display: none; }
+.xf__q-hook,
+.xf__q-stem {
+  fill: none;
+  stroke: #b4791f;
+  stroke-width: 2.3;
+  stroke-linecap: round;
+}
+/* 圆环用 dasharray 留出右下→左下的缺口，让"?"的钩子停在五点钟方向再接竖笔。
+   周长 = 2π×3.5 = 21.99；缺口 8.25（约 135°）。
+   ⚠ 偏移必须是**非负**值：SVG 1.1 把负的 `stroke-dashoffset` 判为 error，
+   Chrome 的处理是**整个 <circle> 不渲染**（实测：写 -11.91 时"?"只剩竖笔和点，
+   钩子整块消失）。同一个缺口位置的等价非负写法是 21.99 - 11.91 = 10.08。 */
+.xf__q-hook {
+  stroke-dasharray: 13.74 8.25;
+  stroke-dashoffset: 10.08;
+}
+.xf__q-dot { fill: #b4791f; }
+.xf__dot { fill: #f0871f; }
+.xf__sweat {
+  fill: #86cdea;
+  stroke: #5aa8cd;
+  stroke-width: 0.8;
+  stroke-opacity: 0.6;
+}
+.xf__sweat-glint { fill: #ffffff; opacity: 0.8; }
+
+/* ── 眨眼：不定周期 ────────────────────────────────────────────────
+ * 两层周期互质：主眨眼 7.4s（一圈里三次，间隔和时长都不同），
+ * 备用眨眼 12.9s 且带负延迟。两个周期的最小公倍数约 95s，
+ * 也就是说将近一分半内不会重复同一套节拍 —— "别像机械"指的是这个。
+ * error（眼睛已是两条线）与 speaking（眼睛弯成笑意弧）不参与眨眼。
+ *
+ * ⚠ 第一次合眼**刻意排在 18% 之后**（7.4s × 18% ≈ 1.33s）。
+ * 原因很实际：切状态时动画是重新开始的，而截图工装是"切完等 600ms 就拍"，
+ * 那一刻正好落在周期的 8% 附近 —— 原来第一次眨眼写在 6.2%，每次切状态
+ * 拍到的都是闭着眼的一张，看着像"这个状态没有眼睛"。
+ * 备用那层的第一次合眼同理排在 44% 之后（负延迟 -3.1s，拍图那刻约在 29%）。 */
+.xd:not([data-state="error"]):not([data-state="speaking"]) .xf__lid {
+  animation: xf-blink 7.4s ease-in-out infinite;
+}
+.xd:not([data-state="error"]):not([data-state="speaking"]) .xf__lid-alt {
+  animation: xf-blink-alt 12.9s ease-in-out -3.1s infinite;
+}
+.xd:not([data-state="error"]) .xf__eyelash {
+  animation: xf-lash 7.4s linear infinite;
+}
+
+@keyframes xf-blink {
+  0%, 17.6% { transform: scaleY(1); }
+  18.4%, 20.4% { transform: scaleY(0.05); }
+  21.4%, 55.6% { transform: scaleY(1); }
+  56.4%, 58.4% { transform: scaleY(0.05); }
+  59.4%, 79.6% { transform: scaleY(1); }
+  80.4%, 83% { transform: scaleY(0.05); }
+  84%, 100% { transform: scaleY(1); }
+}
+@keyframes xf-lash {
+  0%, 17.6% { opacity: 0; }
+  18.4%, 20.4% { opacity: 1; }
+  21.4%, 55.6% { opacity: 0; }
+  56.4%, 58.4% { opacity: 1; }
+  59.4%, 79.6% { opacity: 0; }
+  80.4%, 83% { opacity: 1; }
+  84%, 100% { opacity: 0; }
+}
+@keyframes xf-blink-alt {
+  0%, 43.4% { transform: scaleY(1); }
+  44.4%, 46.4% { transform: scaleY(0.05); }
+  47.4%, 100% { transform: scaleY(1); }
+}
+
+/* ── 七套五官 ──────────────────────────────────────────────────────
+ * 每条都读作"这个状态脸上是什么样"，动画写在括号里（可以是"无"）。 */
+
+/* idle —— 平视 + 淡笑（呼吸在体态层，眨眼在上面的公共规则里） */
+.xd[data-state="idle"] .xf__mouth--smile { display: inline; }
+
+/* listening —— 眼睛睁大、瞳孔放大、双眉上扬、嘴张小圆口（"我在听"的期待感） */
+.xd[data-state="listening"] .xf__eye-open { transform: scale(1.1); }
+.xd[data-state="listening"] .xf__pupil { transform: scale(1.34); }
+.xd[data-state="listening"] .xf__gaze { animation: xf-gaze-perk 2.6s ease-in-out infinite; }
+.xd[data-state="listening"] .xf__brow--l { transform: translateY(-2.8px) rotate(-5deg); }
+.xd[data-state="listening"] .xf__brow--r { transform: translateY(-2.8px) rotate(5deg); }
+.xd[data-state="listening"] .xf__mouth--o { display: inline; }
+
+/* recognizing —— 眼神左右游移（"在辨认"）：眉一高一平，嘴抿成小波浪
+   （静止态停在偏左，且偏得够明显 —— 与 idle 的正视是这一档最容易糊在一起的地方，
+   实测两图差异最小的一对就是它俩，所以偏移量按"看截图能一眼看出来"来定） */
+.xd[data-state="recognizing"] .xf__gaze {
+  transform: translate(-3.8px, -0.8px);
+  animation: xf-gaze-scan 2.4s ease-in-out infinite;
+}
+.xd[data-state="recognizing"] .xf__brow--l { transform: translateY(-2.6px) rotate(-4deg); }
+.xd[data-state="recognizing"] .xf__brow--r { transform: translateY(0.4px) rotate(1deg); }
+.xd[data-state="recognizing"] .xf__mouth--pursed { display: inline; }
+
+/* thinking —— 眼皮半垂、眼珠看上侧方、眉头压低（专注），嘴抿成一道短横线，
+   头顶一个「?」（静止就在，动画只让它飘） */
+.xd[data-state="thinking"] .xf__eye-open { transform: scale(0.97) scaleY(0.86); }
+.xd[data-state="thinking"] .xf__gaze {
+  transform: translate(2.4px, -3.2px);
+  animation: xf-gaze-think 3.6s ease-in-out infinite;
+}
+.xd[data-state="thinking"] .xf__brow--l { transform: translateY(0.8px) rotate(7deg); }
+.xd[data-state="thinking"] .xf__brow--r { transform: translateY(0.8px) rotate(-7deg); }
+.xd[data-state="thinking"] .xf__mouth--flat { display: inline; }
+.xd[data-state="thinking"] .xf__mark--q {
+  display: inline;
+  animation: xf-mark-float 2.8s ease-in-out infinite;
+}
+
+/* speaking —— 眼睛弯成笑意弧，嘴一开一合（说话），眉毛随语调轻抬 */
+.xd[data-state="speaking"] .xf__eye-open { display: none; }
+.xd[data-state="speaking"] .xf__eye-arc { display: inline; }
+.xd[data-state="speaking"] .xf__brow--l { transform: translateY(-2.4px) rotate(-6deg); }
+.xd[data-state="speaking"] .xf__brow--r { transform: translateY(-2.4px) rotate(6deg); }
+.xd[data-state="speaking"] .xf__mouth--open {
+  display: inline;
+  animation: xf-talk 0.36s ease-in-out infinite;
+}
+
+/* confirming —— 一头眉挑得很高、另一头压低（"就等你点头了"）、眼睛睁圆直视、
+   嘴角一侧上扬，头顶三个等待点（静止就可见，动画按顺序闪）。
+   眉毛幅度刻意比 recognizing 大：两个状态都是"不对称眉"，
+   幅度一样的话在静止图里会糊在一起（这是像素自检里最接近的一对之一）。 */
+.xd[data-state="confirming"] .xf__eye-open { transform: scale(1.06); }
+.xd[data-state="confirming"] .xf__gaze { transform: translate(0, -0.8px); }
+.xd[data-state="confirming"] .xf__brow--l { transform: translateY(-5.2px) rotate(-9deg); }
+.xd[data-state="confirming"] .xf__brow--r { transform: translateY(2.4px) rotate(4deg); }
+.xd[data-state="confirming"] .xf__mouth--smirk { display: inline; }
+.xd[data-state="confirming"] .xf__mark--dots { display: inline; }
+.xd[data-state="confirming"] .xf__dot { animation: xf-dot 1.35s ease-in-out infinite; }
+.xd[data-state="confirming"] .xf__dot:nth-child(2) { animation-delay: 0.18s; }
+.xd[data-state="confirming"] .xf__dot:nth-child(3) { animation-delay: 0.36s; }
+
+/* error —— 眼睛眯成两条线（左"＼"右"／"）、眉头内高外低（为难，不是生气）、
+   嘴角下垂，太阳穴一滴汗。四样加在一起，"没听懂/出错了"一眼就看得出来。 */
+.xd[data-state="error"] .xf__eye-open { display: none; }
+.xd[data-state="error"] .xf__eye-flat { display: inline; }
+.xd[data-state="error"] .xf__brow--l { transform: translateY(1.8px) rotate(-13deg); }
+.xd[data-state="error"] .xf__brow--r { transform: translateY(1.8px) rotate(13deg); }
+.xd[data-state="error"] .xf__mouth--frown { display: inline; }
+.xd[data-state="error"] .xf__mark--sweat { display: inline; }
+.xd[data-state="error"] .xf__sweat { animation: xf-sweat 2.4s ease-in infinite; }
+
+@keyframes xf-gaze-scan {
+  0%, 100% { transform: translate(-4.2px, -0.8px); }
+  45%, 55% { transform: translate(4.2px, -0.8px); }
+}
+@keyframes xf-gaze-think {
+  0%, 100% { transform: translate(2.2px, -3px); }
+  50% { transform: translate(3.4px, -3.8px); }
+}
+@keyframes xf-gaze-perk {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1.1px); }
+}
+@keyframes xf-talk {
+  0%, 100% { transform: scaleY(0.34); }
+  45% { transform: scaleY(1); }
+}
+@keyframes xf-mark-float {
+  0%, 100% { transform: translateY(0); opacity: 0.72; }
+  50% { transform: translateY(-2.2px); opacity: 1; }
+}
+@keyframes xf-dot {
+  0%, 100% { opacity: 0.3; }
+  40% { opacity: 1; }
+}
+@keyframes xf-sweat {
+  0% { transform: translateY(-1.4px) scale(0.92); opacity: 0; }
+  20% { opacity: 1; }
+  70% { transform: translateY(2.2px) scale(1); opacity: 1; }
+  100% { transform: translateY(4.4px) scale(0.94); opacity: 0; }
 }
 
 /* 状态徽标：**关掉动效后靠它分辨状态**，所以它始终显示 */
@@ -545,6 +868,15 @@
 
 @media (max-height: 820px) {
   .xd__panel { max-height: 58vh; }
+  /**
+   * 短屏（1366×768 这类）形象收一档：120 → **72**。
+   *
+   * ⚠ 这里是形象短屏尺寸的**唯一**来源。它原本在文件里有两条同选择器、
+   * 同媒体查询的规则（一条 96、一条 72），靠"后写的赢"决定实际生效的是 72 ——
+   * 也就是说 96 那条从来没生效过，注释里"收一档到 96"的说法与实测不符。
+   * 这次整理成一条并把实测值写清楚：72 是在 1366×768 下**验证过**的值
+   * （验收界面.mjs 的 avatarMin 就是 72），改大会把气泡顶出视口上沿。
+   */
   .xd__avatar { width: 72px; height: 72px; }
 }
 
@@ -554,14 +886,31 @@
 
 /* ── 关掉动效（PRD FR-06 / AC-05）───────────────────────────────────
    注意：这里只关动画，**不隐藏任何状态信息** ——
-   状态徽标与配色都还在，用户依然能分辨小木在干什么。 */
+   状态徽标、配色、以及脸上的**五官形状**都还在，用户依然能分辨小木在干什么。
+
+   脸那几个部件要单独列出来，不能只靠 index.css 的全局兜底：全局规则是把
+   `animation-duration` 压到 0.01ms（等于动画跑完就落回基础样式），
+   语义上够用；但形象是"状态信息的主要载体"，这里再显式关一次，
+   即使这个组件被单独挂载（standalone 控制台那条路不保证加载 index.css）
+   也不会漏掉 —— 关掉之后落回的就是上面那七套静止五官。 */
 
 @media (prefers-reduced-motion: reduce) {
   .xd__avatar,
   .xd__ring,
-  .xd__panel {
+  .xd__panel,
+  .xf__lid,
+  .xf__lid-alt,
+  .xf__eyelash,
+  .xf__gaze,
+  .xf__brow,
+  .xf__mouth,
+  .xf__mark,
+  .xf__sweat,
+  .xf__dot {
     animation: none;
     transition: none;
   }
   .xd__ring { opacity: 0.9; }
+  /* 眨眼线在静止态必须隐形，否则七个状态都会多出一条横线 */
+  .xf__eyelash { opacity: 0; }
 }
