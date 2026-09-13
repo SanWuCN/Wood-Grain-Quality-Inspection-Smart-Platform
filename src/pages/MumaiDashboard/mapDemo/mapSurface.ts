@@ -111,7 +111,14 @@ export function createMapSurfaceTexture(options: MapSurfaceOptions): Texture {
   for (let v = 0; v < 256; v += 1) {
     let t = (v - lo) / span;
     t = t < 0 ? 0 : t > 1 ? 1 : t;
-    t = Math.pow(t, 0.78);
+    /*
+     * gamma 由 0.78 提到 0.95。
+     *
+     * < 1 的幂会**提亮**中间调（原来那句注释写的是「拉开层次」，实际效果是整体提亮）。
+     * 0.95 让中间调整体下沉一档，同时保留低海拔平原之间的层次，
+     * 还没到 1.0 那种硬对比。
+     */
+    t = Math.pow(t, 0.95);
     lut[v * 3] = lowColor[0] + (highColor[0] - lowColor[0]) * t;
     lut[v * 3 + 1] = lowColor[1] + (highColor[1] - lowColor[1]) * t;
     lut[v * 3 + 2] = lowColor[2] + (highColor[2] - lowColor[2]) * t;
