@@ -319,7 +319,18 @@ export default function Base(props: BaseProps) {
       typeof window === "undefined"
         ? 1
         : Number(new URLSearchParams(window.location.search).get("fit") ?? "1") || 1;
-    return Math.max((sphereRadius / Math.sin(halfAngle)) * fitPadding * fitScale, 2);
+    /*
+     * 下限由 2 降到 0.2。
+     *
+     * 原来写死 2 —— 那是按中国地图（世界里约 82 单位、取景距离约 96）定的一个
+     * 「别把相机塞进地图里」的保护值。但上海投影跨度只有中国的 1/48，
+     * 反解出来的取景距离本来就小于 2，于是**每张上海图都被这个下限顶住**，
+     * 相机被迫停在两倍远的地方。实测上海地图稳定态只占 viewport **12% 宽**
+     * （中国是 55%），B05「下钻后自动重新 Fit，不得出现过小」不达标。
+     *
+     * 0.2 只是一个防零保护，真正的下限由 OrbitControls 的 minDistance 负责。
+     */
+    return Math.max((sphereRadius / Math.sin(halfAngle)) * fitPadding * fitScale, 0.2);
   }, [bbox, slabDepth, camera, canvasSize.width, canvasSize.height, fitPadding]);
 
   /**
