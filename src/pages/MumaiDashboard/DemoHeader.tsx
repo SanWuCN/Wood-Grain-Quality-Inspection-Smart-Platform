@@ -322,8 +322,16 @@ export interface DemoHeaderProps extends ComponentProps<typeof TitleWrapper> {
    */
   onAccountChange?: (id: string) => void;
   time: Date;
-  /** 设备通道状态等，挂在右侧状态区最前面 */
+  /** 顶栏右侧的状态项（平台 / 智能车 / 扫描仪 / 模型），由 Header 传进来 */
   statusExtra?: ReactNode;
+  /**
+   * 右上「状态正常 N/M」的计数。
+   *
+   * 原来是写死的 `4/4`（对应旧的四路通道）—— 设备真掉线了它也不会变，
+   * 属于"看着像状态、其实是装饰"。现在由调用方按同一批状态项算出来，
+   * 和顶栏右侧那四项永远一致。
+   */
+  statusSummary?: { ok: number; total: number };
   /**
    * 「投到展示窗口」「退出登录」等动作按钮。
    *
@@ -342,6 +350,7 @@ export default function DemoHeader(props: DemoHeaderProps) {
     onAccountChange,
     time,
     statusExtra,
+    statusSummary,
     actions,
     ...rest
   } = props;
@@ -363,9 +372,19 @@ export default function DemoHeader(props: DemoHeaderProps) {
       </Brand>
 
       <TopRight>
-        <span className="device">
+        <span
+          className="device"
+          title={
+            statusSummary
+              ? `${statusSummary.total} 项状态里 ${statusSummary.ok} 项正常（平台 / 智能车 / 扫描仪 / 模型）`
+              : undefined
+          }>
           <i />
-          设备在线 <b>4/4</b>
+          {/*
+            「设备在线 4/4」原来写死 —— 现在由 Shell 按顶栏右侧那四项现算，
+            掉线时数字会跟着变，不会再出现「扫描仪离线但右上角仍写 4/4」。
+          */}
+          状态正常 <b>{statusSummary ? `${statusSummary.ok}/${statusSummary.total}` : "—"}</b>
         </span>
         <time>{time.toLocaleTimeString("zh-CN", { hour12: false })}</time>
         {actions}
