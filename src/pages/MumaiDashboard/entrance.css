@@ -31,12 +31,13 @@ body.is-entering .ov__side--right > .ov__panel {
 }
 
 /* 非总览页：内容区根节点做轻量上浮 */
-body.is-entering .appshell__stage > * {
+body.is-entering .appshell__stage > :not(.ov):not(.appshell__boot):not(.map-veil) {
   opacity: 0;
   transform: translateY(18px);
 }
 
 /* 总览页的地图容器要始终可见，不能被上面那条一起隐藏掉 */
+body.is-entering .appshell__stage > .ov,
 body.is-entering .appshell__stage > .ov .ov__map,
 body.is-entering .appshell__stage > .ov .ov__vignette {
   opacity: 1;

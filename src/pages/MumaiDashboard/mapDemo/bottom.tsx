@@ -42,6 +42,7 @@ export default function Bottom({ size = 16 }: { size?: number }) {
           transparent
           map={texture ?? undefined}
           color="#4ea8ff"
+          fog={false}
           opacity={texture ? 1 : 0}
           depthWrite={false}
           blending={AdditiveBlending}

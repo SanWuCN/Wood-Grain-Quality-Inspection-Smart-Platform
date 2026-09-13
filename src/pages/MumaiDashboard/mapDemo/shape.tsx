@@ -34,7 +34,7 @@ export default function ShapeBox(props: ShapeProps) {
     }
 
     geometry.setAttribute("uv", new Float32BufferAttribute(uv, 2));
-  });
+  }, [args, bbox]);
 
   return (
     <mesh ref={meshRef} {...meshProps}>

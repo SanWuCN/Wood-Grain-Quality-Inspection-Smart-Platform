@@ -17,7 +17,7 @@
  * 只有总览页有地图。非总览页没有这个信号，所以在 boot 结束后立即播放。
  */
 
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { gsap } from "gsap";
 import "./entrance.css";
 
@@ -54,7 +54,7 @@ function collect(): Step[] {
 
   /** 内容区里的页面根节点：非总览页用一次轻量的淡入上浮 */
   const stage = q(".appshell__stage");
-  const pageRoot = stage?.firstElementChild ?? null;
+  const pageRoot = stage?.querySelector(":scope > :not(.ov):not(.appshell__boot):not(.map-veil)") ?? null;
   const panels = Array.from(document.querySelectorAll<HTMLElement>(".ov__panel"));
 
   if (panels.length) {
@@ -121,27 +121,20 @@ function collect(): Step[] {
 /**
  * @param ready 可以开始入场了（总览页 = 地图镜头推完；其它页 = boot 结束）
  * @param routeKey 路由标识，变化时重新播一遍
- * @param fallbackMs 兜底时长：到点无论 `ready` 是什么都强制入场
+ * @param fallbackMs 非总览页的兜底时长；总览始终等待地图时间线
  */
 export function useShellEntrance(ready: boolean, routeKey: string, fallbackMs = 3400) {
-  /**
-   * 兜底必须存在。
-   *
-   * `ready` 依赖 `mapPlayComplete` —— 那是地图那边的一次性闩锁。
-   * 一旦出现「地图先完成、外壳后挂载」的顺序（HMR 热更新只替换了外壳、
-   * 或闩锁被模块重载重置而地图没重挂），`ready` 会**永远是 false**，
-   * 而各面板的初始态是 `opacity: 0` + 位移到屏幕外 ——
-   * 结果就是两侧面板永久停在屏幕外，页面看起来像空的。
-   * 所以这里挂一个定时器：到点无条件入场。
-   */
-  const [forced, setForced] = useState(false);
+  const playedRouteRef = useRef<string | null>(null);
+  // 总览加载可能超过 3.4s，必须等可见地图时间线，不能按墙上时钟抢跑。
+  const waitForMap = routeKey === "/";
+  const [forcedRoute, setForcedRoute] = useState<string | null>(null);
   useEffect(() => {
-    setForced(false);
-    const timer = window.setTimeout(() => setForced(true), fallbackMs);
+    if (waitForMap) return;
+    const timer = window.setTimeout(() => setForcedRoute(routeKey), fallbackMs);
     return () => window.clearTimeout(timer);
-  }, [routeKey, fallbackMs]);
+  }, [routeKey, fallbackMs, waitForMap]);
 
-  const go = ready || forced;
+  const go = ready || (!waitForMap && forcedRoute === routeKey);
 
   /**
    * 硬保险：到这还没显示就直接清掉内联 transform/opacity。
@@ -152,6 +145,7 @@ export function useShellEntrance(ready: boolean, routeKey: string, fallbackMs = 
    * 这里无条件兜一层：无论前面发生了什么，到点一定让所有元素回到自然位置。
    */
   useEffect(() => {
+    if (waitForMap) return;
     const hard = window.setTimeout(() => {
       document.body.classList.remove("is-entering");
       for (const step of collect()) {
@@ -159,7 +153,7 @@ export function useShellEntrance(ready: boolean, routeKey: string, fallbackMs = 
       }
     }, fallbackMs + 2600);
     return () => window.clearTimeout(hard);
-  }, [routeKey, fallbackMs]);
+  }, [routeKey, fallbackMs, waitForMap]);
 
   /**
    * 初始隐藏态。
@@ -169,11 +163,13 @@ export function useShellEntrance(ready: boolean, routeKey: string, fallbackMs = 
    * 这里的 gsap.set 作为补充，覆盖 CSS 选择器没涵盖到的元素。
    */
   useLayoutEffect(() => {
+    playedRouteRef.current = null;
     if (reduceMotion()) return;
     document.body.classList.add("is-entering");
     const steps = collect();
     for (const step of steps) gsap.set(step.el, { opacity: 0, ...step.from });
     return () => {
+      document.body.classList.remove("is-entering");
       for (const step of steps) {
         gsap.killTweensOf(step.el);
         gsap.set(step.el, { clearProps: "transform,opacity" });
@@ -182,13 +178,14 @@ export function useShellEntrance(ready: boolean, routeKey: string, fallbackMs = 
   }, [routeKey]);
 
   useEffect(() => {
-    if (!go) return;
+    if (!go || playedRouteRef.current === routeKey) return;
     const steps = collect();
     if (!steps.length) return;
 
     const release = () => document.body.classList.remove("is-entering");
 
     if (reduceMotion()) {
+      playedRouteRef.current = routeKey;
       release();
       for (const step of steps) {
         gsap.set(step.el, { opacity: 1, xPercent: 0, yPercent: 0, x: 0, y: 0 });
@@ -196,7 +193,7 @@ export function useShellEntrance(ready: boolean, routeKey: string, fallbackMs = 
       return;
     }
 
-    const tl = gsap.timeline();
+    const tl = gsap.timeline({ onComplete: () => { playedRouteRef.current = routeKey; } });
     for (const step of steps) {
       // 第 4 个参数是时间线上的绝对位置 —— 不传的话每段都会被追加到上一段之后，
       // 变成串行播放，而不是 Demo2 那种「同时开始、各自错开」的咬合节奏。

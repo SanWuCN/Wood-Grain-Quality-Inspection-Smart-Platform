@@ -12,26 +12,39 @@
 
 import { useEffect, useState } from "react";
 
-export function useImage(url: string): HTMLImageElement | null {
-  const [image, setImage] = useState<HTMLImageElement | null>(null);
+export function useImageState(url: string) {
+  const [result, setResult] = useState<{
+    url: string;
+    image: HTMLImageElement | null;
+    settled: boolean;
+  }>({ url, image: null, settled: false });
 
   useEffect(() => {
     let alive = true;
     const el = new Image();
     el.decoding = "async";
-    el.onload = () => {
-      if (alive) setImage(el);
+    const finish = (image: HTMLImageElement | null) => {
+      if (!alive) return;
+      alive = false;
+      window.clearTimeout(timeout);
+      setResult({ url, image, settled: true });
     };
-    el.onerror = () => {
-      if (alive) setImage(null);
-    };
+    // A missing image falls back to plain map materials instead of an endless loader.
+    const timeout = window.setTimeout(() => finish(null), 12000);
+    el.onload = () => finish(el);
+    el.onerror = () => finish(null);
     el.src = url;
     return () => {
       alive = false;
+      window.clearTimeout(timeout);
       el.onload = null;
       el.onerror = null;
     };
   }, [url]);
 
-  return image;
+  return result.url === url ? result : { url, image: null, settled: false };
+}
+
+export function useImage(url: string): HTMLImageElement | null {
+  return useImageState(url).image;
 }

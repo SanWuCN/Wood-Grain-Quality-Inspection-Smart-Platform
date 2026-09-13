@@ -1,4 +1,4 @@
-import { useRef, type Ref } from "react";
+import { useMemo, useRef, type Ref } from "react";
 import { useFrame, extend, type ThreeElements } from "@react-three/fiber";
 import { shaderMaterial } from "@react-three/drei";
 import {
@@ -87,6 +87,18 @@ const BeamLight = ({
   topScale?: number;
 }) => {
   const ref = useRef<Group>(null!);
+  // Stable initial positions, with every dimension scaled for the current map.
+  const beams = useMemo(() => Array.from({ length: 26 }, (_, k) => {
+    const angle = (k / 26) * Math.PI * 2 + Math.random() * 0.24;
+    const radius = range * (0.62 + Math.random() * 0.3);
+    return {
+      position: [Math.cos(angle) * radius, Math.random() * 5 * topScale, Math.sin(angle) * radius] as [number, number, number],
+      height: (2 + Math.random() * 4) * topScale,
+      speed: (2 + Math.random()) * topScale,
+      resetHeight: (10 + Math.random() * 20) * topScale,
+      opacity: 0.5 + Math.random() * 0.2,
+    };
+  }), [range, topScale]);
 
   useFrame((_, delta) => {
     ref.current.children.forEach((beam) => {
@@ -116,7 +128,7 @@ const BeamLight = ({
 
   return (
     <group ref={ref}>
-      {Array.from({ length: 26 }, (_, k) => (
+      {beams.map((beam, k) => (
         <mesh
           key={k}
           /*
@@ -126,17 +138,11 @@ const BeamLight = ({
            * 现在按角度均分撒在环带上，内径 range*0.62 —— range 本身已是地图
            * 最大边的 1.15 倍，所以这个内径落在地图外缘之外，整圈围在地图周围。
            */
-          position={[
-            Math.cos((k / 26) * Math.PI * 2 + Math.random() * 0.24) *
-              (range * 0.62 + Math.random() * range * 0.3),
-            5 - Math.random() * 5,
-            Math.sin((k / 26) * Math.PI * 2 + Math.random() * 0.24) *
-              (range * 0.62 + Math.random() * range * 0.3),
-          ]}
-          scale={[1, 2.0 + Math.random() * 4.0, 1]}
+          position={beam.position}
+          scale={[1, beam.height, 1]}
           userData={{
-            speed: 2 + Math.random(), // 上升速度
-            resetHeight: 10 + Math.random() * 20, // 飞多高后消失
+            speed: beam.speed,
+            resetHeight: beam.resetHeight,
           }}>
           {/*
             半径 0.03 → 0.09。
@@ -144,14 +150,14 @@ const BeamLight = ({
             同样 0.03 只有万分之一的宽度，在 1920 屏上不到一个像素 ——
             用户说「太细了，看不到」就是这个原因。
           */}
-          <cylinderGeometry args={[0.09, 0.09, 1, 6, 1, true]} />
+          <cylinderGeometry args={[range * 0.001, range * 0.001, 1, 6, 1, true]} />
           <SparklesImplMaterial
             transparent
             depthWrite={false}
             side={DoubleSide}
             blending={AdditiveBlending}
             uColor={0x8fc2ff}
-            uOpacity={0.5 + Math.random() * 0.2}
+            uOpacity={beam.opacity}
           />
         </mesh>
       ))}

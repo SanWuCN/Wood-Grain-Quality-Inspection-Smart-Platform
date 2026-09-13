@@ -32,6 +32,7 @@ import { Icon } from "./icons";
 import { useMumai } from "./context";
 import { holderLabel, VIEW_LABEL, viewTypeForPath, writeFocus } from "./focus";
 import { useShellEntrance } from "./entrance";
+import LoadingVeil from "./LoadingVeil";
 import { useConfigStore } from "./mapDemo/stores";
 import { COMPONENTS, CURRENT_RISKS, DEVICES, SCAN_BATCHES } from "./seed/scenario";
 import "./appshell.css";
@@ -286,15 +287,7 @@ export default function Shell() {
           改成浮层只做覆盖、不阻塞挂载之后，镜头从 t≈0 就开始推，整段回到 Demo2 的节奏。
         */}
         {!online ? null : (
-          <Suspense
-            fallback={
-              <div className="appshell__boot">
-                <strong>正在打开页面</strong>
-                <div className="appshell__boot-bar">
-                  <i />
-                </div>
-              </div>
-            }>
+          <Suspense fallback={<LoadingVeil />}>
             {/*
               路由守卫，分三种情况，不能合并：
                 ① 地址未登记（如拆页前的 #/adapt）→ 放行 Outlet，由 routes.tsx
@@ -311,7 +304,7 @@ export default function Shell() {
           </Suspense>
         )}
 
-        {booting ? (
+        {booting && !isOverview ? (
           <div className="appshell__boot">
             <div className="appshell__boot-mark">
               <i />

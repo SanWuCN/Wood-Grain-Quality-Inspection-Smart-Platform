@@ -1,10 +1,11 @@
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import styled from "styled-components";
 import { Canvas } from "@react-three/fiber";
 import { gsap } from "gsap";
 import Lights from "./lights";
 import Mirror from "./mirror";
 import Base from "./base";
+import LoadingVeil from "../LoadingVeil";
 import Bottom from "./bottom";
 import BeamLight from "./beamLight";
 import { useCanvasRoot } from "./useCanvasRoot";
@@ -106,20 +107,8 @@ const DATASETS: Record<
    * 0.92 在地图明显变大一档的同时仍留出左右面板的安全距离。
    */
   china: { data: chinaData, outline: chinaOutline, fitPadding: 0.74 },
-  /*
-   * 上海 1.08 → 0.62。
-   *
-   * 实测下钻后上海只占 viewport **28% 宽**（同一次加载内量中国是 55%），
-   * B05「不得出现过小」不达标。上一轮把取景距离下限从 2 放到 0.2，
-   * 只把它从 12% 抬到 28% —— 说明还有一个与地图尺度无关的因子在推远相机。
-   *
-   * 既然量不出那个因子，就按实测比例直接标定：28% → 约 50% 需要距离缩到
-   * 约 1/1.8，系数 1.08 / 1.8 ≈ 0.6，取 0.62 稍留余量，避免崇明岛顶到上沿。
-   *
-   * 这是**经验标定**，不是从几何推出来的 —— 注释写明，免得后面有人
-   * 以为它与中国的 1.14 是同一套推导。
-   */
-  shanghai: { data: shanghaiData, fitPadding: 0.62 },
+  // 为上海纵向轮廓留出上下边距，避免崇明、奉贤与底部操作条相撞。
+  shanghai: { data: shanghaiData, fitPadding: 1.08 },
 };
 
 /** 下钻 / 返回的淡出淡入时长 */
@@ -133,36 +122,18 @@ const CanvasWrapper = styled.div`
   background: #000000;
 `;
 
-/**
- * 加载遮罩（A01）。
- *
- * 原来这里是 `<Suspense fallback={null}>` —— DEM 贴图加载 + 2048px 地表烘焙
- * 大约要 3 秒，这 3 秒画布是纯黑的、连一个像素的反馈都没有。
- * 用户的原话是「刚打开网页加载是黑屏状态，没有加载动画」。
- *
- * 现在盖一层与 Demo2 同语言的极简遮罩：深黑蓝底 + 极弱中心光 + 一行字 + 一条细线。
- * 它等的是 `onSceneReady`（贴图烤好）而不是 `onReady`（开场播完）——
- * 两者中间隔着整个 3.5 秒开场，等错了就等于把开场也遮掉。
- */
-function LoadingVeil({ visible }: { visible: boolean }) {
+// Updating the loading/panel signals must not rebuild all map geometries.
+function MapStage({ children }: { children: ReactNode }) {
+  const introStarted = useConfigStore((state) => state.introStarted);
+  const mapPlayComplete = useConfigStore((state) => state.mapPlayComplete);
+  useLayoutEffect(() => {
+    useConfigStore.setState({ introStarted: false, mapPlayComplete: false, sceneReady: false, veiled: true });
+  }, []);
   return (
-    <div className={`map-veil${visible ? "" : " is-gone"}`} aria-hidden={!visible}>
-      <div className="map-veil__core">
-        {/*
-          底圈圈：外环匀速顺时针、中环反向、内环脉冲。
-          几何语言与场景里真正的 Bottom 展示盘一致，揭幕时由 CSS 淡出接到
-          Three.js 的底盘上，观感是连续的 —— 用户要的「丝滑衔接」。
-        */}
-        <span className="map-veil__rings" aria-hidden="true">
-          <i className="map-veil__ring map-veil__ring--outer" />
-          <i className="map-veil__ring map-veil__ring--mid" />
-          <i className="map-veil__ring map-veil__ring--inner" />
-        </span>
-        <b>木脉智检</b>
-        <span className="map-veil__ascii">MAP INITIALIZING</span>
-        <i className="map-veil__line" />
-      </div>
-    </div>
+    <CanvasWrapper data-map-phase={!introStarted ? "loading" : mapPlayComplete ? "ready" : "intro"} aria-busy={!introStarted}>
+      {children}
+      <LoadingVeil visible={!introStarted} />
+    </CanvasWrapper>
   );
 }
 
@@ -188,46 +159,6 @@ export default function Map(props: MapProps) {
   const { canvasRef, getRoot } = useCanvasRoot();
   const [loadedMode, setLoadedMode] = useState<MapMode>(mode);
   /**
-   * 地表贴图烤好了没有：遮罩等它，不等开场动画。
-   * 走 store 而不是 props 回调 —— 这套 setState 在本模块已经跑通。
-   */
-  /**
-   * 遮罩撤掉的时刻 = `mapPlayComplete`（镜头推完 = 地图开始显形）。
-   *
-   * 试过用「贴图就绪」当信号，但它偏偏撤不干净（试了两套写法）。
-   * 改用这个已经跑通的信号还有一个好处：遮罩盖住的是
-   * 「加载 + 镜头飞行」整段 —— 这两段时间画面本来就没有地图主体，
-   * 揭开时正好接上 2.5→3.5s 的材质淡入，中间不留暗场。
-   */
-  /**
-   * 遮罩是否还盖着。**走 store 不走 useState** —— 组件重挂载时本地状态会丢，
-   * 遮罩就会在地图已经画好之后又盖回来（实测 t=8s 有地图、t=12s 变黑）。
-   */
-  /**
-   * 遮罩是否还盖着。**等 Base 真正就绪**（introStarted），不等定时器 ——
-   * dev 下 Base 挂载要十几秒，这段时间原来是没有遮罩的空白画布。
-   */
-  const introStarted = useConfigStore((state) => state.introStarted);
-  const veiled = useConfigStore((state) => state.veiled) && !introStarted;
-
-  /**
-   * 换图（下钻 / 返回）时重新落遮罩。
-   *
-   * 不这么做的话，切到上海会先看到旧的中国地图被淡出、然后一小段空白 ——
-   * 那正是加载遮罩要消掉的东西。
-   */
-  /*
-   * 这里原来有一个「挂载后 900ms 撤遮罩」的定时器，已删除。
-   *
-   * 它假定 Map 一挂载、场景马上就能画出来。实测 dev 下 `Base`（连同 GeoJSON、
-   * 几何与地表贴图）要十几秒才就绪，于是遮罩在 900ms 就撤了、画布却还是空的
-   * —— 那十几秒就是用户报的「打开网页是蓝屏，一会全部都加载出来了」。
-   *
-   * 现在遮罩由 `introStarted` 驱动（见上方 `veiled` 的推导）：Base 挂载、
-   * 开场时间线建立的那一刻才撤。撤的同一帧开场就开始跑，中间不留空档。
-   */
-
-  /**
    * 真正的切换：淡出 → 换数据（重新取景）→ 淡入。
    * 点上海轮廓、面包屑、按钮三条入口都收敛到这里。
    */
@@ -243,7 +174,7 @@ export default function Map(props: MapProps) {
 
       setTransitioning(true);
       // 真的换图了：重新落遮罩并重新武装开场（揭幕 effect 会幂等地把它揭开）
-      useConfigStore.setState({ veiled: true, introStarted: false });
+      useConfigStore.setState({ veiled: true, introStarted: false, mapPlayComplete: false, sceneReady: false });
       const fade = { value: 1 };
       const tl = gsap.timeline({
         onComplete: () => setTransitioning(false),
@@ -324,7 +255,7 @@ export default function Map(props: MapProps) {
   const on = (name: string) => dbg !== `no${name}` && dbg !== "minimal";
 
   return (
-    <CanvasWrapper>
+    <MapStage>
       <Canvas
         ref={canvasRef}
         camera={{
@@ -378,10 +309,9 @@ export default function Map(props: MapProps) {
              * 光柱是贴地表的环境光效，高度该与地图本身的尺度相称：
              * extent/70 把它们收在视野内的低空，持续可见。
              */
-            <BeamLight range={extent * 1.15} topScale={Math.max(1, extent / 70)} />
+            <BeamLight range={extent * 1.15} topScale={extent / 70} />
           ) : null}
       </Canvas>
-      <LoadingVeil visible={veiled} />
-    </CanvasWrapper>
+    </MapStage>
   );
 }

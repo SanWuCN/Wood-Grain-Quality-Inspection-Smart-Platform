@@ -28,6 +28,7 @@ import { chinaSites, shanghaiSites, type Site } from "../data";
 import { useDashboardStore } from "../map/store";
 import { siteRegion } from "../seed/sites";
 import type { SurfaceKey } from "./base";
+import { useConfigStore } from "./stores";
 
 export interface SiteMarkersProps {
   mode: SurfaceKey;
@@ -62,6 +63,7 @@ export default function SiteMarkers(props: SiteMarkersProps) {
   const selectedSiteId = useDashboardStore((state) => state.selectedSiteId);
   const selectSite = useDashboardStore((state) => state.selectSite);
   const setFocusRegion = useDashboardStore((state) => state.setFocusRegion);
+  const mapPlayComplete = useConfigStore((state) => state.mapPlayComplete);
 
   const sites = mode === "shanghai" ? shanghaiSites : chinaSites;
 
@@ -99,6 +101,10 @@ export default function SiteMarkers(props: SiteMarkersProps) {
       }),
     );
   }, [mode, placed]);
+
+  // HTML anchors and pulsing materials bypass the map's opacity tween.
+  // Mount them after the terrain reveal so points never float over an empty map.
+  if (!mapPlayComplete) return null;
 
   return (
     <group renderOrder={8}>

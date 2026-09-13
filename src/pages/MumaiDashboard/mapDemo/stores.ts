@@ -2,29 +2,13 @@ import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 
 interface ConfigStore {
+  /** 地形主体入场完成，允许面板与业务标签出现（时间线 2.1s）。 */
   mapPlayComplete: boolean;
-  /**
-   * 地表贴图烤好了没有（A01）。
-   *
-   * 与 `mapPlayComplete` 是两个时刻：这个在贴图就绪的那一帧置位（撤加载遮罩），
-   * 后者在镜头推完时置位（左右面板入场），中间隔着整个 2.5 秒开场。
-   * 放在同一个 store 里，是因为这套 setState 机制在本模块已经跑通；
-   * 走 props 回调多一层，出问题时不好定位。
-   */
+  /** 地形、法线与底盘资源加载结束，场景可以准备首帧。 */
   sceneReady: boolean;
-  /**
-   * 加载遮罩是否还盖着。
-   *
-   * 放在 store 而不是组件 useState：组件重挂载会丢本地状态，
-   * 遮罩就会在地图已经画好之后又盖回来（实测 t=8s 有地图、t=12s 变黑）。
-   */
+  /** 加载层是否覆盖场景；跟随实际渲染帧移除。 */
   veiled: boolean;
-  /**
-   * 开场时间线是否已经建立（= Base 已挂载、几何与贴图就绪、可以看了）。
-   *
-   * 遮罩等的是这一个，不是「Map 挂载后 900ms」—— dev 下 Base 要晚十几秒才就绪，
-   * 那段空档就是用户看到的「蓝屏」。
-   */
+  /** 场景完成预热帧，开始可见开场。 */
   introStarted: boolean;
   toggle: (key: keyof Omit<ConfigStore, "toggle" | "reset">) => void;
   reset: () => void;
