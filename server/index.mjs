@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { openDatabase } from "./storage/db.mjs";
 import { createApi } from "./api/http.mjs";
 import { createHub } from "./services/hub.mjs";
+import { createDeviceGateway } from "./services/device-gateway.mjs";
 import { createBleBridge } from "./services/ble-bridge.mjs";
 import { DEFAULT_SESSION_ID, createSession, getSession, listSessions, snapshot } from "./services/session.mjs";
 import { ASSETS_ROOT, ensureAssetsRoot } from "./services/assets.mjs";
@@ -46,9 +47,20 @@ export function startService({
   const archiveReport = ensureArchive(db, sessionId);
 
   const server = createServer();
-  const hub = createHub({ server, db });
+  /*
+    upgrade 由这里统一分发：浏览器事件通道 `/ws` 与设备通道 `/ws/devices/{id}`
+    共用同一个端口（终端只能配一个 platform_url，不能为它单开端口）。
+    顺序敏感 —— 设备通道先试，命中就结束；两个通道都不认才断开。
+  */
+  const hub = createHub({ server, db, noServer: true });
+  const devices = createDeviceGateway({ db, sessionId });
+  server.on("upgrade", (request, socket, head) => {
+    if (devices.handleUpgrade(request, socket, head)) return;
+    if (hub.handleUpgrade(request, socket, head)) return;
+    socket.destroy();
+  });
   const bridge = createBleBridge(db);
-  const handle = createApi({ db, hub, bridge, staticRoot: staticDir ? resolve(staticDir) : null });
+  const handle = createApi({ db, hub, bridge, devices, staticRoot: staticDir ? resolve(staticDir) : null });
   server.on("request", handle);
 
   const log = quiet ? () => {} : (...args) => console.log(...args);
@@ -60,6 +72,8 @@ export function startService({
       log(`木脉智检 · 共享服务已启动`);
       log(`  HTTP      http://${host === "0.0.0.0" ? "localhost" : host}:${actualPort}/api`);
       log(`  WebSocket ws://${host === "0.0.0.0" ? "localhost" : host}:${actualPort}/ws`);
+      log(`  设备通道  ws://${host === "0.0.0.0" ? "localhost" : host}:${actualPort}/ws/devices/{deviceId}`);
+      log(`  设备网关  令牌 ${devices.status().tokens} 组 · 已登记 ${devices.status().devices} 台 · 在线 ${devices.status().online} 台`);
       log(`  会话      ${sessionId}（共 ${listSessions(db).length} 场）`);
       log(`  数据库    ${dbFile}`);
       log(`  资产目录  ${ASSETS_ROOT}${packReport.created ? "（本次补齐了演示更新包）" : ""}`);
@@ -69,12 +83,14 @@ export function startService({
         server,
         db,
         hub,
+        devices,
         sessionId,
         port: actualPort,
         url: `http://localhost:${actualPort}`,
         close: () =>
           new Promise((done) => {
             bridge.close();
+            devices.close();
             hub.close();
             server.close(() => {
               db.close();

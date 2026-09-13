@@ -99,34 +99,157 @@ function readJsonBody(req, limit = 4 * 1024 * 1024) {
   });
 }
 
+/** 二进制直传（设备预览图）：不解析 JSON，原样收字节 */
+function readRawBody(req, limit = 2 * 1024 * 1024) {
+  return new Promise((resolvePromise, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(new WorkflowError(413, "BODY_TOO_LARGE", "请求体过大"));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolvePromise(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
 /* ------------------------------------------------------------------ *
  * 路由
  * ------------------------------------------------------------------ */
 
-const ROUTES = [];
-const route = (method, pattern, handler, { auth = true, rawBody = false } = {}) => {
-  // pattern 里的 :name 段编译成正则，顺序敏感（先注册的先生效）
-  const keys = [];
-  const regex = new RegExp(
-    `^${pattern
-      .split("/")
-      .map((segment) => {
-        if (segment.startsWith(":")) {
-          keys.push(segment.slice(1));
-          return "([^/]+)";
-        }
-        return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      })
-      .join("/")}$`,
-  );
-  ROUTES.push({ method, regex, keys, handler, auth, rawBody });
-};
-
-export function createApi({ db, hub, bridge, staticRoot = null, logger = console }) {
+export function createApi({ db, hub, bridge, devices = null, staticRoot = null, logger = console }) {
   ensureAssetsRoot();
+  /*
+    路由表是**每个 API 实例一份**，不是模块级。
+    模块级的话，同一个进程里起第二个服务（测试、预检都会这么干）时，
+    新请求会先命中上一个实例注册的处理器 —— 那些闭包指着上一个已经关掉的库，
+    表现为「database is not open」，排查起来离现场很远。
+  */
+  const ROUTES = [];
+  const route = (method, pattern, handler, { auth = true, rawBody = false } = {}) => {
+    // pattern 里的 :name 段编译成正则，顺序敏感（先注册的先生效）
+    const keys = [];
+    const regex = new RegExp(
+      `^${pattern
+        .split("/")
+        .map((segment) => {
+          if (segment.startsWith(":")) {
+            keys.push(segment.slice(1));
+            return "([^/]+)";
+          }
+          return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        })
+        .join("/")}$`,
+    );
+    ROUTES.push({ method, regex, keys, handler, auth, rawBody });
+  };
+
   const sensors = createSensorService(db, hub);
   route("GET", "/api/capture/screen/status", () => screenStatus());
   route("GET", "/api/capture/screen/stream", ({ req, res }) => proxyScreen(req, res));
+
+  /* ------------------------------------------------------------------ *
+   * 手持终端（树莓派 / woodpulse）设备网关
+   *
+   * 两条使用方：
+   *   · 终端（设备）—— 带 `X-Device-Token` 上行，`auth: false`，令牌在网关里校验；
+   *   · 浏览器页面 —— 读硬件页数据、下发命令，走正常登录令牌。
+   * 所以这些路由**不能**统一挂 auth:true 或 auth:false，逐个判断：
+   * 设备上行只有令牌，页面读取只有登录态。
+   * ------------------------------------------------------------------ */
+
+  /** 页面读取设备数据：登录态即可；也接受该设备自己的令牌（联调时用 curl 方便） */
+  const requireDeviceView = (ctx, deviceId) => {
+    const actor = actorFromRequest(ctx.req);
+    if (actor) return actor;
+    const token = String(ctx.req.headers["x-device-token"] ?? "");
+    if (devices && token && devices.tokenAllowed(deviceId, token)) return null;
+    throw new WorkflowError(401, "UNAUTHORIZED", "未登录或设备令牌无效");
+  };
+  const requireGateway = () => {
+    if (!devices) throw new WorkflowError(503, "NO_DEVICE_GATEWAY", "设备网关未启用");
+    return devices;
+  };
+
+  route("POST", "/api/devices/register", async (ctx) => requireGateway().register(ctx.body, ctx.req), { auth: false });
+
+  route("POST", "/api/device-events/batch", async (ctx) => {
+    // 响应结构不能变：accepted / duplicated 是 messageId 数组，不是计数（文档 §3.5）
+    return requireGateway().ingestEvents(ctx.body?.events, ctx.req);
+  }, { auth: false });
+
+  route("GET", "/api/devices", async (ctx) => {
+    const actor = actorFromRequest(ctx.req);
+    const token = String(ctx.req.headers["x-device-token"] ?? "");
+    if (!actor && !token) throw new WorkflowError(401, "UNAUTHORIZED", "未登录或设备令牌无效");
+    const gateway = requireGateway();
+    return { devices: gateway.devices(), status: gateway.status(), serverTime: new Date().toISOString() };
+  }, { auth: false });
+
+  route("POST", "/api/devices/:deviceId/hardware", async (ctx) =>
+    requireGateway().ingestHardware(ctx.params.deviceId, ctx.body, ctx.req), { auth: false });
+
+  route("GET", "/api/devices/:deviceId/hardware", async (ctx) => {
+    requireDeviceView(ctx, ctx.params.deviceId);
+    // 页面不需要更高频率（终端本来就是 2 秒一份），但读取本身是幂等的
+    return requireGateway().hardwareView(ctx.params.deviceId);
+  }, { auth: false });
+
+  route("GET", "/api/devices/:deviceId/history", async (ctx) => {
+    requireDeviceView(ctx, ctx.params.deviceId);
+    return { deviceId: ctx.params.deviceId, samples: requireGateway().hardwareHistory(ctx.params.deviceId, ctx.query.limit) };
+  }, { auth: false });
+
+  route("GET", "/api/devices/:deviceId/events", async (ctx) => {
+    requireDeviceView(ctx, ctx.params.deviceId);
+    return { deviceId: ctx.params.deviceId, events: requireGateway().events(ctx.params.deviceId, ctx.query.limit) };
+  }, { auth: false });
+
+  route("POST", "/api/devices/:deviceId/commands", async (ctx) => {
+    if (!allows(ctx.actor, "scan:capture") && !allows(ctx.actor, "console:admin")) {
+      throw new WorkflowError(403, "FORBIDDEN", "此账号没有设备指令权限");
+    }
+    return requireGateway().issueCommand(ctx.params.deviceId, {
+      type: ctx.body?.type ?? ctx.body?.action,
+      args: ctx.body?.args ?? {},
+      ttlMs: ctx.body?.ttlMs,
+    });
+  });
+
+  /** 现场调参回写（文档 §6.1）：本机调参不经过平台下发，平台只做记录 */
+  route("POST", "/api/configs/:configVersion/ack", async (ctx) =>
+    requireGateway().configAck(ctx.params.configVersion, ctx.body, ctx.req), { auth: false });
+
+  /** 低帧率预览图：二进制直传，不是归档图像（文档 §3.9） */
+  route("POST", "/api/devices/:deviceId/preview", async (ctx) => {
+    const gateway = requireGateway();
+    const frame = await readRawBody(ctx.req, 2 * 1024 * 1024);
+    return gateway.ingestPreview(ctx.params.deviceId, frame, ctx.req.headers["x-frame-index"]);
+  }, { auth: false, rawBody: true });
+
+  route("GET", "/api/devices/:deviceId/preview/latest", async (ctx) => {
+    requireDeviceView(ctx, ctx.params.deviceId);
+    const frame = requireGateway().latestPreview(ctx.params.deviceId);
+    if (!frame) {
+      // 没有预览帧时明确回 404，页面显示「等待设备推流」而不是裂图
+      throw new WorkflowError(404, "NO_PREVIEW", "设备还没有推过预览帧");
+    }
+    const body = frame.jpeg;
+    ctx.res.writeHead(200, {
+      "content-type": "image/jpeg",
+      "content-length": body.length,
+      "cache-control": "no-store",
+      "x-frame-index": String(frame.index),
+    });
+    ctx.res.end(body);
+    return null;
+  }, { auth: false });
+
   const requireSensorControl = (ctx) => {
     if (!allows(ctx.actor, "scan:capture") && !allows(ctx.actor, "console:admin")) throw new WorkflowError(403,"FORBIDDEN","此账号没有传感器采集权限");
   };
@@ -620,6 +743,8 @@ export function createApi({ db, hub, bridge, staticRoot = null, logger = console
       assetsRoot: ASSETS_ROOT,
       assetsReady: existsSync(packDir),
       clients: hub.clientCount(),
+      // 设备网关那一路的状态：终端能不能连上、有几台在线（诊断「平台离线」看这里）
+      devices: devices ? devices.status() : null,
     };
   }, { auth: false });
 
@@ -703,9 +828,10 @@ export function createApi({ db, hub, bridge, staticRoot = null, logger = console
 function corsHeaders() {
   return {
     "access-control-allow-origin": "*",
-    "access-control-allow-headers": "authorization, content-type, x-file-name",
+    // 设备侧会带 X-Device-Token / X-Device-Id / X-Frame-Index（终端文档 §3）
+    "access-control-allow-headers": "authorization, content-type, x-file-name, x-device-token, x-device-id, x-frame-index",
     "access-control-allow-methods": "GET, POST, OPTIONS",
-    "access-control-expose-headers": "x-file-sha256",
+    "access-control-expose-headers": "x-file-sha256, x-frame-index",
   };
 }
 

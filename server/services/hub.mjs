@@ -15,8 +15,16 @@
 import { WebSocketServer } from "ws";
 import { eventsSince, getSession } from "./session.mjs";
 
-export function createHub({ server, db, path = "/ws" }) {
-  const wss = new WebSocketServer({ server, path });
+export function createHub({ server, db, path = "/ws", noServer = false }) {
+  /*
+    两种接法：
+      · 默认（noServer=false）：自己挂在 HTTP server 上，只服务 `path` —— 老行为不变；
+      · noServer=true：由 index.mjs 统一做 upgrade 路由（设备通道 `/ws/devices/{id}`
+        也要走同一个端口）。**不能让两个 WebSocketServer 都挂 server**：`ws` 对
+        路径不匹配的 upgrade 会直接回 400 并销毁 socket，设备通道还没轮到就被掐了。
+  */
+  const wss = noServer ? new WebSocketServer({ noServer: true }) : new WebSocketServer({ server, path });
+  const matches = (request) => new URL(request.url, "http://localhost").pathname === path;
   /** sessionId → Set<ws> */
   const rooms = new Map();
 
@@ -105,6 +113,16 @@ export function createHub({ server, db, path = "/ws" }) {
       let total = 0;
       for (const room of rooms.values()) total += room.size;
       return total;
+    },
+    /**
+     * 由 index.mjs 的 upgrade 路由调用。
+     * 不是本通道的路径 **原样退回**（不写响应、不销毁 socket），交给下一个通道；
+     * 是本通道才真正完成握手。
+     */
+    handleUpgrade(request, socket, head) {
+      if (!matches(request)) return false;
+      wss.handleUpgrade(request, socket, head, (ws, req) => wss.emit("connection", ws, req));
+      return true;
     },
     close() {
       clearInterval(heartbeat);
