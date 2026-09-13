@@ -142,8 +142,8 @@ const Brand = styled.div`
  * 图标与文字整体滚出、另一份滚入），配色与状态标记全部落回本平台的设计系统：
  *
  *   默认   文字 --text-secondary，图标 --mumai-icon-secondary
- *   悬停   圆填 --glow-cyan #5DE4FF（规范 §1.2 允许它出现在导航当前项），
- *          文字与图标转为 --bg-page 深色，保证实心亮底上的对比度
+ *   悬停   圆填 --glow-cyan 的 14% 淡青（不是实心亮色，见下面 .mumai-pill-circle
+ *          的说明），文字提到 --text-primary，图标提到 --mumai-icon-accent
  *   当前项 --fill-active 底色 + 1px --border-active 边线 + 2px --primary 底线
  *          + --glow-cyan 圆点；文字 --text-primary，图标 --mumai-icon-accent
  *
@@ -279,26 +279,45 @@ const NavLayer = styled(PillNav)`
     bottom: 0;
     display: block;
     border-radius: 50%;
-    background: var(--glow-cyan);
+    /*
+      悬停填色：--glow-cyan 的 14% 淡青，不是实心亮色。
+
+      上一个版本用实心 #5DE4FF 把整枚药丸点亮 —— 在深蓝黑顶栏里跳得厉害，
+      而且必须把文字与图标一起压成深色才读得清，与规范 §11「普通交互不发光、
+      减少彩色、减少无意义装饰」相冲。改成淡青底 + 亮字后：圆照样长出来、
+      长满整枚药丸，但强度落在平台既有的选中底色那一档（--fill-*），
+      和当前项是同一个音量，谁也不会盖过谁。
+    */
+    background: rgba(93, 228, 255, 0.14);
+    box-shadow: inset 0 1px 0 0 rgba(93, 228, 255, 0.5);
     pointer-events: none;
     will-change: transform;
   }
 
-  /* ---- 悬停：指针与键盘焦点同一种表现 ---- */
-
-  .mumai-pill:hover,
-  .mumai-pill:focus-visible {
-    color: var(--bg-page);
-  }
+  /* ---- 悬停 / 键盘焦点：与 PillNav 维护的 is-hot 同步 ---- */
 
   /*
-    圆已经填满药丸，图标必须跟着文字转深色，不能继续用次级图标色
-    （#A7B5C3 压在 #5DE4FF 上对比度极低）。
-    这里用 currentColor 取到药丸刚变成的深色，与上面那条同权重、靠顺序生效。
+    颜色规则同时写 .is-hot（JS 在 enter / leave 里维护）与 :hover。
+    前者是**权威状态**：gsap 会把文字色写成内联样式，只认 :hover 会出现
+    「指针已经离开、内联深色还挂着」的脏状态；后者保证脚本没跑起来时仍有反馈。
   */
+  .mumai-pill.is-hot,
+  .mumai-pill:hover,
+  .mumai-pill:focus-visible {
+    color: var(--text-primary);
+  }
+
+  /* 悬停时图标提到强调色，与当前项同一套取色（背景是淡青，浅色图标才读得清） */
+  && .mumai-pill.is-hot .mumai-icon,
   && .mumai-pill:hover .mumai-icon,
   && .mumai-pill:focus-visible .mumai-icon {
-    color: currentColor;
+    color: var(--mumai-icon-accent, #6bcbe0);
+  }
+
+  /* 滚入层压在淡青圆上：用最亮的文字色，不能沿用默认次级色 */
+  .mumai-pill.is-hot .mumai-pill-roll,
+  .mumai-pill:hover .mumai-pill-roll {
+    color: var(--text-primary);
   }
 
   /* ---- 当前项：底色 + 底线 + 圆点，三重标记（规范 §4） ---- */
@@ -330,11 +349,11 @@ const NavLayer = styled(PillNav)`
     pointer-events: none;
   }
 
-  /* 当前项被悬停时圆的填色更亮，文字仍走深色（底色被圆盖满） */
+  /* 当前项被悬停时：淡青圆叠在选中底色上，边线让位给圆，文字保持最亮 */
   .mumai-pill.is-active:hover,
   .mumai-pill.is-active:focus-visible {
     border-color: transparent;
-    color: var(--bg-page);
+    color: var(--text-primary);
   }
 
   /*

@@ -4,25 +4,31 @@
  * 交互取自 React Bits 的 PillNav（https://www.reactbits.dev/components/pill-nav）：
  *   - 每个导航项是一枚药丸，圆角 9999px
  *   - 指针进入时，从药丸**底边中点**长出一个圆（圆的半径由药丸的宽高算出来，
- *     保证放大后完整覆盖整枚药丸），把药丸底色填成强调色
- *   - 同时把「图标 + 文字」整体向上滚出，另一份同内容从下方滚入 —— 圆填满的
- *     那一刻，文字已经在深色底上，不会出现半程可读性差的中间态
+ *     保证填满后完整覆盖整枚药丸），把药丸底色换成高亮底
+ *   - 同时把「图标 + 文字」整体向上滚出，另一份同内容从下方滚入
  *   - 指针离开时圆缩回 0，文字反向滚回
  *
  * 与上游的差异（都是按本平台的设计系统改的，不是简化）：
  *   1) 配色全部走 src/styles/tokens.css 的 token：
- *      主色 --primary #4EA8FF、选中底 --fill-active、
- *      科技光效色 --glow-cyan #5DE4FF（规范 §1.2 允许它出现在导航当前项）。
+ *      高亮底是 --glow-cyan 的 14% 淡青，文字 --text-primary，
+ *      图标 --mumai-icon-accent（与当前项同一套取色）；
+ *      当前项用 --fill-active 底 + --border-active 边 + 2px --primary 底线。
  *      上游的 baseColor / pillColor / hoveredPillTextColor 三个 props 因此不再需要。
+ *      上游是**实心亮色填充 + 深色文字**，在这里太跳（评审口径：普通交互不发光、
+ *      减少彩色），所以改成同一色系的淡底 + 亮字，动效不变、音量降一档。
  *   2) 规范 §4 要求「选中态同时有底色或边线、文字变化，不能仅变色」，
  *      所以当前项有三重标记：--fill-active 底色 + 2px 主色底线 + 主色圆点。
- *   3) 规范 §11「普通 Panel 不发光」：填色圆用实心 #5DE4FF，不加外发光、不加光晕。
- *   4) 规范 §4：导航图标默认 20px（这里 18px 以适配 85px 顶栏的两行布局）。
+ *   3) 圆的最终缩放是 1 而不是上游的 1.2：顶栏两行贴得很紧，
+ *      多出来的 20% 会把圆顶到左上角字标上去（见 FILL_SCALE 的注释）。
+ *   4) 规范 §4：导航图标默认 20px（这里 16px 以适配 85px 顶栏的两行布局）。
  *   5) 无障碍：当前项给 aria-current="page"，键盘焦点有 2px 焦点环
  *      （--mumai-focus，规范 §4）；滚入的那一份内容 aria-hidden，
  *      屏幕阅读器只会读到一次标签。
  *   6) prefers-reduced-motion: reduce 时不跑动画，改为静态悬停底色
  *      （规范 §6.2 / 评审 V13「检查展开、加载、失败、降级与减少动态效果」）。
+ *   7) 抗卡死：高亮态由 is-hot 类与 hotPills 标记共同维护，
+ *      enter / leave 幂等，指针离开整条导航或窗口失焦时统一收尾 ——
+ *      手快速划过一排药丸不会再留下「填满但不该填」的圆。
  *
  * 用法（顶栏）：items 由 design.ts 的 NAV_ITEMS 映射而来，
  * activeKey 为当前页面的 key，renderIcon 提供图标（会被渲染两份，
@@ -59,9 +65,28 @@ export interface PillNavProps {
 /** 滚入动效的时长（秒）。0.32s 落在规范 §6.2 的 micro-interaction 档（180–260ms）附近 */
 const DUR_FILL = 0.32;
 const DUR_OUT = 0.22;
+/** 文字与图标换色：比圆的位移快，手快速划过时颜色不会慢半拍 */
+const DUR_TINT = 0.12;
 
-/** 指针进入时圆放大的倍数：1.2 保证圆完整包住药丸，四角不留缝 */
-const FILL_SCALE = 1.2;
+/**
+ * 圆的最终缩放。
+ *
+ * 上游用 1.2：多出来的 20% 会让圆**冲出药丸**，视觉上比药丸高约 8px。
+ * 在这里不行 —— 顶栏两行贴得很紧（药丸顶边 y=39，左上角字标底边 y=40），
+ * 圆一涨就把「木脉智检」压掉一块。
+ * 半径公式本身已经让圆刚好过药丸的四个角，所以 1 就够；
+ * 再加下面那 4px 直径余量，圆覆盖整个药丸而完全落在药丸内部（药丸 overflow: clip）。
+ */
+const FILL_SCALE = 1;
+
+/**
+ * 药丸 → 它的高亮 / 收起控制函数。
+ *
+ * 放在模块级而不是组件里：顶栏整条导航只挂一个 PillNav 实例，
+ * 这张表让「指针离开整条导航」这类收尾逻辑能一次把所有药丸落回常态，
+ * 不需要在 DOM 上挂自定义属性。
+ */
+const PILL_CONTROL = new WeakMap<HTMLElement, { enter: () => void; leave: () => void }>();
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
@@ -81,6 +106,14 @@ export default function PillNav({
     if (!root) return;
 
     const cleanups: Array<() => void> = [];
+    /**
+     * 当前处于「高亮态」的药丸（指针在上面，或键盘焦点在它上面）。
+     *
+     * 两个用途：
+     *   1) 重算时跳过它 —— 悬停中重建时间线会把正在播的圆清零，那一枚就永远填不回来
+     *   2) 换向时按它判断该往哪边走，避免重复触发同一方向的补间
+     */
+    const hotPills = new WeakSet<HTMLElement>();
 
     /**
      * 建时间线。
@@ -114,7 +147,12 @@ export default function PillNav({
           于是圆心正好在底边中点下方 R 处。
         */
         const radius = (width * width) / 4 / (2 * height) + height / 2;
-        const diameter = Math.ceil(2 * radius) + 2;
+        /*
+          +4 而不是上游的 +2：这 4px 全部落在药丸**以内**（圆的底边也从 delta 再往里收，
+          药丸本身还有 1px 边框），所以圆放大到 FILL_SCALE 时刚好齐平药丸边界 ——
+          既盖满整枚药丸，又不会有一丝一毫溢到药丸外面去压住字标。
+        */
+        const diameter = Math.ceil(2 * radius) + 4;
         const delta = Math.ceil(radius - Math.sqrt(Math.max(0, radius * radius - (width * width) / 4))) + 1;
 
         circle.style.width = `${diameter}px`;
@@ -124,8 +162,27 @@ export default function PillNav({
         /** 文字整体上移一个药丸高 + 8px（规范 §4 的图标—标签间距也是 8px） */
         const shift = height + 8;
 
+        /** 圆与文字/图标的终态色：进入补间与「直接落位」两条路径共用同一份定义 */
+        const HOT_COLOR = "var(--text-primary)";
+
+        /** 滚入层压在淡青圆上，用最亮的文字色 —— 与 CSS 的 .is-hot 规则一致 */
+        const setColor = (isHot: boolean) => {
+          if (isHot) gsap.set([pill, roll], { color: HOT_COLOR });
+          else gsap.set([pill, roll], { clearProps: "color" });
+        };
+
+        const land = (isHot: boolean) => {
+          gsap.set(circle, { scale: isHot ? FILL_SCALE : 0 });
+          gsap.set(stack, { y: isHot ? -shift : 0, opacity: isHot ? 0 : 1 });
+          gsap.set(roll, { y: isHot ? 0 : shift, opacity: isHot ? 1 : 0 });
+          setColor(isHot);
+        };
+
         if (reduced) {
-          // 不跑动画：圆留在 0 缩放，悬停/选中的变化全部交给 CSS 静态态
+          /*
+            不跑动画：圆留在 0 缩放，颜色变化交给 CSS 的悬停静态态，
+            因此这里连 color 都不写，只把两层内容摆回基准位置。
+          */
           gsap.set(circle, { xPercent: -50, scale: 0, transformOrigin: "50% 100%" });
           gsap.set(stack, { y: 0, opacity: 1 });
           gsap.set(roll, { y: shift, opacity: 0 });
@@ -137,8 +194,6 @@ export default function PillNav({
           scale: 0,
           transformOrigin: `50% ${diameter - delta}px`,
         });
-        gsap.set(stack, { y: 0, opacity: 1 });
-        gsap.set(roll, { y: shift, opacity: 0 });
 
         const tl = gsap.timeline({ paused: true });
         /*
@@ -148,42 +203,79 @@ export default function PillNav({
         */
         tl.to(circle, { scale: FILL_SCALE, duration: DUR_FILL, ease: "power3.out", overwrite: "auto" }, 0);
         tl.to(stack, { y: -shift, opacity: 0, duration: DUR_FILL * 0.6, ease: "power3.out", overwrite: "auto" }, 0);
-        // 三件事各占时间线的不同区段，整条线走完（tweenTo 到 duration）就是填满态
+        // 文字与图标换色：文字色比圆的位移快，视觉上「一进来就亮」
+        tl.to(pill, { color: HOT_COLOR, duration: DUR_TINT, ease: "power2.out", overwrite: "auto" }, 0);
+        /*
+           滚入的那一份在圆填到一半时进场（0.34 处）。它自己的颜色由 CSS 给定
+           （.mumai-pill.is-hot .mumai-pill-roll → --text-primary），
+           这里不重复写，避免两处各说一套。
+        */
         tl.to(roll, { y: 0, opacity: 1, duration: DUR_FILL * 0.66, ease: "power3.out", overwrite: "auto" }, DUR_FILL * 0.34);
-        // 反向走到底时圆必须精确回到 0：中途改变窗口尺寸会让量出来的 scale 留下残值
-        tl.eventCallback("onReverseComplete", () => {
-          gsap.set(circle, { scale: 0 });
-        });
 
         let tween: gsap.core.Tween | null = null;
+        let hot = false;
 
-        const enter = () => {
-          /*
-             键盘焦点也走同一条动效：焦点落在药丸上时把圆填满，
-             否则纯键盘操作只能靠 2px 焦点环辨认，和鼠标悬停的反馈不一致。
-          */
+        /**
+         * 高亮 / 收起。
+         *
+         * hot 这个标记是**防卡死的关键**：pointerenter 与 pointerleave
+         * 可以在同一帧里前后脚到（手快速划过一排药丸、指针在边界抖动），
+         * 这时 tweenTo 建出来的补间还没跑第一帧就被下一次调用 kill 掉，
+         * 元素就停在「圆填了一半」或「圆填满了但指针已经走了」的状态上不动了。
+         * 有了标记，离开时只在**确实处于高亮态**才反向；万一反向补间也被打断，
+         * 下面 leave 里的 land(false) 直接落位，不会再留残影。
+         */
+        const setHot = (next: boolean) => {
+          if (next === hot) return;
+          hot = next;
+          if (next) hotPills.add(pill);
+          else hotPills.delete(pill);
+
+          pill.classList.toggle("is-hot", next);
           tween?.kill();
-          tween = tl.tweenTo(tl.duration(), { duration: DUR_FILL, ease: "power3.out", overwrite: "auto" });
-        };
-        const leave = () => {
-          tween?.kill();
-          tween = tl.tweenTo(0, { duration: DUR_OUT, ease: "power3.out", overwrite: "auto" });
+
+          if (goInstant) {
+            land(next);
+            return;
+          }
+
+          if (next) {
+            tween = tl.tweenTo(tl.duration(), { duration: DUR_FILL, ease: "power3.out", overwrite: "auto" });
+          } else {
+            tween = tl.tweenTo(0, {
+              duration: DUR_OUT,
+              ease: "power3.out",
+              overwrite: "auto",
+              onComplete: () => {
+                // 反向走完把圆精确归零（中途改变窗口尺寸会留下残值），并撤掉内联文字色
+                gsap.set(circle, { scale: 0 });
+                setColor(false);
+              },
+            });
+          }
         };
 
-        const onFocus = () => enter();
-        const onBlur = () => leave();
+        /** 重建时正在高亮的药丸要按**终态**摆好，不能被清零 */
+        const goInstant = hotPills.has(pill);
+        land(goInstant);
 
-        pill.addEventListener("pointerenter", enter);
-        pill.addEventListener("pointerleave", leave);
+        const onEnter = () => setHot(true);
+        const onLeave = () => setHot(false);
+
+        PILL_CONTROL.set(pill, { enter: onEnter, leave: onLeave });
+
+        pill.addEventListener("pointerenter", onEnter);
+        pill.addEventListener("pointerleave", onLeave);
         // 捕获阶段监听：focus 不冒泡，药丸内部元素拿到焦点时也算这一项
-        pill.addEventListener("focus", onFocus, true);
-        pill.addEventListener("blur", onBlur, true);
+        pill.addEventListener("focus", onEnter, true);
+        pill.addEventListener("blur", onLeave, true);
 
         cleanups.push(() => {
-          pill.removeEventListener("pointerenter", enter);
-          pill.removeEventListener("pointerleave", leave);
-          pill.removeEventListener("focus", onFocus, true);
-          pill.removeEventListener("blur", onBlur, true);
+          pill.removeEventListener("pointerenter", onEnter);
+          pill.removeEventListener("pointerleave", onLeave);
+          pill.removeEventListener("focus", onEnter, true);
+          pill.removeEventListener("blur", onLeave, true);
+          PILL_CONTROL.delete(pill);
           tween?.kill();
           tl.kill();
         });
@@ -191,6 +283,19 @@ export default function PillNav({
     }
 
     build();
+
+    /*
+       兜底：指针离开整条导航时，把所有药丸强制落回常态。
+       指针事件丢一个（切窗口、系统弹窗、鼠标移出浏览器）就可能留下一个
+       「填满但不该填」的圆，这条收尾保证界面不会卡在那个状态。
+    */
+    const onRootLeave = () => {
+      for (const pill of Array.from(root.querySelectorAll<HTMLElement>(".mumai-pill"))) {
+        PILL_CONTROL.get(pill)?.leave();
+      }
+    };
+    root.addEventListener("pointerleave", onRootLeave);
+    window.addEventListener("blur", onRootLeave);
 
     /*
        只在宽度真正变化时重建：字体加载完成、角色权限变化（导航项数量变了）
@@ -215,6 +320,8 @@ export default function PillNav({
     return () => {
       observer.disconnect();
       media?.removeEventListener?.("change", onMotionChange);
+      root.removeEventListener("pointerleave", onRootLeave);
+      window.removeEventListener("blur", onRootLeave);
       cleanups.splice(0).forEach((fn) => fn());
     };
   }, [items, activeKey]);
