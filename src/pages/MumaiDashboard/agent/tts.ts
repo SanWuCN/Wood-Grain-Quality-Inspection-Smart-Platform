@@ -15,7 +15,14 @@
  *
  * 另外把播报状态的**每一次翻转**通过可选的 onSpeakingChange 播出去：
  * 输入侧据此在播报期间暂停聆听，从根上切断「AI 听见自己 → 又识别成用户输入」的自听回环。
+ *
+ * ── 音频优先级（本轮把第 2 条接通了）──────────────────────────────
+ * 现在真的按方案的分层走：**预生成语音包 > speechSynthesis > 静默降级**。
+ * 语音包放 `public/voice/`（按文本精确匹配，见 agent/voicePack.ts 与
+ * `public/voice/README.md`）；没录到的句子自动回退，不会出现"气泡写 A、喇叭念 B"。
  */
+
+import { audioUrlForText } from "./voicePack";
 
 export type TtsStatus = {
   supported: boolean;
@@ -161,22 +168,37 @@ export class VoiceOutput {
   /** 收掉当前 <audio>（换一段播报时用）：只清资源，不动 speaking 状态 */
   private silenceCurrent() {
     if (!this.current) return;
+    const audio = this.current;
+    this.current = null;
     try {
-      this.current.pause();
-      this.current.src = "";
+      /**
+       * 摘掉回调再清 src：`src = ""` 会让元素异步抛
+       * `MEDIA_ELEMENT_ERROR: Empty src attribute`，若不摘回调，这条错会去兑现
+       * **上一轮** playAudio 的 Promise（详见 playAudio 里 finish 的说明）。
+       */
+      audio.onended = null;
+      audio.onerror = null;
+      audio.pause();
+      audio.src = "";
     } catch {
       /* 忽略 */
     }
-    this.current = null;
   }
 
-  /** 播报一段文本；优先播放预录音频（若存在），否则用 speechSynthesis */
+  /** 播报一段文本；优先播放**预生成语音包**里的音频，其次 audioUrl，最后 speechSynthesis */
   async speak(text: string, audioUrl?: string): Promise<void> {
     if (this.muted || !text) return;
     // 新一段接替旧一段：先把还在响的 <audio> 收掉，避免两段声音叠在一起
     this.silenceCurrent();
-    if (audioUrl && (await probeAudio(audioUrl))) {
-      const played = await this.playAudio(audioUrl, text);
+    /**
+     * 语音包优先：调用方没显式给 URL 时，按**文本精确匹配**去语音包里找
+     * （见 agent/voicePack.ts 的说明：命中才播，不命中自动回退，绝不会出现
+     * "气泡写 A、喇叭念 B"）。放在这里而不是各个调用点，是为了让
+     * 气泡与控制台两条播报路径共用同一份规则。
+     */
+    const resolved = audioUrl ?? (await audioUrlForText(text)) ?? undefined;
+    if (resolved && (await probeAudio(resolved))) {
+      const played = await this.playAudio(resolved, text);
       if (played) return;
     }
     this.speakWithSynthesis(text);
@@ -191,12 +213,26 @@ export class VoiceOutput {
         this.current = audio;
         this.setSpeaking(true);
         const finish = (ok: boolean) => {
-          // 迟到的回调（被 stop()/换段之后才触发）不许改状态：代次不匹配就只兑现 Promise
-          if (token === this.generation) {
-            this.clearWatchdog();
-            if (this.current === audio) this.current = null;
-            this.setSpeaking(false);
+          /**
+           * 代次不匹配 = 这一轮已被 `stop()` / 下一段播报取代，**必须当作"已处理"，
+           * 绝不能回退到合成音**。
+           *
+           * 探针实测出来的真实故障（用户听到的"互动后还是合成音"）：连着问两次时，
+           * 第二轮的 `speak()` 一进来就 `silenceCurrent()` 把上一轮的 <audio> 清掉，
+           * 上一轮元素随即抛错 → 上一轮那个**早就作废**的 `finish(false)` 兑现了它
+           * 挂起的 Promise → 作废的 `speak()` 以为"音频没放成"，于是又合成了一遍
+           * **旧文本**，和正在播的新录音叠在一起响。
+           *
+           * 这里返回 true：作废的那一轮安静收场，不合成、不改状态（`speaking`
+           * 由新的那一轮负责）。
+           */
+          if (token !== this.generation) {
+            resolve(true);
+            return;
           }
+          this.clearWatchdog();
+          if (this.current === audio) this.current = null;
+          this.setSpeaking(false);
           resolve(ok);
         };
         /**

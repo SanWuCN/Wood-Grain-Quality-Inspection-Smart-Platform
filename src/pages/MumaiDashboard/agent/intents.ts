@@ -471,9 +471,17 @@ export const INTENTS: Intent[] = [
         "{platformCopy}当前演示场景：{scenarioTitle}（{scenarioId}）；业务日期 {businessDate}，" +
         "全程阶段共 {stageCount} 个，已完成到「{stageLabel}」。本平台不部署本地大模型，" +
         "小木按意图目录调用白名单工具，回复用模板加真实工具结果。",
-      alternatives: [
-        "{platformCopy}本次演示是 {scenarioTitle}，业务日期 {businessDate}，共 {stageCount} 个阶段，当前阶段「{stageLabel}」。",
-      ],
+      /**
+       * ⚠ **这里刻意没有 alternatives（同义模板）**，理由是实测出来的：
+       *
+       * 播报要用"外录的合成音频"替换浏览器语音，而替换规则是**按播报文本逐字匹配**
+       * （见 agent/voicePack.ts）。只要这条回答有第二个模板，随机挑到它时就匹配不上、
+       * 静默回退成浏览器合成音 —— 用户的体感就是"我放的录音，它有时还是机器音"。
+       * 实测两次连续运行分别渲染出长/短两版，正是这个现象。
+       *
+       * 想恢复多变说法的话：要么把每个变体都录一遍（manifest 里各占一条键），
+       * 要么接受"没录的那版回退合成音"。两条路都要显式决定，不能靠随机。
+       */
       facts: [
         "platformCopy",
         "scenarioTitle",

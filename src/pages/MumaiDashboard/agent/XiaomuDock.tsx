@@ -30,6 +30,7 @@ import { useAgentNavigate, useAgentSession } from "./agentSession";
 import { getAgentState, resolveConfirm, setAgent, subscribeAgent } from "./store";
 import { wakeChannel, type WakeSnapshot } from "./wakeChannel";
 import { buildReplyView, latestBotTurn, latestUserText, type ReplyView } from "./replyView";
+import { VoiceOutput } from "./tts";
 import "./xiaomuDock.css";
 
 /**
@@ -80,29 +81,34 @@ export default function XiaomuDock() {
   useEffect(() => wakeChannel().subscribe(setWake), []);
 
   /* ---------- 运行时（与语音控制台同一份构造方式，事实值才不会分叉）---------- */
+  /**
+   * 播报统一交给 `VoiceOutput`（**与全屏控制台同一个实现**）。
+   *
+   * ── 这里原来有个真缺陷，值得写清楚（用户实测"放的还是合成音"）────────
+   * 气泡原先自己调 `window.speechSynthesis.speak()`，**绕过了 `VoiceOutput`**。
+   * 后果：我把"预生成语音包"接在 `VoiceOutput.speak()` 里之后，
+   * 控制台那条路会播录音，而**气泡这条（用户日常交互看到的那条）永远走浏览器合成音** ——
+   * 两条播报路径各写一遍，能力自然只落在其中一条上。
+   * 现在只保留一个实现：语音包 → speechSynthesis → 静默降级（含看门狗与 barge-in），
+   * 全部由 `VoiceOutput` 负责，两个入口共用。
+   */
+  const outputRef = useRef<VoiceOutput | null>(null);
+  if (!outputRef.current && typeof window !== "undefined") {
+    outputRef.current = new VoiceOutput((status) => {
+      // 与旧实现等价的界面反馈：播报中 → RESPONDING，播完 → FINISHED
+      setAgent({ agentState: status.speaking ? "RESPONDING" : "FINISHED" });
+    });
+  }
   const runtime = useMemo<Runtime>(
     () => ({
       navigate,
       session,
       speak: (text: string) => {
         /**
-         * 播报交给浏览器语音合成。
-         *
          * FR-05 要求"TTS 只播报主回答，不逐项朗读字段名、来源定位和时间戳" ——
          * 所以这里**只**传 mainAnswer，绝不把 facts / sources / at 拼进去。
          */
-        try {
-          const speak = window.speechSynthesis?.speak.bind(window.speechSynthesis);
-          if (!speak) return;
-          window.speechSynthesis.cancel();
-          const utter = new SpeechSynthesisUtterance(text);
-          utter.lang = "zh-CN";
-          utter.onstart = () => setAgent({ agentState: "RESPONDING" });
-          utter.onend = () => setAgent({ agentState: "FINISHED" });
-          speak(utter);
-        } catch {
-          /* 播报不可用不影响文字结果 */
-        }
+        void outputRef.current?.speak(text);
       },
     }),
     [navigate, session],
