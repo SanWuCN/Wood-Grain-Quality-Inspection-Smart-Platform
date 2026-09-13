@@ -7715,7 +7715,9 @@
 .pd-rows {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  /* 行之间不加间距：每行自带比例条与两行排版，已经分得开。
+     这里省下的 ~20px 是给下面两张微型图的（面板高度是硬预算）。 */
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -7762,6 +7764,7 @@
   font-size: var(--fs-sub);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  line-height: 20px;
   white-space: nowrap;
 }
 
@@ -7785,17 +7788,47 @@
   font-style: normal;
 }
 
-.pd-fixture {
-  margin: var(--space-1) 0 0;
+/* 夹具徽标：只在标题区出现，不占正文高度 */
+.pd-badge {
+  padding: 0 6px;
+  border: 1px solid rgba(242, 184, 75, 0.45);
   color: var(--warning);
   font-size: var(--fs-aux);
+  white-space: nowrap;
 }
 
-/* 标题右侧：状态点 + 资源详情入口，不新增一行 */
+/* 标题右侧：夹具徽标 + 状态点 + 资源详情入口，不新增一行。
+   不换行（nowrap）是硬要求：标题区一旦折行，面板高度预算立刻被吃掉 */
 .pd-head {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  flex-wrap: nowrap;
+  gap: var(--space-1);
+}
+
+.pd-head .btn {
+  white-space: nowrap;
+}
+
+/* 窄面板（≤1440）里状态点只留圆点：文字进 title/aria，宽度让给「详情」按钮，
+   否则标题区会顶出面板右边界（实测 1366 越界 71px） */
+@media (max-width: 1440px), (max-height: 800px) {
+  /*
+    只留圆点、不要文字：用「宽度 0 + 隐藏溢出」而不是 font-size:0 ——
+    后者会把圆点本身也缩成 0，状态颜色就丢了。圆点是 flex 项，
+    flex:0 0 auto 保证它在 0 宽容器里仍然完整显示。
+  */
+  .pd-head .chip {
+    width: 0;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+  }
+
+  .pd-head .chip i {
+    flex: 0 0 auto;
+    margin: 0;
+  }
 }
 
 /*
@@ -8254,20 +8287,6 @@
   font-style: normal;
 }
 
-/* 控制条：状态说明 + 三个紧凑按钮，不新增一整行（§7.1） */
-.ob-controls {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-top: auto;
-  padding-top: var(--space-1);
-  font-size: var(--fs-aux);
-}
-
-.ob-controls .muted {
-  margin-right: auto;
-}
-
 /* 「查看全部」弹窗：清单式，每行一个工单 */
 .ob-all {
   display: flex;
@@ -8355,5 +8374,92 @@
 
   .pd-rows {
     gap: 0;
+  }
+}
+
+/* ------------------------------------------------------------------
+   平台数据 · 两张微型图（PRD §8.1）
+   ------------------------------------------------------------------
+   五行摘要下面是「逐台负载」条形图与「存储构成」堆叠条。
+   高度是算过的：四块面板在 1920 的可视高度 393px、1280 只剩 234px，
+   两张图合计必须能在最小那一档也放得下（1280 档由 @media 再收一档）。
+   ------------------------------------------------------------------ */
+.ov-chart--load {
+  height: 60px;
+  margin-bottom: var(--space-1);
+}
+
+/* 两张微型图的标题：比常规 ov-sec 矮一档（面板高度是硬预算，
+   五行数字 + 两张图必须同时落在 393px 内，标题让出这一档正好够） */
+.pd-rows + .ov-sec--tight {
+  margin-top: var(--space-1);
+  margin-bottom: 0;
+  font-size: var(--fs-table);
+}
+
+/* 第二张图的标题：紧贴上一张图，不再各占一整行 */
+.ov-chart--load + .ov-sec--tight {
+  margin-top: var(--space-1);
+  margin-bottom: 0;
+}
+
+/* 堆叠条只占一行条形的高度，标签画在条内 */
+.ov-chart--storage {
+  height: 26px;
+}
+
+@media (max-width: 1720px) {
+  .ov-chart--load {
+    height: 54px;
+  }
+
+  .ov-chart--storage {
+    height: 24px;
+  }
+}
+
+@media (max-width: 1440px), (max-height: 800px) {
+  .ov-chart--load {
+    height: 48px;
+  }
+
+  /*
+    隐藏「存储构成」而不是把它压成一条看不清的线：
+    它和存储行的短比例条表达的是同一个比例，压扁只是重复且更难读（PRD §4.2
+    「核心内容放不下即删去辅助层，而不是裁掉数据」）。
+  */
+  .ov-chart--storage {
+    display: none;
+  }
+
+  .ov-chart--load + .ov-sec--tight {
+    display: none;
+  }
+}
+
+@media (max-width: 1320px), (max-height: 760px) {
+  /* 1280×720 是 PRD §4.2 的最短一档（正文 234px）。前面几档已经把
+     存储构成与标题让掉了，这里再把逐台负载收一档、行距压掉，
+     正好落在预算内 —— 五行数字与状态一律不动。 */
+  .ov-chart--load {
+    height: 36px;
+    margin-bottom: 0;
+  }
+
+  .ov-sec--tight {
+    margin-top: 0;
+    font-size: var(--fs-aux);
+  }
+
+  .pd-row {
+    padding: 0;
+  }
+
+  .pd-row__value {
+    font-size: var(--fs-aux);
+  }
+
+  .pd-bar {
+    height: 2px;
   }
 }

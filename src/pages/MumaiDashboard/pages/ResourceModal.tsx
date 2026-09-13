@@ -75,6 +75,7 @@ export default function ResourceModal({
             <span>
               {data.serverCount > 0 ? `${data.serverCount} 台服务器` : data.noVolumeReason ?? "未识别存储卷"} ·
               后端主机 {data.hostId} · 快照 {data.snapshotId}
+              {data.fixture ? ` · 验收夹具输入（${data.fixture.label}，不是真实主机采集）` : ""}
             </span>
           </span>
         ) : (

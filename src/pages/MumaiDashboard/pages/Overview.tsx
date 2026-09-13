@@ -70,6 +70,7 @@ import {
   OVERVIEW_SLOGAN,
   STATUS_KEY_BY_TEXT,
   CHART_BASE,
+  LOAD_COLOR,
 } from "./overview.constants";
 
 /** 首页工单列表：本轮工单 + 历史工单，共 6 条（设计稿「工单列表」） */
@@ -490,9 +491,13 @@ function RiskOrderPanel() {
  * 固定高度视口，可见行数由面板正文剩余高度决定（大屏 3 行 / 小屏 2 行）；
  * 总数超过可见行数时每条停 4 秒、再花 450ms 向上移一个整行高，尾部无缝接回第一条。
  *
- * 暂停条件（缺一不可恢复）：鼠标悬停、键盘焦点在列表内、工单被选中、弹窗打开、
- * 页面不可见、prefers-reduced-motion。悬停发生在移动途中时立刻吸附到最近整行再停，
- * 避免停在半条工单上。
+ * 暂停条件（缺一不可恢复）：鼠标悬停、键盘焦点在列表内、工单被选中、
+ * 页面不可见、prefers-reduced-motion。
+ *
+ * 这里**不提供**暂停/继续与上一条/下一条按钮：轮播就是默认行为，
+ * 要看某一条可以直接点它进工单详情，要看全部走标题右侧的「查看全部」。
+ * 悬停发生在移动途中时位移本来就在整行像素上（translateY = 行高 × 整数索引），
+ * 所以停下来不会卡在半条工单上。
  */
 function OrderBoardList({ orders }: { orders: typeof OVERVIEW_ORDERS }) {
   const navigate = useNavigate();
@@ -501,7 +506,6 @@ function OrderBoardList({ orders }: { orders: typeof OVERVIEW_ORDERS }) {
   const reduceMotion = usePrefersReducedMotion();
 
   const [index, setIndex] = useState(0);
-  const [paused, setPaused] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -517,8 +521,18 @@ function OrderBoardList({ orders }: { orders: typeof OVERVIEW_ORDERS }) {
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
 
-  /** 选中后需要用户点「继续轮播」才恢复（§7.1） */
-  const blocked = paused || hovered || focused || hidden || reduceMotion || Boolean(selectedId);
+  /**
+   * 暂停条件（缺一不可恢复）：鼠标悬停、键盘焦点在列表内、工单被选中、
+   * 页面不可见、prefers-reduced-motion。
+   *
+   * 界面上**没有**暂停/继续、上一条/下一条这些按钮：轮播就是默认行为，
+   * 要看某一条直接点它进工单详情，要看全部走标题右侧的「查看全部」。
+   *
+   * 悬停时**不禁用点击定位**（下面那行 style 的 pointer-events）：
+   * 鼠标移上来只停轮播，行本身照旧可以点、可以聚焦 —— 否则用户想点某条
+   * 还得先把鼠标挪开，属于「暂停把操作抢走」。
+   */
+  const blocked = hovered || focused || hidden || reduceMotion || Boolean(selectedId);
 
   useEffect(() => {
     if (!loop || blocked) return;
@@ -532,10 +546,6 @@ function OrderBoardList({ orders }: { orders: typeof OVERVIEW_ORDERS }) {
     const timer = window.setTimeout(() => setIndex(index - orders.length), 460);
     return () => window.clearTimeout(timer);
   }, [index, loop, orders.length]);
-
-  const step = (delta: number) => {
-    setIndex((value) => (value + delta + orders.length) % orders.length);
-  };
 
   if (orders.length === 0) {
     return <p className="note">当前范围内没有工单。</p>;
@@ -587,30 +597,6 @@ function OrderBoardList({ orders }: { orders: typeof OVERVIEW_ORDERS }) {
         </ul>
       </div>
 
-      {loop ? (
-        <div className="ob-controls">
-          <span className="muted">
-            {hidden || reduceMotion ? "自动轮播已暂停" : selectedId ? "已选中，轮播暂停" : `轮播中 · 共 ${orders.length} 条`}
-          </span>
-          <button type="button" className="ov-more" onClick={() => step(-1)} aria-label="上一条工单">
-            上一条
-          </button>
-          <button type="button" className="ov-more" onClick={() => step(1)} aria-label="下一条工单">
-            下一条
-          </button>
-          <button
-            type="button"
-            className="ov-more"
-            aria-label={blocked ? "继续轮播" : "暂停轮播"}
-            onClick={() => {
-              /* 用户主动继续时清掉所有暂停原因：悬停/焦点会自己恢复，选中与手动暂停要显式清 */
-              setSelectedId(null);
-              setPaused((value) => !value);
-            }}>
-            {blocked ? "继续轮播" : "暂停轮播"}
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -663,6 +649,7 @@ function OrderListModal({ onClose }: { onClose: () => void }) {
  * 标题右侧只放一个轻量入口与一个状态点，不新增第六行。
  */
 function PlatformDataPanel() {
+  const ready = useEntranceSettled("/");
   const { data, error } = usePlatformResources(true);
   const [tab, setTab] = useState<ResourceTab | null>(null);
 
@@ -712,7 +699,12 @@ function PlatformDataPanel() {
             return (
               <>
                 {formatted.w}
-                {formatted.kw ? <i>{formatted.kw}</i> : null}
+                {formatted.kw ? (
+                  <>
+                    {" "}
+                    <i>{formatted.kw}</i>
+                  </>
+                ) : null}
               </>
             );
           })(),
@@ -731,20 +723,137 @@ function PlatformDataPanel() {
       ]
     : [];
 
+  /**
+   * 逐台 GPU 占用：横向条形图。
+   *
+   * 颜色按负载档位取语义色（空闲灰 / 低绿 / 中黄 / 高红），并在 25 / 50 / 75
+   * 画三条虚线 —— 与 §9.5 的档位定义同一套口径，看图不用数刻度就知道哪台进档。
+   * 未知（null）的条不画，靠右侧文字与「负载未知」表达，不拿 0 顶替（§10.3）。
+   */
+  const loadOption = useMemo(() => {
+    const list = data?.servers ?? [];
+    return {
+      ...CHART_BASE,
+      grid: { left: 0, right: 34, top: 4, bottom: 0, containLabel: true },
+      xAxis: {
+        type: "value" as const,
+        max: 100,
+        splitLine: { lineStyle: { color: CHART.grid } },
+        axisLabel: { color: CHART.axisText, fontSize: 11, formatter: "{value}%" },
+      },
+      yAxis: {
+        type: "category" as const,
+        inverse: true,
+        data: list.map((server) => server.id),
+        axisLine: { lineStyle: { color: CHART.axisLine } },
+        axisTick: { show: false },
+        axisLabel: { color: CHART.axisText, fontSize: 12 },
+      },
+      series: [
+        {
+          type: "bar",
+          barWidth: 10,
+          markLine: {
+            silent: true,
+            symbol: "none",
+            label: { show: false },
+            lineStyle: { color: CHART.axisLine, type: "dashed" as const },
+            data: [{ xAxis: 25 }, { xAxis: 50 }, { xAxis: 75 }],
+          },
+          label: {
+            show: true,
+            position: "right" as const,
+            color: CHART.axisText,
+            fontSize: 11,
+            formatter: "{c}%",
+          },
+          data: list.map((server) => ({
+            value: server.gpu.percent === null ? null : Number(server.gpu.percent.toFixed(1)),
+            itemStyle: { color: LOAD_COLOR[server.gpu.load] },
+          })),
+        },
+      ],
+    };
+  }, [data]);
+
+  /**
+   * 存储构成：一根堆叠横条（已用 + 剩余）。
+   *
+   * 不画饼图：只有两个分量时一根条比饼好读，而且这块面板已经有一张条形图，
+   * 再来一个圆环会让面板变吵（规范 §5.1「一块最多一个主要图」）。
+   * 「已用未知」时只画配置容量那一段并写明 —— 不用 0% 冒充（RES-09）。
+   */
+  const storageOption = useMemo(() => {
+    const total = summary?.storageTotalTB ?? 0;
+    const used = summary?.storageUsedTB ?? null;
+    const known = used !== null && Number.isFinite(used);
+    return {
+      ...CHART_BASE,
+      grid: { left: 0, right: 0, top: 0, bottom: 0 },
+      series: [
+        {
+          type: "bar",
+          stack: "storage",
+          barWidth: 16,
+          silent: !known,
+          label: {
+            show: true,
+            position: "inside" as const,
+            color: "#eaf3ff",
+            fontSize: 12,
+            formatter: known ? `已用 ${tb(used)}` : "",
+          },
+          itemStyle: { color: CHART.palette[0] },
+          data: [known ? Number(used.toFixed(4)) : 0],
+        },
+        {
+          type: "bar",
+          stack: "storage",
+          barWidth: 16,
+          silent: !known,
+          label: {
+            show: true,
+            position: "inside" as const,
+            color: CHART.axisText,
+            fontSize: 12,
+            formatter: known ? `剩余 ${tb(total - (used ?? 0))}` : "已用未知",
+          },
+          itemStyle: { color: "rgba(78,168,255,0.14)" },
+          data: [known ? Number((total - (used ?? 0)).toFixed(4)) : total],
+        },
+      ],
+    };
+  }, [summary]);
+
   return (
     <>
       <Panel
         title="平台数据"
         extra={
           <span className="pd-head">
+            {/*
+              夹具徽标：夹具是假输入，必须看得出来，不然「用夹具验过的数」
+              会被误当成真实主机采集结果。放在标题区而不是正文里 ——
+              正文高度是硬预算（四窗口不许滚动），一行提示会把图挤出去。
+              完整说明在弹窗副标题与「映射说明」里。
+            */}
+            {data?.fixture ? (
+              <span className="pd-badge" title={`验收夹具输入：${data.fixture.label}（不是真实主机采集）`}>
+                验收夹具
+              </span>
+            ) : null}
             {/* 状态点：数据过期 / 断连时在标题区提示，不新增一行解释（§8.1） */}
             <StatusChip
               text={error ? "连接中断" : data ? QUALITY_TEXT[quality] : "采样中"}
               tone={error || quality === "unavailable" ? "danger" : quality === "stale" ? "warn" : "ok"}
               dot
             />
-            <Btn tone="ghost" onClick={() => setTab("storage")}>
-              资源详情
+            {/*
+              按钮文案在窄面板里会被挤出去（面板 269px、标题区只剩 ~215px）：
+              用「详情」+ aria-label 保住可读名称，宽度省下一半。
+            */}
+            <Btn tone="ghost" onClick={() => setTab("storage")} aria-label="打开平台资源详情">
+              详情
             </Btn>
           </span>
         }
@@ -774,12 +883,38 @@ function PlatformDataPanel() {
             </ul>
 
             {/*
-              验收夹具提示：夹具是假输入，必须看得出来 ——
-              不然「用夹具验过的数」会被误当成真实主机采集结果。
+              可视化一：逐台负载。§8.1 允许「短比例条 / 微型图」，
+              禁止的是逐台列表与多条历史曲线 —— 这条横向条形图一次讲完
+              「几台机器、各自多少占用」，比五行数字多一层信息。
             */}
-            {data.fixture ? (
-              <p className="pd-fixture">验收夹具输入：{data.fixture.label}（不是真实主机采集）</p>
-            ) : null}
+            <h4 className="ov-sec ov-sec--tight">
+              逐台负载
+              <span className="ov-sec__note">
+                {data.serverCount} 台 · {LOAD_TEXT[summary.loadState]}
+              </span>
+            </h4>
+            <Chart
+              className="ov-chart ov-chart--load"
+              option={loadOption}
+              animate={ready}
+              ariaLabel={`每台服务器 GPU 占用：${data.servers
+                .map((server) => `${server.id} ${percent(server.gpu.percent)}`)
+                .join("，")}`}
+            />
+
+            {/*
+              可视化二：存储构成。§8.1 要求「平台存储严格表示按主机磁盘占用
+              映射的平台容量」—— 所以只画「已用 / 剩余」这一个构成，
+              不混入知识库文件数或数据库字节数。
+            */}
+            <h4 className="ov-sec ov-sec--tight">存储构成</h4>
+            <Chart
+              className="ov-chart ov-chart--storage"
+              option={storageOption}
+              animate={ready}
+              ariaLabel={`平台存储构成：已用 ${tb(summary.storageUsedTB)}，共 ${summary.storageTotalTB} TB`}
+            />
+
           </>
         ) : (
           /* 首次加载 / 断连：占位高度与五行一致，不把窗口撑高也不缩塌（§10.3） */

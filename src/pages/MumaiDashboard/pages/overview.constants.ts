@@ -106,3 +106,18 @@ export const CHART_BASE: echarts.EChartsCoreOption = {
     extraCssText: "border-radius:2px;box-shadow:none;",
   },
 };
+
+/**
+ * GPU 负载档位 → 图表用色（PRD §9.5 的四个档位 + 未知）。
+ *
+ * 取值来自规范 §1.3 的状态色：空闲用中性灰（它不是一个「好」状态，
+ * 只是没在跑）、低负载绿、中负载黄、高负载红。**未知也是灰**，
+ * 但界面上必须配文字（「负载未知」），不能只靠颜色区分。
+ */
+export const LOAD_COLOR: Record<"idle" | "low" | "medium" | "high" | "unknown", string> = {
+  idle: "#687a91",
+  low: "#39d5a3",
+  medium: "#f2b84b",
+  high: "#ff5c70",
+  unknown: "#465a70",
+};
