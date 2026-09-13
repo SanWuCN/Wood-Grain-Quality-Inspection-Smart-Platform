@@ -22,6 +22,7 @@
  */
 
 import { useMemo, useState } from "react";
+import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import { Btn, Modal, StateBlock, StatusChip } from "../ui";
 import { useMumai } from "../context";
@@ -245,7 +246,8 @@ function LogPacketModal({ packet, onClose }: { packet: DeviceLogPacket; onClose:
       footer={
         <>
           <span className="muted">
-            显示 {shown.length} / {packet.stats.total} 条
+            显示 <NumberAnimation value={shown.length} /> /{" "}
+            <NumberAnimation value={packet.stats.total} /> 条
           </span>
           <Btn onClick={onClose}>关闭</Btn>
         </>
@@ -267,13 +269,16 @@ function LogPacketModal({ packet, onClose }: { packet: DeviceLogPacket; onClose:
         </div>
         <div>
           <dt>会话时长</dt>
-          <dd>{packet.durationMin} 分钟</dd>
+          <dd>
+            <NumberAnimation value={packet.durationMin} /> 分钟
+          </dd>
         </div>
         <div>
           <dt>日志条数</dt>
           <dd>
-            {packet.stats.total} 条（INFO {packet.stats.info} / WARN {packet.stats.warn} / ERROR{" "}
-            {packet.stats.error}）
+            <NumberAnimation value={packet.stats.total} /> 条（INFO{" "}
+            <NumberAnimation value={packet.stats.info} /> / WARN <NumberAnimation value={packet.stats.warn} /> /
+            ERROR <NumberAnimation value={packet.stats.error} />）
           </dd>
         </div>
         <div>
@@ -283,12 +288,17 @@ function LogPacketModal({ packet, onClose }: { packet: DeviceLogPacket; onClose:
       </dl>
 
       <div className="tri-filter">
+        {/* Btn 是 `inline-flex + gap:8px`：整段文案包一层 span，数字才不会被 gap 撑开 */}
         <Btn active={source === "全部"} onClick={() => setSource("全部")}>
-          全部 {packet.stats.total}
+          <span>
+            全部 <NumberAnimation value={packet.stats.total} />
+          </span>
         </Btn>
         {LOG_SOURCES.map((item) => (
           <Btn key={item} active={source === item} onClick={() => setSource(item)}>
-            {item} {perSource.get(item) ?? 0}
+            <span>
+              {item} <NumberAnimation value={perSource.get(item) ?? 0} />
+            </span>
           </Btn>
         ))}
         <Btn active={warnOnly} onClick={() => setWarnOnly((value) => !value)}>
@@ -350,8 +360,9 @@ function PacketRow({ boot, onOpen }: { boot: DeviceLogBoot; onOpen: () => void }
             {isCurrent ? <em className="pkt__now">本次</em> : null}
           </b>
           <i>
-            会话 {boot.durationMin} 分钟 · {boot.stats.total} 条日志 ·{" "}
-            {boot.batchId ?? "未开展采集"} · {boot.endNote}
+            会话 <NumberAnimation value={boot.durationMin} /> 分钟 ·{" "}
+            <NumberAnimation value={boot.stats.total} /> 条日志 · {boot.batchId ?? "未开展采集"} ·{" "}
+            {boot.endNote}
           </i>
           {/* 只有出过问题的包才把摘要摆出来 */}
           {boot.stats.errorSummary ? (
@@ -362,8 +373,16 @@ function PacketRow({ boot, onOpen }: { boot: DeviceLogBoot; onOpen: () => void }
         </span>
         <span className="pkt__meta">
           <StatusChip text={boot.outcome} tone={OUTCOME_TONE[boot.outcome]} dot />
-          {boot.stats.warn > 0 ? <em className="pkt__n is-warn">{boot.stats.warn} 告警</em> : null}
-          {boot.stats.error > 0 ? <em className="pkt__n is-error">{boot.stats.error} 错误</em> : null}
+          {boot.stats.warn > 0 ? (
+            <em className="pkt__n is-warn">
+              <NumberAnimation value={boot.stats.warn} /> 告警
+            </em>
+          ) : null}
+          {boot.stats.error > 0 ? (
+            <em className="pkt__n is-error">
+              <NumberAnimation value={boot.stats.error} /> 错误
+            </em>
+          ) : null}
         </span>
       </button>
     </li>
@@ -506,7 +525,9 @@ export function TriageTab() {
         title="设备日志"
         extra={
           <span className="muted">
-            {DEVICE_LOG_BOOTS.length} 个日志包 · 正常 {counts.正常}/需留意 {counts.需留意}/异常 {counts.异常}
+            {DEVICE_LOG_BOOTS.length} 个日志包 · 正常 <NumberAnimation value={counts.正常} />
+            /需留意 <NumberAnimation value={counts.需留意} />
+            /异常 <NumberAnimation value={counts.异常} />
           </span>
         }
         className="tri-panel">
@@ -543,12 +564,21 @@ export function TriageTab() {
 
           <div className="pkt-filter__row">
             <span className="pkt-filter__label">结果</span>
+            {/*
+              这一排「全部 / 正常 / 需留意 / 异常」是**一组 KPI 徽标**：
+              按规则整组一起走数字动效（含数值恰好稳定的成员），
+              否则同一排里有的滚、有的不滚，看着像坏了。
+            */}
             <Btn active={outcome === "全部"} onClick={() => setOutcome("全部")}>
-              全部 {counts.total}
+              <span>
+                全部 <NumberAnimation value={counts.total} />
+              </span>
             </Btn>
             {LOG_OUTCOMES.map((item) => (
               <Btn key={item} active={outcome === item} onClick={() => setOutcome(item)}>
-                {item} {counts[item]}
+                <span>
+                  {item} <NumberAnimation value={counts[item]} />
+                </span>
               </Btn>
             ))}
             <label className="devlog-search">
@@ -588,7 +618,7 @@ export function TriageTab() {
         </div>
 
         <p className="note">
-          显示 {filtered.length} / {DEVICE_LOG_BOOTS.length} 个日志包，按「设备启动」切包：一次上电会话内的
+          显示 <NumberAnimation value={filtered.length} /> / {DEVICE_LOG_BOOTS.length} 个日志包，按「设备启动」切包：一次上电会话内的
           输出连续可读，跨会话的因果（例如上一次遗留的存储占用）不会被混进同一条流水账。
           进入包内可按来源收窄、按关键词检索。
         </p>

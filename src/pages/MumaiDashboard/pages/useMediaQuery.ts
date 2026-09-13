@@ -33,7 +33,9 @@ export function useMediaQuery(query: string): boolean {
  *
  * 与 CSS 的 `@media (prefers-reduced-motion: reduce)` 同一个偏好，
  * JS 侧读它是为了让**行为**也停（自动轮播），而不只是把动画时长设成 0。
+ *
+ * 实现已上移到 `src/hooks/usePrefersReducedMotion.ts`：数字动效组件
+ * （`src/components/numberAnimation.tsx`）是全局共享件，不能反向 import 页面模块。
+ * 这里只做转出，全平台仍然只有一份实现，既有 `./useMediaQuery` 的 import 不用改。
  */
-export function usePrefersReducedMotion(): boolean {
-  return useMediaQuery("(prefers-reduced-motion: reduce)");
-}
+export { usePrefersReducedMotion } from "../../../hooks/usePrefersReducedMotion";

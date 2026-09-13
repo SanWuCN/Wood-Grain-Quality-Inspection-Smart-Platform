@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Euler, MathUtils, Quaternion, Vector3 } from 'three';
+import NumberAnimation from '@/components/numberAnimation';
 import { Panel } from '../Panel';
 import { Btn, Modal, StatusChip } from '../ui';
 import { useSharedStore } from '../store/shared';
@@ -43,7 +44,7 @@ function Trend({ history, field, label, unit, now }: { history: SensorFrame[]; f
     else paths[paths.length-1]+=` L ${x} ${y}`;
     last=f.receivedAt;
   });
-  return <div className="sensor-trend"><header><b>{label}</b><span>{values.length ? `${lo.toFixed(1)}–${hi.toFixed(1)} ${unit}` : '暂无历史数据'}</span></header>
+  return <div className="sensor-trend"><header><b>{label}</b><span>{values.length ? <><NumberAnimation value={lo} digits={1} />–<NumberAnimation value={hi} digits={1} /> {unit}</> : '暂无历史数据'}</span></header>
     <svg viewBox="0 0 600 100" role="img" aria-label={`${label}最近五分钟趋势；断线处留空`}><path className="sensor-trend__grid" d="M8 20H592 M8 50H592 M8 80H592" />
       {paths.map((d,i)=><path key={i} d={d} fill="none" stroke="currentColor" strokeWidth="2" />)}
       {points.length===1 ? <circle cx={8+(points[0].receivedAt-(now-300000))/300000*584} cy="78" r="3" fill="currentColor" /> : null}
@@ -173,6 +174,24 @@ export default function SensorWorkspace({ batchId, screen }: { batchId: string; 
     return { value: demo ? undefined : live, digits, chip: state, tone: toneOf(state), stale: state !== '实时', foot: undefined as string | undefined };
   };
 
+  /*
+   * 数字动效口径（组件：`src/components/numberAnimation.tsx`）
+   * ----------------------------------------------------------
+   * 这一页是全平台刷新最快的一面：姿态流 30Hz、`now` 心跳 500ms、网桥轮询 2s。
+   * 补间时长按「这个数多久变一次」定，不按好不好看定：
+   *   · 姿态角（30Hz）→ 0.25s：比直接落值多一点平滑，又不会永远追不上最新一帧；
+   *   · 网桥轮询的连接参数 / 采样周期、五格读数、趋势区间 → 默认 0.8s
+   *     （2s 轮询、1s 心跳在下一次推送前都能滚完）；
+   *   · 详情弹窗里的原始行 → 0.25s；其中 `seq` 与四元数给 0（直接落值）——
+   *     调试视图要的是「屏幕上就是最新一帧」，中间态反而是噪音。
+   * 设备 ID / 固件版本 / 时间戳 / 按键位掩码 / 写死的电量（FIXED_BATTERY_PCT）
+   * 一律保持静态：它们不是「会变的量」，滚动只会变成噪音。
+   *
+   * 一个不显眼的坑：`NumberAnimation` 渲染出来的是 `<span>`，而 `.sensor-angles span`
+   * 本来是给轴名（Pitch / Yaw / Roll）定的 11px 次级灰 —— 不覆盖的话读数会被这条
+   * 选择器抢走字号和颜色。这里用 `style={{fontSize:'inherit',color:'inherit'}}`
+   * 让读数继续跟着 `<b>`（而不是写死 20px，否则窄屏断点的 18px 就失效了）。
+   */
   return <>
     <div className="capture-visuals">
       {screen}
@@ -183,7 +202,7 @@ export default function SensorWorkspace({ batchId, screen }: { batchId: string; 
           {demo ? <span className="sensor-demo-watermark">模拟姿态 · 非实机</span> : null}
           {!frame?.quaternion ? <span className="sensor-model__hint">模型已就绪 · 等待真实姿态数据</span> : !follow ? <span className="sensor-model__hint">跟随已暂停 · 读数继续接收</span> : poseState!=='实时' ? <span className="sensor-model__hint">保持最后姿态 · {timeLabel(frame.poseAt)}</span> : null}
         </div>
-        <div className="sensor-angles">{[['俯仰 Pitch',angles.y],['偏航 Yaw',angles.z],['侧倾 Roll',angles.x]].map(([label,value])=><div key={String(label)}><span>{label}</span><b>{frame?.quaternion ? MathUtils.radToDeg(Number(value)).toFixed(1) : '—'}<small>°</small></b></div>)}</div>
+        <div className="sensor-angles">{[['俯仰 Pitch',angles.y],['偏航 Yaw',angles.z],['侧倾 Roll',angles.x]].map(([label,value])=><div key={String(label)}><span>{label}</span><b><NumberAnimation value={frame?.quaternion ? MathUtils.radToDeg(Number(value)) : null} digits={1} duration={0.25} style={{fontSize:'inherit',color:'inherit'}} /><small>°</small></b></div>)}</div>
         <div className="sensor-pose__actions"><Btn onClick={zeroPose} disabled={!frame?.quaternion || poseState!=='实时'}>姿态归零</Btn><Btn onClick={()=>setFollow(!follow)}>{follow?'暂停跟随':'开启跟随'}</Btn><Btn tone="ghost" onClick={()=>setReset(v=>v+1)}>恢复视角</Btn></div>
         <div className="sensor-pose__foot"><span>{zero !== identity ? '已归零 · ' : ''}相对航向 · 六轴融合</span><button type="button" onClick={()=>{setDemo(!demo);setZero(identity);setFollow(true);}}>{demo?'退出姿态演示':'姿态演示'}</button></div>
       </Panel>
@@ -194,7 +213,7 @@ export default function SensorWorkspace({ batchId, screen }: { batchId: string; 
         const at=demo ? undefined : frame?.fieldAt[key];
         const view=metricView(key,digits,typeof value==='number'?value:undefined);
         const foot=view.foot ?? `BLE ${frame?.calibration && (key==='ambientTemp'||key==='light')?'已校准':'原始值'} · ${timeLabel(at)}`;
-        return <div className={`sensor-metric${view.stale?' is-stale':''}`} key={key}><header><span>{label}</span><StatusChip text={view.chip} tone={view.tone} dot /></header><strong>{typeof view.value==='number'?view.value.toFixed(view.digits):'—'}<small>{unit}</small></strong><footer>{foot}</footer></div>;
+        return <div className={`sensor-metric${view.stale?' is-stale':''}`} key={key}><header><span>{label}</span><StatusChip text={view.chip} tone={view.tone} dot /></header><strong>{key==='battery' ? FIXED_BATTERY_PCT.toFixed(digits) : <NumberAnimation value={view.value} digits={view.digits} />}<small>{unit}</small></strong><footer>{foot}</footer></div>;
       })}</div>
       <div className="sensor-strip__foot"><span>{sensor.error ? `平台连接异常：${sensor.error}` : sensor.bridge.message}{sensor.bridge.batchId && sensor.bridge.batchId!==batchId ? ` · 当前采集绑定其他批次 ${sensor.bridge.batchId}` : ''}</span><span>姿态更新 {timeLabel(frame?.poseAt)} · 超过 3 秒标记延迟 / 10 秒离线</span></div>
     </section>
@@ -205,8 +224,8 @@ export default function SensorWorkspace({ batchId, screen }: { batchId: string; 
           <div className="sensor-connect__row"><label className="field"><span>设备标识（MAC / UUID）</span><input value={deviceId} onChange={(e)=>setDeviceId(e.target.value)} placeholder={sensor.bridge.deviceId ?? '扫描选择或输入设备标识'} /></label><Btn disabled={!canControl||Boolean(busy)} onClick={()=>void run('scan',async()=>{const data=await sensorRequest<{devices:typeof devices}>('scan',{});setDevices(data.devices);setMessage(`发现 ${data.devices.length} 台设备，请选择 SensorTag`);})}>{busy==='scan'?'扫描中…':'扫描附近设备'}</Btn></div>
           {devices.length ? <ul className="sensor-devices">{devices.map((d)=><li key={d.deviceId}><button type="button" className={deviceId===d.deviceId?'is-selected':''} onClick={()=>setDeviceId(d.deviceId)}><b>{d.name}</b><span>{d.deviceId} · {d.rssi} dBm</span></button></li>)}</ul> : null}
           <div className="sensor-connect__row"><Btn tone="primary" disabled={!canControl||Boolean(busy)||!deviceId.trim()} onClick={()=>void run('connect',async()=>{await sensorRequest<BridgeStatus>('connect',{deviceId:deviceId.trim(),batchId,sessionId:sensor.sessionId});setMessage('已启动连接，请查看实时数据状态');sensor.reconnect();})}>绑定并连接本批次</Btn><Btn disabled={!canControl||Boolean(busy)} onClick={()=>void run('disconnect',async()=>{await sensorRequest('disconnect',{});sensor.reconnect();setMessage('已停止采集并取消自动连接');})}>断开连接</Btn><Btn tone="ghost" onClick={sensor.reconnect}>刷新连接状态</Btn></div>
-          {sensor.bridge.connection?.actual ? <p className="note">蓝牙连接间隔 {sensor.bridge.connection.actual.intervalMs} ms · 监督超时 {sensor.bridge.connection.actual.supervisionTimeoutMs} ms · 本次断连 {sensor.bridge.disconnectCount ?? 0} 次</p> : null}
-          {sensor.bridge.profiles?.motion ? <p className="note">运动服务配置 {sensor.bridge.profiles.motion.config} · 固件采样周期 {parseInt(sensor.bridge.profiles.motion.period,16)*10} ms</p> : null}
+          {sensor.bridge.connection?.actual ? <p className="note">蓝牙连接间隔 <NumberAnimation value={sensor.bridge.connection.actual.intervalMs} /> ms · 监督超时 <NumberAnimation value={sensor.bridge.connection.actual.supervisionTimeoutMs} /> ms · 本次断连 <NumberAnimation value={sensor.bridge.disconnectCount ?? 0} /> 次</p> : null}
+          {sensor.bridge.profiles?.motion ? <p className="note">运动服务配置 {sensor.bridge.profiles.motion.config} · 固件采样周期 <NumberAnimation value={parseInt(sensor.bridge.profiles.motion.period,16)*10} /> ms</p> : null}
           {sensor.bridge.warnings?.map((warning)=><p className="note" key={warning}>{warning}</p>)}
           {!canControl ? <p className="note">当前账号只读，使用有采集权限的账号连接设备。</p> : null}
           <details className="sensor-install"><summary>首次部署说明</summary><p>后端需安装 Python 3 与 Bleak，并允许终端使用蓝牙。将 MUMAI_BLE_PYTHON 指向已安装 Bleak 的 Python 后重启后端。</p><code>python3 -m pip install -r tools/sensortag/requirements.txt</code><p>不同固件可能提供不同传感器。无法订阅时保留空值，需检查实际 GATT 服务。</p></details>
@@ -219,9 +238,12 @@ export default function SensorWorkspace({ batchId, screen }: { batchId: string; 
     {dialog==='details' ? <Modal wide title="传感器数据详情" subtitle={`${batchId} · ${frame?.deviceName ?? '尚未连接'} · ${frame?.model ?? ''}`} onClose={()=>setDialog(null)} footer={<><span className="muted">{message || (frame?.calibration ? `已校准 · ${frame.calibration.actor} · ${timeLabel(frame.calibration.at)}` : '环境读数为原始实测值，未应用偏移校准')}</span><Btn disabled={!sensor.frame||demo||Boolean(busy)} onClick={()=>void run('export',exportHistory)}>{busy==='export'?'导出中…':'导出真实记录 CSV'}</Btn><Btn onClick={()=>setDialog(null)}>关闭</Btn></>}>
       <div className="sensor-detail-tabs"><Btn active={detailsTab==='raw'} onClick={()=>setDetailsTab('raw')}>原始读数</Btn><Btn active={detailsTab==='trend'} onClick={()=>setDetailsTab('trend')}>最近 5 分钟趋势</Btn></div>
       {detailsTab==='trend' ? <><Trend history={sensor.history} field="ambientTemp" label="环境温度" unit="°C" now={sensor.now}/><Trend history={sensor.history} field="light" label="光照" unit="lux" now={sensor.now}/><p className="note">展示最近五分钟真实记录，重新打开页面会恢复历史；完整记录可导出 CSV。</p></> : <>
-        <dl className="sensor-raw"><div><dt>设备 ID</dt><dd>{frame?.deviceId ?? '—'}</dd></div><div><dt>固件版本</dt><dd>{frame?.firmware || '未提供'}</dd></div><div><dt>序号 / 采样时间</dt><dd>{frame?.seq ?? '—'} / {timeLabel(frame?.sampledAt)}</dd></div><div><dt>信号强度 RSSI</dt><dd>{frame?.readings.rssi ?? '未提供'} {frame?.readings.rssi!==undefined?'dBm':''}</dd></div>
-          {([['accel','加速度','g'],['gyro','角速度','°/s'],['mag','磁场','µT']] as const).map(([key,label,unit])=><div key={key}><dt>{label} X / Y / Z</dt><dd>{frame?.readings[key]?.map((v)=>v.toFixed(3)).join(' / ') ?? '—'} {unit}<small>{freshness(frame?.fieldAt[key],sensor.now)} · {timeLabel(frame?.fieldAt[key])}</small></dd></div>)}
-          <div><dt>原始环境温度 / 光照</dt><dd>{frame?.readings.ambientTemp?.toFixed(1) ?? '—'} °C / {frame?.readings.light?.toFixed(1) ?? '—'} lux</dd></div><div><dt>校准后温度 / 光照</dt><dd>{frame?.calibrated?.ambientTemp?.toFixed(1) ?? '—'} °C / {frame?.calibrated?.light?.toFixed(1) ?? '—'} lux</dd></div><div><dt>目标温度</dt><dd>{frame?.readings.objectTemp?.toFixed(1) ?? '—'} °C</dd></div><div><dt>按键位掩码</dt><dd>{frame?.readings.keys ?? '未提供'}</dd></div><div><dt>四元数 x / y / z / w</dt><dd>{frame?.quaternion?.map((v)=>v.toFixed(4)).join(' / ') ?? '—'}</dd></div>
+        {/* 原始读数是 30Hz 流的调试视图，时长口径见本组件上方注释：
+            `seq` 与四元数 duration 0（屏幕上的数就是最新一帧），其余实测值 0.25s 短补间。
+            设备 ID / 固件版本是标识、按键位掩码是位域而不是量，都不参与滚动。 */}
+        <dl className="sensor-raw"><div><dt>设备 ID</dt><dd>{frame?.deviceId ?? '—'}</dd></div><div><dt>固件版本</dt><dd>{frame?.firmware || '未提供'}</dd></div><div><dt>序号 / 采样时间</dt><dd><NumberAnimation value={frame?.seq} duration={0} /> / {timeLabel(frame?.sampledAt)}</dd></div><div><dt>信号强度 RSSI</dt><dd><NumberAnimation value={frame?.readings.rssi} fallback="未提供" duration={0.25} /> {frame?.readings.rssi!==undefined?'dBm':''}</dd></div>
+          {([['accel','加速度','g'],['gyro','角速度','°/s'],['mag','磁场','µT']] as const).map(([key,label,unit])=><div key={key}><dt>{label} X / Y / Z</dt><dd>{frame?.readings[key]?.map((v,i)=><Fragment key={i}>{i?' / ':''}<NumberAnimation value={v} digits={3} duration={0.25} /></Fragment>) ?? '—'} {unit}<small>{freshness(frame?.fieldAt[key],sensor.now)} · {timeLabel(frame?.fieldAt[key])}</small></dd></div>)}
+          <div><dt>原始环境温度 / 光照</dt><dd><NumberAnimation value={frame?.readings.ambientTemp} digits={1} duration={0.25} /> °C / <NumberAnimation value={frame?.readings.light} digits={1} duration={0.25} /> lux</dd></div><div><dt>校准后温度 / 光照</dt><dd><NumberAnimation value={frame?.calibrated?.ambientTemp} digits={1} duration={0.25} /> °C / <NumberAnimation value={frame?.calibrated?.light} digits={1} duration={0.25} /> lux</dd></div><div><dt>目标温度</dt><dd><NumberAnimation value={frame?.readings.objectTemp} digits={1} duration={0.25} /> °C</dd></div><div><dt>按键位掩码</dt><dd>{frame?.readings.keys ?? '未提供'}</dd></div><div><dt>四元数 x / y / z / w</dt><dd>{frame?.quaternion?.map((v,i)=><Fragment key={i}>{i?' / ':''}<NumberAnimation value={v} digits={4} duration={0} /></Fragment>) ?? '—'}</dd></div>
         </dl><p className="note">磁力计全零可能表示未启用或固件不支持；不以零磁场推算绝对航向。RSSI 仅在采集端提供时展示。</p></>}
     </Modal> : null}
   </>;

@@ -23,6 +23,7 @@ import { OrbitControls } from "@react-three/drei";
 import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
 import { Box3, MathUtils, Vector3 } from "three";
 import { useFrame } from "@react-three/fiber";
+import NumberAnimation from "@/components/numberAnimation";
 import { SPLAT_BOUNDS, SPLAT_TRANSFORM, type SplatCamera, type SplatTransform } from "./splat";
 
 function SplatCameraRig({ target }: { target: SplatCamera | null }) {
@@ -347,7 +348,19 @@ export function SplatStage({
           </span>
           <em>
             gs.sog · 238 万高斯点 ·{" "}
-            {progress === null ? "连接中" : `${Math.round(progress * 100)}%`}
+            {/*
+              下载进度是这一页唯一的实时值（31 MB 的产物边下边报），交给
+              `NumberAnimation` 平滑滚动，避免百分比一格格跳。`null` 表示还没收到
+              第一个进度事件 —— 沿用原来的「连接中」文案，用 `fallback` 表达，
+              `%` 与数字本来就在同一个文本节点里，所以走 `suffix`。
+            */}
+            <NumberAnimation
+              value={progress === null ? null : Math.round(progress * 100)}
+              suffix="%"
+              fallback="连接中"
+              /* 百分比是量测值，不是「多少个」：千分位会写出原界面没有的逗号 */
+              group={false}
+            />
           </em>
         </div>
       ) : null}

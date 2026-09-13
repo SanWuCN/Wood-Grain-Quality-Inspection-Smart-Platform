@@ -15,8 +15,9 @@
  *   3) 顶栏右上角显示当前账号与角色，并提供退出登录
  */
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
+import NumberAnimation from "@/components/numberAnimation";
 import { ACCOUNTS, HEADER_HEIGHT, NAV_ITEMS } from "./design";
 import {
   allowsPath,
@@ -218,10 +219,25 @@ export default function Shell() {
     };
     const missionTone = MISSION_TONE[mission.state] ?? "muted";
 
-    /* 扫描仪：手持终端链路（真机优先，没上报过就说未接入） */
+    /*
+      扫描仪：手持终端链路（真机优先，没上报过就说未接入）。
+
+      `text` 的类型放宽到 `ReactNode`：延迟 / 离线两格里的秒数是**会变的数**
+      （5 秒慢轮询，每轮都可能变），拼成模板串就写死了 —— 只能整块重画，也没有动效。
+      改成节点之后，<NumberAnimation> 每一轮都从屏幕上那个数平滑滚到新数。
+      其余几格仍给字符串，渲染结果与之前逐字一致。
+
+      外面那层 `<span>` 不是多余的包裹：chip 是 `inline-flex + gap:5px`（pages.css
+      的 .chip），节点直接摊在 chip 里会被拆成「延迟」「5」「s」三个 flex 项，
+      gap 会在中间各插一道 5px，整格比原来宽约 10px —— 顶栏这一行本来就窄且会被裁切。
+      包成一个文本项之后，chip 的 flex 项仍是「点 + 文字」，版式与模板串逐像素一致。
+
+      `title` 保持纯字符串：悬停说明是固定文案，不是「会变的数」，
+      给它上动效只会让 tooltip 每秒重写一次。
+    */
     const model = deviceLink.view?.report?.hardware?.model;
     const age = deviceLink.view?.ageSec ?? 0;
-    const scanner: { text: string; tone: Tone; title: string } = (() => {
+    const scanner: { text: ReactNode; tone: Tone; title: string } = (() => {
       switch (deviceLink.phase) {
         case "live":
           return {
@@ -230,9 +246,33 @@ export default function Shell() {
             title: `${model ?? "手持终端"} · ${age} 秒前上报${deviceLink.view?.link.socketConnected ? " · 设备通道已建立" : ""}`,
           };
         case "stale":
-          return { text: `延迟 ${age}s`, tone: "warn", title: `${model ?? "手持终端"} · 已 ${age} 秒没有新数据` };
+          return {
+            /*
+              空格与「s」都写在 JSX 里：同一行的空格会被保留，秒数只是中间那一段。
+              `group={false}` 是为了**文本与改动前逐字一致**：这里是「已经过去多少秒」的
+              计时读数，原来的模板串写的就是 `延迟 1200s`；默认的千分位会把它渲染成
+              「延迟 1,200s」，凭空多一个字符，而顶栏这一行本来就窄、还会被裁切。
+              序号 / 计时 / 编号一类值都按这个口径（不给千分位），
+              真正的「数量」（场数、实体数）才用默认的千分位。
+            */
+            text: (
+              <span>
+                延迟 <NumberAnimation value={age} group={false} />s
+              </span>
+            ),
+            tone: "warn",
+            title: `${model ?? "手持终端"} · 已 ${age} 秒没有新数据`,
+          };
         case "offline":
-          return { text: `离线 ${age}s`, tone: "danger", title: `${model ?? "手持终端"} · 已离线 ${age} 秒，硬件页保留最后一份数据` };
+          return {
+            text: (
+              <span>
+                离线 <NumberAnimation value={age} group={false} />s
+              </span>
+            ),
+            tone: "danger",
+            title: `${model ?? "手持终端"} · 已离线 ${age} 秒，硬件页保留最后一份数据`,
+          };
         case "waiting":
           return { text: "未接入", tone: "muted", title: "终端还没上报过设备数据；硬件详情页显示的是演示种子数据" };
         case "unavailable":
@@ -499,6 +539,15 @@ export default function Shell() {
         <span>
           数据源 <b>演示回放</b>
         </span>
+        {/*
+          会话号与事件序号都**不做**动效：
+            · 会话号是标识，一个会话从建立到结束都不会变；
+            · `事件 seq 1001` 是单调递增的**序号**（1000 起算），不是量测值 ——
+              它只会 +1，滚动看不出任何信息；而且序号按标识口径书写，
+              没有千分位，交给 NumberAnimation 会按数量口径渲染成「1,001」，
+              与原来的文本不一致（评审实测过这一条）。
+          （`可见导航 N/8` 同理不做：分母是字面量 8，属于标签，不是运行时读数。）
+        */}
         <span>会话 {sessionId} · 事件 seq {1000 + events.length}</span>
         <span>{DEVICES.realCart.name} 未获运动权限（只读监视）</span>
         <span>地图 · 位姿 · 视频 · 车辆 四路通道独立状态</span>

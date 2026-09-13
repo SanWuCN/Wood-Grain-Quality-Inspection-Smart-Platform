@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
+import NumberAnimation from "@/components/numberAnimation";
 import { useMumai } from "../context";
 import { isReadOnlyPath, permissionHint } from "../auth";
 import { WorkOrderCreateModal } from "./WorkOrderCreate";
@@ -81,6 +82,17 @@ function toDraft(inputs: Record<string, unknown> | undefined, fallback: EnvRecor
     position: String(inputs.position ?? fallback.position),
     measuredAt: String(inputs.measuredAt ?? fallback.measuredAt),
   };
+}
+
+/**
+ * 共享服务回来的环境输入是 `unknown`（服务端字段比表单多）。
+ *
+ * 能当数用的才交给 `NumberAnimation` 滚；不是数就返回 `null`，由调用点把
+ * **原来那段文本**当 `fallback` 传回去 —— 显示内容与改造前逐字一致。
+ */
+function numeric(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export default function Orders() {
@@ -325,7 +337,13 @@ export default function Orders() {
             </button>
           </Panel>
 
-          <Panel title="历史工单" extra={<small>{archivedOrders.length} 条</small>}>
+          <Panel
+            title="历史工单"
+            extra={
+              <small>
+                <NumberAnimation value={archivedOrders.length} /> 条
+              </small>
+            }>
             <div className="orders-history">
               {archivedOrders.map((order) => (
                 <button
@@ -405,7 +423,18 @@ export default function Orders() {
               title="环境记录与配置校验"
               extra={
                 online ? (
-                  <StatusChip text={`共享会话 · ${envVersions.length} 版`} tone="ok" />
+                  /*
+                    chip 是 `inline-flex + gap:5px`：整段文案再包一层 span，
+                    数字才不会被圆点之间那道 gap 额外撑开（排版与原来一致）。
+                  */
+                  <StatusChip
+                    text={
+                      <span>
+                        共享会话 · <NumberAnimation value={envVersions.length} /> 版
+                      </span>
+                    }
+                    tone="ok"
+                  />
                 ) : (
                   <StatusChip text={sharedStatus === "connecting" ? "连接中" : "未连接共享服务"} tone="warn" />
                 )
@@ -427,21 +456,21 @@ export default function Orders() {
                 <li>
                   <small>温度</small>
                   <b>
-                    {draftEnv.airTempC}
+                    <NumberAnimation value={draftEnv.airTempC} />
                     <em>{draftEnv.instrumentRange.unit}</em>
                   </b>
                 </li>
                 <li>
                   <small>相对湿度</small>
                   <b>
-                    {draftEnv.relativeHumidityPct}
+                    <NumberAnimation value={draftEnv.relativeHumidityPct} />
                     <em>%</em>
                   </b>
                 </li>
                 <li>
                   <small>风速</small>
                   <b>
-                    {draftEnv.windSpeedMs}
+                    <NumberAnimation value={draftEnv.windSpeedMs} />
                     <em>m/s</em>
                   </b>
                 </li>
@@ -540,7 +569,11 @@ export default function Orders() {
                 </span>
                 <span>
                   配置版本：{configVersion ?? "—"}
-                  {envEntity ? <em className="env-rev">rev {envEntity.revision}</em> : null}
+                  {envEntity ? (
+                    <em className="env-rev">
+                      rev <NumberAnimation value={envEntity.revision} />
+                    </em>
+                  ) : null}
                 </span>
               </div>
 
@@ -549,7 +582,10 @@ export default function Orders() {
                 <br />
                 方法版本：{HH_PRIOR.functionVersion}；风速是否代入 HH：
                 {HH_PRIOR.windExcluded ? "不代入" : "代入"}
-                {envEntity?.data.emcPct != null ? `；本次平衡含水率估计 ${envEntity.data.emcPct}%` : ""}
+                {/* 平衡含水率是共享会话发布时算出来的，会随配置版本变；「%」原样跟在数字后 */}
+                {envEntity?.data.emcPct != null ? (
+                  <>；本次平衡含水率估计 <NumberAnimation value={envEntity.data.emcPct} suffix="%" /></>
+                ) : null}
               </p>
             </Panel>
 
@@ -566,8 +602,21 @@ export default function Orders() {
                     <li key={version.id}>
                       <b>{version.data.version}</b>
                       <span>
-                        {String(version.data.inputs.airTempC)}℃ / {String(version.data.inputs.relativeHumidityPct)}% /{" "}
-                        {String(version.data.inputs.windSpeedMs)} m/s
+                        <NumberAnimation
+                          value={numeric(version.data.inputs.airTempC)}
+                          fallback={String(version.data.inputs.airTempC)}
+                        />
+                        ℃ /{" "}
+                        <NumberAnimation
+                          value={numeric(version.data.inputs.relativeHumidityPct)}
+                          fallback={String(version.data.inputs.relativeHumidityPct)}
+                        />
+                        % /{" "}
+                        <NumberAnimation
+                          value={numeric(version.data.inputs.windSpeedMs)}
+                          fallback={String(version.data.inputs.windSpeedMs)}
+                        />{" "}
+                        m/s
                       </span>
                       <StatusChip
                         text={version.data.state === "received" ? "设备已确认" : "已提交"}
@@ -682,7 +731,9 @@ export default function Orders() {
             <>
               <span className="muted">
                 {HH_PRIOR.note} · 方法版本 {HH_PRIOR.functionVersion}；风速{HH_PRIOR.windExcluded ? "不" : ""}代入 HH
-                {envEntity?.data.emcPct != null ? ` · 当前平衡含水率估计 ${envEntity.data.emcPct}%` : ""}
+                {envEntity?.data.emcPct != null ? (
+                  <> · 当前平衡含水率估计 <NumberAnimation value={envEntity.data.emcPct} suffix="%" /></>
+                ) : null}
               </span>
               <Btn tone="primary" onClick={() => setEnvOpen(false)}>
                 完成录入

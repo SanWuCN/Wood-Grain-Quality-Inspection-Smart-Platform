@@ -28,6 +28,10 @@ import { DEFAULT_SESSION_ID, createSession, getSession, listSessions, snapshot }
 import { ASSETS_ROOT, ensureAssetsRoot } from "./services/assets.mjs";
 import { ensureDemoPackage } from "./fixtures/preflight.mjs";
 import { ensureArchive } from "./fixtures/archive.mjs";
+import { installKnowledgeFixture } from "./services/knowledge-store.mjs";
+import { ensureSampleFiles } from "./fixtures/knowledge-samples.mjs";
+import { createJobRunner } from "./services/knowledge-jobs.mjs";
+import { appendEvent } from "./services/session.mjs";
 
 export function startService({
   port = Number(process.env.MUMAI_PORT ?? 8000),
@@ -45,6 +49,12 @@ export function startService({
   const packReport = ensureDemoPackage(db, sessionId);
   // 归档清单的真实文件（评审 F11）：缺了就补齐，已有的一律不动
   const archiveReport = ensureArchive(db, sessionId);
+  /*
+    数据与知识中心：安装 knowledge-demo-v1 夹具，并给可深入展示样本补上真实文件。
+    只在没有种子记录时安装 —— 演示中被改过的数据不会被启动流程覆盖（PRD §11.2）。
+  */
+  const knowledgeReport = installKnowledgeFixture(db, { sessionId });
+  const knowledgeSamples = ensureSampleFiles(db, sessionId);
 
   const server = createServer();
   /*
@@ -60,10 +70,22 @@ export function startService({
     socket.destroy();
   });
   const bridge = createBleBridge(db);
-  const handle = createApi({ db, hub, bridge, devices, staticRoot: staticDir ? resolve(staticDir) : null });
-  server.on("request", handle);
-
   const log = quiet ? () => {} : (...args) => console.log(...args);
+  /*
+    知识索引任务调度器：命令总线只负责建立任务与广播 started 事件，
+    真正的阶段推进在 runner 里按 tick 进行。这样「启动更新」是一个幂等的写命令，
+    而进度是服务端按完成记录数算出来的，不由前端计时器伪造（PRD §9.3）。
+  */
+  const knowledgeRunner = createJobRunner({ db, sessionId, hub, logger: { log, error: console.error } });
+  const handle = createApi({
+    db,
+    hub,
+    bridge,
+    devices,
+    staticRoot: staticDir ? resolve(staticDir) : null,
+    knowledgeRunner,
+  });
+  server.on("request", handle);
 
   return new Promise((resolvePromise) => {
     server.listen(port, host, () => {
@@ -78,6 +100,11 @@ export function startService({
       log(`  数据库    ${dbFile}`);
       log(`  资产目录  ${ASSETS_ROOT}${packReport.created ? "（本次补齐了演示更新包）" : ""}`);
       log(`  归档清单  ${archiveReport.count} 项${archiveReport.created ? "（本次补齐了真实文件）" : ""}`);
+      log(
+        `  知识中心  ${knowledgeReport.created ? "已安装 " : "沿用 "}${knowledgeReport.scenarioId}`
+          + `（资产 ${knowledgeReport.report?.assets ?? 0} · 分块 ${knowledgeReport.report?.chunks ?? 0}`
+          + ` · 可打开样本 ${knowledgeSamples.created} 项）`,
+      );
       if (staticDir) log(`  静态托管  ${resolve(staticDir)}`);
       resolvePromise({
         server,
@@ -89,6 +116,7 @@ export function startService({
         url: `http://localhost:${actualPort}`,
         close: () =>
           new Promise((done) => {
+            knowledgeRunner.stopAll();
             bridge.close();
             devices.close();
             hub.close();

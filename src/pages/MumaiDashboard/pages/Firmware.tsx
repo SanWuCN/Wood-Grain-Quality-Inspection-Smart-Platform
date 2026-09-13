@@ -24,6 +24,7 @@
 
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
+import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import { Btn, Modal, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
 import { Icon } from "../icons";
@@ -336,8 +337,18 @@ function ConfigTab() {
         title="版本管理"
         extra={
           <span className="muted">
+            {/*
+              「几个组件 / 几个版本」是 seed/versions.ts 里的定值常量（`VERSION_ITEMS.length`
+              这类），滚起来只是噪音，保持静态；同一行里只有「待生效」这一项随选版
+              实时变，它走数字动效 —— 挑一个版本，计数从当前屏幕上的数滚上去。
+            */}
             {VERSION_ITEMS.length} 个组件 · {VERSION_RELEASE_COUNT} 个版本
-            {changed ? ` · ${pending.length} 项待生效` : ""}
+            {changed ? (
+              <>
+                {" · "}
+                <NumberAnimation value={pending.length} /> 项待生效
+              </>
+            ) : null}
           </span>
         }
         className="fw-panel fw-panel--matrix">
@@ -404,7 +415,11 @@ function ConfigTab() {
 
       <Panel
         title="待生效改动"
-        extra={changed ? <StatusChip text={`${pending.length} 项`} tone="warn" dot /> : undefined}
+        extra={
+          changed ? (
+            <StatusChip text={<><NumberAnimation value={pending.length} /> 项</>} tone="warn" dot />
+          ) : undefined
+        }
         className="fw-panel fw-panel--pending">
         {changed ? (
           <ul className="fw-pending">

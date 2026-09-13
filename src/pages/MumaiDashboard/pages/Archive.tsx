@@ -12,6 +12,7 @@
  */
 
 import { useMemo, useState } from "react";
+import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import { Btn, DataTable, Modal, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
 import { ARCHIVE_ITEMS, UPDATE_PACKAGE, WORK_ORDER } from "../seed/scenario";
@@ -165,6 +166,17 @@ export default function Archive() {
   /** 弹窗里显示的条目：按组筛或全部 */
   const shown = groupOpen ? items.filter((item) => item.group === groupOpen) : items;
 
+  /**
+   * 明细弹窗副标题里的三个结论数。
+   *
+   * 与 `shown` 同源：运行校验、补传之后会跟着翻。提成常量只是为了让
+   * 「数字动效组件嵌在副标题里」读起来还是一句话（副标题是 `flex + gap`，
+   * 整段再包一层 span，数字才不会被 gap 撑开）。
+   */
+  const shownPassed = shown.filter((item) => rowByAsset.get(item.assetId)?.status === "通过").length;
+  const shownMissing = shown.filter((item) => rowByAsset.get(item.assetId)?.status === "缺失").length;
+  const shownMismatch = shown.filter((item) => rowByAsset.get(item.assetId)?.status === "摘要不一致").length;
+
   return (
     <div className="page page--archive">
       <Toolbar
@@ -210,8 +222,16 @@ export default function Archive() {
           title="交付清单"
           extra={
             <span className="fw-console__actions">
-              <span className="muted">{items.length} 项 · {GROUPS.filter((g) => byGroup(g).length).length} 组</span>
-              <Btn onClick={() => setListOpen(true)}>查看全部 {items.length} 项</Btn>
+              <span className="muted">
+                <NumberAnimation value={items.length} /> 项 ·{" "}
+                <NumberAnimation value={GROUPS.filter((g) => byGroup(g).length).length} /> 组
+              </span>
+              <Btn onClick={() => setListOpen(true)}>
+                {/* Btn 是 `inline-flex + gap:8px`：整段文案包一层 span，数字才不会被 gap 撑开 */}
+                <span>
+                  查看全部 <NumberAnimation value={items.length} /> 项
+                </span>
+              </Btn>
             </span>
           }
           className="ar-list">
@@ -226,9 +246,19 @@ export default function Archive() {
                 <li key={group} className={bad.length ? "is-bad" : done ? "is-ok" : ""}>
                   <button type="button" onClick={() => setGroupOpen(group)}>
                     <b>{group}</b>
-                    <span className="muted">{groupItems.length} 项</span>
+                    <span className="muted">
+                      <NumberAnimation value={groupItems.length} /> 项
+                    </span>
                     {bad.length ? (
-                      <StatusChip text={`${bad.length} 项有问题`} tone="danger" />
+                      <StatusChip
+                        /* chip 是 `inline-flex + gap:5px`：整段文案包一层 span，数字才不会被 gap 撑开 */
+                        text={
+                          <span>
+                            <NumberAnimation value={bad.length} /> 项有问题
+                          </span>
+                        }
+                        tone="danger"
+                      />
                     ) : done ? (
                       <StatusChip text="全部通过" tone="ok" />
                     ) : (
@@ -244,18 +274,39 @@ export default function Archive() {
         <div className="ar-side">
           <Panel
             title="校验结果"
-            extra={check ? <StatusChip text={`${check.passed}/${check.total} 通过`} tone={check.missing + check.mismatch === 0 ? "ok" : "danger"} /> : null}>
+            extra={
+              check ? (
+                <StatusChip
+                  /* chip 是 `inline-flex + gap:5px`：整段文案包一层 span，数字才不会被 gap 撑开 */
+                  text={
+                    <span>
+                      <NumberAnimation value={check.passed} />/<NumberAnimation value={check.total} /> 通过
+                    </span>
+                  }
+                  tone={check.missing + check.mismatch === 0 ? "ok" : "danger"}
+                />
+              ) : null
+            }>
             {check ? (
               <>
                 <div className="ar-summary">
                   <span>
-                    一致 <b className="is-ok">{check.passed}</b>
+                    一致{" "}
+                    <b className="is-ok">
+                      <NumberAnimation value={check.passed} />
+                    </b>
                   </span>
                   <span>
-                    缺失 <b className="is-danger">{check.missing}</b>
+                    缺失{" "}
+                    <b className="is-danger">
+                      <NumberAnimation value={check.missing} />
+                    </b>
                   </span>
                   <span>
-                    摘要不一致 <b className="is-warn">{check.mismatch}</b>
+                    摘要不一致{" "}
+                    <b className="is-warn">
+                      <NumberAnimation value={check.mismatch} />
+                    </b>
                   </span>
                 </div>
                 <p className="note">
@@ -347,7 +398,14 @@ export default function Archive() {
         <Modal
           wide
           title={groupOpen ? `${groupOpen} · 明细` : "交付清单明细"}
-          subtitle={`${shown.length} 项 · 通过 ${shown.filter((i) => rowByAsset.get(i.assetId)?.status === "通过").length} · 缺失 ${shown.filter((i) => rowByAsset.get(i.assetId)?.status === "缺失").length} · 摘要不一致 ${shown.filter((i) => rowByAsset.get(i.assetId)?.status === "摘要不一致").length}`}
+          subtitle={
+            /* 副标题是 `flex + gap:6px`：整段包一层 span，数字才不会被 gap 撑开 */
+            <span>
+              <NumberAnimation value={shown.length} /> 项 · 通过{" "}
+              <NumberAnimation value={shownPassed} /> · 缺失 <NumberAnimation value={shownMissing} /> ·
+              摘要不一致 <NumberAnimation value={shownMismatch} />
+            </span>
+          }
           onClose={() => {
             setListOpen(false);
             setGroupOpen(null);

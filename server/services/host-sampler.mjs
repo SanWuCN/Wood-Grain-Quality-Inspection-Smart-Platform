@@ -17,7 +17,7 @@
 import { execFile } from "node:child_process";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { cpus, totalmem } from "node:os";
+import { cpus, freemem, totalmem } from "node:os";
 import { promisify } from "node:util";
 import { num } from "./platform-resources.mjs";
 
@@ -32,30 +32,106 @@ async function exec(command, args, options = {}) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Windows 采集的公共约定（见 readVolumesWindows 的注释）
+ * ------------------------------------------------------------------ */
+
+/**
+ * PowerShell 侧一律把结果 **UTF-8 → Base64** 回传：
+ * 管道输出会按控制台代码页编码，中文卷标 / 网卡名（「以太网」「软件」）直接变乱码。
+ */
+function decodeBase64Json(stdout) {
+  const payload = String(stdout).trim().split(/\s+/).pop();
+  if (!payload) return [];
+  return JSON.parse(Buffer.from(payload, "base64").toString("utf8") || "[]");
+}
+
+/**
+ * 「不依赖 WMI」的 Windows 读法为什么是硬要求：
+ *
+ * 在 WMI 被策略拒绝的 Windows 上（本机实测 Win11：`Get-CimInstance` 抛
+ * `拒绝访问`，HRESULT 0x80041003），`Get-CimInstance Win32_*`、
+ * `Get-Volume`、`Get-NetAdapter*` 全部不可用 —— 连**管理员**也一样。
+ * 采集器三项（内存 / 卷 / 网卡）同时失败时，总览「平台数据」五行都是「—」，
+ * 界面还会显示「连接中断」，看起来像接口没了（其实接口 200）。
+ *
+ * 因此 Windows 分支只允许用这三类读法：
+ *   · Node 内置（`os.*`、`fs.*`）
+ *   · `Get-PSDrive`（读注册表）
+ *   · `[System.Net.NetworkInformation]` / `[System.IO]` 等 .NET 类型
+ *   · 外部命令的文本输出（`vol`、`nvidia-smi`）
+ * 新增采集项时请沿用，别把 WMI 调用再加回来。
+ */
+
+/* ------------------------------------------------------------------ *
  * 固定卷（§9.2 / §10.1）
  * ------------------------------------------------------------------ */
 
 /**
- * Windows：Win32_LogicalDisk DriveType=3（本地固定盘）才算「固定卷」。
- * 无盘符隐藏卷、光驱、网络盘、可移除盘都不计入（§2 / RES-05）。
+ * Windows：逻辑盘里的**本地固定卷**才算数 —— 无盘符隐藏卷、光驱、网络盘、
+ * 可移除盘都不计入（§2 / RES-05）。
+ *
+ * ⚠️ 必须用**不经过 WMI/CIM** 的读法，这是 mac→Windows 移植踩过的坑：
+ * `Get-CimInstance` / `Get-Volume` / `Get-NetAdapter*` 在 WMI 被系统策略拒绝的
+ * 机器上会抛 `拒绝访问 / 无法从客户端中访问 CIM 资源`
+ * （HRESULT 0x80041003 / 0x800706BA，且**普通权限与管理员都一样**）。
+ * 采集器一失败，总览「平台数据」整列就是「—」，界面还显示「连接中断」，
+ * 很容易被误读成接口挂了。
+ *
+ *   · 卷列表 / 容量 / 卷标 → `[System.IO.DriveInfo]::GetDrives()`（Win32 直接调用）
+ *   · 卷序列号             → `GetVolumeInformation`（kernel32 P/Invoke，稳定标识，
+ *                            盘符变它不变，RES-06）
+ *
+ * 读法选择是量过的：本机实测单次 PowerShell 启动约 0.8–1.2 秒，而
+ * `Get-PSDrive` 要 3.4–4.1 秒、再加上每个盘一次 `vol` 是 3.6–5.1 秒 ——
+ * **超过 §10.1 规定的 3 秒单次采集超时**，卷会一直采样失败（表现为「存储」
+ * 长期停在「—」）。DriveInfo + 卷 API 是 0.8–1.8 秒，留足余量。
+ *
+ * 走 PowerShell 的编码陷阱：管道输出按控制台代码页编码，中文卷标会变乱码。
+ * 所以固定用 **UTF-8 → Base64** 回传，由 Node 侧解码（见 `decodeBase64Json`）。
  */
 async function readVolumesWindows() {
   const stdout = await exec("powershell", [
     "-NoProfile",
     "-Command",
-    "Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | " +
-      "Select-Object DeviceID,VolumeSerialNumber,Size,FreeSpace | ConvertTo-Json -Compress",
+    [
+      "$sig = @'",
+      "using System;",
+      "using System.Text;",
+      "using System.Runtime.InteropServices;",
+      "public static class MumaiVolume {",
+      '  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]',
+      "  public static extern bool GetVolumeInformation(string root, StringBuilder label, int labelSize,",
+      "    out uint serial, out uint maxComponent, out uint flags, StringBuilder fileSystem, int fileSystemSize);",
+      "}",
+      "'@",
+      "Add-Type -TypeDefinition $sig | Out-Null",
+      "$rows = @()",
+      "foreach ($d in [System.IO.DriveInfo]::GetDrives()) {",
+      "  if ($d.DriveType -ne 'Fixed') { continue }",
+      "  if (-not $d.IsReady) { continue }",
+      "  if ($d.TotalSize -le 0) { continue }",
+      "  $label = New-Object System.Text.StringBuilder 256",
+      "  $fileSystem = New-Object System.Text.StringBuilder 256",
+      "  $serial = [uint32]0; $maxComponent = [uint32]0; $flags = [uint32]0",
+      "  $ok = [MumaiVolume]::GetVolumeInformation($d.Name, $label, 256, [ref]$serial, [ref]$maxComponent, [ref]$flags, $fileSystem, 256)",
+      "  $serialText = if ($ok) { '{0:X4}-{1:X4}' -f ($serial -shr 16), ($serial -band 0xFFFF) } else { '' }",
+      "  $rows += [pscustomobject]@{ Name = $d.Name.Substring(0, 1); Label = $label.ToString(); Serial = $serialText;",
+      "    Total = [double]$d.TotalSize; Free = [double]$d.AvailableFreeSpace }",
+      "}",
+      "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($rows | ConvertTo-Json -Compress)))",
+      /* 语句之间必须是换行（或分号）：拼成一行 PowerShell 会报 UnexpectedToken */
+    ].join("\n"),
   ]);
-  const rows = JSON.parse(stdout || "[]");
+  const rows = decodeBase64Json(stdout);
   const list = Array.isArray(rows) ? rows : [rows];
   return list
-    .filter((row) => num(Number(row.Size)) > 0)
+    .filter((row) => num(Number(row.Total)) > 0)
     .map((row) => ({
       /* 稳定标识优先用卷序列号：盘符可能变，序列号跟着卷走（RES-06） */
-      id: String(row.VolumeSerialNumber ?? row.DeviceID),
-      label: String(row.DeviceID ?? ""),
-      totalBytes: Number(row.Size),
-      freeBytes: Number(row.FreeSpace),
+      id: String(row.Serial || row.Name || ""),
+      label: String(row.Name ?? ""),
+      totalBytes: Number(row.Total),
+      freeBytes: Number(row.Free),
     }));
 }
 
@@ -149,13 +225,35 @@ async function readMemory() {
   }
 
   if (process.platform === "win32") {
+    /*
+     * Windows 不碰 WMI（原因见文件上方约定）：
+     *   · 总内存 → `GetPhysicallyInstalledSystemMemory`（kernel32 P/Invoke，
+     *     返回**已安装**物理内存，与任务管理器口径一致；它比 `os.totalmem()`
+     *     更准 —— 后者在核显共享显存 / 保留内存的机器上会少算 1–2 GiB）
+     *   · 可用   → `os.freemem()`（GlobalMemoryStatusEx，Node 内置）
+     */
     const stdout = await exec("powershell", [
       "-NoProfile",
       "-Command",
-      "$o=Get-CimInstance Win32_OperatingSystem; \"$($o.TotalVisibleMemorySize) $($o.FreePhysicalMemory)\"",
+      [
+        '$sig = @"',
+        "using System;",
+        "using System.Runtime.InteropServices;",
+        "public static class MumaiMemory {",
+        '  [DllImport("kernel32.dll", SetLastError = true)]',
+        "  [return: MarshalAs(UnmanagedType.Bool)]",
+        "  public static extern bool GetPhysicallyInstalledSystemMemory(out ulong kiloBytes);",
+        "}",
+        '"@',
+        "Add-Type -TypeDefinition $sig | Out-Null",
+        "$kiloBytes = [uint64]0",
+        "if ([MumaiMemory]::GetPhysicallyInstalledSystemMemory([ref]$kiloBytes) -and $kiloBytes -gt 0)",
+        '{ [string]$kiloBytes } else { throw "GetPhysicallyInstalledSystemMemory 读取失败" }',
+      ].join("\n"),
     ]);
-    const [totalKb, freeKb] = stdout.trim().split(/\s+/).map(Number);
-    if (totalKb > 0) return { totalBytes: totalKb * 1024, availableBytes: freeKb * 1024 };
+    const totalKb = Number(stdout.trim());
+    if (!Number.isFinite(totalKb) || totalKb <= 0) throw new Error("Windows 物理内存读取失败");
+    return { totalBytes: totalKb * 1024, availableBytes: freemem() };
   }
 
   return { totalBytes: totalmem(), availableBytes: null };
@@ -279,14 +377,35 @@ async function readNetworkCounters() {
     return { sent, received, interfaces: used };
   }
 
+  /*
+   * Windows：`[System.Net.NetworkInformation.NetworkInterface]`（IP 助手 API，
+   * **不经过 WMI**）。原来的 `Get-NetAdapter` + `Get-NetAdapterStatistics` 在本机
+   * 直接抛 `拒绝访问`（0x80041003），网络这一项永远是「—」。
+   *
+   * 口径与 macOS 分支对齐：只看 Up 的物理网卡，虚拟适配器一律排除
+   * （vEthernet / VMware / VirtualBox / Radmin / WireGuard / Tailscale …），
+   * 否则同一份流量会被数两遍（RES-26）。
+   */
   const stdout = await exec("powershell", [
     "-NoProfile",
     "-Command",
-    "$rows = Get-NetAdapter | Where-Object {$_.Status -eq 'Up' -and -not $_.Virtual} | " +
-      "ForEach-Object { $s = $_ | Get-NetAdapterStatistics; [pscustomobject]@{Name=$_.Name;Sent=$s.SentBytes;Received=$s.ReceivedBytes} }; " +
-      "$rows | ConvertTo-Json -Compress",
+    [
+      "$skip = 'Loopback|Tunnel|Radmin|VirtualBox|VMware|Hyper-V|vEthernet|TAP-|WireGuard|Tailscale|ZeroTier|Virtual Adapter|Pseudo-Interface|Bluetooth|Npcap|WAN Miniport'",
+      "$rows = @()",
+      "foreach ($i in [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {",
+      "  if ($i.OperationalStatus -ne 'Up') { continue }",
+      "  if ($i.NetworkInterfaceType -eq 'Loopback') { continue }",
+      "  if (($i.Name + ' ' + $i.Description) -match $skip) { continue }",
+      "  $s = $null",
+      "  try { $s = $i.GetIPStatistics() } catch { continue }",
+      "  if (-not $s) { continue }",
+      "  $rows += [pscustomobject]@{ Name = $i.Name; Sent = [double]$s.BytesSent; Received = [double]$s.BytesReceived }",
+      "}",
+      "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($rows | ConvertTo-Json -Compress)))",
+      /* 换行不能省：拼成一行 PowerShell 会在 `$rows` / `foreach` 上报 UnexpectedToken */
+    ].join("\n"),
   ]);
-  const rows = JSON.parse(stdout || "[]");
+  const rows = decodeBase64Json(stdout);
   const list = Array.isArray(rows) ? rows : [rows];
   let sent = 0;
   let received = 0;

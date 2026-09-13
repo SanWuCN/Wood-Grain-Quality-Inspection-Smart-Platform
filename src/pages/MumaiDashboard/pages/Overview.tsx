@@ -33,6 +33,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import styled from "styled-components";
+import NumberAnimation from "@/components/numberAnimation";
 import { useDashboardStore, requestMapMode } from "../map/store";
 import Map from "../mapDemo";
 import { Panel } from "../Panel";
@@ -47,6 +48,7 @@ import ResourceModal from "./ResourceModal";
 import type { ResourceTab } from "./usePlatformResources";
 import { useEntranceSettled } from "./useEntranceSettled";
 import { useMediaQuery, usePrefersReducedMotion } from "./useMediaQuery";
+import "./overview-boards.css";
 import SiteDetailCard from "../map/SiteDetailCard";
 import {
   CHINA_PROVINCE_COUNT,
@@ -68,7 +70,6 @@ import {
   ORDER_LEVEL_TONE,
   ORDER_STATUS_TONE,
   OVERVIEW_SLOGAN,
-  STATUS_KEY_BY_TEXT,
   CHART_BASE,
   LOAD_COLOR,
 } from "./overview.constants";
@@ -141,40 +142,14 @@ function SituationPanel() {
   const option = useMemo(
     () => ({
       ...CHART_BASE,
-      /* 图例在右，状态名 + 数量一行读完；不占纵向空间 */
-      legend: {
-        orient: "vertical",
-        right: 0,
-        top: "middle",
-        itemWidth: 8,
-        itemHeight: 8,
-        itemGap: 10,
-        icon: "circle",
-        textStyle: { color: CHART.axisText, fontSize: 13 },
-        formatter: (name: string) =>
-          `${name}  ${summary.byStatus[STATUS_KEY_BY_TEXT[name]] ?? ""}`,
-      },
       series: [
         {
           type: "pie",
           radius: ["54%", "78%"],
-          center: ["31%", "50%"],
+          center: ["50%", "50%"],
           avoidLabelOverlap: true,
-          /*
-            中心是**点位数总量**，不是当前扇区的值 —— 默认 formatter 的 `{c}`
-            取的是扇区值，直接用会显示成「已勘察 9」那一块的数量，
-            和「古建点位」四个字对不上。这里写死总量 + 单位。
-          */
-          label: {
-            show: true,
-            position: "center",
-            formatter: `{v|${summary.total}}{u| 处}\n{t|古建点位}`,
-            rich: {
-              v: { color: CHART.palette[0], fontSize: 24, fontWeight: 600, lineHeight: 30 },
-              u: { color: CHART.axisText, fontSize: 12, lineHeight: 30 },
-              t: { color: CHART.axisText, fontSize: 12, lineHeight: 16 },
-            },
-          },
+          // 总量由单独的 DOM 层显示，避免四个扇区的中心标签重叠。
+          label: { show: false },
           labelLine: { show: false },
           itemStyle: { borderColor: "transparent", borderWidth: 2 },
           data: SITE_STATUS_ORDER.map((key) => ({
@@ -192,11 +167,11 @@ function SituationPanel() {
     <Panel
       title="巡检概览"
       extra={<span className="muted">全国 {CHINA_PROVINCE_COUNT} 个省级区域</span>}
-      className="ov__panel">
+      className="ov__panel ov-board ov-board--situation">
       <div className="ov-tally">
         <div>
           <strong>{CHINA_PROVINCE_COUNT}</strong>
-          <span>已覆盖省份</span>
+          <span>覆盖省份</span>
         </div>
         <div>
           <strong>{summary.total}</strong>
@@ -215,17 +190,36 @@ function SituationPanel() {
         </div>
       </div>
 
-      <Chart
-        className="ov-chart ov-chart--donut"
-        option={option}
-        animate={ready}
-        ariaLabel={`全国古建点位状态分布：共 ${summary.total} 处，${SITE_STATUS_ORDER
-          .map((key) => `${STATUS_TEXT[key]} ${summary.byStatus[key]} 处`)
-          .join("，")}`}
-      />
+      <h3 className="ov-board__section-title">点位分布</h3>
+      <div className="ov-board__distribution">
+        <div className="ov-board__ring">
+          <Chart
+            className="ov-chart ov-chart--donut"
+            option={option}
+            animate={ready}
+            ariaLabel={`全国古建点位状态分布：共 ${summary.total} 处，${SITE_STATUS_ORDER
+              .map((key) => `${STATUS_TEXT[key]} ${summary.byStatus[key]} 处`)
+              .join("，")}`}
+          />
+          <div className="ov-board__ring-label" aria-hidden="true">
+            <strong>{summary.total}<small>处</small></strong>
+            <span>古建点位</span>
+          </div>
+        </div>
+        <ul className="ov-board__legend" aria-label="点位状态数量">
+          {SITE_STATUS_ORDER.map((key) => (
+            <li key={key}>
+              <i style={{ background: STATUS_COLOR[key] }} aria-hidden="true" />
+              <span>{STATUS_TEXT[key]}</span>
+              <b>{summary.byStatus[key]}</b>
+            </li>
+          ))}
+        </ul>
+      </div>
 
       <p className="ov-tally__foot">
-        本轮任务 {WORK_ORDER.id} · {WORK_ORDER.site}
+        <span>本轮任务</span>
+        <strong title={`${WORK_ORDER.id} · ${WORK_ORDER.site}`}>{WORK_ORDER.id} · {WORK_ORDER.site}</strong>
       </p>
     </Panel>
   );
@@ -296,7 +290,14 @@ function DevicePanel() {
     {
       key: "compute",
       name: DEVICES.realCart.name,
-      mode: resources ? `${resources.serverCount} 台` : "—",
+      /* 台数来自 2s 轮询的资源快照：文字里嵌一个滚动数字，和「平台数据」面板同一口径 */
+      mode: resources ? (
+        <>
+          <NumberAnimation value={resources.serverCount} active={ready} /> 台
+        </>
+      ) : (
+        "—"
+      ),
       state: resourceError
         ? "连接中断"
         : resources
@@ -451,7 +452,7 @@ function RiskOrderPanel() {
   return (
     <>
       <div className="ob-counts">
-        <div className="ob-count is-warn">
+        <div className="ob-count is-warn" title="待复核工单计入待处理">
           <strong>{buckets.pending}</strong>
           <span>待处理</span>
         </div>
@@ -464,16 +465,13 @@ function RiskOrderPanel() {
           <span>待验收</span>
         </div>
       </div>
-      <p className="ob-note">
-        待复核并入待处理{buckets.high > 0 ? ` · 高风险 ${buckets.high}` : ""}
-      </p>
-
-      <h4 className="ov-sec ov-sec--tight">
-        工单
+      <div className="ov-board__queue-head">
+        <h4 className="ov-board__section-title">工单队列</h4>
+        {buckets.high > 0 ? <span className="ov-board__risk">高风险 <b>{buckets.high}</b></span> : null}
         <button type="button" className="ov-more" onClick={() => setBoardOpen((open) => !open)}>
           {boardOpen ? "收起明细" : `查看全部 · ${orderTotal}`}
         </button>
-      </h4>
+      </div>
 
       {boardOpen ? (
         /* 「查看全部」打开的是**弹窗式清单**，不在窗口里向下展开长列表（§4.3） */
@@ -582,8 +580,8 @@ function OrderBoardList({ orders }: { orders: typeof OVERVIEW_ORDERS }) {
                     setSelectedId(real.id);
                     navigate(`/orders?order=${real.id}`);
                   }}>
-                  <span className="ob-row__title">
-                    {real.id} · {real.site}
+                  <span className="ob-row__title" title={`${real.id} · ${real.site}`}>
+                    <b>{real.site}</b><span>{real.id}</span>
                   </span>
                   <span className="ob-row__meta">
                     <StatusChip text={real.level} tone={ORDER_LEVEL_TONE[real.level]} />
@@ -636,6 +634,19 @@ function OrderListModal({ onClose }: { onClose: () => void }) {
  * ------------------------------------------------------------------ */
 
 /**
+ * 功耗的两个显示口径，交给 `NumberAnimation` 逐帧复用。
+ *
+ * 为什么提成模块级常量：`NumberAnimation` 把 `format` 存在 ref 里读，内联箭头
+ * 也不会重建动画，但稳定的引用让「这两行到底怎么格式化」一眼可查。
+ *
+ * W 走 `power()`——**取整口径与弹窗、硬件页完全同源**，不在这里另写一份 round。
+ * kW 只在 `power()` 判定 ≥1000 W 时才被渲染（出现条件不在这儿），
+ * 所以这里只负责「滚动过程中的 kW 怎么写」。
+ */
+const powerWatts = (value: number) => power(value).w;
+const powerKilowatts = (value: number) => `${(value / 1000).toFixed(2)} kW`;
+
+/**
  * 平台数据（PRD §8.1）
  *
  * 五行摘要：存储 / 内存 / GPU / 功耗 / 网络，每行一个数字 + 一条短比例条。
@@ -656,7 +667,20 @@ function PlatformDataPanel() {
   const summary = data?.summary;
   const quality = data?.quality ?? "unavailable";
 
-  /** 一行摘要：名称 + 数字 + 可选比例条。null 一律显示「—」，不显示 0 */
+  /**
+   * 一行摘要：名称 + 数字 + 可选比例条。null 一律显示「—」，不显示 0
+   *
+   * 这里的数字走 `/api/platform/resources` 的 **2s 轮询**，是总览页变化最频繁的
+   * 一组。全部交给 `NumberAnimation`：每来一份新快照都从当前显示值平滑滚到新值，
+   * 而不是跳变。`format` 直接复用 `usePlatformResources` 里的格式化函数 ——
+   * 滚动中的每一帧与最终落值走同一套小数位和单位，不会中途换写法。
+   *
+   * 为什么带 `active={ready}`：本面板是**滑入**的（`entrance.ts`，1.4s）。不加门控
+   * 时数字在面板还停在屏幕外时就数完了，一个都看不见；加了门控，滚动正好发生在
+   * 面板落位那一刻，和下面两张图（`Chart animate={ready}`）同一拍。门控期间显示
+   * 的是起始值 0，而那段时间面板还在屏幕外 —— **不存在「让用户看见临时零值」的
+   * 问题**（§9.5 禁的是拿 0 冒充有效样本，不是入场插值）。
+   */
   const rows: { key: ResourceTab; label: string; value: ReactNode; ratio: number | null; note?: string }[] = summary
     ? [
         {
@@ -664,7 +688,10 @@ function PlatformDataPanel() {
           label: "存储",
           value: (
             <>
-              {tb(summary.storageUsedTB)} <i>/ {summary.storageTotalTB} TB</i>
+              <NumberAnimation value={summary.storageUsedTB} format={tb} active={ready} />{" "}
+              <i>
+                / <NumberAnimation value={summary.storageTotalTB} active={ready} /> TB
+              </i>
             </>
           ),
           ratio: summary.storageRatio,
@@ -675,7 +702,10 @@ function PlatformDataPanel() {
           label: "内存",
           value: (
             <>
-              {gibShort(summary.memoryUsedGiB)} <i>/ {gibShort(summary.memoryTotalGiB)}</i>
+              <NumberAnimation value={summary.memoryUsedGiB} format={gibShort} active={ready} />{" "}
+              <i>
+                / <NumberAnimation value={summary.memoryTotalGiB} format={gibShort} active={ready} />
+              </i>
             </>
           ),
           ratio: summary.memoryRatio,
@@ -685,7 +715,7 @@ function PlatformDataPanel() {
           label: "GPU",
           value: (
             <>
-              {percent(summary.gpuBasePercent, 0)}
+              <NumberAnimation value={summary.gpuBasePercent} digits={0} suffix="%" active={ready} />
               <i>{LOAD_TEXT[summary.loadState]}</i>
             </>
           ),
@@ -698,11 +728,13 @@ function PlatformDataPanel() {
             const formatted = power(summary.powerTotalW);
             return (
               <>
-                {formatted.w}
+                <NumberAnimation value={summary.powerTotalW} format={powerWatts} active={ready} />
                 {formatted.kw ? (
                   <>
                     {" "}
-                    <i>{formatted.kw}</i>
+                    <i>
+                      <NumberAnimation value={summary.powerTotalW} format={powerKilowatts} active={ready} />
+                    </i>
                   </>
                 ) : null}
               </>
@@ -715,7 +747,10 @@ function PlatformDataPanel() {
           label: "网络",
           value: (
             <>
-              ↑ {bytesPerSec(summary.uploadBytesPerSec)} <i>↓ {bytesPerSec(summary.downloadBytesPerSec)}</i>
+              ↑ <NumberAnimation value={summary.uploadBytesPerSec} format={bytesPerSec} active={ready} />{" "}
+              <i>
+                ↓ <NumberAnimation value={summary.downloadBytesPerSec} format={bytesPerSec} active={ready} />
+              </i>
             </>
           ),
           ratio: null,
@@ -890,7 +925,7 @@ function PlatformDataPanel() {
             <h4 className="ov-sec ov-sec--tight">
               逐台负载
               <span className="ov-sec__note">
-                {data.serverCount} 台 · {LOAD_TEXT[summary.loadState]}
+                <NumberAnimation value={data.serverCount} active={ready} /> 台 · {LOAD_TEXT[summary.loadState]}
               </span>
             </h4>
             <Chart
@@ -945,6 +980,7 @@ function PlatformDataPanel() {
  * ------------------------------------------------------------------ */
 
 export default function Overview() {
+  const ready = useEntranceSettled("/");
   const mode = useDashboardStore((state) => state.mode);
   const transitioning = useDashboardStore((state) => state.transitioning);
   const { currentOrder, toast } = useMumai();
@@ -982,7 +1018,7 @@ export default function Overview() {
 
       {/* 右栏：风险与工单 + 待办与最近事件 */}
       <div className="ov__side ov__side--right">
-        <Panel title="工单看板" className="ov__panel">
+        <Panel title="工单看板" className="ov__panel ov-board ov-board--orders">
           <RiskOrderPanel />
         </Panel>
         <PlatformDataPanel />
@@ -1003,13 +1039,28 @@ export default function Overview() {
           className="legend"
           title={`${mode === "shanghai" ? "上海市" : "全国"}勘察检测点位 ${siteStats.total} 处`}>
           <span>
-            勘察检测点位 <b>{siteStats.total}</b>
+            勘察检测点位{" "}
+            <b>
+              {/*
+                必须显式写回 `display: inline`：`pages.css` 的
+                `.ov__actions .legend span { display: flex; gap: 6px }` 是**后代**选择器，
+                会把数字这个 span 也一起改成 flex 容器，基线与间距就跟原来的纯文本不一样了。
+                内联样式优先级高于那条规则，所以在这里按原样还原成行内元素。
+              */}
+              <NumberAnimation value={siteStats.total} active={ready} style={{ display: "inline" }} />
+            </b>
           </span>
           {legendStatuses.map((status) => (
             <span key={status} title={STATUS_ACTION[status]}>
               <i style={{ background: STATUS_COLOR[status] }} />
               {STATUS_TEXT[status]}
-              <b>{siteStats.byStatus[status]}</b>
+              <b>
+                <NumberAnimation
+                  value={siteStats.byStatus[status]}
+                  active={ready}
+                  style={{ display: "inline" }}
+                />
+              </b>
             </span>
           ))}
         </Legend>

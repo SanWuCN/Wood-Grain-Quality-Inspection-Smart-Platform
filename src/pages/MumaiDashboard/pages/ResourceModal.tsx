@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import NumberAnimation from "@/components/numberAnimation";
 import { Btn, Modal, StatusChip } from "../ui";
 import Chart from "./OverviewCharts";
 import { CHART } from "../design";
@@ -39,8 +40,24 @@ import type { PlatformResources } from "../api/client";
 /** 每页服务器数（§8.2：超过 8 台分页） */
 const PAGE_SIZE = 8;
 
+/**
+ * 轮询数值的显示口径。都提成模块级常量：`NumberAnimation` 把 `format` 存在 ref 里读，
+ * 内联箭头也不会重建动画，但稳定的引用让「这一列到底怎么格式化」一眼可查，
+ * 也保证滚动中的每一帧与最终落值共用同一套小数位与单位。
+ */
+/** 比率（0–1）→ 百分比：`summary.*Ratio` 与逐台 `ratio` 统一乘 100 后交给 `percent()`（一位小数） */
+const ratioPercent = (value: number) => percent(value * 100);
+/** 每台配额四位小数（§9.2 等分口径），固定 `tb` 的小数位，不在调用点各写一遍 */
+const tb4 = (value: number) => tb(value, 4);
+/** 功耗 W：取整口径与弹窗、主卡完全同源，不另写一份 round */
+const powerWatts = (value: number) => power(value).w;
+/** kW 只在 `power()` 判定 ≥1000 W 时才渲染（出现条件不在这里），这里只管滚动中的 kW 怎么写 */
+const powerKilowatts = (value: number) => `${(value / 1000).toFixed(2)} kW`;
+
 function Bar({ ratio }: { ratio: number | null }) {
   const width = barWidth(ratio);
+  /* 比例条宽度是 CSS 尺寸（`<u>` 的 style.width），不是文本数字，`NumberAnimation`
+     只产出 `<span>` 文本，因此这条保持静态；旁边的百分数已经在滚。 */
   return <i className="pd-bar">{width === null ? null : <u style={{ width: `${width}%` }} />}</i>;
 }
 
@@ -73,8 +90,15 @@ export default function ResourceModal({
           <span className="rm-sub">
             <StatusChip text={QUALITY_TEXT[data.quality]} tone={data.quality === "fresh" ? "ok" : data.quality === "stale" ? "warn" : "danger"} dot />
             <span>
-              {data.serverCount > 0 ? `${data.serverCount} 台服务器` : data.noVolumeReason ?? "未识别存储卷"} ·
-              后端主机 {data.hostId} · 快照 {data.snapshotId}
+              {/* 服务器台数是 2s 轮询快照里的实时计数，走动效；后端主机 ID / 快照 ID 是标识，保持静止 */}
+              {data.serverCount > 0 ? (
+                <>
+                  <NumberAnimation value={data.serverCount} /> 台服务器
+                </>
+              ) : (
+                data.noVolumeReason ?? "未识别存储卷"
+              )}{" "}
+              · 后端主机 {data.hostId} · 快照 {data.snapshotId}
               {data.fixture ? ` · 验收夹具输入（${data.fixture.label}，不是真实主机采集）` : ""}
             </span>
           </span>
@@ -86,6 +110,7 @@ export default function ResourceModal({
       footer={
         <>
           <span className="muted">
+            {/* GPU 型号与每台显存是映射配置（常量，不是轮询指标），保持静止 */}
             资源按后端主机实测比例映射，服务器为演示配置（{data?.mappingExplain.gpuModel ?? "NVIDIA GeForce RTX 4090"} ·{" "}
             {data?.mappingExplain.vramTotalGiB ?? 24} GiB 显存/台）
           </span>
@@ -139,7 +164,8 @@ function Pager({ page, pageCount, onPage, total }: { page: number; pageCount: nu
   return (
     <div className="rm-pager">
       <span className="muted">
-        第 {page + 1} / {pageCount} 页 · 共 {total} 台
+        {/* 页码与总页数是导航序号（跟着翻页变，不跟数据变）保持静止；「共 N 台」是轮询计数，走动效 */}
+        第 {page + 1} / {pageCount} 页 · 共 <NumberAnimation value={total} /> 台
       </span>
       <Btn tone="ghost" disabled={page === 0} onClick={() => onPage(page - 1)}>
         上一页
@@ -161,15 +187,21 @@ function StorageTab({ data, servers, page, pageCount, onPage }: TabProps) {
       <dl className="rm-kv">
         <div>
           <dt>总配额</dt>
-          <dd>{tb(s.storageTotalTB)}</dd>
+          <dd>
+            <NumberAnimation value={s.storageTotalTB} format={tb} />
+          </dd>
         </div>
         <div>
           <dt>已用</dt>
-          <dd>{tb(s.storageUsedTB)}</dd>
+          <dd>
+            <NumberAnimation value={s.storageUsedTB} format={tb} />
+          </dd>
         </div>
         <div>
           <dt>使用率</dt>
-          <dd>{percent(s.storageRatio === null ? null : s.storageRatio * 100)}</dd>
+          <dd>
+            <NumberAnimation value={s.storageRatio} format={ratioPercent} />
+          </dd>
         </div>
         <div>
           <dt>存储质量</dt>
@@ -177,7 +209,10 @@ function StorageTab({ data, servers, page, pageCount, onPage }: TabProps) {
         </div>
       </dl>
       <p className="note">
-        每台配额等分（{tb(data.serverCount > 0 ? s.storageTotalTB / data.serverCount : null, 4)} × {data.serverCount || DASH}），
+        每台配额等分（
+        <NumberAnimation value={data.serverCount > 0 ? s.storageTotalTB / data.serverCount : null} format={tb4} /> ×{" "}
+        {/* 台数为 0 时沿用 `|| DASH` 的「—」，不拿 0 冒充（§10.3） */}
+        <NumberAnimation value={data.serverCount || null} />），
         集群使用率取各卷使用率的算术平均。
         {data.noVolumeReason ? `当前${data.noVolumeReason}，已用与使用率不可用。` : ""}
       </p>
@@ -189,14 +224,24 @@ function StorageTab({ data, servers, page, pageCount, onPage }: TabProps) {
           <span>剩余</span>
           <span>使用率</span>
         </div>
+        {/* 逐台行是同一份 2s 快照：配额 / 已用 / 剩余 / 使用率四个数字都滚；
+            `server.id` 是标识，保持静止 */}
         {servers.map((server) => (
           <div key={server.id} className="rm-table__row">
             <span className="rm-id">{server.id}</span>
-            <span>{tb(server.storage.totalTb, 4)}</span>
-            <span>{tb(server.storage.usedTb)}</span>
-            <span>{tb(server.storage.freeTb)}</span>
+            <span>
+              <NumberAnimation value={server.storage.totalTb} format={tb4} />
+            </span>
+            <span>
+              <NumberAnimation value={server.storage.usedTb} format={tb} />
+            </span>
+            <span>
+              <NumberAnimation value={server.storage.freeTb} format={tb} />
+            </span>
             <span className="rm-cell">
-              <b>{percent(server.storage.ratio === null ? null : server.storage.ratio * 100)}</b>
+              <b>
+                <NumberAnimation value={server.storage.ratio} format={ratioPercent} />
+              </b>
               <Bar ratio={server.storage.ratio} />
             </span>
           </div>
@@ -218,15 +263,21 @@ function MemoryTab({ data, servers, page, pageCount, onPage }: TabProps) {
       <dl className="rm-kv">
         <div>
           <dt>集群总量</dt>
-          <dd>{gib(s.memoryTotalGiB)}</dd>
+          <dd>
+            <NumberAnimation value={s.memoryTotalGiB} format={gib} />
+          </dd>
         </div>
         <div>
           <dt>集群已用</dt>
-          <dd>{gib(s.memoryUsedGiB)}</dd>
+          <dd>
+            <NumberAnimation value={s.memoryUsedGiB} format={gib} />
+          </dd>
         </div>
         <div>
           <dt>占用比例</dt>
-          <dd>{percent(s.memoryRatio === null ? null : s.memoryRatio * 100)}</dd>
+          <dd>
+            <NumberAnimation value={s.memoryRatio} format={ratioPercent} />
+          </dd>
         </div>
         <div>
           <dt>内存质量</dt>
@@ -242,12 +293,19 @@ function MemoryTab({ data, servers, page, pageCount, onPage }: TabProps) {
           <span>占比</span>
           <span />
         </div>
+        {/* 逐台内存同样来自 2s 轮询快照，整列走动效；`server.id` 是标识，保持静止 */}
         {servers.map((server) => (
           <div key={server.id} className="rm-table__row">
             <span className="rm-id">{server.id}</span>
-            <span>{gib(server.memory.totalGib)}</span>
-            <span>{gib(server.memory.usedGib)}</span>
-            <span>{percent(server.memory.ratio === null ? null : server.memory.ratio * 100)}</span>
+            <span>
+              <NumberAnimation value={server.memory.totalGib} format={gib} />
+            </span>
+            <span>
+              <NumberAnimation value={server.memory.usedGib} format={gib} />
+            </span>
+            <span>
+              <NumberAnimation value={server.memory.ratio} format={ratioPercent} />
+            </span>
             <span className="rm-cell">
               <Bar ratio={server.memory.ratio} />
             </span>
@@ -269,7 +327,9 @@ function GpuTab({ data, servers, page, pageCount, onPage }: TabProps) {
       <dl className="rm-kv">
         <div>
           <dt>主机基准</dt>
-          <dd>{percent(s.gpuBasePercent)}</dd>
+          <dd>
+            <NumberAnimation value={s.gpuBasePercent} format={percent} />
+          </dd>
         </div>
         <div>
           <dt>负载状态</dt>
@@ -298,17 +358,21 @@ function GpuTab({ data, servers, page, pageCount, onPage }: TabProps) {
           <span>显存已用 / 总</span>
           <span>负载</span>
         </div>
+        {/* 逐台 GPU：占用率、显存「已用 / 总」都随 2s 快照变；型号是名称、`server.id` 是标识，保持静止 */}
         {servers.map((server) => (
           <div key={server.id} className="rm-table__row">
             <span className="rm-id">{server.id}</span>
             <span>{server.gpu.model}</span>
             <span className="rm-cell">
-              <b>{percent(server.gpu.percent)}</b>
+              <b>
+                <NumberAnimation value={server.gpu.percent} format={percent} />
+              </b>
               <Bar ratio={server.gpu.percent === null ? null : server.gpu.percent / 100} />
             </span>
             <span className="rm-cell">
               <b>
-                {gib(server.gpu.vramUsedGib)} / {server.gpu.vramTotalGib} GiB
+                <NumberAnimation value={server.gpu.vramUsedGib} format={gib} /> /{" "}
+                <NumberAnimation value={server.gpu.vramTotalGib} /> GiB
               </b>
               <Bar ratio={server.gpu.vramRatio} />
             </span>
@@ -329,21 +393,29 @@ function GpuTab({ data, servers, page, pageCount, onPage }: TabProps) {
 function PowerTab({ data, servers, page, pageCount, onPage }: TabProps) {
   const s = data.summary;
   const range = data.mappingExplain.powerRangeW;
+  /* 只留 `.kw` 当「是否显示 kW」的判据；W 的取整口径交给 `powerWatts` 逐帧复用（与 `power()` 同源） */
   const formatted = power(s.powerTotalW);
   return (
     <>
+      {/* 这一行 rm-kv 是一整组 KPI：集群总功耗 / 单台范围 / 服务器数 都在同一行里，
+          按「整组一致」的口径全部走动效，避免旁边三个在数、这个不动 */}
       <dl className="rm-kv">
         <div>
           <dt>集群总功耗</dt>
           <dd>
-            {formatted.w}
-            {formatted.kw ? <em> · {formatted.kw}</em> : null}
+            <NumberAnimation value={s.powerTotalW} format={powerWatts} />
+            {formatted.kw ? (
+              <em>
+                {" · "}
+                <NumberAnimation value={s.powerTotalW} format={powerKilowatts} />
+              </em>
+            ) : null}
           </dd>
         </div>
         <div>
           <dt>单台范围</dt>
           <dd>
-            {range[0]}–{range[1]} W
+            <NumberAnimation value={range[0]} />–<NumberAnimation value={range[1]} /> W
           </dd>
         </div>
         <div>
@@ -352,7 +424,10 @@ function PowerTab({ data, servers, page, pageCount, onPage }: TabProps) {
         </div>
         <div>
           <dt>服务器数</dt>
-          <dd>{data.serverCount || DASH}</dd>
+          {/* 0 台时沿用 `|| DASH` 的「—」，不拿 0 冒充（§10.3） */}
+          <dd>
+            <NumberAnimation value={data.serverCount || null} />
+          </dd>
         </div>
       </dl>
       <p className="note">
@@ -367,10 +442,13 @@ function PowerTab({ data, servers, page, pageCount, onPage }: TabProps) {
           <span>GPU 占用</span>
           <span />
         </div>
+        {/* 逐台功耗与 GPU 占用是 2s 轮询的重算值，随负载上下滚；`server.id` 是标识，保持静止 */}
         {servers.map((server) => (
           <div key={server.id} className="rm-table__row">
             <span className="rm-id">{server.id}</span>
-            <span>{power(server.powerW).w}</span>
+            <span>
+              <NumberAnimation value={server.powerW} format={powerWatts} />
+            </span>
             <span className="rm-cell">
               <Bar
                 ratio={
@@ -378,7 +456,9 @@ function PowerTab({ data, servers, page, pageCount, onPage }: TabProps) {
                 }
               />
             </span>
-            <span>{percent(server.gpu.percent)}</span>
+            <span>
+              <NumberAnimation value={server.gpu.percent} format={percent} />
+            </span>
             <span />
           </div>
         ))}
@@ -450,15 +530,22 @@ function NetworkTab({ data }: { data: PlatformResources }) {
       <dl className="rm-kv">
         <div>
           <dt>平台上行</dt>
-          <dd>↑ {bytesPerSec(s.uploadBytesPerSec)}</dd>
+          <dd>
+            ↑ <NumberAnimation value={s.uploadBytesPerSec} format={bytesPerSec} />
+          </dd>
         </div>
         <div>
           <dt>平台下行</dt>
-          <dd>↓ {bytesPerSec(s.downloadBytesPerSec)}</dd>
+          <dd>
+            ↓ <NumberAnimation value={s.downloadBytesPerSec} format={bytesPerSec} />
+          </dd>
         </div>
         <div>
           <dt>展示倍率</dt>
-          <dd>×{data.mappingExplain.networkScale}</dd>
+          {/* 这一行是整组 KPI（上行 / 下行 / 倍率），倍率跟着一起走，口径仍是映射常量 */}
+          <dd>
+            ×<NumberAnimation value={data.mappingExplain.networkScale} />
+          </dd>
         </div>
         <div>
           <dt>网络质量</dt>
@@ -466,6 +553,7 @@ function NetworkTab({ data }: { data: PlatformResources }) {
         </div>
       </dl>
       <p className="note">
+        {/* 说明句里的倍率是映射常量（口径解释，不是指标），与映射说明一致保持静止 */}
         上行为后端网卡发送、下行为接收，按真实采样间隔差分后乘 {data.mappingExplain.networkScale}；集群只乘一次，
         不随服务器数放大。统计接口：
         {(data.mappingExplain.networkInterfaces ?? []).join("、") || DASH}
@@ -484,6 +572,8 @@ function NetworkTab({ data }: { data: PlatformResources }) {
  * ------------------------------------------------------------------ */
 function MappingExplain({ data }: { data: PlatformResources }) {
   const explain = data.mappingExplain;
+  /* 这一区是技术追溯：主机 ID / 平台与架构 / 核数 / 采集源 / 映射与拓扑版本 / 纪元
+     都是标识、版本串或规格常量（不随轮询变），全部保持静止，不走数字动效 */
   return (
     <details className="rm-explain" open>
       <summary>映射说明</summary>

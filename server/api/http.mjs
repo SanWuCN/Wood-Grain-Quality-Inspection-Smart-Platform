@@ -42,6 +42,17 @@ import {
   restoreSnapshot,
 } from "../services/rehearsal.mjs";
 import { preflightDetail } from "../fixtures/preflight.mjs";
+import { fixtureReport as knowledgeFixtureReport } from "../fixtures/knowledge-samples.mjs";
+import {
+  getConfig as getKnowledgeConfig,
+  listConfigs,
+  listIndexVersions,
+  listJobItems,
+  listJobs,
+  getJob,
+  queryAssets,
+} from "../services/knowledge-store.mjs";
+import { readAssetDetail, readGraph, readOverview, searchKnowledge } from "../services/knowledge-query.mjs";
 import { parseJson } from "../storage/db.mjs";
 import { proxyScreen, screenStatus } from "../services/capture-screen.mjs";
 import { createSensorService } from "../services/sensortag.mjs";
@@ -123,7 +134,7 @@ function readRawBody(req, limit = 2 * 1024 * 1024) {
  * 路由
  * ------------------------------------------------------------------ */
 
-export function createApi({ db, hub, bridge, devices = null, staticRoot = null, logger = console }) {
+export function createApi({ db, hub, bridge, devices = null, staticRoot = null, knowledgeRunner = null, logger = console }) {
   ensureAssetsRoot();
   /*
     路由表是**每个 API 实例一份**，不是模块级。
@@ -366,6 +377,11 @@ export function createApi({ db, hub, bridge, devices = null, staticRoot = null, 
     if (!outcome.replayed && outcome.events?.length) {
       for (const event of outcome.events) hub.broadcast(sessionId, event);
     }
+    // 启动索引更新：任务建立后交给调度器按 tick 推进阶段。
+    // 命令在这里**只**负责建立任务，进度不由前端伪造，也不由命令同步跑完。
+    if (outcome.result?.started && outcome.result.jobId && knowledgeRunner) {
+      knowledgeRunner.start(outcome.result.jobId);
+    }
     const snap = snapshot(db, sessionId);
     return {
       replayed: outcome.replayed,
@@ -378,8 +394,132 @@ export function createApi({ db, hub, bridge, devices = null, staticRoot = null, 
     };
   });
 
-  /* ---- 环境校验（PRD §12 /api/environments/validate） ---- */
+  /* ------------------------------------------------------------------ *
+   * 数据与知识中心（PRD-数据与知识中心-v1.0 §12.4）
+   *
+   * 读取接口全部走这里，写操作仍走命令总线。原因写在 PRD §12.5：
+   * 命令要有 commandId 幂等、revision 冲突检测与 seq 事件，知识域也不例外；
+   * 而读取是万级行数据，不能塞进会话快照里每次事件都搬一遍。
+   * ------------------------------------------------------------------ */
 
+  /** 读取权限：knowledge:read；检索另外要 knowledge:search（PRD §13） */
+  const requireKnowledgeRead = (ctx) => {
+    if (!allows(ctx.actor, "knowledge:read") && !allows(ctx.actor, "console:admin")) {
+      throw new WorkflowError(403, "FORBIDDEN", "此账号没有查看数据与知识中心的权限");
+    }
+    return ctx.query.sessionId ?? DEFAULT_SESSION_ID;
+  };
+  const withKnowledge = (handler) => async (ctx) => {
+    const sessionId = ctx.query.sessionId ?? DEFAULT_SESSION_ID;
+    requireKnowledgeRead(ctx);
+    requireSession(sessionId);
+    return handler(ctx, sessionId);
+  };
+
+  /*
+    GET /api/knowledge/overview —— 总览快照（PRD §12.4）。
+    两层数据的规模信息一并返回：metrics 带 total / materialized / scale，
+    coverage 每行带 total / scale / scaleNote / materialized，
+    availability 与 sources 数的是**全部**资产（各状态相加 = metrics.total）。
+  */
+  route("GET", "/api/knowledge/overview", withKnowledge(async (ctx, sessionId) =>
+    readOverview(db, sessionId, { projectId: ctx.query.projectId ?? undefined }),
+  ));
+
+  /*
+    GET /api/knowledge/assets —— 资产列表（PRD §5.3）。
+    返回体是 queryAssets 的**原样**结构：items / hasMore / nextCursor + 两个总数。
+    两个总数缺一不可：total 是平台规模（含只贡献计数的规模样本），
+    materialized 是其中能点开明细的条数，界面要同时显示「共 N 项 · 其中 M 项可展开明细」。
+  */
+  route("GET", "/api/knowledge/assets", withKnowledge(async (ctx, sessionId) =>
+    queryAssets(db, sessionId, {
+      projectId: ctx.query.projectId ?? undefined,
+      type: ctx.query.type ?? null,
+      query: ctx.query.q ?? null,
+      objectId: ctx.query.objectId ?? null,
+      source: ctx.query.source ?? null,
+      category: ctx.query.category ?? null,
+      indexState: ctx.query.state ?? null,
+      // 可用性是 PRD §9.1 的第一套状态，列表筛选必须支持它（否则界面上那个下拉框是摆设）
+      availability: ctx.query.availability ?? null,
+      timeFrom: ctx.query.from ?? null,
+      timeTo: ctx.query.to ?? null,
+      cursor: ctx.query.cursor ?? null,
+      limit: ctx.query.limit ? Number(ctx.query.limit) : 50,
+    }),
+  ));
+
+  route("GET", "/api/knowledge/assets/:id", withKnowledge(async (ctx, sessionId) => {
+    const detail = readAssetDetail(db, sessionId, ctx.params.id);
+    if (!detail) throw new WorkflowError(404, "NOT_FOUND", `找不到资产 ${ctx.params.id}`);
+    return detail;
+  }));
+
+  route("GET", "/api/knowledge/graph", withKnowledge(async (ctx, sessionId) =>
+    readGraph(db, sessionId, {
+      projectId: ctx.query.projectId ?? undefined,
+      view: ctx.query.view === "lineage" ? "lineage" : "business",
+      focusId: ctx.query.focusId ?? null,
+      depth: ctx.query.depth ? Number(ctx.query.depth) : 1,
+      nodeBudget: ctx.query.nodeBudget ? Number(ctx.query.nodeBudget) : ctx.query.full === "1" ? 250 : 120,
+      edgeBudget: ctx.query.edgeBudget ? Number(ctx.query.edgeBudget) : ctx.query.full === "1" ? 600 : 240,
+    }),
+  ));
+
+  route("GET", "/api/knowledge/indexes", withKnowledge(async (ctx, sessionId) => {
+    const overview = readOverview(db, sessionId, { projectId: ctx.query.projectId ?? undefined });
+    return {
+      servingVersion: overview.servingVersion,
+      configRevision: overview.configRevision,
+      adapterMode: overview.adapterMode,
+      dimensionConfig: overview.dimensionConfig,
+      status: overview.indexStatus,
+      versions: listIndexVersions(db, sessionId),
+      config: getKnowledgeConfig(db, sessionId),
+      configs: listConfigs(db, sessionId),
+      coverage: overview.coverage,
+      chunksByType: overview.coverage.map((row) => ({ type: row.type, label: row.label, chunks: row.chunks })),
+      vectorCount: overview.metrics.vectors,
+    };
+  }));
+
+  route("GET", "/api/knowledge/jobs", withKnowledge(async (ctx, sessionId) => ({
+    jobs: listJobs(db, sessionId, { status: ctx.query.status ?? null, limit: ctx.query.limit ? Number(ctx.query.limit) : 20 }),
+  })));
+
+  route("GET", "/api/knowledge/jobs/:id", withKnowledge(async (ctx, sessionId) => {
+    const job = getJob(db, sessionId, ctx.params.id);
+    if (!job) throw new WorkflowError(404, "NOT_FOUND", `找不到任务 ${ctx.params.id}`);
+    return { job, items: listJobItems(db, sessionId, ctx.params.id) };
+  }));
+
+  /** 检索是**读**操作，但要单独的 knowledge:search 权限（PRD §13） */
+  route("POST", "/api/knowledge/search", async (ctx) => {
+    const sessionId = ctx.body.sessionId ?? DEFAULT_SESSION_ID;
+    if (!allows(ctx.actor, "knowledge:search") && !allows(ctx.actor, "console:admin")) {
+      throw new WorkflowError(403, "FORBIDDEN", "此账号没有证据检索权限");
+    }
+    requireSession(sessionId);
+    const query = String(ctx.body.query ?? "").trim();
+    if (!query) throw new WorkflowError(422, "QUERY_REQUIRED", "请输入检索内容");
+    return searchKnowledge(db, sessionId, {
+      query,
+      projectId: ctx.body.projectId ?? undefined,
+      filters: ctx.body.filters ?? {},
+      topK: ctx.body.topK ?? null,
+      version: ctx.body.version ?? null,
+    });
+  });
+
+  /** 夹具报告：数据说明抽屉用它说明「哪些是合成资料、附件缺多少」（PRD §11.2） */
+  route("GET", "/api/knowledge/fixture", withKnowledge(async (ctx, sessionId) => {
+    const report = knowledgeFixtureReport(db, sessionId);
+    if (!report) throw new WorkflowError(404, "NO_FIXTURE", "当前会话没有安装演示夹具");
+    return report;
+  }));
+
+  /* ---- 环境校验（PRD §12 /api/environments/validate） ---- */
   route("POST", "/api/environments/validate", async (ctx) => {
     const inputs = ctx.body.inputs ?? ctx.body;
     const { checks, ok } = validateEnvironment(inputs);

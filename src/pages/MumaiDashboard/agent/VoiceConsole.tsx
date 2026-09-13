@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useNavigate } from "react-router";
+import NumberAnimation from "@/components/numberAnimation";
 import { useMumai } from "../context";
 import { CHANNELS, KNOWLEDGE_META } from "../seed/scenario";
 import { AGENT_TASK_EXAMPLES, INTENTS, voicePackOf } from "./intents";
@@ -178,7 +179,8 @@ function StepList({ steps }: { steps: AgentStep[] }) {
       <header>
         <span>执行步骤</span>
         <em>
-          {done}/{steps.length}
+          {/* 已完成步数：agent 执行期间会推进，交给 NumberAnimation 从当前值滚到新值 */}
+          <NumberAnimation value={done} />/{steps.length}
         </em>
       </header>
       <div className="vc-steps__bar" aria-hidden="true">
@@ -209,7 +211,8 @@ function BotBubble({ turn, onReplay, tts }: { turn: BotTurn; onReplay: (turn: Bo
           {turn.intentId ?? "no_hit"} · {turn.intentName}
         </span>
         <span className="vc-bubble__conf" title="技术方案 §15 的 Top1 相似度">
-          置信度 {turn.confidence.toFixed(3)}
+          {/* 相似度：digits=3 复现原来的 toFixed(3)，展示精度不变 */}
+          置信度 <NumberAnimation value={turn.confidence} digits={3} />
         </span>
         <span className="vc-bubble__voice" title="语音包">
           {turn.voice}
@@ -225,13 +228,15 @@ function BotBubble({ turn, onReplay, tts }: { turn: BotTurn; onReplay: (turn: Bo
               <header>
                 <b>{run.label}</b>
                 <em>{run.tool}</em>
-                <i>风险 {run.risk} · {RISK_LABEL[run.risk] ?? "—"}</i>
+                <i>风险 <NumberAnimation value={run.risk} /> · {RISK_LABEL[run.risk] ?? "—"}</i>
                 <span>{TOOL_STATE_LABEL[run.state] ?? run.state}</span>
               </header>
               <p>{run.result || "调用中…"}</p>
               <small>
+                {/* run.at 是时间戳，保持静态；耗时是每次调用的实测毫秒数，参与滚动。
+                    毫秒是测量值不是「数量」，关掉千分位，渲染结果与原来的模板字符串逐字一致 */}
                 {run.at}
-                {run.durationMs > 0 ? ` · ${run.durationMs} ms` : ""} · 参数 {JSON.stringify(run.args)}
+                {run.durationMs > 0 ? <> · <NumberAnimation value={run.durationMs} group={false} /> ms</> : null} · 参数 {JSON.stringify(run.args)}
               </small>
             </div>
           ))}
@@ -256,7 +261,7 @@ function BotBubble({ turn, onReplay, tts }: { turn: BotTurn; onReplay: (turn: Bo
       {turn.facts.length ? (
         <div className="vc-facts">
           <button type="button" className="vc-facts__toggle" onClick={() => setFactOpen((open) => !open)}>
-            业务状态（结构化数据）{factOpen ? "▾" : "▸"} {turn.facts.length} 项
+            业务状态（结构化数据）{factOpen ? "▾" : "▸"} <NumberAnimation value={turn.facts.length} /> 项
           </button>
           {factOpen ? (
             <dl>
@@ -670,7 +675,7 @@ export default function VoiceConsole() {
             <div className="vc-confirm__box">
               <header>
                 <b>需要确认</b>
-                <em>风险等级 {state.pendingConfirm.risk}/4</em>
+                <em>风险等级 <NumberAnimation value={state.pendingConfirm.risk} />/4</em>
               </header>
               <p className="vc-confirm__title">{state.pendingConfirm.title}</p>
               <p className="vc-confirm__detail">{state.pendingConfirm.detail}</p>

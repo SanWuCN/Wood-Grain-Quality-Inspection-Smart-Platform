@@ -45,6 +45,15 @@ export type Permission =
   /** 资料检索与索引发布（POST /knowledge/search、/knowledge/indexes） */
   | "knowledge:search"
   | "knowledge:index"
+  /**
+   * 数据与知识中心（PRD-数据与知识中心-v1.0 §13）细分的读取与资产管理权限。
+   *
+   * 为什么要把读取单独拆出来：这一页的读取对象是「本项目的资料清单」，
+   * 与「能不能改」是两件事。评审 F04 的教训就是把页面读取和写动作混在一张表里，
+   * 结果有接收动作的人进不去配置所在页面。
+   */
+  | "knowledge:read"
+  | "knowledge:manage"
   /** 场景发布（POST /scenes/{id}/publish），全栈上传后由架构师检查并发布 */
   | "scene:publish"
   /** 训练演示（POST /training-jobs） */
@@ -96,6 +105,8 @@ export const PERMISSION_LABEL: Record<Permission, string> = {
   "assistant:invoke": "小木调用",
   "knowledge:search": "资料检索",
   "knowledge:index": "索引发布",
+  "knowledge:read": "查看数据与知识中心",
+  "knowledge:manage": "导入与维护资产",
   "scene:publish": "场景发布",
   "training:run": "训练演示",
   "package:deliver": "封装下发",
@@ -150,6 +161,9 @@ const ROLE_ACTIONS: Record<string, readonly Permission[]> = {
     "sample:review", // PRD 3.5 / S14：饶负责硬件端数据复核（饱和、掉帧）
     "training:submit", // PRD 3.6 / S15：准备部署与恢复版本，提交本次数据集
     "knowledge:search", // PRD 5.1 / S06：文件来源与归档资料核对
+    // 数据与知识中心（PRD §13）：饶负责导入资料、核对来源与绑定对象
+    "knowledge:read",
+    "knowledge:manage",
   ],
 
   /** 马 · 具身智能工程师（PRD 2.1：地图检查、点位配置、巡检监视、样本位置复核、复巡计划） */
@@ -161,6 +175,12 @@ const ROLE_ACTIONS: Record<string, readonly Permission[]> = {
     "sample:review", // PRD 3.5：马查样本来源和位置
     "sample:collect", // PRD 2.1 样本位置复核 / S13：取出参考样块、登记批次
     "revisit:plan", // PRD 2.1 复巡计划 / S22：把 Z04 观察点加入复巡计划
+    /*
+      数据与知识中心只读（PRD §13）。
+      「证据检索 knowledge:search 给沈、史、饶；马本期仍按现有权限控制，未经调整不开放」——
+      所以这里只补 read，不补 search / manage / index。
+    */
+    "knowledge:read",
   ],
 };
 
@@ -213,6 +233,12 @@ export const ROUTE_READ: Record<string, readonly string[]> = {
   "/twin": ["shen", "shi", "rao", "ma"],
   // 数据集与样本审核页签在固件及模型页：马承担「查样本来源和位置」（评审 F04）
   "/firmware": ["shen", "shi", "rao", "ma"],
+  /*
+    数据与知识中心：四个业务角色都可查看其所属项目（PRD §13「查看总览、资产与图谱
+    knowledge:read → 四个业务角色」）。写入与检索仍按各自的权限表判定，
+    页面内部会把没有权限的按钮置灰并说明原因。
+  */
+  "/knowledge": ["shen", "shi", "rao", "ma"],
 };
 
 /** 取某个角色的可执行操作集合 */

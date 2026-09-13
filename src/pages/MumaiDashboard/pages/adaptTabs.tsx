@@ -27,6 +27,7 @@
  */
 
 import { useMemo, useState } from "react";
+import NumberAnimation from "@/components/numberAnimation";
 import { useMumai } from "../context";
 import { Modal } from "../ui";
 import { DatasetCleanFlow } from "./DatasetCleanFlow";
@@ -178,7 +179,10 @@ export function DatasetTab() {
           {splits.map((split) => (
             <article key={split.name}>
               <header>{split.name}</header>
-              <strong>{split.sampleIds.length} 个物理样本</strong>
+              {/* 「编入所选集合 / 整组调整后重跑」会改这个数，随点数滚动 */}
+              <strong>
+                <NumberAnimation value={split.sampleIds.length} /> 个物理样本
+              </strong>
               <ul>
                 {split.sampleIds.map((id) => (
                   <li key={id}>{id}</li>
@@ -211,7 +215,17 @@ export function DatasetTab() {
                 : "无",
               <StatusChip
                 key="conflict"
-                text={grouping.conflicts.length ? `${grouping.conflicts.length} 组冲突` : "整组未被拆散"}
+                text={
+                  grouping.conflicts.length ? (
+                    /* `.chip` 是 inline-flex + 5px gap：文案保持一个 span，
+                       数字才不会变成独立 flex item 被 gap 撑开 */
+                    <span>
+                      <NumberAnimation value={grouping.conflicts.length} /> 组冲突
+                    </span>
+                  ) : (
+                    "整组未被拆散"
+                  )
+                }
                 tone={grouping.conflicts.length ? "danger" : "ok"}
               />,
             ],
@@ -220,7 +234,15 @@ export function DatasetTab() {
               orphans.length ? orphans.join("、") : "无",
               <StatusChip
                 key="orphan"
-                text={orphans.length ? `${orphans.length} 组未纳入` : "全部已纳入"}
+                text={
+                  orphans.length ? (
+                    <span>
+                      <NumberAnimation value={orphans.length} /> 组未纳入
+                    </span>
+                  ) : (
+                    "全部已纳入"
+                  )
+                }
                 tone={orphans.length ? "warn" : "ok"}
               />,
             ],
@@ -231,7 +253,15 @@ export function DatasetTab() {
                 : "无",
               <StatusChip
                 key="unknown"
-                text={unknownInSupervised.length ? `${unknownInSupervised.length} 条待核验` : "未知标签单列"}
+                text={
+                  unknownInSupervised.length ? (
+                    <span>
+                      <NumberAnimation value={unknownInSupervised.length} /> 条待核验
+                    </span>
+                  ) : (
+                    "未知标签单列"
+                  )
+                }
                 tone={unknownInSupervised.length ? "danger" : "ok"}
               />,
             ],
@@ -365,7 +395,9 @@ export function FusionTab() {
               item.boxId,
               item.image,
               item.label,
-              item.confidence.toFixed(2),
+              /* 逐条量测值：保留两位（与 toFixed(2) 同口径），入场时滚到位。
+                 `group={false}`：量测值原来没有千分位，别凭空多出逗号 */
+              <NumberAnimation key={item.boxId} value={item.confidence} digits={2} group={false} />,
               item.zone,
             ])}
           />
@@ -387,7 +419,8 @@ export function FusionTab() {
             rows={FUSION_RECORD.radarFeatures.map((item) => [
               item.segment,
               item.zone,
-              item.amplitude.toFixed(2),
+              /* 与置信度同口径：两位小数，逐帧滚；幅值同样不带千分位 */
+              <NumberAnimation key={item.segment} value={item.amplitude} digits={2} group={false} />,
               <StatusChip key={item.segment} text={item.quality} tone={item.quality === "合格" ? "ok" : "danger"} />,
             ])}
           />

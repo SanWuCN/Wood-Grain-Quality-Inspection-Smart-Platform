@@ -20,6 +20,7 @@
  * 挂 independent root 是同一个套路），浮层与页面结构解耦。
  */
 import { useEffect, useState } from "react";
+import NumberAnimation from "@/components/numberAnimation";
 import { wakeChannel } from "./wakeChannel";
 import type { WakeSnapshot } from "./wakeChannel";
 import "./wakeOverlay.css";
@@ -71,8 +72,16 @@ export default function WakeOverlay() {
           ) : null}
           {listening && snap.wakeCount > 0 ? (
             <p className="wko__count">
-              已唤醒 {snap.wakeCount} 次
-              {snap.lastWake ? ` · 上次判定滞后 ${Math.round(snap.lastWake.decisionMs)}ms` : ""}
+              已唤醒 <NumberAnimation value={snap.wakeCount} /> 次
+              {/*
+                尾段原来是模板字符串（` · 上次判定滞后 ${ms}ms`），改成 JSX 才能把毫秒数
+                交给 NumberAnimation。「 · 」与前面的「 次」都写在同一行结尾/开头，
+                JSX 会保留这两个空格，渲染出来仍是「已唤醒 N 次 · 上次判定滞后 Xms」。
+              */}
+              {snap.lastWake ? (
+                /* group=false：滞后毫秒是测量值，原来就没有千分位，保持逐字一致 */
+                <> · 上次判定滞后 <NumberAnimation value={Math.round(snap.lastWake.decisionMs)} group={false} />ms</>
+              ) : null}
             </p>
           ) : null}
         </div>

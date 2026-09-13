@@ -10,7 +10,7 @@
  * 角色 + 退出），DemoHeader 自己不再画账号框 —— 理由见下面 actions 里的注释。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ACCOUNTS } from "./design";
 import type { Permission } from "./auth";
 import { Icon, type IconName } from "./icons";
@@ -36,8 +36,16 @@ import DemoHeader from "./DemoHeader";
 export type HeaderStatusItem = {
   key: string;
   label: string;
-  /** 状态词：正常 / 执行中 / 真机在线 / DEMO-M02 … */
-  text: string;
+  /**
+   * 状态词：正常 / 执行中 / 真机在线 / 延迟 12s …
+   *
+   * 类型从 `string` 放宽到 `ReactNode`：扫描仪那一格的秒数是从手持终端链路快照里
+   * 算出来的**会变的数**（`useDeviceLink` 的 ageSec，5 秒一轮），拼成模板串就等于
+   * 把它写死了 —— 只能整块重画，也上不了数字动效。改成节点后可以把
+   * `<NumberAnimation>` 放进状态词中间；`StatusChip` 的 `text` 同样吃 `ReactNode`。
+   * 另外三格仍然传字符串，渲染结果与之前逐字一致。
+   */
+  text: ReactNode;
   tone: Tone;
   /** 悬停说明：来源、时间、原因 —— 原来占版面的那一列时间戳挪到这里 */
   title: string;

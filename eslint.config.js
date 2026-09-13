@@ -11,6 +11,13 @@ export default defineConfig([
     // 构建期素材缓存（.gitignore 已排除）：放的是第三方素材原包解压结果，
     // 不是本项目源码，lint 不应把它当源码解析。
     ".cache/**",
+    /*
+      临时验证脚本目录（.gitignore 已排除）：截图、探针、一次性补丁都落在这里，
+      里面既有 .mjs 也有随手写的不完整片段。lint 把它当源码解析会把
+      `npm run lint` 变成一条永远失败的命令 —— 而 PRD 要求它作为验证入口可用。
+      这些文件本来就不进版本库，忽略它不影响任何交付物。
+    */
+    "tmp-shot/**",
     "src/components/**",
     "src/hooks/**",
     "src/pages/Demo0/**",
