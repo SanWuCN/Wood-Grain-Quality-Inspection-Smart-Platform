@@ -105,7 +105,7 @@ const DATASETS: Record<
    * 1.14 → 0.92：用户看图 3 觉得中国还不够大。这个系数越小相机越近，
    * 0.92 在地图明显变大一档的同时仍留出左右面板的安全距离。
    */
-  china: { data: chinaData, outline: chinaOutline, fitPadding: 0.92 },
+  china: { data: chinaData, outline: chinaOutline, fitPadding: 0.74 },
   /*
    * 上海 1.08 → 0.62。
    *

@@ -95,9 +95,11 @@ const BeamLight = ({
 
       // 边界检查：如果飞得太高，就重置到底部
       if (beam.position.y > beam.userData.resetHeight) {
-        // 随机水平位置
-        beam.position.x = (Math.random() - 0.5) * range;
-        beam.position.z = (Math.random() - 0.5) * range;
+        // 随机水平位置：落在环带上，与初始分布一致（否则回落之后全挤到地图中心）
+        const angle = Math.random() * Math.PI * 2;
+        const radius = range * 0.62 + Math.random() * range * 0.3;
+        beam.position.x = Math.cos(angle) * radius;
+        beam.position.z = Math.sin(angle) * radius;
 
         // 从地底开始生成，避免直接突然出现在视野中
         beam.position.y = (1 - Math.random() * 5) * topScale;
@@ -114,20 +116,35 @@ const BeamLight = ({
 
   return (
     <group ref={ref}>
-      {Array.from({ length: 20 }, (_, k) => (
+      {Array.from({ length: 26 }, (_, k) => (
         <mesh
           key={k}
+          /*
+           * 环形分布（用户要求「光柱不应该在地图周边吗」）。
+           *
+           * 原来是方形散布、中心就在地图正中，一半光柱被地图本体挡住。
+           * 现在按角度均分撒在环带上，内径 range*0.62 —— range 本身已是地图
+           * 最大边的 1.15 倍，所以这个内径落在地图外缘之外，整圈围在地图周围。
+           */
           position={[
-            (Math.random() - 0.5) * range,
+            Math.cos((k / 26) * Math.PI * 2 + Math.random() * 0.24) *
+              (range * 0.62 + Math.random() * range * 0.3),
             5 - Math.random() * 5,
-            (Math.random() - 0.5) * range,
+            Math.sin((k / 26) * Math.PI * 2 + Math.random() * 0.24) *
+              (range * 0.62 + Math.random() * range * 0.3),
           ]}
           scale={[1, 2.0 + Math.random() * 4.0, 1]}
           userData={{
             speed: 2 + Math.random(), // 上升速度
             resetHeight: 10 + Math.random() * 20, // 飞多高后消失
           }}>
-          <cylinderGeometry args={[0.03, 0.03, 1, 6, 1, true]} />
+          {/*
+            半径 0.03 → 0.09。
+            Demo2 的 0.03 是为世界尺寸约 8.5 的四川定的；我们的中国地图约 82 单位，
+            同样 0.03 只有万分之一的宽度，在 1920 屏上不到一个像素 ——
+            用户说「太细了，看不到」就是这个原因。
+          */}
+          <cylinderGeometry args={[0.09, 0.09, 1, 6, 1, true]} />
           <SparklesImplMaterial
             transparent
             depthWrite={false}

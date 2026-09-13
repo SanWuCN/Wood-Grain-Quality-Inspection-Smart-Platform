@@ -385,7 +385,7 @@ export default function Base(props: BaseProps) {
      * 仰角从约 42° 到约 53°：中国轮廓更接近「摊在眼前」的读法，南北向不再被压扁。
      * 方位角仍保持 Demo2 的构图。
      */
-    const dir = new Vector3(-2, 13.5, 10).normalize();
+    const dir = new Vector3(-2, 17, 10).normalize();
     const target = dir.clone().multiplyScalar(fitDistance);
 
     /*
