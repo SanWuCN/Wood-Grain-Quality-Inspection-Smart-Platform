@@ -71,7 +71,21 @@ export type SparklesProps = Omit<
   scale?: number | [number, number, number] | Vector3;
 };
 
-const BeamLight = ({}: SparklesProps) => {
+/**
+ * @param range    光柱散布的方形区域边长（世界单位）
+ * @param topScale 上升高度与速度的倍率
+ *
+ * Demo2 写死 `range = 20`，那是为世界尺寸约 8.5 的四川定的 —— 20 单位能盖满
+ * 整幅地图。我们的中国地图世界里约 82 单位，同样 20 单位就缩成原点附近一小撮，
+ * 等于看不见。取值见 index.tsx：地图最大边 × 1.15。
+ */
+const BeamLight = ({
+  range = 20,
+  topScale = 1,
+}: {
+  range?: number;
+  topScale?: number;
+}) => {
   const ref = useRef<Group>(null!);
 
   useFrame((_, delta) => {
@@ -86,17 +100,15 @@ const BeamLight = ({}: SparklesProps) => {
         beam.position.z = (Math.random() - 0.5) * range;
 
         // 从地底开始生成，避免直接突然出现在视野中
-        beam.position.y = 1 - Math.random() * 5;
+        beam.position.y = (1 - Math.random() * 5) * topScale;
 
         // 随机长度 (流光段的长度)
-        beam.scale.y = 2.0 + Math.random() * 1.0;
+        beam.scale.y = (2.0 + Math.random() * 1.0) * topScale;
       }
     });
   });
 
   //   useImperativeHandle(forwardRef, () => ref.current, []);
-
-  const range = 20;
 
   //   console.log(ref);
 
@@ -121,7 +133,7 @@ const BeamLight = ({}: SparklesProps) => {
             depthWrite={false}
             side={DoubleSide}
             blending={AdditiveBlending}
-            uColor={0x5de4ff}
+            uColor={0x8fc2ff}
             uOpacity={0.5 + Math.random() * 0.2}
           />
         </mesh>

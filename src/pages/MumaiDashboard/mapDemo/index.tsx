@@ -12,6 +12,7 @@ import { MAP_MODE_EVENT, useDashboardStore, type MapMode } from "../map/store";
 import { useConfigStore } from "./stores";
 import { chinaSites, shanghaiSites } from "../data";
 import type { CityGeoJSON } from "@/types/map";
+import { geoMercator } from "d3-geo";
 
 import chinaMapData from "@/assets/map/china.json";
 import shanghaiMapData from "@/assets/map/shanghai.json";
@@ -51,6 +52,43 @@ void [chinaSurface, shanghaiSurface].map((src) => {
  * 这里只给留白系数。中国与上海经纬跨度差 13 倍，靠这个把两者框到同样的画面比例；
  * 上海略多留一点边，避免崇明岛顶到画面上沿。
  */
+/**
+ * 量出某个数据集在**世界坐标**里的最大边。
+ *
+ * 与 base.tsx 用同一套 geoMercator + `new Vector2(x, -y)`，也乘同样的外层
+ * scale 0.5 —— 两边口径必须一致，否则 Bottom / BeamLight 又会与地图对不上。
+ *
+ * 为什么需要它：Demo2 的 Bottom(16) 与 BeamLight(range 20) 都是为世界尺寸
+ * 约 8.5 的四川写死的；我们的中国地图约 82 单位，照抄就小了一个数量级。
+ */
+function worldExtent(data: CityGeoJSON): number {
+  const projection = geoMercator()
+    .center(data.features[0].properties.centroid)
+    .translate([0, 0]);
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const feature of data.features) {
+    for (const polygon of feature.geometry.coordinates) {
+      for (const ring of polygon) {
+        for (const coord of ring) {
+          const p = projection(coord as [number, number]);
+          if (!p) continue;
+          const x = p[0];
+          const y = -p[1];
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+  }
+  const OUTER_SCALE = 0.5; // 与 base.tsx 的 <group scale={[0.5,0.5,0.5]}> 对齐
+  return Math.max(maxX - minX, maxY - minY) * OUTER_SCALE;
+}
+
 const DATASETS: Record<
   MapMode,
   { data: CityGeoJSON; outline?: CityGeoJSON; fitPadding: number }
@@ -220,6 +258,9 @@ export default function Map(props: MapProps) {
 
   const dataset = DATASETS[loadedMode];
 
+  /** 地图在世界坐标里的最大边；Bottom 与 BeamLight 的尺寸都由它派生 */
+  const extent = useMemo(() => worldExtent(dataset.data), [dataset.data]);
+
   /**
    * 必须有名字的区域，**列表顺序就是放置优先级**（越靠前越先占位）。
    *
@@ -303,10 +344,10 @@ export default function Map(props: MapProps) {
               onReady={() => onReadyRef.current?.()}
             />
           ) : null}
-          {on("bottom") ? <Bottom /> : null}
+          {on("bottom") ? <Bottom size={extent * 1.25} /> : null}
         </Suspense>
         {on("mirror") ? <Mirror /> : null}
-        {on("beam") ? <BeamLight /> : null}
+        {on("beam") ? <BeamLight range={extent * 1.15} topScale={extent / 20} /> : null}
       </Canvas>
       <LoadingVeil visible={veiled} />
     </CanvasWrapper>
