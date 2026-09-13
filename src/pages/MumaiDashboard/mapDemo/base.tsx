@@ -104,7 +104,6 @@ export default function Base(props: BaseProps) {
   } = props;
   const on = (name: string) => debug !== `no${name}` && debug !== "minimal";
 
-  const introArmed = useConfigStore((state) => state.introArmed);
   const groupRef = useRef<Group>(null!);
   const camera = useThree((state) => state.camera);
   const canvasSize = useThree((state) => state.size);
@@ -415,18 +414,18 @@ export default function Base(props: BaseProps) {
      * 遮罩同时撤掉，观众看到的是完整开场。
      */
     /*
-     * **不要等贴图。**
+     * **挂载就开场，不等任何东西。**
      *
-     * 之前门控写成 `mapTexture && introArmed`，实测 DEM 贴图要 ~17 秒才到，
-     * 于是时间线一直没跑、所有材质的 opacity 停在 0 —— 顶面全透明，
-     * 屏幕上只剩侧壁与白线（材质探针实测 opacity:0 / hasMap:false）。
-     * 这正是用户看到的「只有蓝色背景 / 地图出不来」。
+     * 走过两次弯路，都记在这里：
+     *   · 先是门控在 `mapTexture` 上 —— 贴图来得慢，时间线一直不跑，
+     *     各材质 opacity 停在 0，顶面全透明（实测 opacity:0 / hasMap:false），
+     *     屏幕只剩侧壁与白线。
+     *   · 再是门控在 `introArmed` 上 —— 那是 Map 挂载后 900ms 才翻真的，
+     *     加上路由懒加载，时间线推到 8 秒开外；而且依赖变化会让 effect 重建，
+     *     cleanup 里 `tl.kill()` 把 588 条 opacity tween 反复重置。
      *
-     * 顶面本来就有兜底色 #28486e，贴图到位再换上去即可 ——
-     * 「先出一块冷灰蓝的地图、后补地形纹理」远好过「等 17 秒什么都没有」。
+     * 遮罩揭开由独立定时器负责，不需要用开场去同步它。挂载即跑最简单也最稳。
      */
-    if (!introArmed) return;
-
     const tl = gsap.timeline();
     tl.to(group.position, { x: 0, y: 0, z: 0, duration: 1 }, MAP_PUSH_DURATION);
     tl.to(
@@ -443,7 +442,7 @@ export default function Base(props: BaseProps) {
      */
     group.traverse((obj) => {
       if (obj instanceof Mesh || obj instanceof LineSegments) {
-        tl.to(
+tl.to(
           obj.material,
           { opacity: 1, duration: 1, ease: "circ.out" },
           MAP_PUSH_DURATION,
@@ -513,7 +512,7 @@ export default function Base(props: BaseProps) {
     // 不能再带上 fitDistance —— 画布尺寸一确定 fitDistance 就变，
     // 时间线会被 kill 重建，而各材质 opacity 起点是 0，重建没跑完地图就整幅透明。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [introArmed]);
+  }, []);
 
   /**
    * **与时间线解耦的终态兜底。**

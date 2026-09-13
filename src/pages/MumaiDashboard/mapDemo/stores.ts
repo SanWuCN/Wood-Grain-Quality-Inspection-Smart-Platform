@@ -12,8 +12,6 @@ interface ConfigStore {
    * 走 props 回调多一层，出问题时不好定位。
    */
   sceneReady: boolean;
-  /** 遮罩揭开了没有：base 的开场时间线等它，保证「揭幕」与「开场」同帧 */
-  introArmed: boolean;
   /**
    * 加载遮罩是否还盖着。
    *
@@ -29,7 +27,6 @@ export const useConfigStore = create<ConfigStore>()(
   subscribeWithSelector((set, _, store) => ({
     mapPlayComplete: false,
     sceneReady: false,
-    introArmed: false,
     veiled: true,
     toggle: (key) => set((s) => ({ [key]: !s[key] })),
     reset: () => set(store.getInitialState()),

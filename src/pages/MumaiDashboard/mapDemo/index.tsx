@@ -162,7 +162,7 @@ export default function Map(props: MapProps) {
      */
     if (!useConfigStore.getState().veiled) return;
     const timer = window.setTimeout(() => {
-      useConfigStore.setState({ veiled: false, introArmed: true });
+      useConfigStore.setState({ veiled: false });
     }, 900);
     return () => window.clearTimeout(timer);
   }, [loadedMode]);
@@ -183,7 +183,7 @@ export default function Map(props: MapProps) {
 
       setTransitioning(true);
       // 真的换图了：重新落遮罩并重新武装开场（揭幕 effect 会幂等地把它揭开）
-      useConfigStore.setState({ veiled: true, introArmed: false });
+      useConfigStore.setState({ veiled: true });
       const fade = { value: 1 };
       const tl = gsap.timeline({
         onComplete: () => setTransitioning(false),
