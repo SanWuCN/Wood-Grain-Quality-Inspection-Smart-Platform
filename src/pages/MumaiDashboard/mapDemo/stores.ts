@@ -14,6 +14,13 @@ interface ConfigStore {
   sceneReady: boolean;
   /** 遮罩揭开了没有：base 的开场时间线等它，保证「揭幕」与「开场」同帧 */
   introArmed: boolean;
+  /**
+   * 加载遮罩是否还盖着。
+   *
+   * 放在 store 而不是组件 useState：组件重挂载会丢本地状态，
+   * 遮罩就会在地图已经画好之后又盖回来（实测 t=8s 有地图、t=12s 变黑）。
+   */
+  veiled: boolean;
   toggle: (key: keyof Omit<ConfigStore, "toggle" | "reset">) => void;
   reset: () => void;
 }
@@ -23,6 +30,7 @@ export const useConfigStore = create<ConfigStore>()(
     mapPlayComplete: false,
     sceneReady: false,
     introArmed: false,
+    veiled: true,
     toggle: (key) => set((s) => ({ [key]: !s[key] })),
     reset: () => set(store.getInitialState()),
   }))

@@ -134,8 +134,11 @@ export default function Map(props: MapProps) {
    * 「加载 + 镜头飞行」整段 —— 这两段时间画面本来就没有地图主体，
    * 揭开时正好接上 2.5→3.5s 的材质淡入，中间不留暗场。
    */
-  /** 遮罩是否还盖着：本地状态 + 定时揭幕，不依赖场景反馈（见文件顶部说明） */
-  const [veiled, setVeiled] = useState(true);
+  /**
+   * 遮罩是否还盖着。**走 store 不走 useState** —— 组件重挂载时本地状态会丢，
+   * 遮罩就会在地图已经画好之后又盖回来（实测 t=8s 有地图、t=12s 变黑）。
+   */
+  const veiled = useConfigStore((state) => state.veiled);
 
   /**
    * 换图（下钻 / 返回）时重新落遮罩。
@@ -149,11 +152,17 @@ export default function Map(props: MapProps) {
    * 不会出现「遮罩撤了但地图不来」。
    */
   useEffect(() => {
-    useConfigStore.setState({ introArmed: false });
-    setVeiled(true);
+    /*
+     * 幂等：已经揭开过就直接返回。
+     *
+     * 原来这里无条件 setVeiled(true) + 重设定时器，组件一重挂载（本项目有
+     * 数百次重渲染量级）effect 就跑得比 900ms 更频繁，定时器永远等不到触发，
+     * 遮罩永久留在屏幕上 —— 地图明明画好了却看不见。
+     * 现在只有 runTransition 真的换图时才会把 veiled 置回 true。
+     */
+    if (!useConfigStore.getState().veiled) return;
     const timer = window.setTimeout(() => {
-      setVeiled(false);
-      useConfigStore.setState({ introArmed: true });
+      useConfigStore.setState({ veiled: false, introArmed: true });
     }, 900);
     return () => window.clearTimeout(timer);
   }, [loadedMode]);
@@ -173,6 +182,8 @@ export default function Map(props: MapProps) {
       }
 
       setTransitioning(true);
+      // 真的换图了：重新落遮罩并重新武装开场（揭幕 effect 会幂等地把它揭开）
+      useConfigStore.setState({ veiled: true, introArmed: false });
       const fade = { value: 1 };
       const tl = gsap.timeline({
         onComplete: () => setTransitioning(false),
