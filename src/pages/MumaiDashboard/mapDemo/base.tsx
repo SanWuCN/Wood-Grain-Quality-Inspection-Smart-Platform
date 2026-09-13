@@ -378,11 +378,30 @@ export default function Base(props: BaseProps) {
    * 重建只影响镜头，不会把下面的「揭幕」动画一起打断。
    */
   useLayoutEffect(() => {
-    // 机位方向：Demo2 原值是 (-2,7,10)（俯角约 34°）。全国图比四川扁得多，
-    // 34° 下南北向被压得太扁、省界挤在一起，所以把俯角抬到约 42°，
-    // 让中国轮廓读起来更像一张地图；方位角仍保持 Demo2 的构图。
+    /*
+     * 机位方向：Demo2 原值是 (-2,7,10)（俯角约 34°）。全国图比四川扁得多，
+     * 34° 下南北向被压得太扁、省界挤在一起，所以把俯角抬到约 42°，
+     * 让中国轮廓读起来更像一张地图；方位角仍保持 Demo2 的构图。
+     */
     const dir = new Vector3(-2, 9.2, 10).normalize();
-    const target = dir.multiplyScalar(fitDistance);
+    const target = dir.clone().multiplyScalar(fitDistance);
+
+    /*
+     * **先把相机摆到远处，再推进来。**
+     *
+     * 原来只写了 `tl.to(camera.position, target)` —— 从 Canvas 写死的初始机位
+     * `[0, 26, 29]`（距原点约 39）补间到 `fitDistance`（中国约 96）。
+     * 那是**往外飞**，镜头在后退，观众看到的不是推近而是地图不断缩小；
+     * 而且起点 39 远小于地图尺寸，开场瞬间相机几乎贴在地图上。
+     * Demo2 是反过来的：`[3,20,10]`（22.6）→ `[-2,7,10]`（12.4），推近。
+     *
+     * 所以起手把相机按同一方向放到 `fitDistance × 2.4`（远景），
+     * 俯角略高一点形成下压的弧线，再 `circ.out` 收到最终机位 —— 这才是「推镜头」。
+     */
+    const start = dir.clone().multiplyScalar(fitDistance * 2.4);
+    // 起点抬高一档：镜头从高处俯冲下来，比同角度平移更有推进感
+    start.y += fitDistance * 0.55;
+    camera.position.set(start.x, start.y, start.z);
 
     const tl = gsap.timeline();
     tl.to(camera.position, {
@@ -435,8 +454,13 @@ export default function Base(props: BaseProps) {
      *     加上路由懒加载，时间线推到 8 秒开外；而且依赖变化会让 effect 重建，
      *     cleanup 里 `tl.kill()` 把 588 条 opacity tween 反复重置。
      *
-     * 遮罩揭开由独立定时器负责，不需要用开场去同步它。挂载即跑最简单也最稳。
+     * 遮罩揭开由**这里**置位 —— Base 挂载、时间线建立的那一刻才算「可以看了」。
+     * 用户在 dev 下打开页面看到十几秒蓝屏、然后地图一次性出现，就是因为遮罩
+     * 原来按「Map 挂载后 900ms」撤，而 Base（连同贴图与几何）要晚得多才就绪，
+     * 中间那段就是空白画布。
      */
+    useConfigStore.setState({ introStarted: true });
+
     const tl = gsap.timeline();
     tl.to(group.position, { x: 0, y: 0, z: 0, duration: 1 }, MAP_PUSH_DURATION);
     tl.to(

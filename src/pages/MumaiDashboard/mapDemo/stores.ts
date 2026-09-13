@@ -19,6 +19,13 @@ interface ConfigStore {
    * 遮罩就会在地图已经画好之后又盖回来（实测 t=8s 有地图、t=12s 变黑）。
    */
   veiled: boolean;
+  /**
+   * 开场时间线是否已经建立（= Base 已挂载、几何与贴图就绪、可以看了）。
+   *
+   * 遮罩等的是这一个，不是「Map 挂载后 900ms」—— dev 下 Base 要晚十几秒才就绪，
+   * 那段空档就是用户看到的「蓝屏」。
+   */
+  introStarted: boolean;
   toggle: (key: keyof Omit<ConfigStore, "toggle" | "reset">) => void;
   reset: () => void;
 }
@@ -28,6 +35,7 @@ export const useConfigStore = create<ConfigStore>()(
     mapPlayComplete: false,
     sceneReady: false,
     veiled: true,
+    introStarted: false,
     toggle: (key) => set((s) => ({ [key]: !s[key] })),
     reset: () => set(store.getInitialState()),
   }))

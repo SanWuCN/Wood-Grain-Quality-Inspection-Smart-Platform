@@ -189,7 +189,12 @@ export default function Map(props: MapProps) {
    * 遮罩是否还盖着。**走 store 不走 useState** —— 组件重挂载时本地状态会丢，
    * 遮罩就会在地图已经画好之后又盖回来（实测 t=8s 有地图、t=12s 变黑）。
    */
-  const veiled = useConfigStore((state) => state.veiled);
+  /**
+   * 遮罩是否还盖着。**等 Base 真正就绪**（introStarted），不等定时器 ——
+   * dev 下 Base 挂载要十几秒，这段时间原来是没有遮罩的空白画布。
+   */
+  const introStarted = useConfigStore((state) => state.introStarted);
+  const veiled = useConfigStore((state) => state.veiled) && !introStarted;
 
   /**
    * 换图（下钻 / 返回）时重新落遮罩。
@@ -197,26 +202,16 @@ export default function Map(props: MapProps) {
    * 不这么做的话，切到上海会先看到旧的中国地图被淡出、然后一小段空白 ——
    * 那正是加载遮罩要消掉的东西。
    */
-  /**
-   * 揭幕：挂载后 900ms 撤遮罩，**同一帧**置 introArmed 让开场开始。
-   * 900ms 是留给预取命中的窗口；贴图万一还没到，base 的时间线会等它，
-   * 不会出现「遮罩撤了但地图不来」。
+  /*
+   * 这里原来有一个「挂载后 900ms 撤遮罩」的定时器，已删除。
+   *
+   * 它假定 Map 一挂载、场景马上就能画出来。实测 dev 下 `Base`（连同 GeoJSON、
+   * 几何与地表贴图）要十几秒才就绪，于是遮罩在 900ms 就撤了、画布却还是空的
+   * —— 那十几秒就是用户报的「打开网页是蓝屏，一会全部都加载出来了」。
+   *
+   * 现在遮罩由 `introStarted` 驱动（见上方 `veiled` 的推导）：Base 挂载、
+   * 开场时间线建立的那一刻才撤。撤的同一帧开场就开始跑，中间不留空档。
    */
-  useEffect(() => {
-    /*
-     * 幂等：已经揭开过就直接返回。
-     *
-     * 原来这里无条件 setVeiled(true) + 重设定时器，组件一重挂载（本项目有
-     * 数百次重渲染量级）effect 就跑得比 900ms 更频繁，定时器永远等不到触发，
-     * 遮罩永久留在屏幕上 —— 地图明明画好了却看不见。
-     * 现在只有 runTransition 真的换图时才会把 veiled 置回 true。
-     */
-    if (!useConfigStore.getState().veiled) return;
-    const timer = window.setTimeout(() => {
-      useConfigStore.setState({ veiled: false });
-    }, 900);
-    return () => window.clearTimeout(timer);
-  }, [loadedMode]);
 
   /**
    * 真正的切换：淡出 → 换数据（重新取景）→ 淡入。
@@ -234,7 +229,7 @@ export default function Map(props: MapProps) {
 
       setTransitioning(true);
       // 真的换图了：重新落遮罩并重新武装开场（揭幕 effect 会幂等地把它揭开）
-      useConfigStore.setState({ veiled: true });
+      useConfigStore.setState({ veiled: true, introStarted: false });
       const fade = { value: 1 };
       const tl = gsap.timeline({
         onComplete: () => setTransitioning(false),
