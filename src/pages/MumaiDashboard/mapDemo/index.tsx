@@ -101,7 +101,11 @@ const DATASETS: Record<
    * 横长条的中国因此被推远）。收小一点，让地图真正占住中央。
    * 具体值靠 ?fit= 逐档截图比对定，这里先给一个起点。
    */
-  china: { data: chinaData, outline: chinaOutline, fitPadding: 1.14 },
+  /*
+   * 1.14 → 0.92：用户看图 3 觉得中国还不够大。这个系数越小相机越近，
+   * 0.92 在地图明显变大一档的同时仍留出左右面板的安全距离。
+   */
+  china: { data: chinaData, outline: chinaOutline, fitPadding: 0.92 },
   /*
    * 上海 1.08 → 0.62。
    *
@@ -144,8 +148,18 @@ function LoadingVeil({ visible }: { visible: boolean }) {
   return (
     <div className={`map-veil${visible ? "" : " is-gone"}`} aria-hidden={!visible}>
       <div className="map-veil__core">
+        {/*
+          底圈圈：外环匀速顺时针、中环反向、内环脉冲。
+          几何语言与场景里真正的 Bottom 展示盘一致，揭幕时由 CSS 淡出接到
+          Three.js 的底盘上，观感是连续的 —— 用户要的「丝滑衔接」。
+        */}
+        <span className="map-veil__rings" aria-hidden="true">
+          <i className="map-veil__ring map-veil__ring--outer" />
+          <i className="map-veil__ring map-veil__ring--mid" />
+          <i className="map-veil__ring map-veil__ring--inner" />
+        </span>
         <b>木脉智检</b>
-        <span>MAP INITIALIZING</span>
+        <span className="map-veil__ascii">MAP INITIALIZING</span>
         <i className="map-veil__line" />
       </div>
     </div>
@@ -355,7 +369,17 @@ export default function Map(props: MapProps) {
           {on("bottom") ? <Bottom size={extent * 1.25} /> : null}
         </Suspense>
         {on("mirror") ? <Mirror /> : null}
-        {on("beam") ? <BeamLight range={extent * 1.15} topScale={extent / 20} /> : null}
+        {on("beam") ? (
+            /*
+             * topScale 由 extent/20（中国约 4.1）改为 extent/70（约 1.2）。
+             *
+             * 4.1 让光柱升到 41~123 单位高，而相机在 96 单位外看向原点 ——
+             * 它们绝大多数时间在画面上方之外，所以「好像没有光柱」。
+             * 光柱是贴地表的环境光效，高度该与地图本身的尺度相称：
+             * extent/70 把它们收在视野内的低空，持续可见。
+             */
+            <BeamLight range={extent * 1.15} topScale={Math.max(1, extent / 70)} />
+          ) : null}
       </Canvas>
       <LoadingVeil visible={veiled} />
     </CanvasWrapper>

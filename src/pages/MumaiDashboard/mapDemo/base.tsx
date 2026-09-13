@@ -379,11 +379,13 @@ export default function Base(props: BaseProps) {
    */
   useLayoutEffect(() => {
     /*
-     * 机位方向：Demo2 原值是 (-2,7,10)（俯角约 34°）。全国图比四川扁得多，
-     * 34° 下南北向被压得太扁、省界挤在一起，所以把俯角抬到约 42°，
-     * 让中国轮廓读起来更像一张地图；方位角仍保持 Demo2 的构图。
+     * 机位方向：Demo2 原值是 (-2,7,10)（俯角约 34°）。
+     *
+     * 用户反馈「角度也太小了，稍微正视一些」—— 要更接近俯视。由 9.2 抬到 13.5，
+     * 仰角从约 42° 到约 53°：中国轮廓更接近「摊在眼前」的读法，南北向不再被压扁。
+     * 方位角仍保持 Demo2 的构图。
      */
-    const dir = new Vector3(-2, 9.2, 10).normalize();
+    const dir = new Vector3(-2, 13.5, 10).normalize();
     const target = dir.clone().multiplyScalar(fitDistance);
 
     /*
