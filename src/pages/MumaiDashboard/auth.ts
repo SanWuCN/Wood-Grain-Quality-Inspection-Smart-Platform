@@ -56,6 +56,14 @@ export type Permission =
   | "knowledge:manage"
   /** 场景发布（POST /scenes/{id}/publish），全栈上传后由架构师检查并发布 */
   | "scene:publish"
+  /**
+   * 场景模型上传（POST /api/files + scene.submit）。
+   *
+   * 只有全栈开发工程师（饶）能上传：其他人只能**选择已上传的模型**来显示。
+   * 与 `scene:submit` 分开放，是因为沈 / 史在前端持有 ALL_PERMISSIONS ——
+   * 若沿用 `scene:submit`，项目经理与架构师会一并拿到上传权，与需求不符。
+   */
+  | "scene:upload"
   /** 训练演示（POST /training-jobs） */
   | "training:run"
   /** 封装下发（POST /packages、/packages/{id}/deliver） */
@@ -108,6 +116,7 @@ export const PERMISSION_LABEL: Record<Permission, string> = {
   "knowledge:read": "查看数据与知识中心",
   "knowledge:manage": "导入与维护资产",
   "scene:publish": "场景发布",
+  "scene:upload": "场景模型上传",
   "training:run": "训练演示",
   "package:deliver": "封装下发",
   "fusion:run": "多模态分析",
@@ -145,11 +154,15 @@ export const ALL_PERMISSIONS: readonly Permission[] = Object.keys(
  * 不额外放权。逐条对应关系见每行注释里的 PRD 出处。
  */
 const ROLE_ACTIONS: Record<string, readonly Permission[]> = {
-  /** 沈 · 项目经理（PRD 2.1：环境校验、分组检查、新旧评估对比、工单审核、交付摘要校验） */
-  shen: ALL_PERMISSIONS,
+  /*
+    沈 / 史在前端持有全部权限，但**场景模型上传只给饶**：
+    `scene:submit` 在这个数组里也要拿掉，否则「上传模型」按钮会对他们出现。
+    服务端同样只认 `scene:submit` → 饶（见 server/services/permissions.mjs），
+    前端去掉按钮只是不误导，真正的闸门在服务端。
+  */
+  shen: ALL_PERMISSIONS.filter((item) => item !== "scene:submit" && item !== "scene:upload"),
 
-  /** 史 · 人工智能架构师（PRD 2.1：小木调用、资料检索、场景发布、训练演示、封装下发、多模态分析） */
-  shi: ALL_PERMISSIONS,
+  shi: ALL_PERMISSIONS.filter((item) => item !== "scene:submit" && item !== "scene:upload"),
 
   /** 饶 · 全栈开发工程师（PRD 2.1：手持参数确认、原始数据上传、场景成果提交、更新包接收与回验） */
   rao: [
@@ -157,6 +170,7 @@ const ROLE_ACTIONS: Record<string, readonly Permission[]> = {
     "scan:capture", // PRD 3.4 / S09–S11：手持参数确认与采集
     "data:upload", // PRD 3.4 / S13：原始数据包提交
     "scene:submit", // PRD 3.3 / S06–S07：重建成果提交，状态「待检查」
+    "scene:upload", // 高斯模型上传：只有全栈开发工程师可以上传（需求明确）
     "deployment:receive", // PRD 3.6 / S18：接收更新包、执行模拟更新、读取设备版本
     "sample:review", // PRD 3.5 / S14：饶负责硬件端数据复核（饱和、掉帧）
     "training:submit", // PRD 3.6 / S15：准备部署与恢复版本，提交本次数据集

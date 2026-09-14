@@ -302,17 +302,39 @@ const HANDLERS = {
     };
   },
 
-  /* ---- 场景版本：检查 → 发布（评审 F06） ---- */
+  /* ---- 场景版本：上传 → 检查 → 发布（评审 F06 / PRD 3.3） ---- */
   "scene.submit": (ctx, payload) => {
-    const id = payload.sceneId ?? `SCN-${Date.now().toString(36).toUpperCase()}`;
+    /*
+     * 高斯模型**按工单绑定**：一个工单一份场景成果。
+     * 同一个工单再次上传是**替换**（返回同一个 sceneId），
+     * 不是又建一条 —— 否则数字孪生页会列出同一工单的好几份模型，
+     * 谁也说不清该看哪一份。
+     */
+    const orderId = payload.orderId ?? null;
+    if (!orderId) throw new WorkflowError(422, "NO_ORDER", "场景必须绑定工单（orderId）");
+    const existing = listKind(ctx.db, ctx.sessionId, "scene").find((item) => item.data.orderId === orderId);
+    const id = payload.sceneId ?? existing?.id ?? `SCN-${Date.now().toString(36).toUpperCase()}`;
+    /*
+     * 未提供的字段**保留上一版的值**，不用 null 覆盖。
+     *
+     * 这是一条踩过的坑：`assetFileId: payload.assetFileId ?? null` 会让
+     * 「只改标题」这类提交把已绑定的模型清空 —— 孪生页随即变成
+     * 「未收到模型文件」，而用户什么都没删。工单绑定同理：
+     * 一个工单只允许一份场景成果，重复提交的语义是**更新**，不是重建。
+     */
+    const previous = existing?.data ?? {};
+    const keep = (next, fallback) => (next === undefined || next === null ? fallback : next);
     const entity = writeEntity(ctx.db, ctx.sessionId, "scene", id, {
       id,
-      title: payload.title ?? id,
-      round: payload.round ?? "本轮",
-      assetId: payload.assetId ?? null,
-      format: payload.format ?? "sog",
-      componentAnchors: payload.componentAnchors ?? [],
-      bookmarkIds: payload.bookmarkIds ?? [],
+      orderId: keep(orderId, previous.orderId ?? null),
+      assetFileId: keep(payload.assetFileId, previous.assetFileId ?? null),
+      title: keep(payload.title, previous.title ?? id),
+      round: keep(payload.round, previous.round ?? "本轮"),
+      assetId: keep(payload.assetId, previous.assetId ?? null),
+      format: keep(payload.format, previous.format ?? "sog"),
+      /* 锚点与书签：给了就用给的（哪怕空数组是明确的意思），没给才沿用 */
+      componentAnchors: payload.componentAnchors ?? previous.componentAnchors ?? [],
+      bookmarkIds: payload.bookmarkIds ?? previous.bookmarkIds ?? [],
       checkResult: null,
       state: "待检查",
       submittedBy: ctx.actorId,
@@ -324,7 +346,7 @@ const HANDLERS = {
       entityKind: "scene",
       entity,
       result: { sceneId: id, state: "待检查" },
-      events: [{ type: "scene.submitted", payload: { sceneId: id } }],
+      events: [{ type: "scene.submitted", payload: { sceneId: id, orderId } }],
     };
   },
 

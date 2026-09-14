@@ -1737,7 +1737,12 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  /*
+    左列表占 20%–24%（PRD §5.1）。写死 280px 在大屏上只有 15%，
+    工单号 + 地点 + 状态挤成三行；clamp 让窄屏仍有个可读下限，
+    超宽屏也不会把列表拉成一片空白。
+  */
+  grid-template-columns: clamp(248px, 22%, 420px) minmax(0, 1fr);
   gap: var(--space-3);
 }
 
@@ -8459,4 +8464,149 @@
   .pd-bar {
     height: 2px;
   }
+}
+
+/* ------------------------------------------------------------------
+   数字孪生 · 工单选择 / 模型空态 / 操作说明（PRD 3.3）
+   ------------------------------------------------------------------
+   这一页的主入口是「工单」：先选工单，再显示该工单绑定的高斯模型。
+   没有模型时给的是**真实空态**（该工单还没上传），不是加载失败 ——
+   两段文案分开写，不让人以为是网络问题。
+   ------------------------------------------------------------------ */
+.twin-order {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-table);
+  color: var(--ma-text-3);
+}
+
+.twin-order select {
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-default);
+  background: var(--fill-weak);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.twin-order select:focus-visible {
+  outline: 2px solid var(--mumai-focus, #8ad9e9);
+  outline-offset: 2px;
+}
+
+.twin-order option {
+  background: #061228;
+  color: #e8efff;
+}
+
+/* 空态：居中在舞台中央，不遮住工具栏与侧栏 */
+.twin-model-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  text-align: center;
+  background: radial-gradient(60% 50% at 50% 45%, rgba(28, 52, 88, 0.35), transparent 70%);
+}
+
+.twin-model-empty b {
+  color: var(--ma-text-1);
+  font-size: var(--fs-panel);
+  font-weight: 600;
+}
+
+.twin-model-empty span {
+  max-width: 46ch;
+  color: var(--ma-text-3);
+  font-size: var(--fs-table);
+  line-height: 1.6;
+}
+
+.twin-model-empty .mumai-icon {
+  color: var(--ma-text-3);
+}
+
+.twin-model-empty.is-error b {
+  color: var(--warning);
+}
+
+/* 操作说明：键位用 kbd 呈现，与图片里的「按键 + 说明」两列一致 */
+.twin-keys {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.twin-keys li {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.twin-keys__keys {
+  display: flex;
+  gap: 4px;
+}
+
+.twin-keys kbd {
+  min-width: 26px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-default);
+  background: var(--fill-weak);
+  color: var(--ma-text-2);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-aux);
+  text-align: center;
+}
+
+.twin-keys__label {
+  color: var(--ma-text-3);
+  font-size: var(--fs-table);
+}
+
+/* 上传弹窗：整块可点的投放区 */
+.twin-drop {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  border: 1px dashed var(--border-hover);
+  background: var(--fill-weak);
+  cursor: pointer;
+  text-align: center;
+}
+
+.twin-drop:hover {
+  border-color: var(--border-active);
+}
+
+.twin-drop input {
+  display: none;
+}
+
+.twin-drop b {
+  color: var(--ma-text-1);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+}
+
+.twin-drop span {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+/* 场景库里「有版本但没模型」的那一条：明确标出来，不伪装成可用 */
+.scene-list li.is-missing button b::after {
+  content: " · 缺模型文件";
+  color: var(--warning);
+  font-weight: 400;
 }
