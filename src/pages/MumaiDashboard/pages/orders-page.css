@@ -1,0 +1,165 @@
+/**
+ * 工单档案页 · 页面级样式（新流程列表与详情骨架）
+ *
+ * 只放**列表筛选、委托正文、主体清单**这些一级页面自己的排版；
+ * 指派 / 环境 / 下发三块面板的样式在 `orders/orders.css` 里，两边类名前缀分开
+ * （这里 `wop-`，那边 `wo-`），免得同一页里两处定义互相盖。
+ *
+ * 颜色一律走 CSS 变量，不写死色值。
+ */
+
+/* ---------------- 左侧列表：筛选 + 搜索 ---------------- */
+
+.wop-filters {
+  display: flex;
+  gap: 4px;
+  margin-bottom: var(--space-2);
+}
+
+.wop-filter {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 2px;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+  /* 窄列（20%–24%）里四个页签必须各占一行内：换行会读成「待指 派」 */
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wop-filter.is-active {
+  border-color: var(--info);
+  color: var(--ma-text);
+  background: var(--fill-soft);
+}
+
+.wop-search {
+  width: 100%;
+  margin-bottom: var(--space-2);
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--fill-soft);
+  color: var(--ma-text);
+  font-size: var(--fs-aux);
+}
+
+.wop-search::placeholder {
+  color: var(--ma-text-3);
+}
+
+/* 列表行里的状态 + 负责人一行：状态 chip 定宽，负责人跟在后面 */
+.wop-row__status {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.wop-row__status em {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-style: normal;
+}
+
+/* ---------------- 详情：动作行与错误 ---------------- */
+
+.wop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.wop-actions .muted {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.wop-error {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--danger);
+  background: var(--fill-soft);
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+}
+
+.wop-inline-note {
+  margin-left: var(--space-2);
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-style: normal;
+}
+
+/* ---------------- 委托正文：默认三行，展开看全文 ---------------- */
+
+.wop-requirements {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--border-subtle);
+  background: var(--fill-soft);
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-body);
+}
+
+.wop-requirements.is-open {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+.wop-more {
+  margin-left: var(--space-2);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--info);
+  font-size: var(--fs-aux);
+  cursor: pointer;
+}
+
+/* ---------------- 主体 ID：等宽显示，便于和终端/日志对照 ---------------- */
+
+.wop-subject-id {
+  font-family: var(--font-data, monospace);
+  font-size: var(--fs-aux);
+  color: var(--ma-text-3);
+}
+
+/* ---------------- 原始委托附件 ---------------- */
+
+.wop-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wop-attachments li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px var(--space-2);
+  border: 1px solid var(--border-subtle);
+}
+
+.wop-attachments b {
+  color: var(--ma-text);
+  font-size: var(--fs-table);
+}
+
+.wop-attachments em {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-style: normal;
+}

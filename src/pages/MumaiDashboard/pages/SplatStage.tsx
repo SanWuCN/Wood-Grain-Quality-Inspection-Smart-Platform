@@ -19,9 +19,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
 import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
-import { Box3, MathUtils, Vector3 } from "three";
+import { Box3, Euler, MathUtils, Vector3 } from "three";
 import { useFrame } from "@react-three/fiber";
 import NumberAnimation from "@/components/numberAnimation";
 import { SPLAT_BOUNDS, SPLAT_TRANSFORM, type SplatCamera, type SplatTransform } from "./splat";
@@ -205,13 +204,23 @@ function fitToBox(
    * 画面偏模糊是**高斯泼溅的正常表现**，不是取景问题：3DGS 只在接近采集视角时
    * 才清晰，站远看几百万个高斯会叠成色块。换其他重建产物时这个系数要重调。
    */
-  const distance = (maxDim / 2 / Math.tan(MathUtils.degToRad(fovDeg) / 2)) * 6;
+  /*
+   * ×11 是**这个产物的标定系数**：按声明包围盒反解出来的是「正好贴住画面」，
+   * 而高斯泼溅的每个高斯都有体积、实测包围盒又比可见范围小，×6 时相机会落在
+   * 结构内部（画面上只有一片模糊色块）。×11 才能完整看到模型轮廓。
+   * 换其它重建产物时这个系数要重调，判据是「能看见完整轮廓」。
+   */
+  const distance = (maxDim / 2 / Math.tan(MathUtils.degToRad(fovDeg) / 2)) * 11;
   // 斜俯视：方向固定，避免每次适应视图后机位朝向乱跳
   const direction = new Vector3(0.72, 0.46, 0.92).normalize();
   camera.position.copy(center).addScaledVector(direction, distance);
   camera.near = Math.max(0.02, distance / 400);
   camera.far = distance * 30;
   camera.updateProjectionMatrix();
+  /*
+   * 第一人称：相机**看向**包围盒中心（不再维护 OrbitControls 的 target）。
+   * 用 lookAt 设置初始朝向即可，之后由 FirstPersonControls 接管 yaw / pitch。
+   */
   if (controls) {
     controls.target.copy(center);
     controls.update();
@@ -262,6 +271,154 @@ function SplatFitter({
   return null;
 }
 
+/**
+ * 第一人称操作（鼠标决定方向 + WASD 沿朝向移动）
+ *
+ * 键位与鼠标：
+ *   转动视角   鼠标左键拖动（相机**原地**转向，不绕任何中心点）
+ *   前后左右   W / A / S / D（沿**当前朝向**，不是沿世界轴）
+ *   上下移动   Q / E
+ *   减速/加速  Ctrl / Shift
+ *   前进后退   滚轮（相当于沿朝向推拉）
+ *
+ * 为什么不用 OrbitControls：轨道相机的语义是「绕 target 转」——
+ * 视角变化时相机是绕着模型跑的，想去模型的另一侧只能绕着走。
+ * 现场要看的是「站在这里往四周看」，所以这里自己实现：
+ *   · yaw / pitch 自己维护，鼠标位移直接改这两个角；
+ *   · 相机的世界朝向由 yaw / pitch 反解，不读 `getWorldDirection`
+ *     （那会读到上一帧的结果，连续拖动时手感发飘）；
+ *   · W/S/A/D 一律由 yaw 反解出水平前向与右向，所以「转过去再按 W」
+ *     就是往新方向走。
+ *
+ * 拖动而不是指针锁定：演示时经常要在页面上点别的控件，
+ * 指针锁定（Pointer Lock）会把鼠标藏起来还得按 Esc 退出，反而碍事。
+ */
+function FirstPersonControls({ scale, syncNonce = 0 }: { scale: number; syncNonce?: number }) {
+  const camera = useThree((state) => state.camera);
+  const gl = useThree((state) => state.gl);
+  const pressed = useRef<Set<string>>(new Set());
+  const angles = useRef<{ yaw: number; pitch: number } | null>(null);
+  const dragging = useRef(false);
+
+  /**
+   * 外部动过相机之后重新同步朝向。
+   *
+   * 取景（`fitToBox`）会把相机搬到包围盒外侧并改朝向；控制器如果不同步，
+   * yaw/pitch 还是旧值，用户第一次拖动的瞬间画面会「啪」地跳回去 ——
+   * 现象是「一转视角就不知道飘到哪了」。
+   */
+  useEffect(() => {
+    const euler = new Euler().setFromQuaternion(camera.quaternion, "YXZ");
+    angles.current = { yaw: euler.y, pitch: euler.x };
+  }, [camera, syncNonce]);
+
+  useEffect(() => {
+    const canvas = gl.domElement;
+
+    /* 初值从当前相机朝向反解，避免第一帧跳一下 */
+    const euler = new Euler().setFromQuaternion(camera.quaternion, "YXZ");
+    angles.current = { yaw: euler.y, pitch: euler.x };
+
+    const apply = () => {
+      const value = angles.current;
+      if (!value) return;
+      /* 纵向留 2° 余量，避免正上/正下时出现万向节翻转；横向不限 */
+      value.pitch = MathUtils.clamp(value.pitch, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
+      camera.quaternion.setFromEuler(new Euler(value.pitch, value.yaw, 0, "YXZ"));
+    };
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      dragging.current = true;
+      canvas.setPointerCapture(event.pointerId);
+    };
+    const onPointerUp = (event: PointerEvent) => {
+      dragging.current = false;
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (!dragging.current || !angles.current) return;
+      /* 灵敏度按画布像素算：不同窗口大小拖同样的距离，转过的角度一致 */
+      const perPixel = 0.0032;
+      /*
+       * 水平**不设上限**：一直往一个方向拖可以转满 360°（视角是「站着往四周看」，
+       * 想看到背后就该能转过去）。纵向限制在 ±90° 内，避免翻顶时画面打滚。
+       */
+      angles.current.yaw -= event.movementX * perPixel;
+      angles.current.pitch -= event.movementY * perPixel;
+      apply();
+    };
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      moveForward(Math.sign(event.deltaY) * -1 * 0.5);
+    };
+
+    const down = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      pressed.current.add(event.code);
+      if (["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE"].includes(event.code)) event.preventDefault();
+    };
+    const up = (event: KeyboardEvent) => pressed.current.delete(event.code);
+    const blur = () => {
+      pressed.current.clear();
+      dragging.current = false;
+    };
+
+    /** 滚轮：沿当前朝向推拉（不改变 yaw / pitch） */
+    const moveForward = (factor: number) => {
+      const direction = new Vector3();
+      camera.getWorldDirection(direction);
+      camera.position.addScaledVector(direction, scale * factor);
+    };
+
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointercancel", onPointerUp);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointercancel", onPointerUp);
+      canvas.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, [camera, gl, scale]);
+
+  useFrame((_, delta) => {
+    const keys = pressed.current;
+    if (keys.size === 0) return;
+    const value = angles.current;
+    if (!value) return;
+    const fast = keys.has("ShiftLeft") || keys.has("ShiftRight");
+    const slow = keys.has("ControlLeft") || keys.has("ControlRight");
+    const speed = scale * (fast ? 1.1 : slow ? 0.1 : 0.42) * delta;
+
+    /* 由 yaw 反解水平前向与右向：转过去再按 W 就是往新方向走 */
+    const forward = new Vector3(-Math.sin(value.yaw), 0, -Math.cos(value.yaw));
+    const right = new Vector3(Math.cos(value.yaw), 0, -Math.sin(value.yaw));
+
+    const move = new Vector3();
+    if (keys.has("KeyW")) move.add(forward);
+    if (keys.has("KeyS")) move.sub(forward);
+    if (keys.has("KeyD")) move.add(right);
+    if (keys.has("KeyA")) move.sub(right);
+    if (keys.has("KeyE")) move.y += 1;
+    if (keys.has("KeyQ")) move.y -= 1;
+    if (move.lengthSq() === 0) return;
+    camera.position.addScaledVector(move.normalize(), speed);
+  });
+
+  return null;
+}
+
 export function SplatStage({
   url,
   transform = SPLAT_TRANSFORM,
@@ -293,9 +450,10 @@ export function SplatStage({
    */
   const [progress, setProgress] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
-  /** 实测包围盒。就绪后由 SplatFitter 用它取景 */
+  /** 实测包围盒。就绪后由 SplatFitter 用它取景，也用来换算按键移动速度 */
   const boxRef = useRef<Box3 | null>(null);
   const [boxNonce, setBoxNonce] = useState(0);
+  const [flyScale, setFlyScale] = useState(6);
 
   return (
     <div className="splat-stage">
@@ -325,18 +483,16 @@ export function SplatStage({
           }}
           onReady={(box) => {
             boxRef.current = box;
+            /* 移动速度跟着产物尺度走：最长边的一半，小模型不瞬移、大模型不挪不动 */
+            const size = box.isEmpty() ? null : box.getSize(new Vector3());
+            if (size) setFlyScale(Math.max(0.5, Math.max(size.x, size.y, size.z) / 2));
             setBoxNonce((value) => value + 1);
           }}
           onError={onError}
         />
         <SplatFitter box={boxRef} nonce={boxNonce + (fitNonce ?? 0) * 1000} fov={50} />
-        <OrbitControls
-          makeDefault
-          enableDamping
-          dampingFactor={0.12}
-          minDistance={0.4}
-          maxDistance={40}
-        />
+        {/* 第一人称操作：鼠标转视角、WASD 沿朝向走，见 FirstPersonControls 的说明 */}
+        <FirstPersonControls scale={flyScale} syncNonce={boxNonce + (fitNonce ?? 0) * 1000} />
         <SplatCameraRig target={camera} />
       </Canvas>
 
@@ -347,7 +503,7 @@ export function SplatStage({
             <i style={{ width: `${Math.round((progress ?? 0) * 100)}%` }} />
           </span>
           <em>
-            gs.sog · 238 万高斯点 ·{" "}
+            {url.split("/").pop()?.split("?")[0] || "模型文件"} ·{" "}
             {/*
               下载进度是这一页唯一的实时值（31 MB 的产物边下边报），交给
               `NumberAnimation` 平滑滚动，避免百分比一格格跳。`null` 表示还没收到

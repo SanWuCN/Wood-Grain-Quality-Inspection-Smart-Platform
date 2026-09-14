@@ -62,7 +62,13 @@ export type SessionEvent = {
   tone: "ok" | "warn" | "danger" | "info" | "muted";
 };
 
-export type Toast = { id: number; text: string; tone: SessionEvent["tone"] };
+/**
+ * 通知。
+ *
+ * `action` 是可选的「点它去哪」：新工单到达时通知要能点开查看，
+ * 但**不强制跳页**（用户可能正在填表单，草稿要保留）—— PRD §3.1。
+ */
+export type Toast = { id: number; text: string; tone: SessionEvent["tone"]; action?: { label: string; to: string } };
 
 export type MumaiState = {
   sessionId: string;
@@ -118,7 +124,7 @@ export type MumaiState = {
   events: SessionEvent[];
   pushEvent: (text: string, tone?: SessionEvent["tone"]) => void;
   toasts: Toast[];
-  toast: (text: string, tone?: SessionEvent["tone"]) => void;
+  toast: (text: string, tone?: SessionEvent["tone"], action?: Toast["action"]) => void;
   dismissToast: (id: number) => void;
 
   /** 演示控制：适用域待核验时冻结该批诊断输出（PRD 3.4） */
@@ -196,10 +202,11 @@ export function MumaiProvider({ children }: PropsWithChildren) {
     setEvents((list) => [{ id: nextId(), at: clockStamp(), text, tone }, ...list].slice(0, 40));
   }, []);
 
-  const toast = useCallback((text: string, tone: SessionEvent["tone"] = "info") => {
+  const toast = useCallback((text: string, tone: SessionEvent["tone"] = "info", action?: Toast["action"]) => {
     const id = nextId();
-    setToasts((list) => [...list, { id, text, tone }]);
-    window.setTimeout(() => setToasts((list) => list.filter((item) => item.id !== id)), 3200);
+    setToasts((list) => [...list, { id, text, tone, action }]);
+    // 带跳转的通知留久一点：用户可能正在填表，来不及点就没了等于没通知
+    window.setTimeout(() => setToasts((list) => list.filter((item) => item.id !== id)), action ? 8000 : 3200);
   }, []);
 
   const dismissToast = useCallback((id: number) => {

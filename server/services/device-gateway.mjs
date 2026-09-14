@@ -139,6 +139,10 @@ export function createDeviceGateway({
       device_id   TEXT NOT NULL,
       type        TEXT NOT NULL,
       args        TEXT,
+      -- body：命令的业务体。终端 app.py::_cmd_assign_task 读的是
+      -- command["payload"]（= 平台 WS 信封 payload 里再嵌一层 payload），
+      -- 只发 args 时真机回 missing_order_id（2026-09-14 实测）。
+      body        TEXT,
       state       TEXT NOT NULL,
       scope       TEXT,
       created_at  TEXT NOT NULL,
@@ -172,6 +176,16 @@ export function createDeviceGateway({
     );
     CREATE INDEX IF NOT EXISTS device_config_acks_lookup ON device_config_acks (device_id, id DESC);
   `);
+  /*
+    老库补 body 列（新库上面建表时已经带上）。放在建表之后执行：
+    先 ALTER 再建表的话，新库上会先抛一次「no such table」，
+    虽然被吞掉不影响结果，但日志里留一条假错误会误导排查。
+  */
+  try {
+    db.exec("ALTER TABLE device_commands ADD COLUMN body TEXT");
+  } catch {
+    /* 列已存在 */
+  }
 
   /** deviceId → Set<WebSocket>（同一台设备重连时旧的会被替换，不并存） */
   const sockets = new Map();
@@ -653,6 +667,13 @@ export function createDeviceGateway({
           action: row.type,
           expiresAt: row.expires_at,
           args: readJson(row.args, {}),
+          /*
+            业务体再嵌一层 `payload`：终端 app.py::_cmd_assign_task 读的正是
+            `command["payload"]`（它拿到的 command 就是这一层 envelope.payload）。
+            接口清单 §4.1 写的是 `args`，代码读的是 `payload` —— 两个键都给，
+            终端不改也能绑单；只给 args 时真机回 missing_order_id。
+          */
+          ...(row.body ? { payload: readJson(row.body, {}) } : {}),
         },
       }),
     );
@@ -660,7 +681,7 @@ export function createDeviceGateway({
     return true;
   }
 
-  function issueCommand(deviceId, { type, args = {}, ttlMs = 300000 } = {}) {
+  function issueCommand(deviceId, { type, args = {}, body = null, ttlMs = 300000 } = {}) {
     const allowed = ["assign_task", "apply_config", "pause_capture", "request_upload", "prepare_update", "query_status"];
     if (!allowed.includes(String(type))) {
       throw new WorkflowError(422, "BAD_COMMAND", `终端不认这条命令：${type}（白名单：${allowed.join(" / ")}）`);
@@ -669,9 +690,17 @@ export function createDeviceGateway({
     const createdAt = nowIso();
     const expiresAt = new Date(Date.now() + Math.max(1000, Number(ttlMs) || 300000)).toISOString();
     db.prepare(
-      `INSERT INTO device_commands (command_id, device_id, type, args, state, created_at, expires_at)
-       VALUES (?, ?, ?, ?, 'queued', ?, ?)`,
-    ).run(commandId, deviceId, String(type), JSON.stringify(args ?? {}), createdAt, expiresAt);
+      `INSERT INTO device_commands (command_id, device_id, type, args, body, state, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)`,
+    ).run(
+      commandId,
+      deviceId,
+      String(type),
+      JSON.stringify(args ?? {}),
+      body === null ? null : JSON.stringify(body),
+      createdAt,
+      expiresAt,
+    );
     const row = db.prepare("SELECT * FROM device_commands WHERE command_id = ?").get(commandId);
     const pushed = pushCommand(row);
     return {

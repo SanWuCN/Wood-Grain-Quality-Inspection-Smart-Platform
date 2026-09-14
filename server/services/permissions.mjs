@@ -24,6 +24,12 @@ export const ACTION_PERMISSION = {
 
   "map.save": "map:save",
 
+  /*
+   * 场景模型上传与成果提交是同一个动作：`scene.submit`。
+   * 上传本身是「POST /api/files + scene.submit 绑定工单」两步，闸门在后者 ——
+   * 所以这里**不**另立 `scene.upload` 动作（登记了却没有 handler 的动作码
+   * 会在调用时抛 404 NO_HANDLER，看起来像功能没做）。
+   */
   "scene.submit": "scene:submit",
   "scene.check": "scene:publish",
   "scene.publish": "scene:publish",
@@ -56,7 +62,13 @@ export const ACTION_PERMISSION = {
 };
 
 /** 四个账号 → 权限集合（与 src/pages/MumaiDashboard/auth.ts 的 ROLE_ACTIONS 同源） */
+/*
+  沈 / 史 = 全部动作，但**场景上传除外**：上传高斯模型是饶（全栈开发工程师）的活，
+  另外两个角色只能选择已上传的模型显示。写成显式剔除而不是把 scene.upload
+  从 ALL 里漏掉 —— 漏掉会在下次新增动作时又把它带回来。
+*/
 const ALL = [...new Set(Object.values(ACTION_PERMISSION))].filter((item) => item !== "*");
+const ALL_BUT_UPLOAD = ALL.filter((item) => item !== "scene:upload" && item !== "scene:submit");
 
 /*
  * 数据与知识中心新增的三个细分权限（PRD §13）：
@@ -70,15 +82,32 @@ const KNOWLEDGE_PERMISSIONS = ["knowledge:read", "knowledge:search", "knowledge:
 const ARCHIVE_PERMISSIONS = ["archive:verify", "archive:export"];
 const CONSOLE_PERMISSIONS = ["console:admin"];
 
+/*
+ * 工单指派与扫描仪下发（PRD-工单指派与扫描仪下发-v1.0 §6.2）
+ *
+ * 这两个权限**故意不放进 `ACTION_PERMISSION`**：那张表的取值会被 `ALL` 收走，
+ * 一放进去，人工智能架构师（shi）就跟着拿到指派权了 —— 而 PRD 明令
+ * 「人工智能架构师、管理员或小木智能体不能因为现有『全权限』集合而获得指派权」。
+ * 所以指派权只按项目经理这一个岗位显式授予：
+ *   workorder:assign   指派 / 更换负责人、参与人员与职责
+ *   workorder:operate  本期属于项目经理的流程动作：运行环境校验、暂停/恢复/验收/归档
+ * 被指派员工的写权限不在这里 —— 那是**按单**判定的（services/work-orders.mjs 的职责校验）。
+ */
+const WORK_ORDER_PERMISSIONS = ["workorder:assign", "workorder:operate"];
+
 export const ROLE_PERMISSIONS = {
-  // 沈 / 史：评审要求「项目经理和人工智能架构师权限最大」
-  shen: [...new Set([...ALL, ...ARCHIVE_PERMISSIONS, ...CONSOLE_PERMISSIONS, ...KNOWLEDGE_PERMISSIONS])],
-  shi: [...new Set([...ALL, ...ARCHIVE_PERMISSIONS, ...CONSOLE_PERMISSIONS, ...KNOWLEDGE_PERMISSIONS])],
+  // 沈：项目经理。全量业务权限 + 工单指派权
+  shen: [
+    ...new Set([...ALL_BUT_UPLOAD, ...ARCHIVE_PERMISSIONS, ...CONSOLE_PERMISSIONS, ...KNOWLEDGE_PERMISSIONS, ...WORK_ORDER_PERMISSIONS]),
+  ],
+  // 史：人工智能架构师。权限最大，但**不含**工单指派权（PRD §6.2）
+  shi: [...new Set([...ALL_BUT_UPLOAD, ...ARCHIVE_PERMISSIONS, ...CONSOLE_PERMISSIONS, ...KNOWLEDGE_PERMISSIONS])],
   rao: [
     "env:ack",
     "scan:capture",
     "data:upload",
     "scene:submit",
+    "scene:upload",
     "deployment:receive",
     "sample:review",
     "training:submit",

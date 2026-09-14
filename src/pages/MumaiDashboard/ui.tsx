@@ -11,6 +11,7 @@
  */
 
 import { useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { CHART, COLORS } from "./design";
 import { Icon } from "./icons";
 import { permissionHint, type Permission } from "./auth";
@@ -52,11 +53,16 @@ export function StateBlock({
   action?: ReactNode;
 }) {
   const copy = STATE_COPY[kind];
+  /*
+    说明行按需渲染：传了 `hint`（哪怕是空串）就按调用方的意思来 ——
+    空串表示「只要一行标题」，不要再补兜底解释句；没传才用默认文案。
+  */
+  const hintText = hint ?? copy.hint;
   return (
     <div className={`state-block state-block--${copy.tone}`}>
       <span className="state-block__dot" />
       <strong>{title ?? copy.title}</strong>
-      <em>{hint ?? copy.hint}</em>
+      {hintText ? <em>{hintText}</em> : null}
       {kind === "loading" ? <div className="state-block__bar"><i /></div> : null}
       {action ? <div className="state-block__action">{action}</div> : null}
     </div>
@@ -282,14 +288,17 @@ export function DataTable({
   head,
   rows,
   empty = "暂无记录",
+  emptyHint = "",
   compact,
 }: {
   head: string[];
   rows: ReactNode[][];
   empty?: string;
+  /** 空态说明：默认不写 —— 表格空着本身就说明问题，不需要再解释一遍 */
+  emptyHint?: string;
   compact?: boolean;
 }) {
-  if (rows.length === 0) return <StateBlock kind="empty" title={empty} hint="完成对应步骤后记录会出现在这里。" />;
+  if (rows.length === 0) return <StateBlock kind="empty" title={empty} hint={emptyHint} />;
   return (
     <div className={`dtable ${compact ? "is-compact" : ""}`}>
       <table>
@@ -547,7 +556,13 @@ export function Modal({
     };
   }, [onClose]);
 
-  return (
+  /*
+    弹窗必须挂到 `document.body`。
+    渲染在原地时，它会落进面板的层叠上下文里（`.appshell` 带 `isolation: isolate`），
+    面板自己的标题栏反而画在弹窗上面 —— 现象是「弹窗像是在容器里、还被裁掉」。
+    portal 出来之后，`z-index: 400` 直接对整个文档生效。
+  */
+  return createPortal(
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <article
         className={`modal${wide ? " modal--wide" : ""}`}
@@ -568,6 +583,7 @@ export function Modal({
         <div className="modal__body">{children}</div>
         {footer ? <footer className="modal__foot">{footer}</footer> : null}
       </article>
-    </div>
+    </div>,
+    document.body,
   );
 }

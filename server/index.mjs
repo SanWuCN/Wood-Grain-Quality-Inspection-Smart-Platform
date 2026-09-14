@@ -23,6 +23,8 @@ import { openDatabase } from "./storage/db.mjs";
 import { createApi } from "./api/http.mjs";
 import { createHub } from "./services/hub.mjs";
 import { createDeviceGateway } from "./services/device-gateway.mjs";
+import { createWorkOrderService } from "./services/work-orders.mjs";
+import { createUploadService } from "./services/uploads.mjs";
 import { createBleBridge } from "./services/ble-bridge.mjs";
 import { DEFAULT_SESSION_ID, createSession, getSession, listSessions, snapshot } from "./services/session.mjs";
 import { ASSETS_ROOT, ensureAssetsRoot } from "./services/assets.mjs";
@@ -72,6 +74,13 @@ export function startService({
   const bridge = createBleBridge(db);
   const log = quiet ? () => {} : (...args) => console.log(...args);
   /*
+    工单域（PRD-工单指派与扫描仪下发-v1.0）：快捷键触发建单、指派、按单环境版本与整包下发。
+    它要借设备网关把命令推给扫描仪，所以放在 devices 之后创建；没有网关时读取与建单照样可用。
+  */
+  const workOrders = createWorkOrderService({ db, hub, devices, sessionId });
+  /* 交付平台批次 B：文件分片上传与批次清单（终端侧契约） */
+  const uploads = createUploadService({ db });
+  /*
     知识索引任务调度器：命令总线只负责建立任务与广播 started 事件，
     真正的阶段推进在 runner 里按 tick 进行。这样「启动更新」是一个幂等的写命令，
     而进度是服务端按完成记录数算出来的，不由前端计时器伪造（PRD §9.3）。
@@ -82,6 +91,8 @@ export function startService({
     hub,
     bridge,
     devices,
+    workOrders,
+    uploads,
     staticRoot: staticDir ? resolve(staticDir) : null,
     knowledgeRunner,
   });

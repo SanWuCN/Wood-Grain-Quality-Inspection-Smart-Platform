@@ -30,37 +30,19 @@
  * 改了读数，结论跟着变，不会出现「读数已经不合格、结论还写着合格」。
  */
 
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import { Btn, DataTable, KV, Metric, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
-import { DeviceFigure } from "../illustrations";
 import { Icon } from "../icons";
 import { useMumai } from "../context";
 import { CaptureTab } from "./CaptureRun";
 import { TriageTab } from "./TriageLog";
 import { api } from "../api/client";
 import { useDeviceLink, useDevicePreview, type DeviceLink } from "../device/useDeviceLink";
-import {
-  BATCH_STATE_LABEL,
-  CAPABILITY_LABEL,
-  CAPABILITY_NOTE,
-  CAPABILITY_VALUE_LABEL,
-  HANDHELD_DEVICE_ID,
-  READING_SOURCE_LABEL,
-  toScanBatch,
-  type DeviceEvent,
-  type DeviceReport,
-} from "../device/types";
-import {
-  CHANNELS,
-  DEVICES,
-  REFERENCE_BATCHES,
-  SCAN_BATCHES,
-  SCANNER_TELEMETRY,
-  SCANNER_TELEMETRY_AT,
-} from "../seed/scenario";
+import { BATCH_STATE_LABEL, HANDHELD_DEVICE_ID, toScanBatch, type DeviceReport } from "../device/types";
+import { CHANNELS, DEVICES, SCAN_BATCHES, SCANNER_READING_LAYOUT } from "../seed/scenario";
 import { VERSION_ITEMS } from "../seed/versions";
 import type { ChannelStatus, DeviceReading, ScanBatch } from "../seed/types";
 import type { Tone } from "../lib";
@@ -93,38 +75,6 @@ const RECEIVE_TONE: Record<string, Tone> = {
 
 const versionOf = (key: string) =>
   VERSION_ITEMS.find((item) => item.key === key)?.current ?? "—";
-
-/** 终端事件类型 → 中文标签（覆盖终端文档 §3.5 的事件全集） */
-const EVENT_LABEL: Record<string, string> = {
-  "device.register": "注册握手",
-  "device.hello": "通道握手",
-  "device.capabilities": "能力变化",
-  "device.selfcheck": "开机自检",
-  "capture.started": "开始采集",
-  "capture.paused": "暂停采集",
-  "capture.resumed": "继续采集",
-  "capture.finished": "结束采集",
-  "capture.mark_created": "人工标记",
-  "capture.progress": "采集进度",
-  "capture.anomaly": "端侧异常",
-  "batch.finalized": "批次封存",
-  "batch.upload_started": "开始上传",
-  "batch.upload_completed": "上传完成",
-  "config.received": "收到配置",
-  "config.applied": "配置生效",
-  "command.accepted": "命令已接收",
-  "command.executed": "命令已执行",
-  "command.failed": "命令失败",
-  "update.downloaded": "更新已下载",
-  "update.verified": "更新已校验",
-  "update.applied": "更新已应用",
-  "update.failed": "更新失败",
-  "system.recovered": "崩溃恢复",
-  "system.error": "系统错误",
-};
-
-/** 心跳与遥测每秒一条，混进事件流水会把它冲掉；它们在上面单独展示 */
-const EVENT_NOISE = new Set(["device.health", "device.telemetry", "device.hello"]);
 
 const clockOf = (value?: string | null): string => {
   if (!value) return "—";
@@ -217,59 +167,37 @@ const byteRateText = (value: number) => `${Math.round(value)} B/s`;
  */
 const NUMBER_INHERIT_STYLE: CSSProperties = { display: "inline", color: "inherit", fontSize: "inherit" };
 
-/** 实时读数的刷新间隔（毫秒）。手持设备的读数本来就不是一秒一变 */
-const READING_TICK_MS = 1200;
-
-/**
- * 种子的实时摆动。
- *
- * 用户的观察是「设备数据可以稍微浮动，显得真实一些」—— 一条钉死的数字确实
- * 不像在监看。这里让带 `drift` 的读数围绕种子基准做正弦摆动：
- *   · 用正弦而不是随机数：围绕基准摆动、不会单向漂走，也不需要平滑处理；
- *   · 每项给不同周期，避免六个数字同频一起跳（那比不动还假）；
- *   · 没有 `drift` 的项（版本号之类）保持不动。
- *
- * **只在种子兜底时生效**：真机上报的读数是设备实测值，不做任何加工
- * （设备说 43.2℃ 就是 43.2℃，页面上抖动一下就成了平台编的数）。
- */
-function useLiveReadings(items: DeviceReading[]): { item: DeviceReading; value: number }[] {
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setTick((value) => value + 1), READING_TICK_MS);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  return useMemo(
-    () =>
-      items.map((item) => {
-        if (!item.drift) return { item, value: item.value };
-        const period = item.driftPeriod ?? 13;
-        const seconds = (tick * READING_TICK_MS) / 1000;
-        const value = item.value + item.drift * Math.sin((seconds / period) * Math.PI * 2);
-        return { item, value: Number(value.toFixed(item.digits ?? 2)) };
-      }),
-    [items, tick],
-  );
-}
-
 /**
  * 本页数据源：真机优先、种子兜底。
  *
  * 只要终端推过数据就用终端的（哪怕已经 stale/offline —— 那时页面标「离线」
- * 并保留最后一份，而不是悄悄换回种子）。只有**一份都没推过**时才整块退回种子，
- * 并在页面顶部说明「现在看的是演示数据」。
+ * 并保留最后一份）。**没有上报时不退回演示数据**：读数按静态行模板全部显示
+ * 「—」，布局与连接后完全一致。
  */
 function useHardwareSource(link: DeviceLink) {
-  const seeded = useLiveReadings(SCANNER_TELEMETRY);
   const report: DeviceReport | null = link.view?.report ?? null;
   const live = Boolean(report);
 
+  /**
+   * 读数列表：**行数与顺序在连接前后完全一致**。
+   *
+   * 行模板是 `SCANNER_READING_LAYOUT`（静态清单），不是设备上报的字段 ——
+   * 字段清单如果来自上报本身，未连接时只有 5 行、连上之后 15 行，布局会跳。
+   * 未连接时每行都是 `undefined`，界面显示「—」；
+   * 连接后按 key 填真值，设备多出来的字段追加在后面。
+   */
   const readings = useMemo(() => {
     const fromDevice = report?.readings?.filter((item) => Number.isFinite(item.value)) ?? [];
-    if (!live || fromDevice.length === 0) return seeded;
-    return fromDevice.map((item) => ({ item, value: item.value }));
-  }, [live, report, seeded]);
+    const deviceByKey = new Map(fromDevice.map((item) => [item.key, item]));
+    const extra = fromDevice.filter((item) => !SCANNER_READING_LAYOUT.some((row) => row.key === item.key));
+    return [...SCANNER_READING_LAYOUT, ...extra].map((item) => {
+      const device = deviceByKey.get(item.key);
+      return {
+        item: device ? { ...item, ...device } : item,
+        value: live && device ? device.value : undefined,
+      };
+    });
+  }, [live, report]);
 
   const channels: ChannelStatus[] = useMemo(
     () => (report?.channels?.length ? report.channels : CHANNELS),
@@ -316,49 +244,6 @@ function linkChip(link: DeviceLink): { node: ReactNode; tone: Tone } {
     default:
       return { node: "正在读取设备数据", tone: "info" };
   }
-}
-
-/** 顶部说明条：为什么现在看到的是种子数据（或者这份真机数据已经旧了） */
-function LinkNotice({ link }: { link: DeviceLink }) {
-  const age = link.view?.ageSec ?? 0;
-  if (link.phase === "loading" || link.phase === "live") return null;
-  if (link.phase === "waiting") {
-    return (
-      <div className="hw-notice">
-        <b>等待设备上报</b>
-        <span>
-          终端（树莓派手持机）还没推过设备数据，下面的四块是演示种子数据。
-          终端一连上平台就会自动切到真机读数，不需要改页面。
-        </span>
-      </div>
-    );
-  }
-  if (link.phase === "unavailable") {
-    return (
-      <div className="hw-notice is-warn">
-        <b>设备通道不可达</b>
-        <span>{link.error || "读不到设备数据"} —— 下面显示的是演示种子数据。</span>
-      </div>
-    );
-  }
-  return (
-    <div className={`hw-notice${link.phase === "offline" ? " is-danger" : " is-warn"}`}>
-      {/*
-        这条提示里唯一的数就是「离线 / 有多久没新数据」，它跟着 2 秒轮询一直涨。
-        拆成「前缀 + 数字 + 后缀」三段，数字交给 NumberAnimation 滚；
-        两段后缀分别对应离线与延迟两种说法，渲染出来的文字与原来逐字相同。
-      */}
-      <b>
-        {link.phase === "offline" ? "设备已离线 " : "设备 "}
-        <NumberAnimation value={age} group={false} style={NUMBER_INHERIT_STYLE} />
-        {link.phase === "offline" ? " 秒" : " 秒没有新数据"}
-      </b>
-      <span>
-        下面保留的是<b>最后一份真机数据</b>（不清空、也不回退成种子），
-        读数与通道状态请按现场情况判断。
-      </span>
-    </div>
-  );
 }
 
 /* ------------------------------------------------------------------ *
@@ -503,14 +388,14 @@ function DeviceStatusPanel({ link, deviceId }: { link: DeviceLink; deviceId: str
         {
           label: "固件版本",
           value: versions?.controller || "未接入",
-          note: versions?.controller ? "控制器（ESP32）实机固件" : "控制器未接入，不用演示模型顶替",
+          note: versions?.controller ? undefined : "控制器未接入",
         },
         {
           label: "采集配置",
           value: versions?.config || telemetryVersions.configVersion || "—",
-          note: versions?.config ? undefined : "取自终端遥测：本机当前生效的一版",
+          note: versions?.config ? undefined : "取自终端遥测",
         },
-        { label: "运行模型", value: versions?.model || telemetryVersions.demoModelVersion || "—", note: "演示模型版本" },
+        { label: "运行模型", value: versions?.model || telemetryVersions.demoModelVersion || "—" },
         {
           label: "应用版本",
           value: versions?.app || telemetryVersions.appVersion || "—",
@@ -531,32 +416,10 @@ function DeviceStatusPanel({ link, deviceId }: { link: DeviceLink; deviceId: str
     <Panel
       title="设备状态"
       extra={
-        <>
-          <StatusChip text={chip.node} tone={chip.tone} dot />
-          <SourceTag label={live ? "真机数据" : "模拟采集"} />
-        </>
+        <StatusChip text={live ? chip.node : "未连接"} tone={live ? chip.tone : "muted"} dot />
       }
       className="hw-panel hw-col-6">
-      {/*
-        PRD §5 硬件详情与采集：「I03 放设备卡，采集相机、二维响应和关键结果保持主体」，
-        「不把设备插图当实时相机帧」。
-        因此插图放在设备状态卡的左上角、120–180px 高的小图位（DESIGN-SYSTEM 的
-        「设备卡 120–180px」），并明确标注为示意图；右侧仍是设备字段与读数，
-        主体依旧是数据而不是插图。
-      */}
-      <div className="hw-device">
-        <DeviceFigure id="i03-scanner" caption={hardware?.model || DEVICES.scanner.name} height={132} />
-        <div className="hw-device__facts">
-          {/*
-            设备字段走**两列**：这一块面板是监看屏的主角，宽度是 3 栏短面板的两倍，
-            单列时六条事实只占左侧一半，右半边会留出一大块空白（2560 宽下约 600px）。
-            两列之后事实铺满整张卡、面板还矮了一截。
-            连接/数据来源这两条取值带状态标签，最长约 300px，最窄的档位
-            （1100 以下单列、面板 ~700px → 每列 ~330px）也放得下。
-          */}
-          <KV columns={2} items={facts} />
-        </div>
-      </div>
+      <KV columns={2} items={facts} />
       <div className="hw-metrics">
         {metrics.map((item) => (
           <Metric key={item.label} label={item.label} value={item.value} note={item.note} />
@@ -577,9 +440,6 @@ function DeviceStatusPanel({ link, deviceId }: { link: DeviceLink; deviceId: str
         <Btn tone="ghost" disabled={busy || !live} onClick={() => ask("request_upload", "平台请求上传当前批次")}>
           请求上传当前批次
         </Btn>
-        <span className="muted">
-          命令走设备通道下发，设备回 accepted / executed 三态回执；本页不把「已下发」当「已执行」。
-        </span>
       </div>
     </Panel>
   );
@@ -589,75 +449,39 @@ function DeviceStatusPanel({ link, deviceId }: { link: DeviceLink; deviceId: str
  * 设备读数
  * ------------------------------------------------------------------ */
 
-/**
- * 设备读数
- *
- * 手持设备的实时读数。带 `preflight` 的是知识库 SOP 要求的采集前核对项
- * （电量 / 存储余量 / 时间同步），任一不满足即不开始采集，所以面板标题右侧
- * 直接给「核对几项通过」，而不是让操作员自己逐条比阈值。
- *
- * 真机数据逐条标来源（实测 / 推算 / 估算）；种子兜底时整块标「模拟采集」。
- */
 function ReadingsPanel({ link }: { link: DeviceLink }) {
-  const { live, readings, report } = useHardwareSource(link);
-  const preflight = readings.filter(({ item }) => item.preflight);
-  const failed = preflight.filter(({ item, value }) => readingState(item, value).tone !== "ok");
-  const estimated = report?.state?.estimatedCount ?? 0;
-  const derived = report?.state?.derivedCount ?? 0;
+  const { live, readings } = useHardwareSource(link);
 
   return (
     <Panel
       title="设备读数"
-      extra={
-        <>
-          {live && estimated > 0 ? (
-            <StatusChip text={<>含 <NumberAnimation value={estimated} /> 项估算</>} tone="warn" dot />
-          ) : null}
-          <StatusChip
-            text={
-              failed.length === 0 ? (
-                <>
-                  采集前核对 <NumberAnimation value={preflight.length} />/
-                  <NumberAnimation value={preflight.length} /> 通过
-                </>
-              ) : (
-                <>
-                  采集前核对 <NumberAnimation value={failed.length} /> 项不满足
-                </>
-              )
-            }
-            tone={failed.length === 0 ? "ok" : "danger"}
-            dot
-          />
-        </>
-      }
+      extra={<StatusChip text={live ? "在线" : "未连接"} tone={live ? "ok" : "muted"} dot />}
       className="hw-panel hw-col-3">
+      {/*
+        行数与连接状态无关：设备报什么就填什么，没报的与未连接的一律显示「—」。
+        界面上不出现来源标签（实测 / 推算 / 估算）与采集口径说明 ——
+        那些是内部实现口径，不属于操作界面。
+      */}
       <ul className="hw-readings">
         {readings.map(({ item, value }) => {
-          const state = readingState(item, value);
+          const known = typeof value === "number" && Number.isFinite(value);
+          const state = known ? readingState(item, value) : { tone: "muted" as Tone, text: "无" };
           const filled =
-            item.scale === undefined
+            !known || item.scale === undefined
               ? null
               : Math.min(100, Math.max(0, (value / item.scale) * 100));
           return (
             <li key={item.key}>
-              <span className="hw-readings__label">
-                {item.label}
-                {item.preflight ? <i title="采集前必须核对项">核对</i> : null}
-                {item.source ? (
-                  <em className="hw-readings__src" data-source={item.source} title={item.origin ?? undefined}>
-                    {READING_SOURCE_LABEL[item.source]}
-                  </em>
-                ) : null}
-              </span>
+              <span className="hw-readings__label">{item.label}</span>
               <b>
-                {/*
-                  数字走动效，单位仍留在自己的 `em` 里 —— 那个 `em` 单独有字号与
-                  颜色（CSS `.hw-readings b em`），所以只能动数字这一段，
-                  不能把单位并进 `suffix`。
-                */}
-                <NumberAnimation value={value} format={readingFormat(item)} />
-                <em>{item.unit}</em>
+                {known ? (
+                  <>
+                    <NumberAnimation value={value} format={readingFormat(item)} />
+                    <em>{item.unit}</em>
+                  </>
+                ) : (
+                  <em>—</em>
+                )}
               </b>
               {filled === null ? (
                 <span className="hw-readings__bar is-none" />
@@ -671,29 +495,6 @@ function ReadingsPanel({ link }: { link: DeviceLink }) {
           );
         })}
       </ul>
-      <p className="note">
-        采样时间 {live ? report?.sampledAt ?? "—" : SCANNER_TELEMETRY_AT}
-        {live ? (
-          <>
-            {/* 四项都是从这一份真机数据现算的计数，设备换一组读数就跟着变 */}
-            {" · 真机 "}
-            <NumberAnimation value={readings.length} />
-            {" 项（实测 "}
-            <NumberAnimation value={readings.length - estimated - derived} />
-            {" · 推算 "}
-            <NumberAnimation value={derived} />
-            {" · 估算 "}
-            <NumberAnimation value={estimated} />
-            {"）"}
-          </>
-        ) : (
-          " · 种子数据（设备未上报）"
-        )}
-      </p>
-      {/* 终端不发「电池电量」：本机没有电量计。这里说明一句，避免被当成漏了一行 */}
-      {live && !readings.some(({ item }) => item.key === "battery") ? (
-        <p className="note muted">本机没有电量计，终端不上报电量与续航，因此没有「电池电量」这一行。</p>
-      ) : null}
     </Panel>
   );
 }
@@ -735,12 +536,7 @@ function ChannelsPanel({ link }: { link: DeviceLink }) {
           channel.source,
         ])}
       />
-      {live ? (
-        <p className="note">
-          手持端只拥有四路里的视频通道：地图由巡检车负责、本机没有 IMU 不提供枪体姿态、
-          也不含车辆通道 —— 这几路按终端的原话显示为「断开 + 原因」，不是没问过。
-        </p>
-      ) : null}
+      
     </Panel>
   );
 }
@@ -876,12 +672,7 @@ function ReceivePanel({ link, deviceId }: { link: DeviceLink; deviceId: string }
           );
         })}
       </ul>
-      {live ? (
-        <p className="note">
-          接收计数是<b>平台已收到的份数</b>：终端的文件交付（分片上传 + 批次清单）平台侧还没接，
-          所以这里会是 0 —— 批次本身已经在终端封存了。点「补传」让终端重新交付，或等平台补上接收侧。
-        </p>
-      ) : null}
+      
     </Panel>
   );
 }
@@ -889,42 +680,6 @@ function ReceivePanel({ link, deviceId }: { link: DeviceLink; deviceId: string }
 /* ------------------------------------------------------------------ *
  * 设备能力 · 遥测 · 事件 · 预览（终端能给的、平台原来没有的那几块）
  * ------------------------------------------------------------------ */
-
-/**
- * 能力声明
- *
- * 终端在注册与每次设备数据里都带 `capabilities`，说明「这台设备到底有什么」。
- * 平台原来没有这块，于是「雷达是回放还是实采」只能靠人猜 —— 现在写清楚：
- * 手持端的毫米波响应序列**恒为回放**（预制样例包），不因为板上写着「毫米波」就变实采。
- */
-function CapabilitiesPanel({ link }: { link: DeviceLink }) {
-  const capabilities = link.view?.report?.capabilities ?? link.view?.ledger?.capabilities ?? null;
-  const entries = Object.entries(capabilities ?? {});
-  return (
-    <Panel
-      title="能力声明"
-      extra={<span className="muted">终端自带</span>}
-      className="hw-panel hw-col-3">
-      {entries.length === 0 ? (
-        <StateBlock kind="empty" title="等待设备上报" hint="终端注册后会把能力声明随设备数据一起送上来说明。" />
-      ) : (
-        <DataTable
-          head={["能力", "状态", "口径"]}
-          rows={entries.map(([key, value]) => [
-            CAPABILITY_LABEL[key] ?? key,
-            <StatusChip
-              key={key}
-              text={CAPABILITY_VALUE_LABEL[value] ?? value}
-              tone={value === "live" ? "ok" : value === "replay" ? "warn" : "muted"}
-              dot
-            />,
-            CAPABILITY_NOTE[`${key}:${value}`] ?? "—",
-          ])}
-        />
-      )}
-    </Panel>
-  );
-}
 
 /**
  * 终端遥测
@@ -1014,107 +769,13 @@ function TelemetryPanel({ link }: { link: DeviceLink }) {
               <Metric key={item.label} label={item.label} value={item.value} />
             ))}
           </div>
-          <p className="note">
-            终端每 1 秒推一条系统遥测（psutil / procfs / sysfs 实测），平台只保留最新一份；
-            各项采集周期不同（CPU 1 秒 / 内存与温度 2 秒 / 磁盘 10 秒），这一份里没有的项就不显示。
-            「接口收发」是网卡流量，不是本应用的上传速率。
-          </p>
+          
         </>
       ) : (
         <StateBlock kind="empty" title="暂无遥测" hint="终端每 1 秒推一条系统遥测，平台只保留最新一份。" />
       )}
     </Panel>
   );
-}
-
-/** 事件流水：采集进度、端侧异常、批次交付、命令回执都从这里看 */
-function EventsPanel({ link }: { link: DeviceLink }) {
-  const events = link.events.filter((event) => !EVENT_NOISE.has(event.type));
-  const commands = link.view?.recentCommands ?? [];
-  return (
-    <Panel
-      title="设备事件与回执"
-      extra={<span className="muted">心跳与遥测不在此列</span>}
-      className="hw-panel hw-col-3">
-      {commands.length ? (
-        <ul className="hw-commands">
-          {commands.map((command) => (
-            <li key={command.commandId}>
-              <code>{command.action}</code>
-              <StatusChip
-                text={
-                  command.state === "executed"
-                    ? "已执行"
-                    : command.state === "accepted"
-                      ? "已接收"
-                      : command.state === "failed"
-                        ? "失败"
-                        : command.state === "sent"
-                          ? "已下发"
-                          : "排队中"
-                }
-                tone={
-                  command.state === "executed"
-                    ? "ok"
-                    : command.state === "failed"
-                      ? "danger"
-                      : command.state === "accepted"
-                        ? "info"
-                        : "muted"
-                }
-                dot
-              />
-              <span className="muted">
-                {clockOf(command.executedAt ?? command.acceptedAt ?? command.sentAt ?? command.createdAt)}
-                {command.reason ? ` · ${command.reason}` : ""}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {events.length === 0 ? (
-        <StateBlock
-          kind="empty"
-          title="暂无设备事件"
-          hint="终端开始采集、标记、封存批次或回复命令后，这里会出现对应的关键事件。"
-        />
-      ) : (
-        <ul className="hw-events">
-          {events.slice(0, 14).map((event) => (
-            <li key={event.messageId}>
-              <span className="hw-events__at">{clockOf(event.receivedAt)}</span>
-              <b>{EVENT_LABEL[event.type] ?? event.type}</b>
-              <span className="muted">{eventDetail(event)}</span>
-              {/* 事件时刻是时钟值（不动），右边这一列是距今秒数（活数） */}
-              <em>
-                <NumberAnimation value={event.ageSec ?? 0} group={false} />s
-              </em>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Panel>
-  );
-}
-
-/** 事件的业务摘要：只取能对上人的那两三个字段，不整包 JSON 糊一屏 */
-function eventDetail(event: DeviceEvent): string {
-  const payload = event.payload ?? {};
-  const pick = (key: string) => (payload[key] === undefined ? "" : String(payload[key]));
-  const batch = pick("batchId") || pick("targetBatchId");
-  const reason = pick("reason");
-  const marks = pick("markCount");
-  const frames = pick("frameCount") || pick("frames");
-  const progress = pick("progressPct") || pick("percent");
-  const parts = [
-    batch ? `批次 ${batch}` : "",
-    progress ? `进度 ${progress}%` : "",
-    frames ? `${frames} 帧` : "",
-    marks ? `标记 ${marks}` : "",
-    pick("state") ? `状态 ${pick("state")}` : "",
-    reason,
-  ].filter(Boolean);
-  return parts.join(" · ");
 }
 
 /**
@@ -1140,10 +801,7 @@ function PreviewPanel({ link, deviceId }: { link: DeviceLink; deviceId: string }
       {preview.url ? (
         <>
           <img className="hw-preview" src={preview.url} alt="手持终端低帧率预览画面" />
-          <p className="note">
-            终端屏幕的低帧率预览（1—2 fps、640px 宽），只用于现场监看；
-            <b>不是归档图像</b>，不作为原始图像入库。
-          </p>
+          
         </>
       ) : (
         <StateBlock
@@ -1161,70 +819,56 @@ function PreviewPanel({ link, deviceId }: { link: DeviceLink; deviceId: string }
  * ------------------------------------------------------------------ */
 
 /**
- * 硬件监看
+ * 面板的排版位置：`[行, 列]`。
  *
- * 只展示「**这一台扫描枪**现在是什么状态」：身份与连接 / 四条采集条件 /
- * 数据通道 / 采到哪一批 / 终端自己的健康度 / 现场预览 / 事件流 / 能力声明。
- * 不在这里做结论判定 —— 缺陷结论属于模型侧，混在一起会让口径不清（PRD 3.4）。
- * 阈值判定是例外：采集条件属于设备侧，且 SOP 就要求采集前核对。
+ * 配对原则：同排两块的自然高度尽量接近，等高拉伸后的留白最小。
+ * （自然高度实测，单位 px：设备读数 613 · 采集接收 422 · 设备状态 374 ·
+ *   设备预览 330 · 通道状态 246 · 终端遥测 147）
  *
- * ## 为什么没有「算力占用」
+ *   第 1 排  设备状态(374) · 通道状态(246)   → 拉到 374，留白 246
+ *   第 2 排  采集接收(422) · 设备预览(330)   → 拉到 422，留白 330
+ *   第 3 排  设备读数(613) · 终端遥测(147)   → 拉到 613（最矮的一块无论和谁
+ *            配对都会被拉，放最后不挤占上面的行）
  *
- * 那一块读的是 `/api/platform/resources`，讲的是**跑后端的那台服务器**
- * （GPU / 显存 / 内存 / 存储 / 功耗 / 网络）。它和这台手持扫描枪不是一回事，
- * 摆在监看屏里既占了最要紧的位置，又让人以为「扫描枪的算力是 4090」。
- * 服务器资源已经在总览页「平台数据」和资源弹窗里讲，这一屏不再重复。
- *
- * ## 排版：按「先看什么」排，宽度按内容给
- *
- * 三行十二栏，每行都凑满（6+3+3），相邻两块放内容高度接近的面板：
- *   ① 设备状态 / 设备读数 / 通道状态    —— 现在能不能采
- *   ② 采集接收 / 终端遥测 / 设备预览    —— 采到哪了、画面在不在
- *   ③ 设备事件 / 能力声明 / 参考样本    —— 出过什么事、这台机器有什么
- * 设备状态拿到 6 栏：它是这一屏的主角，设备插图 + 六条事实 + 四个版本读数
- * 挤在 4 栏里会折行。通道状态、能力声明这类三五行的短面板给 3 栏。
- * 具体栏宽与断点见 `pages.css` 的 `.hw-monitor` / `.hw-col-*`。
+ * 面板自然高度随后端数据变（通道与接收的行数不是固定的），所以这里是配对顺序，
+ * 不是硬编码高度；同排两块一律等高对齐。
  */
+const MONITOR_LAYOUT: Record<string, [number, number]> = {
+  status: [1, 1],
+  channels: [1, 2],
+  receive: [2, 1],
+  preview: [2, 2],
+  readings: [3, 1],
+  telemetry: [3, 2],
+};
+
+/** 把排版位置写成 CSS 变量，CSS 侧用 grid-row / grid-column 读取 */
+const place = (key: keyof typeof MONITOR_LAYOUT) => {
+  const [row, col] = MONITOR_LAYOUT[key];
+  return { style: { "--hw-row": row, "--hw-col": col } as CSSProperties };
+};
+
 function MonitorTab({ link, deviceId }: { link: DeviceLink; deviceId: string }) {
   return (
     <div className="hw-monitor">
-      {/* ① 现在能不能采 */}
-      <DeviceStatusPanel link={link} deviceId={deviceId} />
-      <ReadingsPanel link={link} />
-      <ChannelsPanel link={link} />
-
-      {/* ② 采到哪了 */}
-      <ReceivePanel link={link} deviceId={deviceId} />
-      <TelemetryPanel link={link} />
-      <PreviewPanel link={link} deviceId={deviceId} />
-
-      {/* ③ 事件、能力与台账 */}
-      <EventsPanel link={link} />
-      <CapabilitiesPanel link={link} />
-
-      {/*
-        参考样本横跨 6 栏：这张表里有「G-SAMPLE-01」「0° / 45° / 90°」这种
-        不可断的长串，3 栏（~460px）时五个列会全部折行，整块看起来像坏了。
-      */}
-      <Panel
-        title="参考样本"
-        extra={<span className="muted">{REFERENCE_BATCHES.length} 组</span>}
-        className="hw-panel hw-col-6">
-        <DataTable
-          head={["批次", "物理样本组", "材质来源", "扫描次数", "方向"]}
-          rows={REFERENCE_BATCHES.map((batch) => [
-            batch.batchId,
-            batch.groupId,
-            batch.material,
-            `${batch.scans} 次`,
-            `${batch.direction}`,
-          ])}
-        />
-        <p className="note">
-          参考样本台账是**平台侧的标定记录**（不是设备遥测），终端不产生也不修改它，
-          所以这一块仍然来自平台数据。
-        </p>
-      </Panel>
+      <div {...place("status")}>
+        <DeviceStatusPanel link={link} deviceId={deviceId} />
+      </div>
+      <div {...place("readings")}>
+        <ReadingsPanel link={link} />
+      </div>
+      <div {...place("channels")}>
+        <ChannelsPanel link={link} />
+      </div>
+      <div {...place("receive")}>
+        <ReceivePanel link={link} deviceId={deviceId} />
+      </div>
+      <div {...place("telemetry")}>
+        <TelemetryPanel link={link} />
+      </div>
+      <div {...place("preview")}>
+        <PreviewPanel link={link} deviceId={deviceId} />
+      </div>
     </div>
   );
 }
@@ -1312,10 +956,7 @@ export default function Hardware() {
         {tab === "capture" ? <CaptureTab /> : null}
         {tab === "triage" ? <TriageTab /> : null}
         {tab === "monitor" ? (
-          <>
-            <LinkNotice link={link} />
-            <MonitorTab link={link} deviceId={deviceId} />
-          </>
+          <MonitorTab link={link} deviceId={deviceId} />
         ) : null}
       </div>
     </div>

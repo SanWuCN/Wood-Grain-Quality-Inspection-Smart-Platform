@@ -42,6 +42,9 @@ import { useDeviceLink } from "./device/useDeviceLink";
 import { VERSION_ITEMS } from "./seed/versions";
 import type { Tone } from "./lib";
 import { HANDHELD_DEVICE_ID } from "./device/types";
+import { useWorkOrderShortcut } from "./useWorkOrderShortcut";
+import { isWorkOrderEvent, useWorkOrderStore } from "./store/workOrders";
+import { useSharedStore } from "./store/shared";
 import "./appshell.css";
 import "./pages.css";
 // UI 视觉素材 v2.0：主题变量作用域 + 图标/插图样式（PRD §4）
@@ -166,6 +169,45 @@ export default function Shell() {
   useEffect(() => {
     document.title = "木脉智检 · 古建筑智能巡检平台";
   }, []);
+
+  /* ------------------------------------------------------------------ *
+   * 隐藏快捷键 Ctrl + Q + L：小木接单 → 平台工单（PRD §3）
+   *
+   * 注册点放在外壳上，所以每个已登录页面都能触发；触发器本身负责按键序列识别、
+   * 幂等事件 ID 与失败重试，这里只负责「告诉用户发生了什么」。
+   * 平台上**不显示**任何快捷键提示，也不加来单入口。
+   * ------------------------------------------------------------------ */
+  useWorkOrderShortcut({
+    onCreated: useCallback(
+      ({ orderNo, orderId, created }) => {
+        toast(
+          created ? `收到新工单 ${orderNo}，待项目经理指派` : `新工单 ${orderNo} 已存在（重复触发未重复建单）`,
+          created ? "ok" : "warn",
+          { label: "查看", to: `/orders?order=${encodeURIComponent(orderId)}` },
+        );
+      },
+      [toast],
+    ),
+    onFailed: useCallback(
+      (message: string) => {
+        // 失败绝不显示成功通知（PRD §3.1）
+        toast(`工单创建失败：${message}`, "danger");
+      },
+      [toast],
+    ),
+  });
+
+  /**
+   * 别的端建了单 / 改了工单 → 本端列表与详情跟着刷新。
+   * 事件体不带完整实体，收到就重拉一次列表（PRD §3.1「工单列表实时刷新」）。
+   */
+  const lastSharedEvent = useSharedStore((state) => state.lastEvent);
+  useEffect(() => {
+    if (!isWorkOrderEvent(lastSharedEvent?.type)) return;
+    void useWorkOrderStore.getState().refresh();
+    const selected = useWorkOrderStore.getState().detail?.order.id;
+    if (selected && selected === lastSharedEvent?.entityId) void useWorkOrderStore.getState().select(selected);
+  }, [lastSharedEvent]);
 
   const account = useMemo(
     () => ACCOUNTS.find((item) => item.id === accountId) ?? ACCOUNTS[0],
@@ -529,8 +571,16 @@ export default function Shell() {
             key={item.id}
             type="button"
             className={`toast toast--${item.tone}`}
-            onClick={() => dismissToast(item.id)}>
+            onClick={() => {
+              /*
+                带去向的通知：点它跳过去查看（新工单到达时的「查看」）。
+                **不自动跳页** —— 用户可能正在填表单，草稿必须保留（PRD §3.1）。
+              */
+              if (item.action) navigate(item.action.to);
+              dismissToast(item.id);
+            }}>
             {item.text}
+            {item.action ? <em className="toast__action">{item.action.label}</em> : null}
           </button>
         ))}
       </div>

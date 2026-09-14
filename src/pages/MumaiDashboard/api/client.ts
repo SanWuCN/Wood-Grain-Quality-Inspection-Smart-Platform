@@ -113,6 +113,10 @@ export type SceneEntity = {
   id: string;
   title: string;
   round: "历史" | "本轮";
+  /** 绑定的工单：一个工单一份场景成果，孪生页按它取模型 */
+  orderId?: string | null;
+  /** 上传到平台的高斯模型文件 id（`/api/files/:id/download` 可取回渲染） */
+  assetFileId?: string | null;
   assetId: string | null;
   format: string;
   componentAnchors: { componentId: string; zoneId: string; position: unknown }[];
@@ -254,6 +258,43 @@ export function isApiError(value: unknown): value is ApiError {
   return typeof value === "object" && value !== null && "code" in value && "status" in value;
 }
 
+/**
+ * 服务重启会换掉签名密钥（`server/services/auth.mjs` 没设 `MUMAI_SECRET` 时每次启动随机），
+ * 于是**页面还开着、令牌已经失效**：下一次点击就是 401。
+ *
+ * 这里补一次「用本地会话重新登录 + 重放原请求」，让用户不用手动刷新。
+ * 并发的多个 401 共用同一次登录（`reloginInFlight`），不会打出四五个登录请求。
+ */
+let reloginInFlight: Promise<boolean> | null = null;
+
+async function reloginWithSession(): Promise<boolean> {
+  if (reloginInFlight) return reloginInFlight;
+  reloginInFlight = (async () => {
+    const session = readSession();
+    const account = session?.login || session?.accountId;
+    if (!account) return false;
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account, password: DEMO_PASSWORD }),
+      });
+      if (!response.ok) return false;
+      const body = (await response.json()) as { token?: string };
+      if (!body?.token) return false;
+      writeToken(body.token);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      window.setTimeout(() => {
+        reloginInFlight = null;
+      }, 0);
+    }
+  })();
+  return reloginInFlight;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = readToken();
   const headers = new Headers(init.headers);
@@ -285,7 +326,23 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       body = { message: text };
     }
   }
-  if (!response.ok) throw toApiError(response.status, body);
+  if (!response.ok) {
+    // 令牌失效：补一次登录后**只重放一次**这个请求；补不上就给一句人能照着做的话
+    const retried = (init as RequestInit & { __reloginRetried?: boolean }).__reloginRetried;
+    if (response.status === 401 && token && !retried) {
+      if (await reloginWithSession()) {
+        return request<T>(path, { ...init, __reloginRetried: true } as RequestInit);
+      }
+      throw {
+        status: 401,
+        code: "SESSION_EXPIRED",
+        message: "登录已过期，请刷新页面后重试",
+        fieldErrors: [],
+        retryable: false,
+      } satisfies ApiError;
+    }
+    throw toApiError(response.status, body);
+  }
   return body as T;
 }
 
@@ -491,6 +548,24 @@ export const api = {
   },
 
   /**
+   * 给渲染器用的模型地址：**带 `?token=`**。
+   *
+   * 高斯泼溅的模型是由 Three.js 的加载器（SplatMesh）直接请求的，加不了
+   * `Authorization` 头，所以这一条地址把令牌放进查询串（服务端只对下载放行这种取法）。
+   * 下载给人用的那一条（`downloadUrl`）不带 —— 它走带头的原生下载。
+   */
+  modelUrl(fileId: string, fileName?: string | null) {
+    const token = readToken();
+    const query = token ? `?token=${encodeURIComponent(token)}` : "";
+    /*
+     * 路径里必须留文件名：加载器按**扩展名**判格式（`.sog` / `.spz`），
+     * 只有 id 的地址它会报 Unknown file type。`:name` 不参与寻址，只给扩展名与下载名。
+     */
+    const name = fileName?.trim() || "model.sog";
+    return `/api/files/${encodeURIComponent(fileId)}/model/${encodeURIComponent(name)}${query}`;
+  },
+
+  /**
    * 下载一个文件资产。
    *
    * **不能直接 `<a href="/api/files/…/download">`**：导航式下载带不上
@@ -666,6 +741,290 @@ export const api = {
       { method: "POST", body: JSON.stringify({ type, args }) },
     );
   },
+
+  /* ---- 工单指派与扫描仪下发（PRD-工单指派与扫描仪下发-v1.0） ---- */
+
+  /**
+   * 快捷键触发：`eventId` 由前端在**一次完整按键序列**上生成，
+   * 服务端按它幂等 —— 断网重试同一个 ID，拿到的是同一张工单（PRD §3.1）。
+   */
+  triggerWorkOrder(eventId: string) {
+    return request<WorkOrderTriggerResult>("/api/work-orders/trigger", {
+      method: "POST",
+      body: JSON.stringify({ eventId }),
+    });
+  },
+
+  workOrders(filter: WorkOrderFilter = "all", q = "") {
+    const query = new URLSearchParams({ filter, q });
+    return request<{ orders: WorkOrderSummary[]; accounts: AssignmentGroup[]; targets: DispatchTarget[] }>(
+      `/api/work-orders?${query}`,
+    );
+  },
+
+  workOrder(orderId: string) {
+    return request<WorkOrderDetail>(`/api/work-orders/${encodeURIComponent(orderId)}`);
+  },
+
+  assignWorkOrder(
+    orderId: string,
+    body: { leaderAccountId: string; members: { accountId: string; duties: string[] }[]; expectedRevision: number },
+  ) {
+    return request<{ ok: boolean; detail: WorkOrderDetail }>(
+      `/api/work-orders/${encodeURIComponent(orderId)}/assignment`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  },
+
+  setWorkOrderStatus(orderId: string, action: WorkOrderAction, expectedRevision?: number) {
+    return request<{ ok: boolean; detail: WorkOrderDetail }>(
+      `/api/work-orders/${encodeURIComponent(orderId)}/status`,
+      { method: "POST", body: JSON.stringify({ action, expectedRevision }) },
+    );
+  },
+
+  /** 保存环境草稿：未填的项传 null，服务端保持 null，不补 0 也不补标准气压 */
+  saveWorkOrderEnvironment(
+    orderId: string,
+    body: {
+      inputs: Partial<Record<EnvironmentFieldKey, number | null>>;
+      pressure?: { value: number | null; unit: string } | null;
+      instruments: { instrumentId: string; fields: string[]; source?: string }[];
+      position: string;
+      measuredAt: string;
+      expectedRevision: number;
+    },
+  ) {
+    return request<{ ok: boolean; environment: EnvironmentView }>(
+      `/api/work-orders/${encodeURIComponent(orderId)}/environment-draft`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  },
+
+  validateWorkOrderEnvironment(orderId: string, expectedRevision: number) {
+    return request<{ ok: boolean; environment: EnvironmentView }>(
+      `/api/work-orders/${encodeURIComponent(orderId)}/environment/validate`,
+      { method: "POST", body: JSON.stringify({ expectedRevision }) },
+    );
+  },
+
+  /** 删除工单（项目经理）：级联清掉主体、指派、环境版本与下发记录，不可恢复 */
+  deleteWorkOrder(orderId: string) {
+    return request<{ ok: boolean; orderNo: string; status: string; openDispatches: number }>(
+      `/api/work-orders/${encodeURIComponent(orderId)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  dispatchWorkOrder(
+    orderId: string,
+    body: { deviceId: string; configVersion?: string | null; expectedRevision?: number; idempotencyKey: string },
+  ) {
+    return request<{ ok: boolean; dispatch: DispatchView; replayed: boolean; hint?: string }>(
+      `/api/work-orders/${encodeURIComponent(orderId)}/dispatches`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+};
+
+/* ------------------------------------------------------------------ *
+ * 工单域类型（与服务端 services/work-orders.mjs 的返回结构一一对应）
+ * ------------------------------------------------------------------ */
+
+export type WorkOrderFilter = "all" | "assign" | "active" | "archived";
+
+export type WorkOrderStatus = "待指派" | "待准备" | "待作业" | "作业中" | "待验收" | "已归档" | "已暂停";
+
+export type WorkOrderAction = "start" | "submit" | "accept" | "archive" | "pause" | "resume";
+
+export type EnvironmentFieldKey =
+  | "airTempC"
+  | "relativeHumidityPct"
+  | "windSpeedMs"
+  | "atmosphericPressureHpa";
+
+export type WorkOrderSubject = {
+  subjectId: string;
+  code: string;
+  type: string;
+  name: string;
+  position: string | null;
+  positionStatus: "pending" | "confirmed";
+};
+
+export type WorkOrderSummary = {
+  id: string;
+  orderNo: string;
+  title: string;
+  status: WorkOrderStatus;
+  revision: number;
+  assignmentRevision: number;
+  location: string;
+  district: string;
+  plannedStart: string | null;
+  plannedEnd: string | null;
+  createdAt: string;
+  source: string;
+  leaderLabel: string | null;
+  dispatchState: string;
+};
+
+export type AssignmentMember = {
+  accountId: string;
+  roleCode: string;
+  label: string;
+  duties: { code: string; label: string }[];
+};
+
+export type AssignmentView = {
+  assignmentId: string;
+  revision: number;
+  leaderAccountId: string;
+  leaderRoleCode: string;
+  leaderLabel: string;
+  members: AssignmentMember[];
+  assignedBy: string;
+  assignedByLabel: string;
+  assignedAt: string;
+};
+
+export type AssignmentCandidate = { accountId: string; displayLabel: string; roleCode: string; suggestedDuties: { code: string; label: string }[] };
+export type AssignmentGroup = { roleCode: string; label: string; suggestedDuties: { code: string; label: string }[]; candidates: { accountId: string; displayLabel: string }[] };
+
+export type EnvironmentView = {
+  draftRevision: number;
+  inputs: Record<EnvironmentFieldKey, number | null>;
+  instruments: { instrumentId: string; fields: string[]; source?: string }[];
+  pressureInput: { value: number; unit: string; hpa: number | null; invalid?: boolean } | null;
+  position: string | null;
+  measuredAt: string | null;
+  needsRevalidate: boolean;
+  updatedAt: string | null;
+  updatedByLabel: string | null;
+  config: {
+    configVersion: string;
+    draftRevision: number;
+    inputs: Record<EnvironmentFieldKey, number>;
+    instruments: { instrumentId: string; fields: string[] }[];
+    position: string;
+    measuredAt: string;
+    checks: { key: string; label: string; ok: boolean; field: string; message: string }[];
+    methodVersion: string;
+    validatedByLabel: string;
+    validatedAt: string;
+    superseded: boolean;
+  } | null;
+  catalog: { instrumentId: string; name: string; fields: string[]; ranges: Record<string, { min: number; max: number; unit: string }>; source: string }[];
+  fields: { key: EnvironmentFieldKey; label: string; unit: string }[];
+};
+
+export type DispatchView = {
+  dispatchId?: string;
+  bundleId: string | null;
+  deviceId: string | null;
+  commandId?: string | null;
+  state: "none" | "queued" | "sent" | "accepted" | "executed" | "failed" | "expired" | "superseded";
+  stateText: string;
+  reason: string | null;
+  activationState: string | null;
+  configVersion: string | null;
+  orderRevision?: number;
+  assignmentRevision?: number;
+  sha256?: string;
+  createdAt?: string;
+  expiresAt?: string;
+  acceptedAt?: string | null;
+  executedAt?: string | null;
+  failedAt?: string | null;
+  createdByLabel?: string | null;
+};
+
+export type DispatchTarget = {
+  deviceId: string;
+  online: boolean;
+  linkState: string;
+  socketConnected: boolean;
+  connectionState: string;
+  appVersion: string | null;
+  capabilities: Record<string, unknown>;
+  pendingCommands: number;
+};
+
+export type WorkOrderCapabilities = {
+  canAssign: boolean;
+  canDelete: boolean;
+  canViewFull: boolean;
+  assigned: boolean;
+  isLeader: boolean;
+  canEditEnvironment: boolean;
+  canValidate: boolean;
+  canDispatch: boolean;
+  canPause: boolean;
+  canResume: boolean;
+  canStart: boolean;
+  canSubmit: boolean;
+  canAccept: boolean;
+  canArchive: boolean;
+};
+
+export type WorkOrderDetail = {
+  /** 未指派到此工单：只给摘要，委托正文与随单附件不下发（PRD §6.1） */
+  restricted?: boolean;
+  order: {
+    id: string;
+    orderNo: string;
+    revision: number;
+    assignmentRevision: number;
+    status: WorkOrderStatus;
+    pausedFrom: string | null;
+    title: string;
+    source: string;
+    location: string;
+    district: string;
+    plannedStart: string | null;
+    plannedEnd: string | null;
+    schedulePrecision: string;
+    timeZone: string;
+    requirementsText: string;
+    deliveryText: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+  commission: {
+    title: string;
+    unit: string;
+    date: string;
+    no: string | null;
+    projectName: string;
+    address: string;
+    subjectNote: string;
+    scope: string;
+    deliveryText: string;
+    contact: { role: string; channel: string };
+    attachments: { assetId: string; name: string; kind: string; sizeText: string; sourceMode: string }[];
+    sourceMode: string;
+  };
+  subjects: WorkOrderSubject[];
+  assignment: AssignmentView | null;
+  environment: EnvironmentView;
+  dispatch: DispatchView;
+  dispatches: DispatchView[];
+  work: { records: unknown[]; attachments: unknown[]; report: null };
+  logs: { at: string; type: string; text: string; actorId: string | null; actorLabel: string }[];
+  capabilities: WorkOrderCapabilities;
+  accounts: AssignmentGroup[];
+  targets: DispatchTarget[];
+  assignmentCandidates: AssignmentCandidate[];
+};
+
+export type WorkOrderTriggerResult = {
+  ok: boolean;
+  created: boolean;
+  orderId: string;
+  orderNo: string;
+  status: WorkOrderStatus;
+  detail: WorkOrderDetail;
+  capabilities: WorkOrderCapabilities;
 };
 
 let commandSeq = 0;

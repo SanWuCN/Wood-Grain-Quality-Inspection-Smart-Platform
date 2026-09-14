@@ -29,7 +29,7 @@ import {
   listSessions,
   snapshot,
 } from "../services/session.mjs";
-import { actorFromRequest, login } from "../services/auth.mjs";
+import { actorFromRequest, login, verifyToken } from "../services/auth.mjs";
 import { allows, permissionsOf } from "../services/permissions.mjs";
 import { ensureArchive, formatSize } from "../fixtures/archive.mjs";
 import {
@@ -57,6 +57,7 @@ import { parseJson } from "../storage/db.mjs";
 import { proxyScreen, screenStatus } from "../services/capture-screen.mjs";
 import { createSensorService } from "../services/sensortag.mjs";
 import { createPlatformResources } from "../services/platform-resources.service.mjs";
+import { registerUploadRoutes } from "../services/uploads.mjs";
 
 /** 归档副本的补传 / 重选属于「交付摘要校验」的写入侧，与前端 archive:verify 同一个权限 */
 function hasAssetPermission(actorId) {
@@ -134,7 +135,7 @@ function readRawBody(req, limit = 2 * 1024 * 1024) {
  * 路由
  * ------------------------------------------------------------------ */
 
-export function createApi({ db, hub, bridge, devices = null, staticRoot = null, knowledgeRunner = null, logger = console }) {
+export function createApi({ db, hub, bridge, devices = null, workOrders = null, uploads = null, staticRoot = null, knowledgeRunner = null, logger = console }) {
   ensureAssetsRoot();
   /*
     路由表是**每个 API 实例一份**，不是模块级。
@@ -196,7 +197,19 @@ export function createApi({ db, hub, bridge, devices = null, staticRoot = null, 
 
   route("POST", "/api/device-events/batch", async (ctx) => {
     // 响应结构不能变：accepted / duplicated 是 messageId 数组，不是计数（文档 §3.5）
-    return requireGateway().ingestEvents(ctx.body?.events, ctx.req);
+    const result = requireGateway().ingestEvents(ctx.body?.events, ctx.req);
+    /*
+      命令回执还要喂给工单域：设备「已接收 / 已应用 / 失败」是发包状态唯一能推进的来源。
+      只把网关真正收下的（accepted）交给它 —— duplicated 说明这条回执早就处理过了，
+      再推一次会把已经 executed 的包按旧回执重放（A18）。
+    */
+    if (workOrders && result?.accepted?.length) {
+      const accepted = new Set(result.accepted);
+      workOrders.consumeDeviceEvents(
+        (ctx.body?.events ?? []).filter((event) => accepted.has(event?.messageId)),
+      );
+    }
+    return result;
   }, { auth: false });
 
   route("GET", "/api/devices", async (ctx) => {
@@ -266,9 +279,172 @@ export function createApi({ db, hub, bridge, devices = null, staticRoot = null, 
     return null;
   }, { auth: false });
 
+  /* ------------------------------------------------------------------ *
+   * 工单指派与扫描仪下发（PRD-工单指派与扫描仪下发-v1.0）
+   *
+   * 与设备网关的关系：工单域自己管工单、指派、环境版本与下发记录；
+   * 真正把命令推给设备仍然走 device-gateway，工单侧只拿回 commandId。
+   * 所以这里的路由**都要求登录**，只有设备下载包那两条额外认设备令牌。
+   * ------------------------------------------------------------------ */
+
+  const requireOrders = () => {
+    if (!workOrders) throw new WorkflowError(503, "NO_WORK_ORDERS", "工单域未启用");
+    return workOrders;
+  };
+
+  /** 设备侧取包：认设备令牌；页面查看同一条包也走登录态 */
+  const requireDeviceOrActor = (ctx, deviceId) => {
+    if (actorFromRequest(ctx.req)) return;
+    const token = String(ctx.req.headers["x-device-token"] ?? "");
+    if (devices && token && devices.tokenAllowed(deviceId, token)) return;
+    throw new WorkflowError(401, "UNAUTHORIZED", "未登录或设备令牌无效");
+  };
+
+  /** 快捷键触发：任何已登录业务账号都能触发，但触发权限**不等于**指派权（PRD §3.1） */
+  route("POST", "/api/work-orders/trigger", async (ctx) => {
+    const orders = requireOrders();
+    const eventId = ctx.body?.eventId ?? ctx.body?.triggerEventId;
+    const outcome = orders.trigger({ eventId, actorId: ctx.actor });
+    const detail = orders.detailFor(outcome.order.id, ctx.actor);
+    return {
+      ok: true,
+      created: outcome.created,
+      orderNo: outcome.order.order_no,
+      orderId: outcome.order.id,
+      status: outcome.order.status,
+      detail,
+      capabilities: detail.capabilities,
+    };
+  });
+
+  route("GET", "/api/work-orders", async (ctx) => {
+    const orders = requireOrders();
+    return {
+      orders: orders.list({ filter: ctx.query.filter ?? "all", q: ctx.query.q ?? "" }),
+      accounts: orders.accounts(),
+      targets: orders.deviceTargets(),
+    };
+  });
+
+  route("GET", "/api/work-orders/:orderId", async (ctx) => {
+    const orders = requireOrders();
+    return orders.detailFor(ctx.params.orderId, ctx.actor);
+  });
+
+  route("PUT", "/api/work-orders/:orderId/assignment", async (ctx) => {
+    const orders = requireOrders();
+    const outcome = orders.assign({
+      orderId: ctx.params.orderId,
+      actorId: ctx.actor,
+      leaderAccountId: ctx.body?.leaderAccountId,
+      members: ctx.body?.members ?? [],
+      expectedRevision: ctx.body?.expectedRevision ?? null,
+    });
+    return { ok: true, ...outcome, detail: orders.detailFor(ctx.params.orderId, ctx.actor) };
+  });
+
+  route("POST", "/api/work-orders/:orderId/status", async (ctx) => {
+    const orders = requireOrders();
+    const order = orders.setStatus({
+      orderId: ctx.params.orderId,
+      actorId: ctx.actor,
+      action: ctx.body?.action,
+      expectedRevision: ctx.body?.expectedRevision ?? null,
+    });
+    return { ok: true, order, detail: orders.detailFor(ctx.params.orderId, ctx.actor) };
+  });
+
+  route("PUT", "/api/work-orders/:orderId/environment-draft", async (ctx) => {
+    const orders = requireOrders();
+    const environment = orders.saveDraft({
+      orderId: ctx.params.orderId,
+      actorId: ctx.actor,
+      body: ctx.body ?? {},
+      expectedRevision: ctx.body?.expectedRevision ?? null,
+    });
+    return { ok: true, environment };
+  });
+
+  route("POST", "/api/work-orders/:orderId/environment/validate", async (ctx) => {
+    const orders = requireOrders();
+    const environment = orders.validateOrderEnvironment({
+      orderId: ctx.params.orderId,
+      actorId: ctx.actor,
+      expectedRevision: ctx.body?.expectedRevision ?? null,
+    });
+    return { ok: true, environment };
+  });
+
+  route("POST", "/api/work-orders/:orderId/dispatches", async (ctx) => {
+    const orders = requireOrders();
+    const outcome = orders.dispatch({
+      orderId: ctx.params.orderId,
+      actorId: ctx.actor,
+      deviceId: ctx.body?.deviceId,
+      configVersion: ctx.body?.configVersion ?? null,
+      expectedRevision: ctx.body?.expectedRevision ?? null,
+      idempotencyKey: ctx.body?.idempotencyKey ?? null,
+    });
+    return { ok: true, ...outcome };
+  });
+
+  route("GET", "/api/work-orders/:orderId/dispatches", async (ctx) => {
+    const orders = requireOrders();
+    return { orderId: ctx.params.orderId, dispatches: orders.dispatches(ctx.params.orderId) };
+  });
+
+  /** 删除工单（项目经理）：级联清掉主体、指派、环境版本、下发记录与日志，不可恢复 */
+  route("DELETE", "/api/work-orders/:orderId", async (ctx) => {
+    const outcome = requireOrders().deleteOrder({ orderId: ctx.params.orderId, actorId: ctx.actor });
+    return { ok: true, ...outcome };
+  });
+
+  /** 设备主动拉取：只返回明确下发给它、且仍然有效的包（PRD §9.1） */
+  route("GET", "/api/devices/:deviceId/work-order-bundles/pending", async (ctx) => {
+    requireDeviceOrActor(ctx, ctx.params.deviceId);
+    return requireOrders().pendingBundles(ctx.params.deviceId);
+  }, { auth: false });
+
+  /**
+   * 终端「从平台获取」环境记录（接口清单 §4.4）：返回本设备当前工单已校验的那份读数。
+   * 只给能给的项，缺的项不出现 —— 终端对缺失项沿用当前值，不会被清零。
+   */
+  route("GET", "/api/devices/:deviceId/environment", async (ctx) => {
+    requireDeviceOrActor(ctx, ctx.params.deviceId);
+    return requireOrders().deviceEnvironment(ctx.params.deviceId);
+  }, { auth: false });
+
+  /**
+   * 包下载：响应体就是被摘要固化下来的那份 UTF-8 JSON 字节。
+   * 这里**不能**走框架的 JSON 序列化 —— 重新 stringify 一遍摘要就对不上了。
+   */
+  route("GET", "/api/work-order-bundles/:bundleId", async (ctx) => {
+    const token = String(ctx.req.headers["x-device-token"] ?? "");
+    const deviceId = String(ctx.req.headers["x-device-id"] ?? ctx.query.deviceId ?? "") || null;
+    if (deviceId) requireDeviceOrActor(ctx, deviceId);
+    else if (!actorFromRequest(ctx.req)) throw new WorkflowError(401, "UNAUTHORIZED", "未登录或设备令牌无效");
+    const bundle = requireOrders().readBundle(ctx.params.bundleId, deviceId);
+    const body = Buffer.from(bundle.text, "utf8");
+    ctx.res.writeHead(200, {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": body.length,
+      "cache-control": "no-store",
+      "x-bundle-sha256": bundle.sha256,
+      "x-bundle-status": bundle.status,
+    });
+    ctx.res.end(body);
+    return null;
+  }, { auth: false });
+
   const requireSensorControl = (ctx) => {
     if (!allows(ctx.actor, "scan:capture") && !allows(ctx.actor, "console:admin")) throw new WorkflowError(403,"FORBIDDEN","此账号没有传感器采集权限");
   };
+
+  /*
+    交付平台批次 B（《交付平台-新增接口清单》§3）：文件分片上传三步 + 批次清单。
+    路由在 uploads.mjs 里自带注册函数 —— 那边是终端契约的落点，改它不用动这张路由表。
+  */
+  registerUploadRoutes(route, { service: uploads });
   route("GET", "/api/sensors/bridge", async () => bridge.status());
   route("POST", "/api/sensors/gyro-calibrate", async (ctx) => {
     requireSensorControl(ctx);
@@ -539,12 +715,26 @@ export function createApi({ db, hub, bridge, devices = null, staticRoot = null, 
   route("POST", "/api/files", async (ctx) => {
     const name = ctx.query.name ?? ctx.req.headers["x-file-name"];
     if (!name) throw new WorkflowError(422, "NO_NAME", "缺少文件名（?name=）");
+    /*
+     * 场景模型目录只允许持 `scene:submit` 的角色写。
+     *
+     * 为什么在这里补：`POST /api/files` 是通用上传口，原来只校验登录态 ——
+     * 也就是说任何登录账号都能往 `scenes/` 目录里写字节，只是没法把它绑到工单。
+     * 需求是「只有全栈开发工程师可以上传模型」，所以字节这一层也要拦。
+     */
+    const dir = String(ctx.query.dir ?? "uploads");
+    if (dir === "scenes") {
+      const allowed = (permissionsOf(ctx.actor) ?? []).includes("scene:submit");
+      if (!allowed) {
+        throw new WorkflowError(403, "FORBIDDEN", `账号 ${ctx.actor} 无「场景成果提交」权限，不能上传场景模型`);
+      }
+    }
     const record = await saveStream(ctx.req, {
       name: String(name),
       mediaType: ctx.query.mediaType ?? mediaTypeFor(String(name)),
       sessionId: ctx.query.sessionId ?? DEFAULT_SESSION_ID,
       uploadedBy: ctx.actor,
-      dir: ctx.query.dir ?? "uploads",
+      dir,
     });
     registerFile(db, record);
     hub.broadcast(record.session_id, {
@@ -581,7 +771,27 @@ export function createApi({ db, hub, bridge, devices = null, staticRoot = null, 
     return verifyFile(file);
   });
 
+  /*
+   * 允许用 `?token=` 而不是 Authorization 头访问。
+   *
+   * 为什么需要：高斯泼溅的模型文件是由 Three.js 的加载器（SplatMesh）直接请求的，
+   * 它加不了自定义请求头 —— 孪生页传 `/api/files/:id/download` 就必然 401。
+   * 令牌本身是自校验的，放查询串里不额外泄露（同一浏览器里 localStorage 也存着它）。
+   * 只对**下载**放行，其它接口仍只认 Authorization 头。
+   */
   route("GET", "/api/files/:id/download", async (ctx) => {
+    /*
+     * 令牌可以走 Authorization 头，也可以走 `?token=`：
+     * 这一条路由的调用方里有 Three.js 的模型加载器（加不了自定义头），
+     * 所以 `auth:false` 之后在这里自己校验，两种取法等价。
+     */
+    const queryToken = String(ctx.query.token ?? "");
+    ctx.actor =
+      actorFromRequest(ctx.req) ??
+      (queryToken ? verifyToken(queryToken) : null) ??
+      (() => {
+        throw new WorkflowError(401, "UNAUTHORIZED", "未登录或令牌无效");
+      })();
     const file = getFile(db, ctx.params.id);
     if (!file) throw new WorkflowError(404, "NOT_FOUND", "文件不存在");
     if (!existsSync(file.stored_path)) throw new WorkflowError(410, "GONE", "文件已不在磁盘上");
@@ -619,7 +829,37 @@ export function createApi({ db, hub, bridge, devices = null, staticRoot = null, 
     });
     createReadStream(file.stored_path).pipe(ctx.res);
     return null; // 已经自己接管了响应
-  });
+  }, { auth: false });
+
+  /*
+   * 模型文件专用下载地址：`/api/files/:id/model/:name`
+   *
+   * 为什么不复用 `/download`：Three.js 的加载器按**URL 里的扩展名**判断格式，
+   * 而 `/download?token=…` 的路径里没有 `.sog`，Spark 会报 Unknown file type。
+   * 这里把文件名拼回路径（`:name` 只用于取扩展名与下载名，不参与寻址），
+   * 让 `…/model/gs.sog?token=…` 既能带令牌、又保留扩展名。
+   */
+  route("GET", "/api/files/:id/model/:name", async (ctx) => {
+    const token = String(ctx.query.token ?? "");
+    ctx.actor =
+      actorFromRequest(ctx.req) ??
+      (token ? verifyToken(token) : null) ??
+      (() => {
+        throw new WorkflowError(401, "UNAUTHORIZED", "未登录或令牌无效");
+      })();
+    const file = getFile(db, ctx.params.id);
+    if (!file) throw new WorkflowError(404, "NOT_FOUND", "文件不存在");
+    if (!existsSync(file.stored_path)) throw new WorkflowError(410, "GONE", "文件已不在磁盘上");
+    ctx.res.writeHead(200, {
+      "content-type": mediaTypeFor(file.name),
+      "content-length": String(file.size),
+      "content-disposition": `inline; filename="${asciiFallback(file.name)}"; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+      "x-file-sha256": file.sha256,
+      ...corsHeaders(),
+    });
+    createReadStream(file.stored_path).pipe(ctx.res);
+    return null;
+  }, { auth: false });
 
   /* ---- 投屏（PRD §7 / §10） ---- */
 
@@ -998,7 +1238,7 @@ function corsHeaders() {
     "access-control-allow-origin": "*",
     // 设备侧会带 X-Device-Token / X-Device-Id / X-Frame-Index（终端文档 §3）
     "access-control-allow-headers": "authorization, content-type, x-file-name, x-device-token, x-device-id, x-frame-index",
-    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
     "access-control-expose-headers": "x-file-sha256, x-frame-index",
   };
 }
