@@ -289,9 +289,14 @@ export default function VoiceConsole() {
         sourceMode: session.sourceMode,
         channelSummary: session.channelSummary,
       },
+      /*
+        把 speak() 的 Promise **透出去**，不要吞掉。
+        剧本轮次靠它把"逐段展开"校准到真实播报时长（见 executor 的 startOrderDetailReveal）；
+        吞掉之后调用方只能按字数估算，实测板块会比声音慢好几秒。
+      */
       speak: (text: string) => {
         lastSpokenRef.current = { text };
-        void outputRef.current?.speak(text);
+        return outputRef.current?.speak(text);
       },
     }),
     [navigate, session],

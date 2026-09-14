@@ -26,6 +26,33 @@ import { useEffect, useState } from "react";
 /** 单次揭示计划的兜底存活时间：agent 中途被打断也不会让页面停在半截 */
 const PLAN_TTL_MS = 30000;
 
+/**
+ * 中文播报语速（字/秒）。
+ *
+ * 用来把台词长度换算成揭示节奏。**必须与 `tts.ts` 的看门狗口径一致** ——
+ * 两处一旦漂移，就会出现"声音念完了、板块还在慢慢亮"（或反过来提前铺满）。
+ * 5.5 字/秒对应约 182ms/字；此前 executor 里写的是 260ms/字，明显偏长，
+ * 实测第①轮 64 字估算出 16.6s，而实际约 11.6s —— 那正是"页面跟不上嘴"的算术来源。
+ */
+export const CHARS_PER_SECOND = 5.5;
+
+/**
+ * 把台词切成语义段（按标点）。
+ * 切句而不是按字数硬切：标点处本来就是说话的停顿，在那里切换分段最自然。
+ */
+export function splitSegments(text: string): string[] {
+  const parts = String(text)
+    .split(/[。！？；\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return parts.length ? parts : [String(text)];
+}
+
+/** 一段文字的播报耗时估算（毫秒） */
+export function segmentDurationMs(segment: string): number {
+  return Math.max(420, Math.round((segment.length / CHARS_PER_SECOND) * 1000));
+}
+
 type RevealPlan = {
   orderId: string;
   /** 一共分几段（= 详情页要逐段显示的分区数） */

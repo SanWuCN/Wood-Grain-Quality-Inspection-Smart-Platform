@@ -135,8 +135,11 @@ export default function XiaomuDock() {
         /**
          * FR-05 要求"TTS 只播报主回答，不逐项朗读字段名、来源定位和时间戳" ——
          * 所以这里**只**传 mainAnswer，绝不把 facts / sources / at 拼进去。
+         *
+         * 并把 Promise 透出去：剧本轮次用它把"逐段展开"校准到真实播报时长
+         * （见 executor 的 startOrderDetailReveal）。吞掉它就只能按字数估算。
          */
-        void outputRef.current?.speak(text);
+        return outputRef.current?.speak(text);
       },
     }),
     [navigate, session],
