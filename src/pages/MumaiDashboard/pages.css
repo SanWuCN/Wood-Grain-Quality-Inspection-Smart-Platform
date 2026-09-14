@@ -5415,11 +5415,39 @@
    就是三到四块，密度是对的，换成 12 栏只会让短面板掉到 330px 反而折行、
    整页被拉高一倍。窄屏要的是密度，宽屏才有多余的宽度可以分配。
    ------------------------------------------------------------------ */
+/*
+ * 硬件监看：多列瀑布流，**按列紧凑堆叠**。
+ *
+ * 原来是 grid + auto-fit：同一行的面板会被最高的那块拉齐，
+ * 于是「设备读数」（15 行）一高，整行下面的面板就被推到很后面 ——
+ * 实测 y=227 的行里最高的 613px，第二行直接落到 y=856，中间空出一大片。
+ * 换成 CSS columns 后每列各自往下排，面板之间只有 16px 的固定间距，
+ * 不会有「被邻居高度顶开的空白」。
+ *
+ * 阅读顺序变成「先往下、再换列」（列优先），这是瀑布流的固有代价，
+ * 换来的是没有空洞 —— 这一页的面板彼此独立，先读哪一列都成立。
+ */
 .hw-monitor {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-  gap: var(--space-4);
-  align-items: start;
+  columns: 3;
+  column-gap: var(--space-4);
+}
+
+/* 面板不能跨列断开 */
+.hw-monitor > * {
+  break-inside: avoid;
+  margin-bottom: var(--space-4);
+}
+
+@media (max-width: 1500px) {
+  .hw-monitor {
+    columns: 2;
+  }
+}
+
+@media (max-width: 980px) {
+  .hw-monitor {
+    columns: 1;
+  }
 }
 
 .hw-panel,
@@ -5430,31 +5458,6 @@
 /* 宽屏之前：主角面板横跨两列。「参考样本」那张 5 列表格也靠它拿到 ~940px ——
    它的列全是「G-SAMPLE-01」「0° / 45° / 90°」这种不可断的长串，
    一列（~460px）时每一格都会折行（实测过）。 */
-.hw-col-6 {
-  grid-column: span 2;
-}
-
-/* 视口窄到只剩一列时 span 2 会撑出隐式列，退回单列 */
-@media (max-width: 1100px) {
-  .hw-col-6 {
-    grid-column: auto;
-  }
-}
-
-/* ≥1700：12 栏，按内容分配宽度 */
-@media (min-width: 1700px) {
-  .hw-monitor {
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-  }
-
-  .hw-col-6 {
-    grid-column: span 6;
-  }
-
-  .hw-col-3 {
-    grid-column: span 3;
-  }
-}
 
 /* ------------------------------------------------------------------
    固件及模型 · 版本管理（/firmware?tab=config）
@@ -6546,20 +6549,10 @@
    插图在左、字段在右，插图高度限制在 132px（DESIGN-SYSTEM「设备卡 120–180px」），
    保证卡片下半部仍是版本读数与通道状态这些真正的监看信息。
    窄档退回上下排列，字段不再被挤成两行。 */
-.hw-device {
-  display: grid;
-  grid-template-columns: minmax(96px, 132px) minmax(0, 1fr);
-  align-items: center;
-  gap: var(--space-4);
-  margin-bottom: var(--space-3);
-}
 
-.hw-device__facts {
-  min-width: 0;
-}
 
 @media (max-width: 900px) {
-  .hw-device {
+  .hw-device-removed {
     grid-template-columns: minmax(0, 1fr);
     justify-items: center;
   }
@@ -6738,45 +6731,12 @@
    必须在版面上直接回答，不能让人从数字里猜。 */
 
 /* 整块退回种子数据、或真机数据已经旧了时的说明条 */
-.hw-notice {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  margin-bottom: var(--space-4);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-subtle);
-  border-left: 2px solid var(--ma-info);
-  background: var(--fill-soft);
-  font-size: var(--fs-aux);
-}
 
-.hw-notice b {
-  color: var(--ma-text-1);
-  white-space: nowrap;
-}
 
-.hw-notice span {
-  color: var(--ma-text-3);
-}
 
-.hw-notice.is-warn {
-  border-left-color: var(--ma-warn);
-}
 
-.hw-notice.is-danger {
-  border-left-color: var(--ma-danger);
-}
 
 /* 读数的来源标记（实测 / 推算 / 估算）：小、靠左、不抢数值的位置 */
-.hw-readings__src {
-  padding: 0 4px;
-  border: 1px solid var(--border-subtle);
-  color: var(--ma-text-3);
-  font-size: 10px;
-  font-style: normal;
-  line-height: 14px;
-  white-space: nowrap;
-}
 
 .hw-readings__src[data-source="estimated"] {
   border-color: var(--ma-warn);

@@ -259,6 +259,35 @@ export const SCANNER_TELEMETRY: DeviceReading[] = [
 ];
 
 /**
+ * 终端能上报的全部读数字段（**静态清单**，值不参与显示）
+ *
+ * 为什么单独列一份而不是等设备上报：硬件监看页要求「连接前与连接后的行数、
+ * 排版完全一致」。字段清单如果来自上报本身，未连接时就只剩种子里的五行、
+ * 连上之后变成十五行，布局会跳一次。
+ *
+ * 这份清单就是那张表的**行模板**：未连接时所有行显示「—」，
+ * 连接后设备报什么就填什么（多出来的字段追加在后面）。
+ * `value` 只作为字段类型与单位的占位，界面不会拿它当读数显示。
+ */
+export const SCANNER_READING_LAYOUT: DeviceReading[] = [
+  { key: "battery", label: "电池电量", value: 0, unit: "%", digits: 0, min: 40, scale: 100 },
+  { key: "storage", label: "存储余量", value: 0, unit: "GB", digits: 1, min: 2, scale: 32 },
+  { key: "clock", label: "时钟偏差", value: 0, unit: "s", digits: 2, max: 1 },
+  { key: "temp", label: "机身温度", value: 0, unit: "℃", digits: 1, max: 55 },
+  { key: "rssi", label: "无线信号", value: 0, unit: "dBm", min: -75 },
+  { key: "cpu", label: "CPU 利用率", value: 0, unit: "%", digits: 0 },
+  { key: "memory", label: "内存占用", value: 0, unit: "%", digits: 0 },
+  { key: "disk", label: "数据目录占用", value: 0, unit: "%", digits: 0 },
+  { key: "cpuFreq", label: "CPU 频率", value: 0, unit: "MHz", digits: 0 },
+  { key: "voltage", label: "5V 轨电压", value: 0, unit: "V", digits: 2, min: 4.75, max: 5.25 },
+  { key: "power", label: "整机功耗", value: 0, unit: "W", digits: 1 },
+  { key: "gpu", label: "GPU 利用率", value: 0, unit: "%", digits: 0 },
+  { key: "netTx", label: "接口发送", value: 0, unit: "B/s", digits: 0 },
+  { key: "netRx", label: "接口接收", value: 0, unit: "B/s", digits: 0 },
+  { key: "throttle", label: "降频 / 欠压", value: 0, unit: "", digits: 0 },
+];
+
+/**
  * 采集设备画面（屏幕推流）。
  *
  * 与 `RvizView` 的 `RvizStreamConfig` 同一套口径：演示阶段给静态参考画面，
