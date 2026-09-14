@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>木脉智检 · 古建筑智能巡检平台 —— 一页介绍</title>
+<style>
+  /* 配色直接取自平台 token（src/styles/tokens.css）：深底 + 青蓝高亮 + 1px 细边 */
+  :root{
+    --bg:#0a1321; --panel:rgba(9,19,33,.86); --line:rgba(78,168,255,.22);
+    --glow:#6ee7ff; --primary:#4ea8ff; --text:#ddeeff; --muted:#8fa9c4;
+    --ok:#37d39b; --warn:#f0b23c; --bad:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; width:1600px; padding:56px 64px 48px;
+    background:
+      radial-gradient(1200px 620px at 14% -10%, rgba(78,168,255,.16), transparent 62%),
+      radial-gradient(900px 520px at 96% 8%, rgba(110,231,255,.10), transparent 60%),
+      var(--bg);
+    color:var(--text);
+    font-family:"Microsoft YaHei","PingFang SC","HarmonyOS Sans SC",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .head{display:flex; align-items:flex-end; justify-content:space-between; gap:40px; padding-bottom:22px; border-bottom:1px solid var(--line)}
+  h1{margin:0; font-size:52px; letter-spacing:2px; line-height:1.12}
+  h1 span{color:var(--glow)}
+  .tag{margin-top:10px; font-size:20px; color:var(--muted)}
+  .ver{font-size:15px; color:var(--muted); text-align:right; line-height:1.9; white-space:nowrap}
+  .ver b{color:var(--glow); font-weight:600}
+
+  .lead{margin:26px 0 30px; font-size:21px; line-height:1.75; color:#e8f3ff; max-width:1420px}
+  .lead em{font-style:normal; color:var(--glow)}
+
+  .grid{display:grid; grid-template-columns:repeat(3,1fr); gap:20px}
+  .card{position:relative; background:var(--panel); border:1px solid var(--line); padding:22px 24px 20px; clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px))}
+  .card h2{margin:0 0 12px; font-size:20px; font-weight:600; letter-spacing:.5px}
+  .card h2::before{content:"// "; color:var(--glow)}
+  .card ul{margin:0; padding-left:18px; font-size:15.5px; line-height:1.95; color:#cfe2f5}
+  .card li::marker{color:var(--primary)}
+  .card b{color:#fff; font-weight:600}
+  .card .num{color:var(--glow); font-weight:600}
+
+  .flow{margin-top:26px; background:var(--panel); border:1px solid var(--line); padding:22px 24px}
+  .flow h2{margin:0 0 16px; font-size:20px; font-weight:600}
+  .flow h2::before{content:"// "; color:var(--glow)}
+  .steps{display:flex; align-items:stretch; gap:12px}
+  .step{flex:1; border:1px solid var(--line); background:rgba(78,168,255,.05); padding:14px 14px 13px; font-size:15px; line-height:1.6}
+  .step i{display:block; font-style:normal; color:var(--glow); font-size:13px; letter-spacing:1px; margin-bottom:7px}
+  .step b{color:#fff}
+  .step small{display:block; margin-top:6px; color:var(--muted); font-size:13px; line-height:1.55}
+  .arrow{align-self:center; color:var(--primary); font-size:20px}
+
+  .strip{margin-top:26px; display:grid; grid-template-columns:1.35fr 1fr 1fr; gap:20px}
+  .box{background:var(--panel); border:1px solid var(--line); padding:20px 22px}
+  .box h3{margin:0 0 12px; font-size:17px; font-weight:600}
+  .box h3::before{content:"// "; color:var(--glow)}
+  .box p{margin:0; font-size:15px; line-height:1.9; color:#cfe2f5}
+  .kv{display:flex; flex-wrap:wrap; gap:8px 14px; font-size:14.5px; color:#cfe2f5}
+  .kv span{border:1px solid var(--line); padding:5px 10px; background:rgba(78,168,255,.05)}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  .foot{margin-top:24px; display:flex; justify-content:space-between; font-size:14px; color:var(--muted); border-top:1px solid var(--line); padding-top:16px}
+</style>
+</head>
+<body>
+  <div class="head">
+    <div>
+      <h1>木脉智检 · <span>古建筑智能巡检平台</span></h1>
+      <div class="tag">面向古建筑木构无损检测的智能巡检演示平台 · 三维地图入口 · 语音智能体「小木」驱动全流程</div>
+    </div>
+    <div class="ver">
+      演示版 <b>v2.0</b><br />
+      React 19 · TypeScript · Vite · three.js / R3F<br />
+      Node 共享服务 · 本地语音（不外网）
+    </div>
+  </div>
+
+  <p class="lead">
+    把<em>古建采集点、巡检风险、工单与设备通道</em>放进同一空间语境：从全国省级地图平滑下钻到上海市 district 级地图，
+    再用一个<em>能执行平台操作、能多步编排任务</em>的语音语义智能体把流程串起来 —— 说一句话，地图动、页面跳、数据落。
+  </p>
+
+  <div class="grid">
+    <div class="card">
+      <h2>三维地图 · 空间入口</h2>
+      <ul>
+        <li>中国 <span class="num">34</span> 省 ↔ 上海 <span class="num">16</span> 区双模式下钻</li>
+        <li>DEM 地形烤贴图 + 无光照顶面，俯角 42°</li>
+        <li>业务点位：全国 <span class="num">27</span> 处 / 上海 <span class="num">12</span> 处</li>
+        <li>点位点击三分支：任务 / 工单 / 就地详情浮层</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>业务闭环 · 十路由</h2>
+      <ul>
+        <li><b>任务总览 · 工单档案 · 建图巡检 · 数字孪生</b></li>
+        <li><b>硬件详情 · 固件及模型 · 知识库 · 报告归档</b></li>
+        <li><b>演示控制 · 大屏展示</b>；顶栏 8 项一级导航按权限显示</li>
+        <li>四账号分角色：<span class="num">沈 / 史 / 饶 / 马</span>（演示口令 123456）</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>小木 · 语音语义智能体</h2>
+      <ul>
+        <li>唤醒词「<b>小木小木</b>」连说 <span class="num">两遍</span> → 停 0.3~1.5 秒 → 说命令</li>
+        <li>意图 <span class="num">29</span> 条 / 工具 <span class="num">13</span> 条，白名单调用</li>
+        <li>多步编排：<b>✓ / ● / ○</b> 步骤清单实时推进</li>
+        <li>高风险二次确认；预录语音包 <span class="num">60</span> 段；播报优先级 预录 &gt; 合成</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>真机接入 · 不是 PPT</h2>
+      <ul>
+        <li>扫描枪姿态：SensorTag（Bleak 六轴解算）约 <span class="num">10 Hz</span></li>
+        <li>树莓派桌面串流：<span class="num">1024×600</span> 原比例，实测约 <span class="num">10 FPS</span></li>
+        <li>手持终端网关：每 <span class="num">2 s</span> 上报；≤6s 在线 / 6–15s 延迟 / &gt;15s 离线</li>
+        <li>断流只影响该设备，不回退成种子数据</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>数据可信 · 标出来源</h2>
+      <ul>
+        <li>归档：<b>真实 SHA-256 校验</b>，可导出校验报告</li>
+        <li>知识库：TF-IDF + 余弦相似度检索；三维 Token 关系链</li>
+        <li>读数分档：<b>实测 / 推算 / 估算</b>；没有的就写"未接入"</li>
+        <li>演示值不伪装成真实值，逐条标注来源</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>工程保障 · 可验收</h2>
+      <ul>
+        <li>AC 验收矩阵 <span class="num">51</span> 项：通过 <span class="ok">45</span> / 不通过 <span class="bad">3</span> / 证据不足 <span class="warn">3</span></li>
+        <li>界面验收 <span class="ok">230 / 230</span>；语音包 <span class="ok">audio=1 synth=0</span></li>
+        <li>真人命令识别 <span class="ok">9/9 = 100%</span>；唤醒漏检 <span class="bad">8.70%</span>（待优化）</li>
+        <li>全本地语音：数据不出机器（127.0.0.1 内部链路）</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="flow">
+    <h2>一条演示主线（可现场跑通）</h2>
+    <div class="steps">
+      <div class="step"><i>STEP 1</i><b>Ctrl + Q + L</b><small>受控建单入口：平台无按钮、无提示，弹出"收到新工单"</small></div>
+      <div class="arrow">→</div>
+      <div class="step"><i>STEP 2</i><b>「小木小木，读取这份工单」</b><small>唤醒 + 剧本第①轮命中，播逐字台词</small></div>
+      <div class="arrow">→</div>
+      <div class="step"><i>STEP 3</i><b>跳到该工单详情</b><small>详情三区随播报逐段加载（实测 0.8s → 9.6s → 13.6s）</small></div>
+      <div class="arrow">→</div>
+      <div class="step"><i>STEP 4</i><b>地图下钻 + 点选构件</b><small>全国 → 上海 → 示例寺 Z04，看风险与回波</small></div>
+      <div class="arrow">→</div>
+      <div class="step"><i>STEP 5</i><b>多步语音编排</b><small>「让小车先去一号柱，再绕一圈，然后回来」→ 步骤清单推进</small></div>
+    </div>
+  </div>
+
+  <div class="strip">
+    <div class="box">
+      <h3>技术栈与进程</h3>
+      <p>
+        前端 React 19 + TS + Vite（5173）· three.js / R3F 三维 · ECharts 图表 · zustand 状态 · HashRouter<br />
+        后端 Node 共享服务（8000）：会话 / 工单 / 归档 / 设备网关 / WebSocket<br />
+        语音：Python ASR+KWS（8770）+ Node 桥（8780），<b>仅监听 127.0.0.1</b>
+      </p>
+    </div>
+    <div class="box">
+      <h3>四账号（演示用）</h3>
+      <div class="kv">
+        <span>沈 · 项目经理</span><span>史 · AI 架构师</span><span>饶 · 全栈开发</span><span>马 · 具身智能</span><span>口令 123456</span>
+      </div>
+      <p style="margin-top:12px">单一角色跑不完 S01–S23 全流程，排练需四个浏览器各登一个。</p>
+    </div>
+    <div class="box">
+      <h3>已知边界（诚实标注）</h3>
+      <p>
+        业务批次与雷达流程仍为<b>种子数据回放</b>；地图边界文件仅用于界面原型，正式部署须替换合规地图数据与审图号版本；
+        唤醒漏检率与误唤醒样本量仍在补采。
+      </p>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>仓库：github.com/SanWuCN/Wood-Grain-Quality-Inspection-Smart-Platform（分支 SHI）</span>
+    <span>本图由仓库内工具渲染生成 · 数据取自 README / 验收报告 / 实机实测</span>
+  </div>
+</body>
+</html>
