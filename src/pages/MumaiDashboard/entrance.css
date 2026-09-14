@@ -61,6 +61,31 @@ body.is-entering .appshell__ticker {
   transform: translateY(100%);
 }
 
+/**
+ * 小木浮标（`.xd`）也要参与入场 —— 它此前**完全没被入场逻辑覆盖**。
+ *
+ * ── 用户口径 ────────────────────────────────────────────────────────
+ * 「小木形象所在层不对，刷新发现页面还没完全展示，小木就在那了」。
+ *
+ * 根因是它的挂载位置：`XiaomuDock` 挂在 `AppShell` 里、是 `.appshell__stage`
+ * 的**兄弟节点**（`position: fixed`，z-index 80）。而上面那些入场规则全部写作
+ * `body.is-entering .appshell__stage > …` —— 只覆盖了 stage 的**子节点**，
+ * 所以刷新时整页还在滑入，右下角的小木已经稳稳在原位了，观感是"它不属于这个页面"。
+ *
+ * 修法沿用同一套机制（`body.is-entering` 从**首次绘制**就生效，摘掉它的瞬间
+ * GSAP 接管），只是把浮标也纳入：初始态向下位移 14px + 透明，
+ * 入场时随页面一起落位。
+ *
+ * ⚠ 只改 `opacity` 与 `transform`：这两个属性由 GSAP 在建场后接管，
+ *   不碰 `visibility`/`display` —— 否则"入场结束"那一刻会出现跳变
+ *   （entrance.ts 里对这一点有专门说明）。
+ * ⚠ 不用 `scale`：浮标尺寸由拖拽缩放控制（`--xd-size`），叠加缩放会与用户操作打架。
+ */
+body.is-entering .xd {
+  opacity: 0;
+  transform: translateY(14px);
+}
+
 body.is-entering .appshell__fab {
   opacity: 0;
   transform: translateY(16px) scale(0.6);

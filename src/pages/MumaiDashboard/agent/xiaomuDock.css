@@ -1049,4 +1049,15 @@
   .xd__ring { opacity: 0.9; }
   /* 眨眼线在静止态必须隐形，否则七个状态都会多出一条横线 */
   .xf__eyelash { opacity: 0; }
+  /*
+    ⚠ **保险**：入场逻辑在减动效下会**提前返回**（entrance.ts 的
+    `useLayoutEffect` 里有 `if (reduceMotion()) return;`），
+    也就是说它既不添加、也不摘除 `body.is-entering`。
+    而入场样式里有一条 `body.is-entering .xd { opacity: 0 }`（浮标也参与入场）。
+    万一 `is-entering` 因为任何原因留在 body 上（别的入口加上却没摘干净、
+    Suspense 让外壳晚于页面挂载…），小木就会**永久不可见** —— 用户连语音入口都点不到。
+    这里显式兜一层：减动效时浮标一律可见。
+    与 entrance.ts 里那条"硬保险"是同一个思路（宁可少一次动画，也不能让元素停在屏幕外）。
+  */
+  .xd { opacity: 1; transform: none; }
 }
