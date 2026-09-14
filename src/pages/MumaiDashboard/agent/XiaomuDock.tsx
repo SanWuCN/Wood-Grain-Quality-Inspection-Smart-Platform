@@ -31,6 +31,18 @@ import { getAgentState, resolveConfirm, setAgent, subscribeAgent } from "./store
 import { wakeChannel, type WakeSnapshot } from "./wakeChannel";
 import { buildReplyView, latestBotTurn, latestUserText, type ReplyView } from "./replyView";
 import { VoiceOutput } from "./tts";
+import {
+  clampPos,
+  maxSizeForViewport,
+  clampSize,
+  defaultSizeForViewport,
+  posFromDrag,
+  readStageMemory,
+  resizeKeepingTopLeft,
+  sizeFromResize,
+  writeStageMemory,
+  type StagePos,
+} from "./XiaomuStage";
 import "./xiaomuDock.css";
 
 /**
@@ -198,6 +210,34 @@ export default function XiaomuDock() {
     };
     window.addEventListener("mumai:xiaomu-ask", onAsk);
     return () => window.removeEventListener("mumai:xiaomu-ask", onAsk);
+  }, []);
+
+  /**
+   * 开发期调试句柄（`window.__mumaiAsk`）：直接驱动 `ask()`。
+   *
+   * ── 为什么需要它（不是为了方便，是因为**没有它就没法端到端验证**）──
+   * 「说小木小木 + 关键词 → 播对应台词」这条链路，我原本只能在单测里验证到
+   * `routeUtterance`（纯路由判定）那一层 —— `ask()` 所在的 executor.ts 导入链没写
+   * `.ts` 扩展名，Node 原生 ESM 解析不了，单测进不去；而浏览器里 CDP 派发的输入事件
+   * 登录后收不到（工装问题），也驱不动。
+   * 有了这个句柄，工装可以**绕开输入模拟**、直接走唤醒通道那一行调用
+   * （`ask(question, runtime, "mic")`），把"唤醒事件 → 应答 → 会话流"整条链路跑完。
+   *
+   * ⚠ 只在开发构建暴露（`import.meta.env.DEV`），与既有的 `window.__mumaiWake`、
+   * `window.__mumaiAgent` 同一口径；生产构建里这段是死代码。
+   */
+  useEffect(() => {
+    if (!import.meta.env?.DEV) return undefined;
+    const handle = {
+      /** 与唤醒链路完全相同的调用方式 */
+      ask: (text: string) => ask(text, runtimeRef.current, "mic"),
+      /** 直接派发唤醒事件，走真实监听器 */
+      fire: (text: string) => {
+        window.dispatchEvent(new CustomEvent("mumai:xiaomu-ask", { detail: { question: text, interactionId: nextInteractionId() } }));
+      },
+    };
+    (window as unknown as Record<string, unknown>).__mumaiAsk = handle;
+    return () => { delete (window as unknown as Record<string, unknown>).__mumaiAsk; };
   }, []);
 
   /* ---------- 关闭：统一入口 ---------- */
@@ -392,6 +432,133 @@ export default function XiaomuDock() {
    */
   const avatarRef = useRef<HTMLButtonElement | null>(null);
   const focusReturnRef = useRef<Element | null>(null);
+
+  /* ------------------------------------------------------------------ *
+   * 拖拽 · 实时缩放（逻辑在 XiaomuStage.ts，纯函数已单测）
+   *
+   * 为什么把"位置/尺寸"放在 `.xd` 根节点上：
+   *   `.xd__panel`（对话框）是这个根节点的子元素、绝对定位贴着形象。
+   *   所以移动/缩放根节点，**形象与对话框自然一起动、一起限界** ——
+   *   这正是用户要的"绑定在一起拖动"，不需要额外同步两套坐标。
+   * ------------------------------------------------------------------ */
+  const dockRef = useRef<HTMLDivElement | null>(null);
+  /* 记忆只在挂载时读一次：之后以组件内的 state 为准，避免与拖动过程互相打架 */
+  const initialStage = useMemo(() => readStageMemory(), []);
+  const [stagePos, setStagePos] = useState<StagePos | null>(initialStage.pos);
+  const [size, setSize] = useState<number>(initialStage.size || defaultSizeForViewport(typeof window === "undefined" ? 0 : window.innerHeight));
+  const [gesture, setGesture] = useState<null | "drag" | "resize">(null);
+
+  /* 手势过程的中间量放 ref：它们每帧都在变，放 state 会让整棵树每帧重渲染 */
+  const gestureRef = useRef<{
+    mode: "drag" | "resize";
+    x: number;
+    y: number;
+    startRight: number;
+    startBottom: number;
+    startSize: number;
+  } | null>(null);
+
+  /** 面板的实际尺寸（限界要用它算并集）；面板没开时为 null */
+  const panelSizeOf = useCallback((): { width: number; height: number } | null => {
+    const panel = dockRef.current?.querySelector(".xd__panel");
+    if (!panel) return null;
+    const r = panel.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 ? { width: r.width, height: r.height } : null;
+  }, []);
+
+  /** 当前位置：没有用户位置时用 CSS 里那套默认锚点（right 24 / bottom 120） */
+  const effectivePos = useCallback((): StagePos => {
+    const base: StagePos = stagePos ?? { right: 24, bottom: 120 };
+    const vw = window.innerWidth, vh = window.innerHeight;
+    return clampPos(base, { size }, panelSizeOf(), vw, vh);
+  }, [stagePos, size, panelSizeOf]);
+
+  const applySize = useCallback((next: number) => {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const s = Math.min(maxSizeForViewport(vw, vh), clampSize(next));
+    setSize((prevSize) => {
+      setStagePos((prev) => {
+        const base: StagePos = prev ?? { right: 24, bottom: 120 };
+        return clampPos(resizeKeepingTopLeft(base, prevSize, s), { size: s }, panelSizeOf(), vw, vh);
+      });
+      return s;
+    });
+    writeStageMemory({ pos: stagePos, size: s });
+  }, [panelSizeOf, stagePos]);
+
+  const beginGesture = useCallback((mode: "drag" | "resize") => (e: React.PointerEvent) => {
+    const pos = effectivePos();
+    gestureRef.current = {
+      mode, x: e.clientX, y: e.clientY,
+      startRight: pos.right, startBottom: pos.bottom, startSize: size,
+    };
+    setGesture(mode);
+    /* 指针捕获：手指/鼠标移出元素后仍然收得到 move，这是 Pointer Events 的关键一步 */
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+    e.stopPropagation();
+  }, [effectivePos, size]);
+  const beginDrag = useMemo(() => beginGesture("drag"), [beginGesture]);
+  const beginResize = useMemo(() => beginGesture("resize"), [beginGesture]);
+
+  /* move/up 挂在 window 上：即使指针跑出形象、或者中途捕获丢失，手势也不会卡住 */
+  useEffect(() => {
+    if (!gesture) return undefined;
+    const onMove = (e: PointerEvent) => {
+      const g = gestureRef.current;
+      if (!g) return;
+      const dx = e.clientX - g.x, dy = e.clientY - g.y;
+      if (g.mode === "drag") {
+        setStagePos(clampPos(
+          posFromDrag({ right: g.startRight, bottom: g.startBottom, x: g.x, y: g.y }, dx, dy),
+          { size: g.startSize }, panelSizeOf(), window.innerWidth, window.innerHeight,
+        ));
+      } else {
+        const next = sizeFromResize(g.startSize, dx, dy, window.innerWidth, window.innerHeight);
+        setSize(next);
+        /*
+          缩放时**保持左上角不动**（用户口径："右下角拖动之后是向左上角缩放"）：
+          位置以右下角为锚，直接改尺寸会表现为"往左上长"。
+          先用 `resizeKeepingTopLeft` 把左上角钉住，再做并集夹取。
+        */
+        setStagePos(clampPos(
+          resizeKeepingTopLeft({ right: g.startRight, bottom: g.startBottom }, g.startSize, next),
+          { size: next }, panelSizeOf(), window.innerWidth, window.innerHeight,
+        ));
+      }
+    };
+    const onUp = () => {
+      const g = gestureRef.current;
+      gestureRef.current = null;
+      setGesture(null);
+      /* 手势结束时才写记忆：拖动过程中每帧写 localStorage 会明显掉帧 */
+      if (g) setStagePos((cur) => { writeStageMemory({ pos: cur, size: g.mode === "resize" ? size : g.startSize }); return cur; });
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [gesture, panelSizeOf, size]);
+
+  /* 视口尺寸变化（拖窗口、转屏）时重新夹取：否则元素可能整块留在屏幕外 */
+  useEffect(() => {
+    const onResize = () => {
+      setStagePos((prev) => {
+        const base: StagePos = prev ?? { right: 24, bottom: 120 };
+        return clampPos(base, { size }, panelSizeOf(), window.innerWidth, window.innerHeight);
+      });
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [size, panelSizeOf]);
+
+  const dragging = gesture === "drag";
+  const resizing = gesture === "resize";
+
   useEffect(() => {
     if (visible) {
       // 只在"从不可见变可见"的那一刻记一次，避免把面板内部的焦点也记进去
@@ -403,10 +570,22 @@ export default function XiaomuDock() {
 
   return (
     <div
-      className={`xd${visible ? " is-open" : ""}`}
+      ref={dockRef}
+      className={`xd${visible ? " is-open" : ""}${dragging ? " xd--dragging" : ""}${resizing ? " xd--resizing" : ""}`}
       data-state={dockState}
       data-interaction-id={agent.interactionId || ""}
       data-queued={queueDepth}
+      /*
+        位置与尺寸由内联样式驱动（`clampPos` 的结果）。
+        CSS 里那套 `right: 24px; bottom: 120px` 保留为**默认值** ——
+        用户没调整过时内联样式与它一致，读起来也是同一处语义。
+      */
+      style={{
+        right: `${effectivePos().right}px`,
+        bottom: `${effectivePos().bottom}px`,
+        /* 形象尺寸由变量下发，`.xd__avatar` 的 width/height 读它 */
+        ["--xd-size" as string]: `${size}px`,
+      }}
     >
       {visible ? (
         <section className="xd__panel" role="region" aria-label="小木对话">
@@ -560,6 +739,14 @@ export default function XiaomuDock() {
         type="button"
         ref={avatarRef}
         className="xd__avatar"
+        /*
+          按住形象 = 拖动（用户口径：「允许拖拽，虚拟形象和对话框绑定在一起拖动」）。
+          单击仍然展开/收起 —— 两者靠"是否移动过"区分：Pointer 事件里
+          位移小于阈值时不会阻止 click，所以点一下照旧生效。
+        */
+        onPointerDown={beginDrag}
+        /* 位图会被浏览器当成可拖拽内容，起手就触发原生 drag，必须屏蔽 */
+        onDragStart={(e) => e.preventDefault()}
         /**
          * 点形象 = 显式的"收起 / 展开"，语义要与**面板此刻是否真的可见**一致。
          *
@@ -583,7 +770,7 @@ export default function XiaomuDock() {
         title={`小木 · ${DOCK_STATE_LABEL[dockState]}（点击${visible ? "收起" : "展开"}，Esc 关闭）`}
       >
         {/*
-          形象本体换成**内联矢量角色**（`XiaomuFace`），不再是 I04 位图素材。
+          形象本体是 `XiaomuFace`：**七状态各一张带 alpha 的位图帧**（v2），状态由本组件的 `dockState` 传入。
 
           原来这里是一张静态素材 + 一圈会呼吸的光环，七个状态在形象上看不出差别：
           图片里没有可以被单独选中的眼、眉、嘴，所以"状态"只能靠整张图晃一晃
@@ -593,11 +780,36 @@ export default function XiaomuDock() {
           状态**没有**再往下传一层 props：`.xd` 根节点上的 `data-state` 已经是
           唯一来源，脸内部用 `.xd[data-state=…] .xf__…` 选择器取用（见 xiaomuDock.css）。
         */}
-        <XiaomuFace />
+        <XiaomuFace state={dockState} />
         <span className="xd__ring" aria-hidden="true" />
         {/* 状态文字始终存在：关掉动效后仍能靠它分辨状态（FR-06） */}
         <span className="xd__badge">{DOCK_STATE_LABEL[dockState]}</span>
       </button>
+
+      {/*
+        右下角的小把手：实时调大小（用户口径：「右下角做一个小按钮用来实时调整大小」）。
+        用 `aria-label` 说明它是做什么的；键盘用户也能用（←/→ 调整，见 onKeyDown）。
+        它只在形象上，不在对话框上 —— 对话框的尺寸不该被这个把手改（那是另一个需求）。
+      */}
+      <button
+        type="button"
+        className="xd__grip"
+        aria-label="拖动可调整小木大小"
+        title="拖动调整大小（←/→ 微调）"
+        onPointerDown={beginResize}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+            e.preventDefault();
+            const next = clampSize(size + (e.key === "ArrowRight" ? 8 : -8));
+            applySize(next);
+          }
+        }}
+      >
+        <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+          <path d="M1 11 L11 1 M5 11 L11 5 M9 11 L11 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" fill="none" />
+        </svg>
+      </button>
+      {(dragging || resizing) && <span className="xd__size-tip">{size}px</span>}
     </div>
   );
 }

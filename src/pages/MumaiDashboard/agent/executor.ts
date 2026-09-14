@@ -50,6 +50,8 @@ import {
   updateLastBot,
 } from "./store";
 import { resolveArgs, toolByName, TOOL_BY_NAME, type ToolDef } from "./tools";
+import { mainLineOf, type ScriptRound } from "./script";
+import { routeUtterance, type ScriptMatch } from "./scriptMatch";
 import type { AgentStep, BotTurn, EntityBag } from "./types";
 
 /** 小木运行时的外部依赖：由 VoiceConsole 注入（路由 + Mumai 会话状态 + 播报） */
@@ -229,6 +231,61 @@ function replyIntent(
           : `相似度匹配 Top1 ${match.confidence.toFixed(3)}（margin ${match.margin.toFixed(3)}）`),
   });
   pushTurn(turn);
+  return turn;
+}
+
+/**
+ * 剧本轮次回复：命中第二章剧本时，播**逐字台词**。
+ *
+ * ── 为什么要单独一条路径，而不是塞进意图表 ──────────────────────────
+ * `INTENTS` 是**意图目录**（回答"用户想干什么"），台词是**排练稿**
+ * （回答"这一轮小木该说哪几句原话"）。两者更新节奏完全不同：
+ * 意图随产品能力增删，台词是按稿子逐字对的。
+ * 混进意图表还会破坏 `voicePackOf()` 的编号映射 ——
+ * 稿子里只有六轮带 `AI语音3`~`AI语音8` 标注，而那个函数是按数组下标推编号的。
+ *
+ * 所以剧本走 `script.ts` 自己的表 + `scriptMatch.ts` 的模糊匹配，
+ * 命中后在这里组装成一轮正常的 `BotTurn` 推入会话流，并交给 `runtime.speak` 播报 ——
+ * 与意图回复走**同一套落库与播报机制**，界面上看不出两套。
+ */
+function replyScript(round: ScriptRound, match: ScriptMatch, runtime: Runtime): BotTurn {
+  /*
+    取哪一句：
+      · 默认取 main
+      · ⑮ 那种带"等待时选用"的备用播报，只有在该轮确实处于等待/审核未结束时才追加 ——
+        现在没有真实审核状态可依据，所以**只播 main**，并把备用句写进 note 让排练者知道它存在。
+        （排演约束明确要求"不按倒计时编造成功"，不能凭空把备用句也念出来。）
+  */
+  const line = mainLineOf(round);
+  const extras = round.lines.filter((l) => l.role !== "main");
+
+  const turn = botTurnBase({
+    text: line,
+    intentId: round.intentId,
+    intentName: `剧本 ${round.roundNo} · ${round.title}`,
+    type: "RESPONSE",
+    confidence: match.score,
+    level: "rule",
+    rule: match.reason,
+    /* 剧本轮次不展示业务事实表：台词里已经把该说的都说完了 */
+    facts: [],
+    entities: [
+      { name: "剧本轮次", value: `${round.roundNo}（${round.paragraph}）` },
+      { name: "幕", value: round.act },
+      ...(round.precondition ? [{ name: "前置条件", value: round.precondition }] : []),
+    ],
+    /* ⑦ 步：这一轮是否需要真实工具尚未接通 */
+    steps: [],
+    voice: round.voicePack ?? "（未标注语音编号，走 TTS）",
+    note:
+      `剧本命中：${match.reason}` +
+      (extras.length
+        ? ` · 另有 ${extras.length} 句"等待时选用"的备用播报（${extras.map((l) => l.role).join("/")}），` +
+          "在对应时机才播，此处不念。"
+        : ""),
+  });
+  pushTurn(turn);
+  runtime.speak(turn.text);
   return turn;
 }
 
@@ -579,6 +636,26 @@ export async function ask(text: string, runtime: Runtime, via: "text" | "mic" | 
   await sleep(160);
   if (stale(gen)) return;
   const match = understand(trimmed, 4);
+
+  /**
+   * ── 剧本优先（用户需求：呼叫「小木小木」→ 听后文关键词 → 播对应台词）──
+   *
+   * 判据放在意图匹配**之前**，因为剧本台词是**逐字稿**：
+   * 排演/验收都按稿子对字，一旦命中就不能被意图的模板文案改写。
+   * 剧本没命中（`matchScriptRound` 返回 null 或 verdict 不是 hit）时
+   * 完全不影响下面原有的意图链路 —— 这就是"加一条支路"而不是"改主路"。
+   *
+   * ⚠ 只有 `verdict === "hit"` 才走剧本：`ambiguous`（两轮得分接近）与
+   *   `too-weak`（没够阈值）都交回原有链路处理，避免"猜错轮次播错台词"，
+   *   那在演示现场是最难堪的错。
+   */
+  const route = routeUtterance(trimmed);
+  if (route.kind === "script") {
+    setAgent({ agentState: "RESPONDING", stateNote: `剧本命中 ${route.round.roundNo}` });
+    replyScript(route.round, route.match, runtime);
+    setAgent({ agentState: "FINISHED", stateNote: "" });
+    return;
+  }
 
   if (!match.intent) {
     replyFallbackFromMatch(match, runtime);

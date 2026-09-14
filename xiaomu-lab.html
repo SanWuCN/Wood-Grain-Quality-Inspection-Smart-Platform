@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>小木形象方案展台 · 渐变半透明动画（three.js / CSS-SVG）</title>
+    <meta name="description" content="小木（平台语音智能体）形象候选方案展台：多版渐变半透明球状角色并排实时渲染，供挑选。" />
+    <!--
+      为什么是**仓库根目录**下的独立 html、而不是加到 index.html 的某个路由：
+        · 它是选型工装，不是产品页面，不该进产品路由表（PRD 里没有这一页）；
+        · vite dev server 对根目录下的任意 .html 都是直出的
+          （http://127.0.0.1:5173/xiaomu-lab.html），不需要改 vite.config.ts；
+        · 生产构建靠下面这段 vite 官方约定注释把它加成第二个入口，
+          不写这段的话 npm run build 只打 index.html，这个页面在生产包里会 404。
+      —— 结论：dev 与 build 两种用法都不需要动 vite.config.ts。
+    -->
+    <style>
+      /* 页面骨架样式内联：首屏就有正确的底色，避免白闪。
+         每方案格子/画布/文字的样式在 src/lab/xiaomu-lab.css 里。 */
+      html,
+      body {
+        margin: 0;
+        /* 与参考图一致的亮底：球体靠"自身明度 + 柔和外发光"立住 */
+        background: #eef1f7;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="lab-root"></div>
+    <script type="module" src="/src/lab/main.ts"></script>
+  </body>
+</html>

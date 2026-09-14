@@ -44,6 +44,23 @@ export default defineConfig([
     },
   },
   {
+    /*
+      形象方案展台（src/lab/）的契约实现需要"签名里必须有、但这一版用不到"的参数：
+      `LabVariant.create(host, opts, stage)` 是全部方案的**同一个**调用点，
+      老方法版（09）不需要 `stage`，但少写一个参数 JS 不报错、只会静默收到
+      `undefined`（契约测试 variants.test.ts 正盯着 `create.length === 3`）。
+      所以这些参数必须以 `_` 前缀保留下来。
+      ⚠ 只对 src/lab 放宽，不是全局 —— 产品代码里未使用的参数仍然应当报错。
+    */
+    files: ["src/lab/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" },
+      ],
+    },
+  },
+  {
     // context 文件按惯例同时导出 Hook 与它的类型/常量，
     // 这类文件本来就不能做 fast refresh，关掉这条规则即可。
     files: ["src/pages/MumaiDashboard/context.tsx", "src/pages/MumaiDashboard/design.ts"],

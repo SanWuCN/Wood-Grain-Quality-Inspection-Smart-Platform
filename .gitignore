@@ -45,3 +45,6 @@ server/assets/
 # Local SensorTag BLE runtime
 .venv-sensortag/
 __pycache__/
+
+# 形象展台的构建产物（vite.lab.config.ts 的输出，可由 npm 脚本重建）
+dist-lab/

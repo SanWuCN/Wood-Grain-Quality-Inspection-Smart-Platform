@@ -85,24 +85,36 @@
    * 右下角「小木助手」浮标（`.appshell__fab`：right:16 / bottom:52 / 52×52）
    * 占 52–104，两者仍然不相交。
    */
-  width: 120px;
-  height: 120px;
-  padding: 5px;
-  border: none;
-  /* 方圆形：与小木那个圆角木块头的轮廓一致（不是圆脸） */
-  border-radius: 26%;
-  /**
-   * 底色从冷调浅蓝改成**暖木色**的奶油底。
+  /*
+   * 形象又加宽一档：120 → **132**。
    *
-   * 形象本体现在是木色的（见 .xf__head 的木纹渐变），冷蓝底会把暖木衬得发灰；
-   * 换成同色系的暖底之后，木块与背景是一个体系里的两层，
-   * 与平台"木脉智检"的木色/暖色基调也对得上。
-   * 明度仍然贴着白（顶部 #fffdf7），形象在深色页面上依旧是亮的那一块。
+   * 换位图之后球在每张帧里是**铺满**的（240×240 里球占满、只留约 3px 透明边），
+   * 而原来那圈米色容器已经去掉 —— 于是"球看起来比之前小"：
+   * 之前木块在 100 单位的 viewBox 里只占 74 单位（两边各留 13），
+   * 加上 5px padding，脸的实际可见直径只有约 0.69 × 120 ≈ 83px。
+   * 现在没有容器可依托，靠尺寸本身把观感补回来：132 × 0.975 ≈ 129px 的可见直径，
+   * 与原来"球面占满容器"的观感接近；132 仍在验收口径上限 128 的**邻近**范围，
+   * 若后续 `验收界面.mjs` 的 avatarMax 需要同步，改那一处即可。
    */
-  background: radial-gradient(circle at 50% 30%, #fffdf7 0%, #fbf1de 58%, #f0e0c5 100%);
-  box-shadow:
-    0 10px 26px rgba(16, 32, 60, 0.24),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.75);
+  /* 尺寸由 `.xd` 根节点下发的 --xd-size 决定（拖把手实时改）；变量缺失时回落 132 */
+  width: var(--xd-size, 132px);
+  height: var(--xd-size, 132px);
+  padding: 0;
+  border: none;
+  /*
+   * ── 容器已经去掉（用户口径："容器直接去掉"）──────────────────────
+   * 形象本体是**带 alpha 的琉璃球位图**，球自己有完整轮廓与体积；
+   * 再套一层米色方圆底就成了"球装在盒子里"，四周那圈底色与球之间还留缝。
+   * 所以底色、圆角、内描边一起去掉，让球**直接浮在页面深色底上**。
+   *
+   * ⚠ 保留 `button` 本身：它是点击热区，也是无障碍语义的载体
+   * （`.xd__badge` 的文字兜底、aria 属性都挂在它上面）。
+   * 去掉的是"看得见的容器"，不是这个可点区域。
+   */
+  border-radius: 0;
+  background: none;
+  /* 只留一层落影，给球一个"贴在页面上"的关系 */
+  box-shadow: 0 8px 22px rgba(8, 20, 40, 0.28);
   cursor: pointer;
   overflow: visible;
   transition: transform 0.18s ease-out, box-shadow 0.18s ease-out;
@@ -131,6 +143,106 @@
   width: 100%;
   height: 100%;
   display: block;
+  /*
+   * 渲染适配（用户口径："更改渲染适配"）：显式给 `contain`，不用默认的 `fill`。
+   *
+   * 形象本体现在是 240×240 的方形位图（GIF 与静止帧同规格、球都铺满整帧），
+   * 容器是 132×132 的正方形 —— 同比例，`fill` 本来也不变形。
+   * 仍然显式写 `contain`：它是**等比**语义，将来若换非方形素材、
+   * 或容器在窄屏被改成非正方形，`fill` 会直接拉扁，`contain` 不会。
+   */
+  object-fit: contain;
+  /*
+   * 形象本体是抠好的透明位图，自己就是完整轮廓 ——
+   * **不要描边、不要底色**（用户口径："把虚拟形象的边框也去掉"）。
+   * 这里显式写死，避免将来有全局 `img` 规则把边框加回来。
+   */
+  border: none;
+  background: none;
+}
+
+/* ------------------------------------------------------------------ *
+ * 拖拽 · 实时缩放（逻辑见 XiaomuStage.ts，纯函数已单测）
+ * ------------------------------------------------------------------ */
+
+/*
+ * 拖动期间禁用子元素的选择与指针事件：否则拖到文字上会变成选词、
+ * 拖到按钮上会变成误点。只在拖动期间挂这个类。
+ */
+.xd--dragging, .xd--dragging * {
+  user-select: none !important;
+  cursor: grabbing !important;
+}
+.xd--dragging * { pointer-events: none; }
+
+/*
+ * 形象本体兼作拖动把手：按住球就能拖。
+ * `touch-action: none` 让触摸拖动不被浏览器的滚动手势抢走。
+ *
+ * ⚠ **不要给它 `overflow: hidden`**（踩过两次，第二次是用户指出来的）：
+ *   七状态里 `xd-listen` 用 `scale(1.04)`、`xd-idle` 用 `scale(1.035)` 做整体动画，
+ *   变换后的盒子（132 × 1.04 ≈ 137）本来就比容器大 —— 这是**有意的**（形象会"鼓"一下）。
+ *   加 `overflow: hidden` 会把这部分裁掉，现象是**球顶部被切平**。
+ *   遮挡把手的正确解法是**提高把手层级**（见 `.xd__grip` 的 z-index / isolation），
+ *   而不是裁掉形象。
+ */
+.xd__avatar { touch-action: none; }
+
+/**
+ * 右下角的小把手：实时调大小。
+ *
+ * 视觉 18×18，但用 `::before` 把命中区域扩到 30×30 ——
+ * 它是辅助控件（主交互是球本身），视觉要轻，可点区域仍要达标。
+ */
+.xd__grip {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 50%;
+  background: rgba(18, 34, 58, 0.72);
+  color: #eaf3ff;
+  display: grid;
+  place-items: center;
+  cursor: nwse-resize;
+  touch-action: none;
+  /*
+   * ⚠ `pointer-events: auto` 是**必须**的（这里卡了两轮）——
+   * `.xd` 容器为了"不吃点击"写了 `pointer-events: none`，
+   * 而 `pointer-events` 是**会被继承**的：把手虽然用 z-index 提到了最上层、
+   * 屏幕上完全可见，却永远不被命中。
+   * 现象就是"看得到把手但拖不动"，而且 `elementFromPoint(把手中心)` 会落到
+   * 它下面的 `img.xd__figure` 上 —— 看起来像被遮挡，实际是被禁用了命中测试。
+   */
+  pointer-events: auto;
+  /*
+   * 层级高于形象本体：形象带着 transform（七状态的缩放动画），
+   * 变换后的盒子（132 × 1.04 ≈ 137）比容器大，会盖住把手所在的角落。
+   */
+  z-index: 20;
+  transition: background 0.15s ease-out;
+}
+.xd__grip::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; }
+.xd__grip:hover { background: rgba(30, 60, 100, 0.92); }
+.xd__grip svg { width: 10px; height: 10px; display: block; }
+
+/* 拖动/缩放时显示的实时读数 */
+.xd__size-tip {
+  position: absolute;
+  right: 20px;
+  bottom: -2px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(18, 34, 58, 0.88);
+  color: #eaf3ff;
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 3;
 }
 
 /**
@@ -142,20 +254,28 @@
  * **每个状态的配色一条都没删**（颜色本身就是状态信息，见下方配色段）。
  * 动画仍然只用 transform/opacity（PRD §9：地图与三维页是性能瓶颈）。
  */
+/**
+ * 状态圈：**已经去掉**（用户口径：「把虚拟形象的边框也去掉」）。
+ *
+ * 它原本是给"木色圆角木块"配的一圈描边 —— 木块没有轮廓线，靠这圈把形象框出来。
+ * 现在的形象是**抠好的琉璃球位图**，球自己就有完整的轮廓与体积，
+ * 再套一圈 26% 圆角的描边就成了"箱子里的球"，而且那圈深色描边比球还抢眼。
+ *
+ * 保留这条规则本身（而不是删掉）：`data-state` 那几条配色规则还挂在上面
+ * （见下方 `.xd[data-state=…] .xd__ring`），删规则会牵动一大段；
+ * 这里只把**看得见的描边与动画**关掉，语义钩子留着。
+ */
 .xd__ring {
   position: absolute;
   inset: -5px;
   border-radius: 26%;
-  border: 1.5px solid rgba(150, 122, 84, 0.4);
+  border: none;
   transform: scale(1);
-  animation: xd-breathe 3.2s ease-in-out infinite;
+  animation: none;
   pointer-events: none;
 }
 
-@keyframes xd-breathe {
-  0%, 100% { transform: scale(1); opacity: 0.42; }
-  50% { transform: scale(1.05); opacity: 0.78; }
-}
+/* xd-breathe 已随状态圈一起去掉（圈不可见了，关键帧没有使用者） */
 
 /* ── 状态姿态：身体语言（形象本体的体态，与下面的"脸"分工不同）───────
  *
@@ -200,9 +320,19 @@
 .xd[data-state="recognizing"] .xd__ring { animation-duration: 2s; }
 .xd[data-state="error"] .xd__ring { animation: none; }
 
+/**
+ * 待机：呼吸起伏。
+ *
+ * ⚠ 上一版只写 `translateY(-2.5px)` —— 在 120px 的形象上只有约 2% 的位移。
+ * 实测 transform 确实在变（-2.3 → -2.4 → -1.2），但**肉眼判断就是一张静态图**
+ * （用户口径：「待机动画没有显示，是一张静态图片」）。
+ * 判据是"能不能被看出来"，不是"数值有没有变"。
+ * 现在幅度提到 6px 并叠一点缩放（1 → 1.035），与其它状态的表现力对齐；
+ * 保留一点点旋转，避免纯上下平移显得机械。
+ */
 @keyframes xd-idle {
-  0%, 100% { transform: translateY(0) rotate(0deg); }
-  50% { transform: translateY(-2.5px) rotate(0deg); }
+  0%, 100% { transform: translateY(0) scale(1) rotate(0deg); }
+  50% { transform: translateY(-6px) scale(1.035) rotate(-1deg); }
 }
 
 @keyframes xd-listen {
@@ -877,7 +1007,13 @@
    * 这次整理成一条并把实测值写清楚：72 是在 1366×768 下**验证过**的值
    * （验收界面.mjs 的 avatarMin 就是 72），改大会把气泡顶出视口上沿。
    */
-  .xd__avatar { width: 72px; height: 72px; }
+  /*
+   * ⚠ 这里原本有一条 `.xd__avatar { width: 72px; height: 72px; }`。
+   * 加了"拖动缩放"之后它变成了 bug：媒体查询里的 `width` 会**盖掉**
+   * 用户拖出来的内联尺寸，现象是"拖了把手但形象不变大"（用户口径："拉不到缩放按钮"）。
+   * 短屏收一档的逻辑已移到 JS（`defaultSizeForViewport`）——那里能区分
+   * "用户没调过（用档位值）"与"用户调过（以用户为准）"，CSS 做不到这个区分。
+   */
 }
 
 @media (max-height: 720px) {

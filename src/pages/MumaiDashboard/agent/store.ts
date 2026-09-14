@@ -121,6 +121,41 @@ export function setAgent(patch: Partial<AgentStoreState>) {
   emit();
 }
 
+/**
+ * 开发期调试句柄：`window.__mumaiAgent`。
+ *
+ * ── 为什么需要它（不是为了方便，是因为**没它就没法验证**）────────────
+ * 形象有七个界面状态，但它们在浏览器里**很难自然构造**：
+ * 要真实触发"播报中"得先有唤醒 + ASR + 意图命中 + TTS，而"出错"要通道断线。
+ * 截图工装因此只能手改 DOM 的 `data-state` —— 但那是 React 的渲染产物，
+ * 下一次重渲染就被覆盖，于是七个状态拍出来全是 idle（我确实这么白拍过一轮）。
+ * 有了这个句柄，工装可以**驱动真实状态**，拍到的就是用户会看到的画面。
+ *
+ * ⚠ 只在开发构建暴露（`import.meta.env.DEV`），生产构建里这段是死代码。
+ * 与既有的 `window.__mumaiWake`（唤醒通道）、`__mumaiInput` 同一口径。
+ */
+if (import.meta.env?.DEV) {
+  (window as unknown as Record<string, unknown>).__mumaiAgent = {
+    setAgent,
+    getAgentState,
+    /** 供工装一次设一个状态，语义比 setAgent({agentState}) 更直白 */
+    setState: (agentState: AgentStoreState["agentState"]) => setAgent({ agentState }),
+    /** 构造"等待确认"：形象在 confirming 态靠的是 pendingConfirm，不是 agentState */
+    setPendingConfirm: (on: boolean) => setAgent({
+      pendingConfirm: on
+        ? {
+            id: -1,
+            title: "调试用确认",
+            detail: "由 window.__mumaiAgent.setPendingConfirm 构造，仅用于截图工装验证 confirming 态。",
+            risk: 3,
+            tool: "debug_confirm",
+            cancelText: "取消",
+          }
+        : null,
+    }),
+  };
+}
+
 export function patchLive(patch: Partial<LiveState>) {
   state = { ...state, live: { ...state.live, ...patch } };
   emit();
