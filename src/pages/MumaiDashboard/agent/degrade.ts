@@ -243,15 +243,62 @@ export function audioLinkNote(): string {
  */
 let lastErrorNote = "";
 
+/**
+ * 同一种断开的**稳定签名**：把会变的计数与参数抹掉。
+ *
+ * ── 这是一个实测出来的真缺陷（用户："窗口关不掉，一直弹回来"）──────
+ * 原来的去重是 `lastErrorNote === note`，而 note 里带着重连计数
+ * （「8000ms 后第 75 次重试」）—— 每重试一次文字就变一次，
+ * 于是**每次重连都被当成一种新的断开**：
+ *   · 往会话里再 push 一条错误（用户看到的就是卡片反复弹回来）；
+ *   · 连续重试时错误卡会一直往上长。
+ * 现在按抹掉数字后的骨架比较：「第 1 次重试」与「第 75 次重试」是同一种断开，
+ * 只提示一次；而「重连中」变成「麦克风权限被拒绝」这种**真的换了原因**的情况，
+ * 骨架不同，仍会照常提示。
+ */
+export function errorSignatureOf(note: string): string {
+  return note.replace(/\d+/g, "#").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * 去掉重连参数，只留「断开原因」。
+ *
+ * `wakeChannel.scheduleReconnect` 写的 note 里带退避参数
+ * （「唤醒通道断开，正在重连…（8000ms 后第 9 次重试）」），这两个数字**每次都变**：
+ *   · 徽标上的错误说明会一直抖；
+ *   · 更要命的是「用户已按 × 确认过这条错误」的判据也会随计数变化 ——
+ *     重试一次就变成一条"新"错误，刚关掉的面板立刻又弹回来。
+ * 所以归一化放在这里，degrade 与气泡共用同一套规则。
+ */
+export function stableNote(note: string): string {
+  return note
+    .replace(/（[^）]*后第\s*\d+\s*次重试）/g, "")
+    .replace(/第\s*\d+\s*次重试/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function enterServiceError(note: string): void {
-  setAgent({ agentState: "ERROR", stateNote: note });
-  if (lastErrorNote === note) return; // 同一种断开只提示一次，别刷屏
-  lastErrorNote = note;
+  /*
+   * 只把状态机切到 ERROR（徽标变「出错了」、形象换成错误帧），
+   * **不主动把气泡顶开**。
+   *
+   * 状态机切 ERROR 会让 `dockState` 变 `error`，气泡本来就可见
+   * （用户此刻正在看它）；用户按 × 关掉之后，`active` 由关闭态压住，
+   * 后续的重连不会再把面板顶回来。想再看那条错误，点一下形象即可
+   * （`reopen()` 会清掉「已确认」）。
+   */
+  const stable = stableNote(note);
+  /* 状态里也放归一化后的文本：徽标不再随重试次数跳动 */
+  setAgent({ agentState: "ERROR", stateNote: stable });
+  const signature = errorSignatureOf(stable);
+  if (lastErrorNote === signature) return; // 同一种断开只提示一次，别刷屏
+  lastErrorNote = signature;
   pushTurn({
     kind: "bot",
     id: nextId(),
     at: clockStamp(),
-    text: `本地语音服务当前不可用：${note}。文字入口和 COM4 语音串口入口不受影响，仍然可用。${RECONNECT_HINT}。`,
+    text: `本地语音服务当前不可用：${stable}。文字入口和 COM4 语音串口入口不受影响，仍然可用。${RECONNECT_HINT}。`,
     intentId: null,
     intentName: "语音服务不可用",
     type: "ERROR",

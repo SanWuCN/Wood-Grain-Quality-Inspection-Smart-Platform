@@ -26,6 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import XiaomuFace from "./XiaomuFace";
 import { ask, type Runtime } from "./executor";
 import { closeAgent, hasForeignModal, nextInteractionId } from "./api";
+import { stableNote } from "./degrade";
 import { useAgentNavigate, useAgentSession } from "./agentSession";
 import { getAgentState, resolveConfirm, setAgent, subscribeAgent } from "./store";
 import { wakeChannel, type WakeSnapshot } from "./wakeChannel";
@@ -86,6 +87,21 @@ export default function XiaomuDock() {
   const agent = useSyncExternalStore(subscribeAgent, getAgentState);
   const [wake, setWake] = useState<WakeSnapshot>(() => wakeChannel().snapshot());
   const [expanded, setExpanded] = useState(false);
+  /**
+   * 用户已经按过 × 的**那一条**通道错误。
+   *
+   * ── 为什么必须有这个状态（用户实测"这个窗口关不掉"）──────────────
+   * 本地没有语音服务时 `/voice-wake` 连不上，`wakeChannel` 会按退避表**一直重连**，
+   * `wake.state` 因此长期停在 `reconnecting` → `dockState` 恒为 `error`
+   * → `active` 恒为真 → 面板**关了立刻又回来**。× 只能关掉 `expanded` 与
+   * `agent.open`，关不掉"通道正在重连"这个事实。
+   *
+   * 判据用「状态 + 说明」而不是布尔量：记住了这一条，下一条**新的**错误
+   * （比如从"重连中"变成"权限被拒"）仍会照常弹出来提醒，不会一并静音。
+   */
+  const [dismissedWakeError, setDismissedWakeError] = useState<string | null>(null);
+  /** 当前错误签名的 ref：close() 要先于签名计算拿到它（见 close 里的说明） */
+  const errorSignatureRef = useRef<string | null>(null);
   const [factsOpen, setFactsOpen] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [openSource, setOpenSource] = useState<string | null>(null);
@@ -240,9 +256,27 @@ export default function XiaomuDock() {
     return () => { delete (window as unknown as Record<string, unknown>).__mumaiAsk; };
   }, []);
 
+  /**
+   * 用户主动再打开一次（点形象 / Alt+E）时清掉「已确认」。
+   *
+   * 否则会有个反直觉的表现：错误被 × 掉之后，用户点形象想再看看小木，
+   * 面板里却没有那条错误了 —— 而那正是他此刻想看的东西。
+   */
+  const reopen = useCallback(() => {
+    setDismissedWakeError(null);
+    setExpanded(true);
+  }, []);
+
   /* ---------- 关闭：统一入口 ---------- */
   const close = useCallback(() => {
     setExpanded(false);
+    /*
+     * 记下"这条通道错误我看过了"。
+     *
+     * 只关显示层：常驻唤醒仍然在后台重连（FR-08 要求关气泡不释放麦克风），
+     * 用户想停重连要点「关闭常驻唤醒」——所以这里**不**去动 wakeChannel。
+     */
+    setDismissedWakeError(errorSignatureRef.current);
     /**
      * 关闭后把焦点还回去（FR-08 最后一条；键控无障碍探针 C6 抓到过）。
      *
@@ -347,7 +381,8 @@ export default function XiaomuDock() {
         else void channel.start();
       } else if (key === "e") {
         event.preventDefault();
-        setExpanded((value) => !value);
+        if (expanded) close();
+        else reopen();
       } else if (key === "r") {
         event.preventDefault();
         const turn = latestBotTurn(agent.turns);
@@ -366,7 +401,7 @@ export default function XiaomuDock() {
     /** 捕获阶段监听：Esc 的让路判据必须早于页面 Modal 的冒泡监听器（见上面的根因说明） */
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [agent.open, agent.turns, expanded, close]);
+  }, [agent.open, agent.turns, expanded, close, reopen]);
 
   /* ---------- 状态推导 ---------- */
   /**
@@ -422,7 +457,28 @@ export default function XiaomuDock() {
    *   · `expanded`    —— 用户点了形象，想回看上一轮
    * 关闭后三者都为假，面板就该消失；历史仍然留在 store 里，点一下形象就能回看。
    */
-  const active = dockState !== "idle";
+  /**
+   * 通道错误是否已经被用户按 × 确认过。
+   *
+   * `errorSignature` 为 null 表示当前没有通道错误（那时这条判据不参与）。
+   * 这一条只影响**错误态**：正在听 / 思考 / 播报 / 等确认一律照旧显示。
+   */
+  const errorSignature = useMemo(() => {
+    if (wake.state !== "error" && wake.state !== "reconnecting") return null;
+    /*
+     * 用 `stableNote` 归一化后再当签名。
+     *
+     * 直接用 `wake.note` 会漏：它带着退避参数（「8000ms 后第 9 次重试」），
+     * 后台每重试一次文本就变一次 —— 用户按 × 记下的签名与下一轮的签名对不上，
+     * 「已确认」当场失效，面板又被顶回来（这就是"关掉还是弹出来"的根因）。
+     * 归一化后，「重连中」无论重试多少次都是同一条；换了原因（比如变成
+     * 「麦克风权限被拒绝」）签名才变，仍会照常提示。
+     */
+    return `${wake.state}|${stableNote(wake.note ?? "")}`;
+  }, [wake.state, wake.note]);
+  errorSignatureRef.current = errorSignature;
+  const wakeErrorDismissed = errorSignature !== null && errorSignature === dismissedWakeError;
+  const active = dockState !== "idle" && !wakeErrorDismissed;
   const visible = agent.open || expanded || active;
 
   /**
@@ -763,7 +819,7 @@ export default function XiaomuDock() {
          */
         onClick={() => {
           if (visible) close();
-          else setExpanded(true);
+          else reopen();
         }}
         aria-expanded={visible}
         aria-label={`小木（${DOCK_STATE_LABEL[dockState]}），${visible ? "点击收起" : "点击展开"}`}
