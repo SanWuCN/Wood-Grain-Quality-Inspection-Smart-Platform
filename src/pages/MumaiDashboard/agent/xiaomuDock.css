@@ -686,14 +686,14 @@
 }
 
 /* 各状态配色：颜色本身就是状态信息（动效关了也读得出来） */
-.xd[data-state="listening"] .xd__ring { border-color: #2fbf8f; }
-.xd[data-state="listening"] .xd__badge { background: #10674f; }
-.xd[data-state="recognizing"] .xd__ring { border-color: #3f8ff0; }
-.xd[data-state="recognizing"] .xd__badge { background: #14477f; }
-.xd[data-state="thinking"] .xd__ring { border-color: #b4791f; }
-.xd[data-state="thinking"] .xd__badge { background: #6d4a0d; }
-.xd[data-state="speaking"] .xd__ring { border-color: #7a5cf0; }
-.xd[data-state="speaking"] .xd__badge { background: #3f2c8c; }
+.xd[data-state="listening"] .xd__ring { border-color: var(--success, #39d5a3); }
+.xd[data-state="listening"] .xd__badge { background: rgba(57, 213, 163, 0.22); color: var(--success, #39d5a3); }
+.xd[data-state="recognizing"] .xd__ring { border-color: var(--info, #4ea8ff); }
+.xd[data-state="recognizing"] .xd__badge { background: rgba(78, 168, 255, 0.22); color: var(--text-accent, #70c4ff); }
+.xd[data-state="thinking"] .xd__ring { border-color: var(--warning, #f2b84b); }
+.xd[data-state="thinking"] .xd__badge { background: rgba(242, 184, 75, 0.20); color: var(--warning, #f2b84b); }
+.xd[data-state="speaking"] .xd__ring { border-color: var(--primary, #4ea8ff); }
+.xd[data-state="speaking"] .xd__badge { background: rgba(78, 168, 255, 0.26); color: var(--text-title, #ddeeff); }
 /**
  * 等确认 / 出错：**必须是两种颜色**。
  *
@@ -702,10 +702,10 @@
  * 等确认是"在等你点一下"（橙，需要行动但不危险），出错是"坏了"（红，需要排查）。
  * 关掉动效之后颜色就是唯一的状态线索，混在一起会让人把"等你确认"看成"出故障"。
  */
-.xd[data-state="confirming"] .xd__ring { border-color: #f0871f; }
-.xd[data-state="confirming"] .xd__badge { background: #7a3f06; }
-.xd[data-state="error"] .xd__ring { border-color: #d94a3d; }
-.xd[data-state="error"] .xd__badge { background: #8c2119; }
+.xd[data-state="confirming"] .xd__ring { border-color: var(--warning, #f2b84b); }
+.xd[data-state="confirming"] .xd__badge { background: rgba(242, 184, 75, 0.24); color: var(--warning, #f2b84b); }
+.xd[data-state="error"] .xd__ring { border-color: var(--danger, #ff5c70); }
+.xd[data-state="error"] .xd__badge { background: rgba(255, 92, 112, 0.24); color: var(--danger, #ff5c70); }
 
 /* ── 气泡面板 ─────────────────────────────────────────────────────── */
 
@@ -727,10 +727,31 @@
   max-height: 58vh;
   display: flex;
   flex-direction: column;
+  /**
+   * ── 改成**平台深色面板**（用户口径：「小木形象的气泡美术突兀」）────────
+   *
+   * 原来这里是 `background: #fdfefe` + 浅灰描边 + 浅色阴影 —— 一块**白色卡片**
+   * 弹在整页深色海军底（`--bg-page: #030812`）上，是全屏唯一的高亮白块，
+   * 亮度和色温都跳出去，观感就是"贴上去的"。
+   *
+   * 现在统一走平台令牌，与业务面板同一套：
+   *   `--panel-surface` `--border-subtle` `--text-*` `--primary` `--success` …
+   * 好处不只是"看起来一致"：平台整体换肤时，气泡会**跟着变**，不会再漏一处。
+   *
+   * ⚠ 半径用 14px 保持原值，不改动布局相关属性（圆角变化会让面板与形象的对齐
+   *   看起来位移，那是无谓的改动）。
+   */
   border-radius: 14px;
-  background: #fdfefe;
-  border: 1px solid #d5e0f0;
-  box-shadow: 0 18px 46px rgba(16, 32, 60, 0.24);
+  background: var(--panel-surface, rgba(9, 19, 33, 0.86));
+  border: 1px solid var(--border-default, rgba(78, 168, 255, 0.18));
+  /* 深色底上的阴影要更重、更冷，否则面板会显得"浮不起来" */
+  box-shadow:
+    0 18px 46px rgba(0, 6, 16, 0.62),
+    0 0 0 1px rgba(78, 168, 255, 0.06) inset;
+  /* 与平台一致的轻微背景虚化：面板后面的地图不会"透"得刺眼 */
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--text-primary, #eaf3ff);
   overflow: hidden;
   animation: xd-in 0.2s ease-out;
 }
@@ -745,8 +766,8 @@
   align-items: center;
   gap: 8px;
   padding: 9px 12px;
-  background: linear-gradient(180deg, #f7faff 0%, #eef4fd 100%);
-  border-bottom: 1px solid #e2eaf6;
+  background: var(--panel-surface-2, rgba(9, 19, 33, 0.96));
+  border-bottom: 1px solid var(--border-subtle, rgba(78, 168, 255, 0.12));
   flex: none;
 }
 
@@ -755,30 +776,30 @@
   align-items: center;
   gap: 6px;
   font-weight: 600;
-  color: #1b2740;
+  color: var(--text-primary, #eaf3ff);
 }
 
 .xd__dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #93a3bd;
+  background: var(--text-tertiary, #70849c);
 }
 
-.xd[data-state="listening"] .xd__dot { background: #2fbf8f; }
-.xd[data-state="recognizing"] .xd__dot { background: #3f8ff0; }
-.xd[data-state="thinking"] .xd__dot { background: #d99a2b; }
-.xd[data-state="speaking"] .xd__dot { background: #7a5cf0; }
+.xd[data-state="listening"] .xd__dot { background: var(--success, #39d5a3); }
+.xd[data-state="recognizing"] .xd__dot { background: var(--info, #4ea8ff); }
+.xd[data-state="thinking"] .xd__dot { background: var(--warning, #f2b84b); }
+.xd[data-state="speaking"] .xd__dot { background: var(--primary, #4ea8ff); }
 /* 等确认用橙、出错用红：与上面的 ring/badge 配色保持一致（见该处注释） */
-.xd[data-state="confirming"] .xd__dot { background: #f0871f; }
-.xd[data-state="error"] .xd__dot { background: #d94a3d; }
+.xd[data-state="confirming"] .xd__dot { background: var(--warning, #f2b84b); }
+.xd[data-state="error"] .xd__dot { background: var(--danger, #ff5c70); }
 
 .xd__intent {
   margin-left: auto;
   padding: 1px 8px;
   border-radius: 6px;
-  background: #eaf1fb;
-  color: #3d5578;
+  background: rgba(78, 168, 255, 0.14);
+  color: var(--text-accent, #70c4ff);
   font-size: 11px;
   max-width: 180px;
   overflow: hidden;
@@ -793,22 +814,22 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #63748f;
+  color: var(--text-muted, #91a5bc);
   font-size: 17px;
   line-height: 1;
   cursor: pointer;
 }
 
-.xd__icon-btn:hover { background: #e4ecf8; color: #1b2740; }
+.xd__icon-btn:hover { background: rgba(78, 168, 255, 0.16); color: var(--text-primary, #eaf3ff); }
 
 /* 用户那句（流式，就地更新） */
 .xd__user {
   margin: 10px 12px 0;
   padding: 7px 11px;
   border-radius: 10px 10px 2px 10px;
-  background: #eaf3ff;
-  border: 1px solid #d3e5ff;
-  color: #1b3c66;
+  background: rgba(78, 168, 255, 0.16);
+  border: 1px solid var(--border-hover, rgba(78, 168, 255, 0.32));
+  color: var(--text-title, #ddeeff);
   font-weight: 600;
   word-break: break-all;
   flex: none;
@@ -834,7 +855,7 @@
 /* 主回答：字号最大、颜色最深 —— 它是唯一不许折叠的内容 */
 .xd__answer {
   margin: 0;
-  color: #16233b;
+  color: var(--text-primary, #eaf3ff);
   font-size: 14px;
   line-height: 1.65;
 }
@@ -845,28 +866,28 @@
   width: 100%;
   text-align: left;
   padding: 5px 9px;
-  border: 1px solid #dfe8f5;
+  border: 1px solid var(--border-subtle, rgba(78, 168, 255, 0.12));
   border-radius: 7px;
-  background: #f6f9fe;
-  color: #40587c;
+  background: rgba(78, 168, 255, 0.06);
+  color: var(--text-secondary, #aabbd0);
   font-size: 12px;
   cursor: pointer;
 }
 
-.xd__fold-btn:hover { background: #edf3fc; }
+.xd__fold-btn:hover { background: rgba(78, 168, 255, 0.14); border-color: var(--border-hover, rgba(78, 168, 255, 0.32)); }
 
 .xd__facts {
   margin: 6px 0 0;
   padding: 8px 10px;
   border-radius: 7px;
-  background: #f7fafd;
-  border: 1px solid #e6eef8;
+  background: rgba(78, 168, 255, 0.05);
+  border: 1px solid var(--border-subtle, rgba(78, 168, 255, 0.12));
   font-size: 12px;
 }
 
 .xd__facts > div { display: flex; gap: 8px; padding: 2px 0; }
-.xd__facts dt { flex: none; color: #63748f; min-width: 96px; }
-.xd__facts dd { margin: 0; color: #1b2740; word-break: break-all; }
+.xd__facts dt { flex: none; color: var(--text-tertiary, #70849c); min-width: 96px; }
+.xd__facts dd { margin: 0; color: var(--text-primary, #eaf3ff); word-break: break-all; }
 
 .xd__sources { list-style: none; margin: 6px 0 0; padding: 0; }
 
@@ -875,28 +896,29 @@
   width: 100%;
   text-align: left;
   padding: 6px 9px;
-  border: 1px solid #dfe8f5;
+  border: 1px solid var(--border-subtle, rgba(78, 168, 255, 0.12));
   border-radius: 7px;
-  background: #fff;
+  background: rgba(78, 168, 255, 0.04);
+  color: var(--text-secondary, #aabbd0);
   cursor: pointer;
   font-size: 12px;
 }
 
-.xd__source:hover { border-color: #b9cdea; background: #f8fbff; }
-.xd__source b { color: #1b3c66; }
+.xd__source:hover { border-color: var(--border-hover, rgba(78, 168, 255, 0.32)); background: rgba(78, 168, 255, 0.12); }
+.xd__source b { color: var(--text-title, #ddeeff); }
 
 .xd__locator {
   display: block;
   margin-top: 2px;
-  color: #63748f;
+  color: var(--text-tertiary, #70849c);
 }
 
 .xd__excerpt {
   margin: 6px 0 0;
   padding: 7px 9px;
-  border-left: 3px solid #b9cdea;
-  background: #f7fafd;
-  color: #40587c;
+  border-left: 3px solid var(--border-hover, rgba(78, 168, 255, 0.32));
+  background: rgba(78, 168, 255, 0.05);
+  color: var(--text-secondary, #aabbd0);
   font-size: 12px;
 }
 
@@ -906,19 +928,19 @@
   gap: 10px;
   padding: 9px 12px;
   margin-top: 8px;
-  border-top: 1px solid #eef3fa;
-  color: #7a8aa5;
+  border-top: 1px solid var(--border-subtle, rgba(78, 168, 255, 0.12));
+  color: var(--text-tertiary, #70849c);
   font-size: 11px;
   flex: none;
 }
 
-.xd__foot time { color: #40587c; font-weight: 600; }
+.xd__foot time { color: var(--text-secondary, #aabbd0); font-weight: 600; }
 
 .xd__link {
   margin-left: auto;
   border: none;
   background: transparent;
-  color: #2f6fd0;
+  color: var(--text-accent, #70c4ff);
   font-size: 11px;
   cursor: pointer;
   padding: 0;
@@ -928,7 +950,7 @@
 
 .xd__note {
   margin: 0 12px 10px;
-  color: #7a8aa5;
+  color: var(--text-tertiary, #70849c);
   font-size: 11px;
 }
 
@@ -937,12 +959,12 @@
   margin: 10px 12px 0;
   padding: 10px 12px;
   border-radius: 9px;
-  background: #fff6f4;
-  border: 1px solid #f2c4bc;
+  background: rgba(255, 92, 112, 0.12);
+  border: 1px solid rgba(255, 92, 112, 0.34);
 }
 
-.xd__confirm b { color: #8c2119; font-size: 13px; }
-.xd__confirm p { margin: 4px 0 9px; color: #6d4a45; font-size: 12px; }
+.xd__confirm b { color: var(--danger, #ff5c70); font-size: 13px; }
+.xd__confirm p { margin: 4px 0 9px; color: var(--text-secondary, #aabbd0); font-size: 12px; }
 .xd__confirm-actions { display: flex; gap: 8px; }
 
 .xd__bar {
@@ -950,27 +972,27 @@
   align-items: center;
   gap: 8px;
   padding: 9px 12px;
-  border-top: 1px solid #eef3fa;
-  background: #fbfdff;
+  border-top: 1px solid var(--border-subtle, rgba(78, 168, 255, 0.12));
+  background: var(--panel-surface-2, rgba(9, 19, 33, 0.96));
   flex: none;
 }
 
 .xd__btn {
   padding: 5px 11px;
-  border: 1px solid #cfdcee;
+  border: 1px solid var(--border-default, rgba(78, 168, 255, 0.18));
   border-radius: 7px;
-  background: #fff;
-  color: #24405f;
+  background: rgba(78, 168, 255, 0.08);
+  color: var(--text-primary, #eaf3ff);
   font-size: 12px;
   cursor: pointer;
 }
 
-.xd__btn:hover { background: #f2f7ff; }
+.xd__btn:hover { background: rgba(78, 168, 255, 0.18); border-color: var(--border-hover, rgba(78, 168, 255, 0.32)); }
 
 .xd__btn--wake.is-live {
-  border-color: #7fd7b6;
-  background: #eafaf4;
-  color: #10674f;
+  border-color: var(--success, #39d5a3);
+  background: rgba(57, 213, 163, 0.16);
+  color: var(--success, #39d5a3);
 }
 
 .xd__btn--danger {
@@ -979,7 +1001,7 @@
   color: #fff;
 }
 
-.xd__hint { color: #8b9ab3; font-size: 11px; }
+.xd__hint { color: var(--text-tertiary, #70849c); font-size: 11px; }
 
 /* ── 窄屏 / 矮屏 ────────────────────────────────────────────────────
    ⚠ 这里的 vh 值**比默认更大**，这是有意的，别按"屏幕小就该显示更少"的直觉改回去。
