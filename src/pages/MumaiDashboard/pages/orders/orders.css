@@ -305,3 +305,36 @@
   gap: var(--space-2);
   margin: var(--space-3) 0;
 }
+
+/* ------------------------------------------------------------------ *
+ * 「随播报逐步加载」（agent 念工单时逐段揭示）
+ *
+ * 门控在 WorkOrderDetail.tsx 的 revealClass()：没揭示到的分区不带 is-in。
+ * **没有揭示计划时三个分区都带 is-in**（用户自己点进工单、刷新、从地图跳进来），
+ * 所以这里隐藏的只可能是"agent 正在念、还没念到"的那一段。
+ * ------------------------------------------------------------------ */
+.wop-reveal:not(.is-in) {
+  display: none;
+}
+
+.wop-reveal.is-in {
+  animation: wop-reveal-in 420ms ease-out both;
+}
+
+@keyframes wop-reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 关掉动效偏好下仍然逐段出现，只是不做位移淡入 */
+@media (prefers-reduced-motion: reduce) {
+  .wop-reveal.is-in {
+    animation: none;
+  }
+}

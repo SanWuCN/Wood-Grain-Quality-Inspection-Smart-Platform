@@ -62,6 +62,16 @@ export type ScriptRound = {
   precondition?: string;
   /** 交给 TTS 时的语音风格提示 */
   style?: string;
+  /**
+   * 「随播报逐步加载」的目标（可选）。
+   *
+   * ① 接单整理 是唯一需要它的轮次：说完台词后既要把页面**跳到该工单详情**，
+   * 又要让详情页的分区**跟着这句话的节奏逐段出现** ——
+   * 而不是人还没开口，整页内容已经铺满。
+   *
+   * 只声明"要什么"，怎么排拍点在 `executor.ts` 的 `applyScriptAction()` 里。
+   */
+  reveal?: { target: "order-detail"; panels: number };
 };
 
 /** 一句台词 */
@@ -97,7 +107,18 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     ],
     next: "沈：收到。我来核对范围。本次完成巡检和辅助诊断，形成可追溯记录。请各岗位报告出发前准备情况。",
     voicePack: null,
-    intentId: "history_summary",
+    /**
+     * ⚠ 这一轮原来绑的是 `history_summary`（查历史巡检风险汇总）——
+     * 与台词说的「读取这份工单」根本不是一件事，结果是**只播报、不跳转**：
+     * 按 Ctrl+Q+L 建单后说「读取这份工单」，页面停在原地不动。
+     *
+     * 改绑 `view_current_order`（查看当前工单）：它的 action 是 `open_order`，
+     * 会把页面跳到 `/orders?order=<当前工单>`；配合下面的 `reveal`，
+     * 详情页的内容再跟着这句话的节奏逐段铺开。
+     */
+    intentId: "view_current_order",
+    /* 详情页分 3 段揭示：工单摘要 → 委托要求与检测主体 → 后续分区 */
+    reveal: { target: "order-detail", panels: 3 },
   },
   {
     roundNo: "②",

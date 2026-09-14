@@ -23,6 +23,7 @@ import type {
   WorkOrderDetail as WorkOrderDetailView,
 } from "../api/client";
 import { Panel } from "../Panel";
+import { useOrderReveal } from "../ordersReveal";
 import { WORK_ORDER_STATUS_TONE } from "./overview.constants";
 import { Btn, DataTable, KV, Modal, SourceTag, StateBlock, StatusChip } from "../ui";
 import { AssignmentPanel } from "./orders/AssignmentPanel";
@@ -63,6 +64,14 @@ export function WorkOrderDetail({
   actions: WorkOrderDetailActions;
 }) {
   const { order, commission, subjects, logs } = detail;
+  /**
+   * 「随播报逐步加载」：agent 念这张工单时，分区按台词节奏逐段揭示。
+   *
+   * 没有揭示计划时（用户自己点进工单 / 从地图跳进来 / 刷新页面）恒为 `Infinity`，
+   * 三个分区都带 `is-in`，页面上看不出任何差别 —— 演示效果不会传染成"页面少了内容"。
+   */
+  const revealStage = useOrderReveal(order.id);
+  const revealClass = (index: number) => (revealStage > index ? "wop-reveal is-in" : "wop-reveal");
   /*
     能力集合兜底：服务端每条返回详情的路由都带 capabilities（services/work-orders.mjs 的
     detailFor）。这里再兜一层是**不让一个字段缺失把整页打成白屏** ——
@@ -98,6 +107,7 @@ export function WorkOrderDetail({
   return (
     <>
       <Panel
+        className={revealClass(0)}
         title={`工单摘要 · ${order.orderNo}`}
         extra={<StatusChip text={order.status} tone={WORK_ORDER_STATUS_TONE[order.status] ?? "info"} />}>
         <KV
@@ -156,6 +166,7 @@ export function WorkOrderDetail({
       </Panel>
 
       <Panel
+        className={revealClass(1)}
         title="委托要求与检测主体"
         extra={<span className="muted">{commission.unit} · {commission.date}</span>}>
         <KV
@@ -284,6 +295,7 @@ export function WorkOrderDetail({
       ) : null}
 
       <Panel
+        className={revealClass(2)}
         title="作业记录与成果"
         extra={<span className="muted">{logs.length} 条记录</span>}>
         <StateBlock kind="empty" title="本单还没有作业记录" />

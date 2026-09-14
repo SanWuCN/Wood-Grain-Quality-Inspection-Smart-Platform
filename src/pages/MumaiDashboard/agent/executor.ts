@@ -31,9 +31,12 @@ import {
 import { evaluateFacts, factToneOf, type FactContext, type FactRow, type LiveSnapshot } from "./facts";
 import {
   FALLBACK_TEXT,
+  INTENT_BY_ID,
   voicePackOf,
   type Intent,
 } from "./intents";
+import { advanceOrderReveal, beginOrderReveal } from "../ordersReveal";
+import { useWorkOrderStore } from "../store/workOrders";
 import { understand, SEMANTIC_THRESHOLDS, type MatchResult } from "./matcher";
 import { planFacts, planTask, type TaskPlan } from "./planner";
 import {
@@ -286,7 +289,91 @@ function replyScript(round: ScriptRound, match: ScriptMatch, runtime: Runtime): 
   });
   pushTurn(turn);
   runtime.speak(turn.text);
+  /**
+   * 剧本轮次**也要执行该轮声明的动作**。
+   *
+   * 原来这里播完就 `return turn` —— 于是第①轮「读取这份工单」说完之后页面纹丝不动，
+   * 用户看到的是"小木只是回了句话"（这正是本次要修的现象）。
+   *
+   * 播报是同步的、工具往返是异步的，所以这里**不 await**：先让声音起来，
+   * 导航与逐段揭示随后跟上，与现场观感一致（等到 await 回来再出声就慢了半拍）。
+   */
+  void applyScriptAction(round, runtime);
   return turn;
+}
+
+/**
+ * 执行剧本轮次声明的动作，并在需要时驱动「随播报逐步加载」。
+ *
+ * 两条硬约束：
+ *   ① **只跑低风险工具**（`risk === 0`）。剧本是排练稿，不能因为改了台词就顺手
+ *      执行高风险动作；导航类（`open_order` / `open_panel`）的风险都是 0。
+ *   ② **不伪造成功**。台词已经说完了，工具失败只记日志、不补播成功话术。
+ */
+async function applyScriptAction(round: ScriptRound, runtime: Runtime): Promise<void> {
+  const intent = round.intentId ? INTENT_BY_ID[round.intentId] : undefined;
+  const action = intent?.action;
+  const entities = scriptEntities();
+  if (action) {
+    const tool = toolByName(action.tool);
+    /**
+     * 门槛是「**不产生副作用、也不需要二次确认**」，不是「风险为 0」。
+     *
+     * 踩过的坑：这里一开始写 `tool.risk === 0`，结果第①轮的 `open_order`
+     * 风险等级是 **1**（打开页面/跳转类都不是 0），于是导航被自己挡掉，
+     * 现象与"没接动作"一模一样 —— 排查时先怀疑了路由、又怀疑了权限，最后才发现是门槛。
+     *
+     * 现在按语义放行：`risk <= 1` 且 `requireConfirmation === false`
+     * （导航、选中、只读）；风险 ≥2 或需要确认的动作**一律不执行**——
+     * 那类必须走正常意图链路，让用户在意图层显式确认。
+     */
+    const scriptsMayRun = tool && tool.risk <= 1 && !tool.requireConfirmation;
+    if (scriptsMayRun) {
+      try {
+        await runTool(tool, resolveArgs(action.params, entities), runtime, entities, false);
+      } catch (error) {
+        console.warn(`[script] 第 ${round.roundNo} 轮的动作 ${action.tool} 执行失败：`, error);
+      }
+    } else if (tool) {
+      console.warn(
+        `[script] 第 ${round.roundNo} 轮的动作 ${action.tool}（风险 ${tool.risk}${tool.requireConfirmation ? "，需确认" : ""}）剧本不执行`,
+      );
+    }
+  }
+  if (round.reveal?.target === "order-detail") {
+    startOrderDetailReveal(round, entities.order ?? "");
+  }
+}
+
+/**
+ * 剧本轮次的槽位来源。
+ *
+ * 剧本没有 matcher 抽出来的 `entities`，但第①轮的动作是"打开**这份**工单" ——
+ * 指的就是快捷键刚建出来的那张。工单列表由服务端按创建时间倒序返回，取第一条即最新；
+ * 列表还没拉回来时，退回详情里正在看的那一张。
+ */
+function scriptEntities(): EntityBag {
+  const state = useWorkOrderStore.getState();
+  const newest = state.orders[0]?.id ?? state.detail?.order?.id ?? "";
+  return newest ? { order: newest } : {};
+}
+
+/**
+ * 让工单详情**跟着这句台词的节奏**逐段出现。
+ *
+ * 节拍口径与 `tts.ts` 的看门狗一致（按字数估时、不短于 2.5s）：
+ * 声音一响先揭示第 1 段（页面不能是空的），随后按比例推进，
+ * 最后一段落在约 80% 处 —— 留出收尾，避免"话还没说完页面就铺满了"。
+ */
+function startOrderDetailReveal(round: ScriptRound, orderId: string): void {
+  const total = round.reveal?.panels ?? 0;
+  if (!orderId || total <= 0) return;
+  beginOrderReveal(orderId, total);
+  const estimatedMs = Math.max(2500, mainLineOf(round).length * 260);
+  for (let stage = 1; stage <= total; stage += 1) {
+    const at = stage === 1 ? 0 : Math.round((estimatedMs * 0.8 * stage) / total);
+    window.setTimeout(() => advanceOrderReveal(orderId, stage), at);
+  }
 }
 
 /**
