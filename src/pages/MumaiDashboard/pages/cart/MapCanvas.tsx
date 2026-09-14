@@ -92,98 +92,82 @@ export type MapCanvasProps = {
 };
 
 /**
- * 车体顶视照片（绿幕已抠掉，public/cart/car-top.png）。
+ * 位姿标记：**与小车 RViz 上那个箭头一致**（按用户提供的 RViz 截图量出来）。
  *
- * 用实车照片代替箭头，是为了让「图上那个点」和停在你面前的这台车一眼对上：
- * 车身轮廓、云台、雷达、屏幕的位置都对得上，不用再解释「这个绿三角是什么」。
- * 图片按车长等比缩放（不写死像素），朝向按 pose.yaw 旋转。
- * 文件由 `tmp-cart-asset/cutout.mjs` 从绿幕原图生成（一次性工具）。
+ * 实测那枚标记的构成（截图像素采样）：
+ *   · 半径 38 px 的**淡青圆盘** `rgb(176,240,240)` —— 底色圆，标明机器人的位置范围；
+ *   · 圆内一枚**深青实心箭头** `rgb(0,215,238)`，尖端朝车头、后缘略微内凹，
+ *     横向占圆直径约 8/13、纵向约 5/13；
+ *   · 箭头贴着一圈白边，在淡青底上分得清轮廓。
+ *
+ * 这里按同样的形状与配色绘制，尺寸按地图比例换算（真车约 0.32 m），
+ * 并给一个最小像素下限 —— 地图缩小时整枚标记只有几个像素，
+ * 看不出来「车在哪、朝哪」，那就失去了位姿标记的意义。
  */
-const CAR_SPRITE_URL = "/cart/car-top.png";
+const MARKER_DISC = "rgba(176,240,240,0.92)";
+const MARKER_RING = "rgba(120,206,214,0.85)";
+const MARKER_ARROW = "rgb(0,215,238)";
 /**
- * 车体在屏幕上的长度（m，按地图比例换算）。真车约 0.32 m，这里给 0.45 ——
- * 地图缩到 0.05 m/px 时，0.32 m 只有 6 个像素，照片糊成一个黑点；
- * 位姿指示宁可略大于实物也要看得清（RViz 的 RobotModel 也是这个口径）。
- */
-const CAR_LENGTH_M = 0.45;
-
-/** 位姿箭头（对齐 RViz 的 Pose 显示习惯）：**照片加载不出来时的兜底**。
+ * 标记在屏幕上的直径（m，按地图比例换算）。
  *
- * 三点是从实测反馈里来的，不是装饰：
- *   · **尺寸有下限**：车体按真实车长（mini_akm 约 34 cm）换算，缩到看不见时
- *     用固定像素兜底 —— 一开始只按比例画，地图缩小时整台车不到两个像素，
- *     看起来就是「地图上没有这个箭头」；
- *   · **朝向做成实心三角**：RViz 里一眼能认出车头朝哪，比一条细线可靠；
- *   · **先描白边再填色**：底图是浅灰的栅格，没有描边时绿色车体在自由区域上
- *     几乎看不出来。
+ * **不按真车尺寸画**（车长 0.32 m 在 0.05 m/px 只有 6 个像素，糊成一个点）。
+ * 取 2.0 m：大屏默认视角（约 1.25 px/m）下圆盘直径约 125 px、箭头约 77×40 px，
+ * 是用户 RViz 上那枚（圆盘 76 px）的 1.6 倍 —— 位姿标记的作用是「一眼看到车在哪、
+ * 朝哪」，宁可画大一点也不要让人凑近找。
+ * 半径另有 18 px 的下限，缩到很小也不会消失。
  */
-function drawRobot(
+const MARKER_SIZE_M = 2.0;
+
+/** 位姿箭头（= 小车 RViz 上的样子） */
+function drawPoseMarker(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   yaw: number,
   scale: number,
   tone: "live" | "stale",
-  sprite: HTMLImageElement | null,
 ) {
-  const color = tone === "live" ? "#39d5a3" : "#70849c";
+  const radius = Math.max(18, (MARKER_SIZE_M * scale) / 2);
+  const tip = radius * 0.615; // 箭头尖端到圆心（8/13 × 半径）
+  const back = radius * 0.385; // 后缘（5/13 × 半径）
+  const halfHeight = radius * 0.29; // 半个箭头高度（图里约 4/13 的直径）
+  const notch = back * 0.35; // 后缘内凹
 
-  /*
-    有照片就画照片：长度按真实车长换算，最短 26px 兜底（缩得太小时
-    照片会糊成一团，反而看不见车在哪）。照片是「车头朝上」拍的，
-    而地图上 +x 是车头，所以旋转时要先补 90°。
-  */
-  if (sprite) {
-    const length = Math.max(34, CAR_LENGTH_M * scale);
-    const width = length * (sprite.naturalWidth / sprite.naturalHeight);
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(-yaw + Math.PI / 2);
-    /*
-      先垫一层柔光：照片是深色金属车身，直接画在浅灰的自由区域上，
-      第一眼找不到车在哪。光晕跟着车体形状走，不改变照片本身。
-    */
-    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, length * 0.72);
-    glow.addColorStop(0, "rgba(93,228,255,0.42)");
-    glow.addColorStop(0.6, "rgba(93,228,255,0.16)");
-    glow.addColorStop(1, "rgba(93,228,255,0)");
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(0, 0, length * 0.72, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.drawImage(sprite, -length / 2, -width / 2, length, width);
-    ctx.restore();
-    return;
-  }
-  // 真实车长换算后不小于 22px，保证任何缩放下都看得见
-  const length = Math.max(22, 0.34 * scale);
-  const width = length * 0.65;
-  const head = length * 0.55;
-
+  const stale = tone === "stale";
   ctx.save();
   ctx.translate(x, y);
-  // 画布 y 轴向下，世界的 yaw 逆时针为正 → 屏幕上取负
-  ctx.rotate(-yaw);
 
-  // 车体（圆角矩形）+ 白色描边
+  // 1) 柔光：浅灰底图上先垫一层，缩小时也能一眼看到
+  const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, radius * 1.9);
+  glow.addColorStop(0, "rgba(93,228,255,0.34)");
+  glow.addColorStop(0.55, "rgba(93,228,255,0.12)");
+  glow.addColorStop(1, "rgba(93,228,255,0)");
+  ctx.fillStyle = glow;
   ctx.beginPath();
-  ctx.roundRect(-length / 2, -width / 2, length, width, Math.max(2, width * 0.25));
-  ctx.fillStyle = color;
+  ctx.arc(0, 0, radius * 1.9, 0, Math.PI * 2);
   ctx.fill();
-  ctx.lineWidth = Math.max(1.5, length * 0.07);
-  ctx.strokeStyle = "rgba(234,243,255,0.9)";
+
+  // 2) 淡青圆盘 + 细边
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  ctx.fillStyle = stale ? "rgba(190,200,210,0.9)" : MARKER_DISC;
+  ctx.fill();
+  ctx.lineWidth = Math.max(1, radius * 0.06);
+  ctx.strokeStyle = stale ? "rgba(112,132,156,0.9)" : MARKER_RING;
   ctx.stroke();
 
-  // 车头：实心三角，指 +x（车头方向）
+  // 3) 箭头（画布 y 轴向下，世界 yaw 逆时针为正 → 屏幕上取负）
+  ctx.rotate(-yaw);
   ctx.beginPath();
-  ctx.moveTo(length / 2 + head, 0);
-  ctx.lineTo(length / 2 - head * 0.35, -width * 0.5);
-  ctx.lineTo(length / 2 - head * 0.35, width * 0.5);
+  ctx.moveTo(tip, 0);
+  ctx.lineTo(-back, -halfHeight);
+  ctx.lineTo(-back + notch, 0);
+  ctx.lineTo(-back, halfHeight);
   ctx.closePath();
-  ctx.fillStyle = "#eaf3ff";
+  ctx.fillStyle = stale ? "#70849c" : MARKER_ARROW;
   ctx.fill();
-  ctx.lineWidth = Math.max(1, length * 0.05);
-  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1.2, radius * 0.1);
+  ctx.strokeStyle = "#ffffff";
   ctx.stroke();
 
   ctx.restore();
@@ -218,20 +202,6 @@ export default function MapCanvas({
   const [size, setSize] = useState({ width: 800, height: 520 });
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [imageState, setImageState] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  /** 车体照片；取不到就退回位姿箭头（底图与其它图层照常工作） */
-  const [sprite, setSprite] = useState<HTMLImageElement | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    const next = new Image();
-    next.onload = () => {
-      if (alive) setSprite(next);
-    };
-    next.src = CAR_SPRITE_URL;
-    return () => {
-      alive = false;
-    };
-  }, []);
   /** 正在进行的拖拽：平移 / 画航点方向 / 设定位姿 */
   const drag = useRef<
     | { kind: "pan"; startX: number; startY: number; dx: number; dy: number }
@@ -412,7 +382,7 @@ export default function MapCanvas({
     if (ghost) {
       const { u, v } = worldToImage(map, ghost);
       const p = places(u, v);
-      drawRobot(ctx, p.x, p.y, ghost.yaw, view.scale, "stale", sprite);
+      drawPoseMarker(ctx, p.x, p.y, ghost.yaw, view.scale, "stale");
       ctx.setLineDash([4, 3]);
       ctx.strokeStyle = "#f2b84b";
       ctx.beginPath();
@@ -426,7 +396,7 @@ export default function MapCanvas({
     if (pose) {
       const { u, v } = worldToImage(map, pose);
       const p = places(u, v);
-      drawRobot(ctx, p.x, p.y, pose.yaw, view.scale, "live", sprite);
+      drawPoseMarker(ctx, p.x, p.y, pose.yaw, view.scale, "live");
     }
 
     // 比例尺：随缩放变化，取一个整米数
@@ -444,7 +414,7 @@ export default function MapCanvas({
       ctx.fillText(`已知区域 ${map.bounds[2] - map.bounds[0]}×${map.bounds[3] - map.bounds[1]} px · rev ${map.revision}`, width - 14, height - 40);
       ctx.textAlign = "left";
     }
-  }, [dpr, image, imageState, map, pendingPose, path, pose, preview, scanPoints, size, sprite, view, waypoints, activeIndex]);
+  }, [dpr, image, imageState, map, pendingPose, path, pose, preview, scanPoints, size, view, waypoints, activeIndex]);
 
   /* ---- 交互 ---- */
 
