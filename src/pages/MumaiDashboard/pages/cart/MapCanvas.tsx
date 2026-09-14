@@ -111,12 +111,14 @@ const MARKER_ARROW = "rgb(0,215,238)";
  * 标记在屏幕上的直径（m，按地图比例换算）。
  *
  * **不按真车尺寸画**（车长 0.32 m 在 0.05 m/px 只有 6 个像素，糊成一个点）。
- * 取 2.0 m：大屏默认视角（约 1.25 px/m）下圆盘直径约 125 px、箭头约 77×40 px，
- * 是用户 RViz 上那枚（圆盘 76 px）的 1.6 倍 —— 位姿标记的作用是「一眼看到车在哪、
- * 朝哪」，宁可画大一点也不要让人凑近找。
- * 半径另有 18 px 的下限，缩到很小也不会消失。
+ * 2.0 m 是基准（大屏默认视角约 125 px 圆盘），再乘倍率 ——
+ * 倍率是需求方按观感调的：位姿标记的作用是「一眼看到车在哪、朝哪」，
+ * 投屏演示时宁可画大也不要让人凑近找。
+ * 半径另有随倍率放大的下限，缩到很小也不会消失。
  */
 const MARKER_SIZE_M = 2.0;
+/** 标记整体倍率（改这一个数即可，圆盘 / 箭头 / 下限全部按比例缩放） */
+const MARKER_SCALE = 2.5;
 
 /** 位姿箭头（= 小车 RViz 上的样子） */
 function drawPoseMarker(
@@ -127,7 +129,7 @@ function drawPoseMarker(
   scale: number,
   tone: "live" | "stale",
 ) {
-  const radius = Math.max(18, (MARKER_SIZE_M * scale) / 2);
+  const radius = Math.max(18 * MARKER_SCALE, (MARKER_SIZE_M * MARKER_SCALE * scale) / 2);
   const tip = radius * 0.615; // 箭头尖端到圆心（8/13 × 半径）
   const back = radius * 0.385; // 后缘（5/13 × 半径）
   const halfHeight = radius * 0.29; // 半个箭头高度（图里约 4/13 的直径）
