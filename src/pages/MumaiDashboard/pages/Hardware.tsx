@@ -818,18 +818,57 @@ function PreviewPanel({ link, deviceId }: { link: DeviceLink; deviceId: string }
  * 硬件监看
  * ------------------------------------------------------------------ */
 
+/**
+ * 面板的排版位置：`[行, 列]`。
+ *
+ * 配对原则：同排两块的自然高度尽量接近，等高拉伸后的留白最小。
+ * （自然高度实测，单位 px：设备读数 613 · 采集接收 422 · 设备状态 374 ·
+ *   设备预览 330 · 通道状态 246 · 终端遥测 147）
+ *
+ *   第 1 排  设备状态(374) · 通道状态(246)   → 拉到 374，留白 246
+ *   第 2 排  采集接收(422) · 设备预览(330)   → 拉到 422，留白 330
+ *   第 3 排  设备读数(613) · 终端遥测(147)   → 拉到 613（最矮的一块无论和谁
+ *            配对都会被拉，放最后不挤占上面的行）
+ *
+ * 面板自然高度随后端数据变（通道与接收的行数不是固定的），所以这里是配对顺序，
+ * 不是硬编码高度；同排两块一律等高对齐。
+ */
+const MONITOR_LAYOUT: Record<string, [number, number]> = {
+  status: [1, 1],
+  channels: [1, 2],
+  receive: [2, 1],
+  preview: [2, 2],
+  readings: [3, 1],
+  telemetry: [3, 2],
+};
+
+/** 把排版位置写成 CSS 变量，CSS 侧用 grid-row / grid-column 读取 */
+const place = (key: keyof typeof MONITOR_LAYOUT) => {
+  const [row, col] = MONITOR_LAYOUT[key];
+  return { style: { "--hw-row": row, "--hw-col": col } as CSSProperties };
+};
+
 function MonitorTab({ link, deviceId }: { link: DeviceLink; deviceId: string }) {
   return (
     <div className="hw-monitor">
-      {/* ① 设备现在能不能采、读数是多少 */}
-      <DeviceStatusPanel link={link} deviceId={deviceId} />
-      <ReadingsPanel link={link} />
-      <ChannelsPanel link={link} />
-
-      {/* ② 采到哪一批、终端自己的健康度与现场画面 */}
-      <ReceivePanel link={link} deviceId={deviceId} />
-      <TelemetryPanel link={link} />
-      <PreviewPanel link={link} deviceId={deviceId} />
+      <div {...place("status")}>
+        <DeviceStatusPanel link={link} deviceId={deviceId} />
+      </div>
+      <div {...place("readings")}>
+        <ReadingsPanel link={link} />
+      </div>
+      <div {...place("channels")}>
+        <ChannelsPanel link={link} />
+      </div>
+      <div {...place("receive")}>
+        <ReceivePanel link={link} deviceId={deviceId} />
+      </div>
+      <div {...place("telemetry")}>
+        <TelemetryPanel link={link} />
+      </div>
+      <div {...place("preview")}>
+        <PreviewPanel link={link} deviceId={deviceId} />
+      </div>
     </div>
   );
 }

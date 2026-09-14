@@ -5416,37 +5416,49 @@
    整页被拉高一倍。窄屏要的是密度，宽屏才有多余的宽度可以分配。
    ------------------------------------------------------------------ */
 /*
- * 硬件监看：多列瀑布流，**按列紧凑堆叠**。
+ * 硬件监看：按行网格 —— 同一排的面板**等高对齐**，排与排之间等距。
  *
- * 原来是 grid + auto-fit：同一行的面板会被最高的那块拉齐，
- * 于是「设备读数」（15 行）一高，整行下面的面板就被推到很后面 ——
- * 实测 y=227 的行里最高的 613px，第二行直接落到 y=856，中间空出一大片。
- * 换成 CSS columns 后每列各自往下排，面板之间只有 16px 的固定间距，
- * 不会有「被邻居高度顶开的空白」。
+ * 为什么不用瀑布流（columns）：那一版虽然不留空洞，但各列高度参差
+ * （设备读数 613px 与终端遥测 147px 差四倍），排出来的下沿是锯齿状。
  *
- * 阅读顺序变成「先往下、再换列」（列优先），这是瀑布流的固有代价，
- * 换来的是没有空洞 —— 这一页的面板彼此独立，先读哪一列都成立。
+ * 为什么不用「12 栏 + 每块面板自己的 span」：那样同一行里
+ * 设备状态(3) 与设备读数(6) 的高度差 240px，行内同样对不齐。
+ *
+ * 现在：两列等宽（窄屏一列），高度由最高的一块决定，其余拉伸对齐；
+ * 配对方式让每排两块的高度尽量接近（见下面的配对表），把拉伸留白压到最小。
+ * 读 DOM 顺序仍是 CSS 里 --- 只影响视觉位置。
  */
 .hw-monitor {
-  columns: 3;
-  column-gap: var(--space-4);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: auto;
+  gap: var(--space-4);
+  align-items: stretch;
 }
 
-/* 面板不能跨列断开 */
 .hw-monitor > * {
-  break-inside: avoid;
-  margin-bottom: var(--space-4);
+  /* 行/列位置由各面板在 DOM 上用内联变量声明，见 Hardware.tsx */
+  grid-row: var(--hw-row, auto);
+  grid-column: var(--hw-col, auto);
+  min-width: 0;
+  /* 包裹层撑满单元格，面板再撑满包裹层 —— 同排两块才会真正等高对齐 */
+  display: flex;
+  height: 100%;
 }
 
-@media (max-width: 1500px) {
+.hw-monitor > * > .tech-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
   .hw-monitor {
-    columns: 2;
+    grid-template-columns: minmax(0, 1fr);
   }
-}
 
-@media (max-width: 980px) {
-  .hw-monitor {
-    columns: 1;
+  .hw-monitor > * {
+    grid-row: auto;
+    grid-column: auto;
   }
 }
 
