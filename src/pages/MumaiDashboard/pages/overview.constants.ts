@@ -56,7 +56,26 @@ export const ORDER_STATUS_TONE: Record<OrderStatus, Tone> = {
   待处理: "warn",
   处理中: "info",
   待验收: "warn",
+  已完成: "ok",
   已关闭: "ok",
+};
+
+/**
+ * 新流程工单状态（PRD-工单指派与扫描仪下发-v1.0 §8.1）→ 语义色。
+ *
+ * 与 `ORDER_STATUS_TONE` 分开：那一张是演示回放老工单的词汇
+ * （草稿 / 待复核 / 处理中 / 已完成…），这一张是本期的
+ * 待指派 → 待准备 → 待作业 → 作业中 → 待验收 → 已归档（另加已暂停）。
+ * 两套状态同时出现在工单档案页，各自取各自的色，不互相将就。
+ */
+export const WORK_ORDER_STATUS_TONE: Record<string, Tone> = {
+  待指派: "warn",
+  待准备: "warn",
+  待作业: "info",
+  作业中: "info",
+  待验收: "warn",
+  已归档: "ok",
+  已暂停: "muted",
 };
 
 /* ------------------------------------------------------------------ *

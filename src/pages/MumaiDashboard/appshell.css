@@ -348,6 +348,20 @@
 .toast--danger { border-left-color: var(--danger); }
 .toast--info { border-left-color: var(--info); }
 
+/*
+  带去向的通知里的动作词（「查看」）。
+  通知整条就是一个按钮，所以这里只做视觉提示：竖线分隔 + 强调色。
+  不另做一个小按钮 —— 点哪儿都能跳，做小了反而让人以为只有那一块能点。
+*/
+.toast__action {
+  margin-left: var(--space-2);
+  padding-left: var(--space-2);
+  border-left: 1px solid var(--border-subtle);
+  color: var(--info);
+  font-style: normal;
+  white-space: nowrap;
+}
+
 @keyframes toastIn {
   from { opacity: 0; transform: translateX(16px); }
   to { opacity: 1; transform: none; }

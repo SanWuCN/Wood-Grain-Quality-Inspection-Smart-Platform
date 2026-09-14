@@ -183,8 +183,14 @@ export type HistoryRisk = {
   bookmark: string;
 };
 
-/** 工单状态机（PRD 3.8），design.ts ORDER_STATUS 为展示顺序 */
-export type OrderStatus = "草稿" | "待复核" | "待处理" | "处理中" | "待验收" | "已关闭";
+/**
+ * 工单状态机（PRD 3.8），design.ts ORDER_STATUS 为展示顺序。
+ *
+ * 「已完成」是办结态：历史工单（`HISTORIC_ORDERS`）人工验收通过后一律用它，
+ * 因此历史工单列表里不会再有处理中 / 待处理 / 待验收混杂。
+ * 「已关闭」保留给工单页的「归档」动作 —— 归档是动作结果，不等于验收办结。
+ */
+export type OrderStatus = "草稿" | "待复核" | "待处理" | "处理中" | "待验收" | "已完成" | "已关闭";
 
 export type Order = {
   id: string;

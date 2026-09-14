@@ -1,0 +1,307 @@
+/* ==================================================================
+   木脉智检 · 工单指派与扫描仪下发
+   ------------------------------------------------------------------
+   只服务三个面板：AssignmentPanel / EnvironmentPanel / DispatchPanel
+   （pages/orders/）。类名统一 `wo-` 前缀，避免与 pages.css 撞名。
+
+   口径与 pages.css 一致：
+     - 颜色只写 var(--token)，不写死色值
+     - 字号只用 --fs-aux / --fs-table / --fs-sub / --fs-body
+     - 间距只用 --space-*（4/8/12/16/20）
+     - 能靠留白与左侧细线区分的，不额外画框
+   ================================================================== */
+
+/* ------------------------------------------------------------------
+   负责人及参与人员
+   ------------------------------------------------------------------ */
+
+.wo-people {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wo-people > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.wo-people b {
+  color: var(--ma-text);
+  font-size: var(--fs-table);
+  font-weight: 600;
+}
+
+.wo-people small {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.wo-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+.wo-tag {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  background: var(--fill-soft);
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+  line-height: 20px;
+}
+
+.wo-tag--none {
+  border-color: transparent;
+  background: none;
+  color: var(--ma-text-3);
+}
+
+/* 参与人员勾选：按岗位分组，职责挂在被勾选的人下面 */
+.wo-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wo-picker__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.wo-picker__group > b {
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+  font-weight: 600;
+}
+
+.wo-picker__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.wo-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ma-text-2);
+  font-size: var(--fs-table);
+  cursor: pointer;
+}
+
+.wo-check input {
+  accent-color: var(--primary);
+}
+
+.wo-duties {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding-left: var(--space-4);
+}
+
+/* ------------------------------------------------------------------
+   环境读数摘要与校验结论
+   ------------------------------------------------------------------ */
+
+.wo-readings {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.wo-reading {
+  display: grid;
+  gap: var(--space-1);
+  align-content: start;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+/* 未录入：整格退到中性层级，值就是「—」，不显示任何默认数 */
+.wo-reading.is-pending {
+  border-left-color: var(--ma-text-3);
+}
+
+.wo-reading small {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.wo-reading b {
+  color: var(--ma-text);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-panel);
+  font-weight: 600;
+}
+
+.wo-reading.is-pending b {
+  color: var(--ma-text-3);
+}
+
+.wo-reading b em {
+  margin-left: 3px;
+  color: var(--ma-text-3);
+  font-style: normal;
+  font-size: var(--fs-aux);
+}
+
+.wo-reading__raw {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.wo-checks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wo-checks li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-left: 2px solid var(--ma-text-3);
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+}
+
+.wo-checks li.is-ok {
+  border-left-color: var(--ma-ok);
+}
+
+.wo-checks li.is-bad {
+  border-left-color: var(--ma-danger);
+}
+
+.wo-checks em {
+  margin-left: auto;
+  color: var(--ma-text-3);
+  font-style: normal;
+  font-family: var(--font-data-mixed);
+}
+
+/* ------------------------------------------------------------------
+   表单（二级弹窗内）：读数 / 仪表 / 测量信息
+   ------------------------------------------------------------------ */
+
+.wo-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.wo-form__item {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.wo-form__item > span {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.wo-form__full {
+  grid-column: 1 / -1;
+}
+
+.wo-form__pair {
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.wo-form__pair > .wo-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wo-form__hint {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  font-style: normal;
+}
+
+.wo-input,
+.wo-select {
+  height: 30px;
+  max-width: 100%;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--ma-line);
+  background: var(--bg-page);
+  color: var(--ma-text);
+  font-size: var(--fs-table);
+  outline: none;
+}
+
+.wo-select {
+  min-width: 0;
+}
+
+.wo-select--unit {
+  flex: 0 0 84px;
+}
+
+/* ------------------------------------------------------------------
+   扫描仪下发
+   ------------------------------------------------------------------ */
+
+.wo-target {
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.wo-target > span {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.wo-target__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+/* ------------------------------------------------------------------
+   面板内的动作行
+   ------------------------------------------------------------------ */
+
+.wo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}

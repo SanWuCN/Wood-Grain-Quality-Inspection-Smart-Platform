@@ -379,7 +379,13 @@ export const WORK_ORDER: Order = {
   sourceMode: "replay",
 };
 
-/** 历史工单（PRD 3.1：历史工单与当前工单分列表显示） */
+/**
+ * 历史工单（PRD 3.1：历史工单与当前工单分列表显示）
+ *
+ * 状态一律为「已完成」：这一列是**已办结的档案**，人工验收通过后整单办结，
+ * 不再停留在处理中 / 待处理 / 待验收 —— 未办结的单子在「当前工单」那一栏。
+ * 「已完成」与「已关闭」的分工见 `seed/types.ts` 的 OrderStatus 注释。
+ */
 export const HISTORIC_ORDERS: Order[] = [
   {
     id: "MAY-DEMO-01",
@@ -389,7 +395,7 @@ export const HISTORIC_ORDERS: Order[] = [
     location: "大雄宝殿四柱区域",
     scope: "四柱影像采集与表面巡检，发现 6 处风险",
     componentIds: ["Z01", "Z02", "Z03", "Z04"],
-    status: "待验收",
+    status: "已完成",
     current: false,
     createdAt: "2026-05-18 09:30",
     discoveredAt: "2026-05-18 09:30",
@@ -400,7 +406,7 @@ export const HISTORIC_ORDERS: Order[] = [
       { assetId: "asset-may-report", name: "MAY-DEMO-01_巡检报告.pdf", kind: "报告", sizeText: "4.8 MB", from: "历史资料包", sourceMode: "replay" },
       { assetId: "asset-may-scene", name: "scene-May_bookmarks.json", kind: "场景", sizeText: "16 KB", from: "旧场景书签", sourceMode: "replay" },
     ],
-    acceptanceNote: "R01–R03 已验收关闭；R04 待验收；R05、R06 待处理。",
+    acceptanceNote: "R01–R03 验收关闭，R04 人工验收通过；R05、R06 转入例行复巡跟踪。工单已完成。",
     revisitPlanId: null,
     sourceMode: "replay",
   },
@@ -412,7 +418,7 @@ export const HISTORIC_ORDERS: Order[] = [
     location: "钟楼二层 Z02 测区",
     scope: "受潮范围复核与排水检查",
     componentIds: ["Z02"],
-    status: "处理中",
+    status: "已完成",
     current: false,
     createdAt: "2026-08-28 10:05",
     discoveredAt: "2026-08-28 10:05",
@@ -420,7 +426,7 @@ export const HISTORIC_ORDERS: Order[] = [
     level: "中风险",
     sourceRiskIds: [],
     attachments: [],
-    acceptanceNote: "施工单位已完成排水沟清理，等待雨季复测。",
+    acceptanceNote: "施工单位完成排水沟清理，受潮范围复核通过人工验收，工单已完成。",
     revisitPlanId: null,
     sourceMode: "replay",
   },
@@ -432,7 +438,7 @@ export const HISTORIC_ORDERS: Order[] = [
     location: "山门东侧 Z01",
     scope: "裂隙观测与灌浆建议",
     componentIds: ["Z01"],
-    status: "待处理",
+    status: "已完成",
     current: false,
     createdAt: "2026-08-26 15:40",
     discoveredAt: "2026-08-26 15:40",
@@ -440,7 +446,7 @@ export const HISTORIC_ORDERS: Order[] = [
     level: "低风险",
     sourceRiskIds: [],
     attachments: [],
-    acceptanceNote: "等待责任部门确认处理时间。",
+    acceptanceNote: "裂隙观测记录与灌浆建议已提交并通过人工验收，工单已完成。",
     revisitPlanId: null,
     sourceMode: "replay",
   },
@@ -452,7 +458,7 @@ export const HISTORIC_ORDERS: Order[] = [
     location: "大雄宝殿西次间 Z02 测区",
     scope: "含水率复测与通风改善建议",
     componentIds: ["Z02"],
-    status: "处理中",
+    status: "已完成",
     current: false,
     createdAt: "2026-08-23 11:20",
     discoveredAt: "2026-08-23 11:20",
@@ -460,7 +466,7 @@ export const HISTORIC_ORDERS: Order[] = [
     level: "中风险",
     sourceRiskIds: [],
     attachments: [],
-    acceptanceNote: "已增设通风口，等待干燥季节复测确认。",
+    acceptanceNote: "增设通风口后含水率复测回落，通过人工验收，工单已完成。",
     revisitPlanId: null,
     sourceMode: "replay",
   },
@@ -472,7 +478,7 @@ export const HISTORIC_ORDERS: Order[] = [
     location: "主塔一层北侧 Z03",
     scope: "外观复核与倾斜观测，不含内部检测",
     componentIds: ["Z03"],
-    status: "待验收",
+    status: "已完成",
     current: false,
     createdAt: "2026-08-20 09:05",
     discoveredAt: "2026-08-20 09:05",
@@ -480,7 +486,7 @@ export const HISTORIC_ORDERS: Order[] = [
     level: "低风险",
     sourceRiskIds: [],
     attachments: [],
-    acceptanceNote: "施工单位已提交观测记录，等待人工验收关闭。",
+    acceptanceNote: "观测记录已提交并通过人工验收，工单已完成。",
     revisitPlanId: null,
     sourceMode: "replay",
   },
@@ -492,7 +498,7 @@ export const HISTORIC_ORDERS: Order[] = [
     location: "塔身二层西南侧斗栱区",
     scope: "斗栱变形观测与塔身倾斜复核，不含落架维修",
     componentIds: ["Z02"],
-    status: "处理中",
+    status: "已完成",
     current: false,
     createdAt: "2026-08-13 09:15",
     discoveredAt: "2026-07-18 09:10",
@@ -500,7 +506,7 @@ export const HISTORIC_ORDERS: Order[] = [
     level: "中风险",
     sourceRiskIds: [],
     attachments: [],
-    acceptanceNote: "变形观测按季度跟踪，本轮记录已归档，等待下一轮观测对比。",
+    acceptanceNote: "本轮变形观测记录已归档并通过人工验收，工单已完成；后续按季度继续跟踪。",
     revisitPlanId: null,
     sourceMode: "replay",
   },

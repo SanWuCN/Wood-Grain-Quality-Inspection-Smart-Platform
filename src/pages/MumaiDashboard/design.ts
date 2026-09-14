@@ -156,12 +156,13 @@ export const ADAPT_TABS = [
   { key: "fusion", label: "融合分析", icon: "biz-multimodal" },
 ] as const;
 
-/** 工单状态机（PRD 3.8） */
+/** 工单状态机（PRD 3.8）：已完成 = 历史工单办结态，已关闭 = 归档动作写入 */
 export const ORDER_STATUS = [
   "草稿",
   "待复核",
   "待处理",
   "处理中",
   "待验收",
+  "已完成",
   "已关闭",
 ] as const;
