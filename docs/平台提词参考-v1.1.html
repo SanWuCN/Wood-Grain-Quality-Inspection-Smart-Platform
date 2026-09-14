@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>木脉智检 · PPT 提词参考 v1.1</title>
+<style>
+  :root{
+    --bg:#0a1321; --panel:#0e1c2e; --line:rgba(78,168,255,.20);
+    --glow:#6ee7ff; --primary:#4ea8ff; --text:#e6f2ff; --muted:#8ea8c3;
+    --ok:#37d39b; --warn:#f0b23c; --bad:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; width:1500px; padding:46px 54px 40px;
+    background:var(--bg); color:var(--text);
+    font-family:"Microsoft YaHei","PingFang SC","HarmonyOS Sans SC",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* ── 头部：一页只留一句定位 + 一句总纲 ── */
+  header{display:flex; align-items:flex-start; justify-content:space-between; gap:32px; padding-bottom:20px; border-bottom:1px solid var(--line)}
+  h1{margin:0; font-size:40px; letter-spacing:1.5px}
+  h1 span{color:var(--glow)}
+  .kick{margin-top:9px; font-size:17px; color:var(--muted)}
+  .badge{font-size:13px; color:var(--glow); border:1px solid var(--line); padding:6px 12px; white-space:nowrap}
+  .lead{margin:18px 0 26px; font-size:19px; line-height:1.7; color:#dcebfa}
+  .lead b{color:#fff}
+
+  /* ── 主体：10 张"页卡"，每张 = 图标 + 标题 + 口播一句 + 3 条要点 ── */
+  .deck{display:grid; grid-template-columns:repeat(2,1fr); gap:16px}
+  .card{display:grid; grid-template-columns:52px 1fr; gap:14px; align-items:start;
+        background:var(--panel); border:1px solid var(--line); padding:16px 18px;
+        /* grid 子项默认 min-width:auto：内容里一旦有长串（英文/数字组合），
+           它会撑破列宽并把整页推出横向滚动条。这两条是修这个的。 */
+        min-width:0}
+  .card > div:last-child{min-width:0}
+  .card li,.card .say,.card h2{overflow-wrap:anywhere}
+  .ico{display:flex; flex-direction:column; align-items:center; gap:6px; color:var(--glow)}
+  .ico svg{width:30px; height:30px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round}
+  .no{font-size:12px; letter-spacing:1px; color:var(--muted)}
+  h2{margin:0 0 7px; font-size:18.5px; font-weight:600}
+  .say{margin:0 0 8px; font-size:15px; line-height:1.6; color:#bfe3ff}
+  .say::before{content:"口播 "; color:var(--glow); font-size:12px; letter-spacing:1px}
+  ul{margin:0; padding-left:16px; font-size:14.5px; line-height:1.85; color:#cfe2f5}
+  li::marker{color:var(--primary)}
+  b{color:#fff; font-weight:600}
+
+  /* ── 底部：只有三条收尾指令 ── */
+  footer{margin-top:22px; display:grid; grid-template-columns:repeat(3,1fr); gap:16px}
+  .foot{display:grid; grid-template-columns:26px 1fr; gap:12px; align-items:start; border-top:1px solid var(--line); padding-top:14px;
+        /* 同上：不加 min-width:0，中间那格的长串会把整页顶宽 */
+        min-width:0}
+  .foot svg{width:22px; height:22px; fill:none; stroke:var(--glow); stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round}
+  .foot p{margin:0; font-size:14px; line-height:1.75; color:#cfe2f5; overflow-wrap:anywhere}
+  .foot strong{display:block; color:#fff; font-size:15px; margin-bottom:3px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 3v18M5 4h11l-2 4 2 4H5"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7"/><rect x="13.5" y="3.5" width="7" height="7"/><rect x="3.5" y="13.5" width="7" height="7"/><rect x="13.5" y="13.5" width="7" height="7"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+  <symbol id="i-speaker" viewBox="0 0 24 24"><path d="M4 9.5v5h3l4 3.5V6L7 9.5H4z"/><path d="M15 9.5a4 4 0 0 1 0 5M17.5 7a7.5 7.5 0 0 1 0 10"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 8.5l6 3.5-6 3.5z"/></symbol>
+  <symbol id="i-chip" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/><path d="M9.5 2.5v3M14.5 2.5v3M9.5 18.5v3M14.5 18.5v3M2.5 9.5h3M2.5 14.5h3M18.5 9.5h3M18.5 14.5h3"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3.5v5c0 4-3 7.5-7 9.5-4-2-7-5.5-7-9.5v-5L12 3z"/><path d="M9 12l2 2 4-4.5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12.5l3 3 5-6"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3.5l9 16H3l9-16z"/><path d="M12 9.5v5M12 17.2h.01"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3.5 2"/></symbol>
+</svg>
+
+<header>
+  <div>
+    <h1>木脉智检 · <span>古建筑智能巡检平台</span></h1>
+    <div class="kick">PPT 提词参考 · 10 页骨架 · 每页一句口播 + 三条要点</div>
+  </div>
+  <div class="badge">v1.1 · 配图见《平台介绍图 v1.0》</div>
+</header>
+
+<p class="lead">
+  一句话总纲：<b>把古建筑木构无损检测的采集、风险、工单与设备放进同一空间语境，再用一个能动手干活的语音智能体串起来</b> —— 说一句话，地图动、页面跳、数据落。
+</p>
+
+<div class="deck">
+  <article class="card">
+    <div class="ico"><svg><use href="#i-flag"/></svg><span class="no">01</span></div>
+    <div>
+      <h2>开场 · 我们解决什么</h2>
+      <p class="say">“古建筑木构件不能拆、不能钻，我们要在不伤它的前提下，把里外都看清楚。”</p>
+      <ul><li>对象：古建筑<b>木构无损检测</b></li><li>痛点：点散、证据散、责任散</li><li>主张：<b>一张地图 + 一个智能体</b>串起全流程</li></ul>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="ico"><svg><use href="#i-globe"/></svg><span class="no">02</span></div>
+    <div>
+      <h2>空间语境 · 三维地图</h2>
+      <p class="say">“从全国地图一路钻到示例寺的那一根柱子。”</p>
+      <ul><li>全国 <b>34 省</b> ↔ 上海 <b>16 区</b>平滑下钻</li><li>业务点位 全国 <b>27</b> / 上海 <b>12</b></li><li>点位点击三分支：任务 / 工单 / 就地详情</li></ul>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="ico"><svg><use href="#i-grid"/></svg><span class="no">03</span></div>
+    <div>
+      <h2>业务闭环 · 十个路由</h2>
+      <p class="say">“从接单到交付，每一步都落在这一个平台里。”</p>
+      <ul><li>总览 / 工单 / 建图 / 孪生 / 硬件 / 模型 / 知识库 / 归档</li><li>另有<b>演示控制</b>与<b>大屏展示</b></li><li>顶栏 8 项导航<b>按账号权限</b>显示</li></ul>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="ico"><svg><use href="#i-mic"/></svg><span class="no">04</span></div>
+    <div>
+      <h2>小木 · 怎么叫醒它</h2>
+      <p class="say">“不用点按钮，喊两遍名字，停一下，直接说事。”</p>
+      <ul><li>唤醒「小木小木」<b>连说两遍</b> → 停 0.3~1.5 秒 → 说命令</li><li>意图 <b>29</b> 条 / 工具 <b>13</b> 条，全部<b>白名单</b>调用</li><li>多步任务：<b>✓ ● ○</b> 步骤清单实时推进</li></ul>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="ico"><svg><use href="#i-speaker"/></svg><span class="no">05</span></div>
+    <div>
+      <h2>小木 · 怎么说话</h2>
+      <p class="say">“它的声音是提前录好的，不是机器人念稿。”</p>
+      <ul><li>预录语音包 <b>60 段</b>：预录 &gt; 合成 &gt; 静默降级</li><li>界面上<b>写什么就念什么</b>（逐字匹配，宁可回退不念错）</li><li>高风险动作<b>必须二次确认</b>才执行</li></ul>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="ico"><svg><use href="#i-play"/></svg><span class="no">06</span></div>
+    <div>
+      <h2>现场主线 · 五步演示</h2>
+      <p class="say">“我先按 Ctrl+Q+L 收一张新工单，然后让小木去读它。”</p>
+      <ul><li><b>Ctrl+Q+L</b> 建单（平台无按钮，受控入口）</li><li>「小木小木，<b>读取这份工单</b>」→ 跳到该工单详情</li><li>详情<b>随播报逐段加载</b>（0.8s → 9.6s → 13.6s）</li></ul>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="ico"><svg><use href="#i-chip"/></svg><span class="no">07</span></div>
+    <div>
+      <h2>真机接入 · 不是 PPT</h2>
+      <p class="say">“这三个数不是写死的，是现场设备报上来的。”</p>
+      <ul><li>扫描枪姿态：约 <b>10 Hz</b> 实时同步</li><li>树莓派桌面串流 <b>1024×600</b>，约 10 FPS</li><li>终端每 <b>2 秒</b>上报；6s / 15s 判延迟与离线</li></ul>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="ico"><svg><use href="#i-shield"/></svg><span class="no">08</span></div>
+    <div>
+      <h2>数据可信 · 敢给专家看</h2>
+      <p class="say">“每个数字都能说清从哪来、是实测还是推算。”</p>
+      <ul><li>归档做<b>真实 SHA-256 校验</b>，可导出报告</li><li>知识库检索 + 三维 Token 关系链</li><li>读数分档：<b>实测 / 推算 / 估算</b>，没有的写"未接入"</li></ul>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="ico"><svg><use href="#i-check"/></svg><span class="no">09</span></div>
+    <div>
+      <h2>验收 · 我们自己的尺子</h2>
+      <p class="say">“我把验收做成矩阵跑的，不是自己说好。”</p>
+      <ul><li>AC 矩阵 <b>51 项</b>：通过 45 / 不通过 3 / 证据不足 3</li><li>界面 <b>230/230</b>；语音包 audio=1 synth=0</li><li>真人命令 <b>9/9</b>；唤醒漏检 <b>8.70%</b>（待优化）</li></ul>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="ico"><svg><use href="#i-warn"/></svg><span class="no">10</span></div>
+    <div>
+      <h2>边界 · 主动交代</h2>
+      <p class="say">“哪些是真的、哪些是演示，我一条条说清。”</p>
+      <ul><li>业务批次与雷达流程仍是<b>种子数据回放</b></li><li>地图边界仅供原型，正式部署换<b>合规地图数据</b></li><li>唤醒误报样本仍在补采；串口那批按<b>已搁置</b>处理</li></ul>
+    </div>
+  </article>
+</div>
+
+<footer>
+  <div class="foot">
+    <svg><use href="#i-clock"/></svg>
+    <p><strong>时长建议</strong>01–03 各 40 秒 → 04–06 是重点（各 90 秒，现场跑主线和语音）→ 07–09 各 40 秒 → 10 收尾 30 秒。总计约 8 分钟。</p>
+  </div>
+  <div class="foot">
+    <svg><use href="#i-code"/></svg>
+    <p><strong>技术栈（被问到再展开）</strong>React 19 + TS + Vite + three.js/R3F；Node 共享服务 8000；本地语音 8770/8780，仅监听 127.0.0.1，数据不出机器。</p>
+  </div>
+  <div class="foot">
+    <svg><use href="#i-flag"/></svg>
+    <p><strong>收尾一句</strong>“让每一次判断都有据可查 —— 这就是木脉智检。”</p>
+  </div>
+</footer>
+</body>
+</html>
