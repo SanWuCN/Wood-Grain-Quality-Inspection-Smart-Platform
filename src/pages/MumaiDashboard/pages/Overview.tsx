@@ -246,7 +246,7 @@ function DevicePanel() {
 
   /**
    * 行的点击目标。
-   * 前两行进既有业务页（设备详情 / 建图巡检），第三行开资源弹窗 ——
+   * 前两行进既有业务页（设备详情 / 建图巡航），第三行开资源弹窗 ——
    * 算力服务器没有「设备详情页」，硬跳过去会打开一台根本不存在的设备（§6.1）。
    */
   const selectDeviceRow = (row: { resourceTab?: ResourceTab; to?: string }) => {
@@ -284,7 +284,7 @@ function DevicePanel() {
       mode: "回放",
       state: MISSION.state,
       tone: "info" as const,
-      hint: "建图巡检",
+      hint: "建图巡航",
       to: "/mapping",
     },
     {
@@ -825,6 +825,24 @@ function PlatformDataPanel() {
     return {
       ...CHART_BASE,
       grid: { left: 0, right: 0, top: 0, bottom: 0 },
+      /*
+        单根堆叠横条也**必须**有坐标系。
+        少了 xAxis / yAxis，cartesian2d 在 setOption 里取不到轴，
+        ECharts 会抛 `Cannot read properties of undefined (reading 'get')` ——
+        结果是这一张图整体不渲染，控制台报错、面板空着，而旁边那张
+        「逐台负载」照常画出来，很容易被误判成「页面坏了」。
+        yAxis 用一条空类目撑住这一行的位置，xAxis 固定到总容量。
+      */
+      xAxis: {
+        type: "value" as const,
+        max: total > 0 ? total : 1,
+        show: false,
+      },
+      yAxis: {
+        type: "category" as const,
+        data: [""],
+        show: false,
+      },
       series: [
         {
           type: "bar",

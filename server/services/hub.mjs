@@ -109,6 +109,27 @@ export function createHub({ server, db, path = "/ws", noServer = false }) {
       }
       return sent;
     },
+    /**
+     * 小车状态专用广播：**不挂在会话房间、也不是 kind:"event"**。
+     *
+     * 两条都不能省：
+     *   · 不是 event —— 共享 store 收到 event 会重拉整份快照。小车 2 Hz 推状态，
+     *     挂在事件通道上就是每秒两次全量重拉，四端同时打开会把平台打满；
+     *   · 不按会话 —— 小车不属于某一场排练会话，任何打开建图巡航页的人看到的
+     *     都是同一台车的同一份状态。
+     * 页面自己按需要订阅 `kind:"cart"`，其它页面收到直接忽略。
+     */
+    broadcastCart(payload) {
+      const text = JSON.stringify({ kind: "cart", ...payload });
+      let sent = 0;
+      for (const socket of wss.clients) {
+        if (socket.readyState === socket.OPEN && socket.bufferedAmount < 512 * 1024) {
+          socket.send(text);
+          sent += 1;
+        }
+      }
+      return sent;
+    },
     clientCount() {
       let total = 0;
       for (const room of rooms.values()) total += room.size;

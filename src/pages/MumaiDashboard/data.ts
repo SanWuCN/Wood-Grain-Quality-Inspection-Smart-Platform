@@ -62,7 +62,7 @@ export const workOrders: WorkOrder[] = [
 
 export const moduleCopy: Record<string, { title: string; summary: string; action: string; steps: string[] }> = {
   "工单档案": { title: "工单档案", summary: "从风险发现到人工验收，所有证据与处理记录围绕同一工单沉淀。", action: "打开当前工单", steps: ["任务附件已关联", "环境配置已确认", "复核工单待审核"] },
-  "建图巡检": { title: "建图巡检", summary: "占据栅格、机器人轨迹、巡检点与通信通道保持独立状态。", action: "预览巡检路线", steps: ["地图版本 MAP-SH-06", "点位序列 Z01 → Z04", "车辆状态 3 秒前"] },
+  "建图巡航": { title: "建图巡航", summary: "小车只有建图与巡航两个功能：栅格地图、位姿、雷达点、规划路径与七路车况分别判断。", action: "打开建图巡航", steps: ["小车链路 2 Hz 状态", "地图与 RViz 画面各自判断", "航点巡航需先定位就绪"] },
   "数字孪生": { title: "数字孪生", summary: "打开示例寺预采场景，联动构件标签、表面疑点、回波与历史记录。", action: "定位 Z04", steps: ["场景版本 GS-2026.09", "Z04 热点已定位", "当前/历史视角可对比"] },
   "检测适配": { title: "检测适配", summary: "采集、异常排查、数据集、训练验证、更新交付与融合分析串成闭环。", action: "查看训练验证", steps: ["数据集 DS-06 已冻结", "适配任务已完成", "设备回执已归档"] },
   "知识库": { title: "知识库", summary: "本地资料检索与业务状态分开读取，来源可追溯到原文位置。", action: "查询五月巡检", steps: ["资料索引 KB-12", "检索结果 Top 5", "工单状态实时合并"] },

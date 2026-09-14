@@ -295,7 +295,14 @@ async function reloginWithSession(): Promise<boolean> {
   return reloginInFlight;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/**
+ * 统一的平台请求入口（登录令牌 + 401 自动补登录 + 统一错误体）。
+ *
+ * 导出给同源的其它数据源复用（小车链路 `cart/api.ts`）—— 那里如果自己写一份
+ * fetch，就等于把「令牌失效补登录」「服务未启动给可识别错误」这两条规则复制一遍，
+ * 迟早两边不一致（一边显示"未连接"、一边显示"登录过期"）。
+ */
+export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = readToken();
   const headers = new Headers(init.headers);
   if (token) headers.set("authorization", `Bearer ${token}`);
@@ -331,7 +338,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const retried = (init as RequestInit & { __reloginRetried?: boolean }).__reloginRetried;
     if (response.status === 401 && token && !retried) {
       if (await reloginWithSession()) {
-        return request<T>(path, { ...init, __reloginRetried: true } as RequestInit);
+        return apiRequest<T>(path, { ...init, __reloginRetried: true } as RequestInit);
       }
       throw {
         status: 401,
@@ -437,7 +444,7 @@ export type PlatformHistory = { windowSec: number; scale: number; points: Platfo
 
 export const api = {
   async login(account: string, password: string) {
-    const result = await request<{ token: string; actor: Actor; allowedActions: string[] }>("/api/auth/login", {
+    const result = await apiRequest<{ token: string; actor: Actor; allowedActions: string[] }>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ account, password }),
     });
@@ -454,7 +461,7 @@ export const api = {
   async ensureSession(account: string, password: string) {
     if (readToken()) {
       try {
-        const me = await request<{ actor: Actor | null; allowedActions: string[] }>("/api/auth/me");
+        const me = await apiRequest<{ actor: Actor | null; allowedActions: string[] }>("/api/auth/me");
         if (me.actor) return { actor: me.actor, allowedActions: me.allowedActions };
       } catch {
         /* 服务没起来之类：下面统一走登录，失败会在登录那一步报出来 */
@@ -465,11 +472,11 @@ export const api = {
   },
 
   snapshot(sessionId: string) {
-    return request<Snapshot>(`/api/sessions/${encodeURIComponent(sessionId)}/snapshot`);
+    return apiRequest<Snapshot>(`/api/sessions/${encodeURIComponent(sessionId)}/snapshot`);
   },
 
   createSession(scenarioId = "chapter2") {
-    return request<{ session: Snapshot["session"] }>("/api/sessions", {
+    return apiRequest<{ session: Snapshot["session"] }>("/api/sessions", {
       method: "POST",
       body: JSON.stringify({ scenarioId }),
     });
@@ -489,7 +496,7 @@ export const api = {
     payload?: Record<string, unknown>;
     commandId?: string;
   }) {
-    return request<T>("/api/commands", {
+    return apiRequest<T>("/api/commands", {
       method: "POST",
       body: JSON.stringify({
         commandId: body.commandId ?? makeCommandId(body.action, body.entityId ?? null),
@@ -503,7 +510,7 @@ export const api = {
   },
 
   validateEnvironment(inputs: Record<string, unknown>) {
-    return request<{
+    return apiRequest<{
       ok: boolean;
       checks: { key: string; label: string; ok: boolean; field: string; message: string }[];
       fieldErrors: { field: string; message: string }[];
@@ -524,20 +531,20 @@ export const api = {
     sessionId: string,
     body: { viewType: string; focusIds: string[]; hold?: boolean },
   ) {
-    return request<{ holderId: string; viewType: string; focusIds: string[]; eventSeq: number }>(
+    return apiRequest<{ holderId: string; viewType: string; focusIds: string[]; eventSeq: number }>(
       "/api/projection",
       { method: "POST", body: JSON.stringify({ sessionId, ...body }) },
     );
   },
 
   fileMeta(fileId: string) {
-    return request<{ fileId: string; name: string; size: number; sha256: string; mediaType: string }>(
+    return apiRequest<{ fileId: string; name: string; size: number; sha256: string; mediaType: string }>(
       `/api/files/${encodeURIComponent(fileId)}`,
     );
   },
 
   verifyFile(fileId: string) {
-    return request<{ fileId: string; name: string; present: boolean; match: boolean; declaredSha256?: string; actualSha256: string | null }>(
+    return apiRequest<{ fileId: string; name: string; present: boolean; match: boolean; declaredSha256?: string; actualSha256: string | null }>(
       `/api/files/${encodeURIComponent(fileId)}/verify`,
     );
   },
@@ -621,7 +628,7 @@ export const api = {
 
   upload(file: File, sessionId: string, dir = "uploads") {
     const query = new URLSearchParams({ name: file.name, sessionId, dir, mediaType: file.type || "application/octet-stream" });
-    return request<{ fileId: string; name: string; size: number; sha256: string }>(`/api/files?${query}`, {
+    return apiRequest<{ fileId: string; name: string; size: number; sha256: string }>(`/api/files?${query}`, {
       method: "POST",
       body: file,
       headers: { "content-type": file.type || "application/octet-stream" },
@@ -629,7 +636,7 @@ export const api = {
   },
 
   health() {
-    return request<{ ok: boolean; service: string; sessions: number; assetsReady: boolean; clients: number }>("/api/health");
+    return apiRequest<{ ok: boolean; service: string; sessions: number; assetsReady: boolean; clients: number }>("/api/health");
   },
 
   /**
@@ -640,7 +647,7 @@ export const api = {
    * 等于自己跟自己比，把文件删了结论也一样。
    */
   archiveCheck(sessionId: string, assetIds?: string[]) {
-    return request<ArchiveCheckReport>("/api/archives/check", {
+    return apiRequest<ArchiveCheckReport>("/api/archives/check", {
       method: "POST",
       body: JSON.stringify({ sessionId, assetIds: assetIds ?? [] }),
     });
@@ -648,7 +655,7 @@ export const api = {
 
   /** 补传 / 重选副本：把清单项指向一份真实文件，登记摘要取该文件的真实摘要 */
   archiveRepair(sessionId: string, assetId: string, fileId: string) {
-    return request<{ assetId: string; fileId: string; name: string; sizeText: string; sha256: string; repairedBy: string }>(
+    return apiRequest<{ assetId: string; fileId: string; name: string; sizeText: string; sha256: string; repairedBy: string }>(
       "/api/archives/repair",
       { method: "POST", body: JSON.stringify({ sessionId, assetId, fileId }) },
     );
@@ -657,19 +664,19 @@ export const api = {
   /* ---- 排练控制台（PRD §11 / 评审 F12） ---- */
 
   consoleOverview(sessionId: string) {
-    return request<RehearsalOverview>(`/api/console/overview?sessionId=${encodeURIComponent(sessionId)}`);
+    return apiRequest<RehearsalOverview>(`/api/console/overview?sessionId=${encodeURIComponent(sessionId)}`);
   },
 
   /** 新建一场演示会话：新一轮隔离，从开场状态开始 */
   consoleNewSession(scenarioId = "chapter2") {
-    return request<{ session: RehearsalOverview["sessions"][number]; entityCount: number }>(
+    return apiRequest<{ session: RehearsalOverview["sessions"][number]; entityCount: number }>(
       "/api/console/sessions",
       { method: "POST", body: JSON.stringify({ scenarioId }) },
     );
   },
 
   consoleCapture(sessionId: string, stage: string, label: string) {
-    return request<{ id: string; stage: string; label: string; entityCount: number; createdAt: string }>(
+    return apiRequest<{ id: string; stage: string; label: string; entityCount: number; createdAt: string }>(
       "/api/console/snapshots",
       { method: "POST", body: JSON.stringify({ sessionId, stage, label }) },
     );
@@ -677,14 +684,14 @@ export const api = {
 
   /** 恢复阶段快照：把整场实体换回快照内容，历史事件流不动 */
   consoleRestore(sessionId: string, snapshotId: string) {
-    return request<{ restored: number; stage: string; at: string; label: string; snapshotId: string }>(
+    return apiRequest<{ restored: number; stage: string; at: string; label: string; snapshotId: string }>(
       "/api/console/snapshots/restore",
       { method: "POST", body: JSON.stringify({ sessionId, snapshotId }) },
     );
   },
 
   consoleDeleteSnapshot(sessionId: string, snapshotId: string) {
-    return request<{ removed: boolean }>("/api/console/snapshots/delete", {
+    return apiRequest<{ removed: boolean }>("/api/console/snapshots/delete", {
       method: "POST",
       body: JSON.stringify({ sessionId, snapshotId }),
     });
@@ -692,7 +699,7 @@ export const api = {
 
   /** 导出诊断包：会话 + 实体 + 快照 + 事件 + 预检，一份 JSON */
   consoleDiagnostics(sessionId: string) {
-    return request<Record<string, unknown>>(`/api/console/diagnostics?sessionId=${encodeURIComponent(sessionId)}`);
+    return apiRequest<Record<string, unknown>>(`/api/console/diagnostics?sessionId=${encodeURIComponent(sessionId)}`);
   },
 
   /* ---- 平台资源（运行后端这台机器的真实占用） ---- */
@@ -705,11 +712,11 @@ export const api = {
    */
   platformResources(fixture?: string) {
     const query = fixture ? `?fixture=${encodeURIComponent(fixture)}` : "";
-    return request<PlatformResources>(`/api/platform/resources${query}`);
+    return apiRequest<PlatformResources>(`/api/platform/resources${query}`);
   },
 
   platformResourceHistory(windowSec = 60) {
-    return request<PlatformHistory>(`/api/platform/resources/history?windowSec=${windowSec}`);
+    return apiRequest<PlatformHistory>(`/api/platform/resources/history?windowSec=${windowSec}`);
   },
 
   /* ---- 手持终端（树莓派 / woodpulse）设备网关 ---- */
@@ -721,22 +728,22 @@ export const api = {
    * 要退回种子数据继续演示，而不是整页报错。
    */
   deviceHardware(deviceId: string) {
-    return request<DeviceHardwareView>(`/api/devices/${encodeURIComponent(deviceId)}/hardware`);
+    return apiRequest<DeviceHardwareView>(`/api/devices/${encodeURIComponent(deviceId)}/hardware`);
   },
 
   deviceEvents(deviceId: string, limit = 40) {
-    return request<{ deviceId: string; events: DeviceEvent[] }>(
+    return apiRequest<{ deviceId: string; events: DeviceEvent[] }>(
       `/api/devices/${encodeURIComponent(deviceId)}/events?limit=${limit}`,
     );
   },
 
   deviceLedger() {
-    return request<{ devices: DeviceLedgerEntry[]; status: Record<string, unknown>; serverTime: string }>("/api/devices");
+    return apiRequest<{ devices: DeviceLedgerEntry[]; status: Record<string, unknown>; serverTime: string }>("/api/devices");
   },
 
   /** 下发设备命令。终端的回执是异步的（accepted → executed），这里只负责发出去 */
   deviceCommand(deviceId: string, type: string, args: Record<string, unknown> = {}) {
-    return request<{ command: { commandId: string; state: string; action: string }; pushed: boolean; hint: string }>(
+    return apiRequest<{ command: { commandId: string; state: string; action: string }; pushed: boolean; hint: string }>(
       `/api/devices/${encodeURIComponent(deviceId)}/commands`,
       { method: "POST", body: JSON.stringify({ type, args }) },
     );
@@ -749,7 +756,7 @@ export const api = {
    * 服务端按它幂等 —— 断网重试同一个 ID，拿到的是同一张工单（PRD §3.1）。
    */
   triggerWorkOrder(eventId: string) {
-    return request<WorkOrderTriggerResult>("/api/work-orders/trigger", {
+    return apiRequest<WorkOrderTriggerResult>("/api/work-orders/trigger", {
       method: "POST",
       body: JSON.stringify({ eventId }),
     });
@@ -757,27 +764,27 @@ export const api = {
 
   workOrders(filter: WorkOrderFilter = "all", q = "") {
     const query = new URLSearchParams({ filter, q });
-    return request<{ orders: WorkOrderSummary[]; accounts: AssignmentGroup[]; targets: DispatchTarget[] }>(
+    return apiRequest<{ orders: WorkOrderSummary[]; accounts: AssignmentGroup[]; targets: DispatchTarget[] }>(
       `/api/work-orders?${query}`,
     );
   },
 
   workOrder(orderId: string) {
-    return request<WorkOrderDetail>(`/api/work-orders/${encodeURIComponent(orderId)}`);
+    return apiRequest<WorkOrderDetail>(`/api/work-orders/${encodeURIComponent(orderId)}`);
   },
 
   assignWorkOrder(
     orderId: string,
     body: { leaderAccountId: string; members: { accountId: string; duties: string[] }[]; expectedRevision: number },
   ) {
-    return request<{ ok: boolean; detail: WorkOrderDetail }>(
+    return apiRequest<{ ok: boolean; detail: WorkOrderDetail }>(
       `/api/work-orders/${encodeURIComponent(orderId)}/assignment`,
       { method: "PUT", body: JSON.stringify(body) },
     );
   },
 
   setWorkOrderStatus(orderId: string, action: WorkOrderAction, expectedRevision?: number) {
-    return request<{ ok: boolean; detail: WorkOrderDetail }>(
+    return apiRequest<{ ok: boolean; detail: WorkOrderDetail }>(
       `/api/work-orders/${encodeURIComponent(orderId)}/status`,
       { method: "POST", body: JSON.stringify({ action, expectedRevision }) },
     );
@@ -795,14 +802,14 @@ export const api = {
       expectedRevision: number;
     },
   ) {
-    return request<{ ok: boolean; environment: EnvironmentView }>(
+    return apiRequest<{ ok: boolean; environment: EnvironmentView }>(
       `/api/work-orders/${encodeURIComponent(orderId)}/environment-draft`,
       { method: "PUT", body: JSON.stringify(body) },
     );
   },
 
   validateWorkOrderEnvironment(orderId: string, expectedRevision: number) {
-    return request<{ ok: boolean; environment: EnvironmentView }>(
+    return apiRequest<{ ok: boolean; environment: EnvironmentView }>(
       `/api/work-orders/${encodeURIComponent(orderId)}/environment/validate`,
       { method: "POST", body: JSON.stringify({ expectedRevision }) },
     );
@@ -810,7 +817,7 @@ export const api = {
 
   /** 删除工单（项目经理）：级联清掉主体、指派、环境版本与下发记录，不可恢复 */
   deleteWorkOrder(orderId: string) {
-    return request<{ ok: boolean; orderNo: string; status: string; openDispatches: number }>(
+    return apiRequest<{ ok: boolean; orderNo: string; status: string; openDispatches: number }>(
       `/api/work-orders/${encodeURIComponent(orderId)}`,
       { method: "DELETE" },
     );
@@ -820,7 +827,7 @@ export const api = {
     orderId: string,
     body: { deviceId: string; configVersion?: string | null; expectedRevision?: number; idempotencyKey: string },
   ) {
-    return request<{ ok: boolean; dispatch: DispatchView; replayed: boolean; hint?: string }>(
+    return apiRequest<{ ok: boolean; dispatch: DispatchView; replayed: boolean; hint?: string }>(
       `/api/work-orders/${encodeURIComponent(orderId)}/dispatches`,
       { method: "POST", body: JSON.stringify(body) },
     );
