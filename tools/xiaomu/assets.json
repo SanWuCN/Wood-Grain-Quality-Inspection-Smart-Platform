@@ -1,0 +1,19 @@
+{
+  "note": "动效素材清单。换视频：替换 src/ 下的 mp4 → 跑 tools/video/抠透明GIF.mjs → 跑 tools/rebuild/03-检查台.mjs",
+  "pipeline": "tools/video/抠透明GIF.mjs（ffmpeg 色度键/亮度键自动选择 + 空间约束）",
+  "verifyTool": "tools/video/验透明.mjs",
+  "items": [
+    { "id": "blink", "title": "眨眼", "desc": "眯眼笑的眨眼，循环",
+      "gif": "gif/blink.gif", "webm": "webm/blink.webm", "src": "src/blink.mp4",
+      "key": { "mode": "chroma", "solid": 0.20 },
+      "verify": { "corner": "8/8", "center": "8/8", "soft": "1.10%" } },
+    { "id": "think", "title": "思考", "desc": "皱眉抬眼的思考态，循环",
+      "gif": "gif/think.gif", "webm": "webm/think.webm", "src": "src/think.mp4",
+      "key": { "mode": "chroma", "solid": 0.20 },
+      "verify": { "corner": "8/8", "center": "8/8", "soft": "1.00%" } },
+    { "id": "speak", "title": "说话", "desc": "说话时的口型开合，循环",
+      "gif": "gif/speak.gif", "webm": "webm/speak.webm", "src": "src/speak.mp4",
+      "key": { "mode": "chroma", "solid": 0.20 },
+      "verify": { "corner": "8/8", "center": "8/8", "soft": "0.87%" } }
+  ]
+}
