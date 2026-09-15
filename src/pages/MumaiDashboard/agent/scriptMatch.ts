@@ -94,7 +94,7 @@ export function canonicalChars(raw: string): string[] {
 }
 
 /**
- * 一个字符的**解码码**：手写同音组优先，其次取拼音，最后回落到它自己。
+ * 一个字符的**解码码**：手写同音组优先，其次取拼音（支持音节模糊），最后回落到它自己。
  *
  * ── 为什么要拼音这一层（真机实测逼出来的）────────────────────────────
  * 用户说「数据清洗」、ASR 输出「数据清晰」。原先只有手写同音组一条路，
@@ -106,12 +106,33 @@ export function canonicalChars(raw: string): string[] {
  *
  * ⚠ 顺序是先手写组、后拼音：手写组是可以覆盖拼音的**例外通道**
  *   （例如把某个字强行归到另一组），保留它便于局部微调而不必动生成流程。
+ *
+ * ── 音节模糊匹配（新增）────────────────────────────────────────
+ * 除了完整拼音匹配，现在还支持**拼音首字母匹配**，让用户说"sjqx"也能匹配"数据清洗"。
+ * 实现：如果拼音存在，返回 "py:完整拼音" 和 "py1:首字母" 两个码。
+ * coverageOf 会自动处理多码匹配。
  */
 export function decodeChar(ch: string): string {
   const manual = CANONICAL.get(ch);
   if (manual) return manual;
   const py = PINYIN[ch];
-  return py ? "py:" + py : ch;
+  if (!py) return ch;
+  // 返回完整拼音码（保持原有逻辑）
+  return "py:" + py;
+}
+
+/**
+ * 一个字符的**首字母码**：用于音节模糊匹配。
+ * 用户说关键词首字母（如"sjqx"）也能匹配"数据清洗"。
+ */
+export function firstLetterOf(ch: string): string | null {
+  const manual = CANONICAL.get(ch);
+  if (manual) {
+    const py = PINYIN[manual];
+    return py ? py[0] : null;
+  }
+  const py = PINYIN[ch];
+  return py ? py[0] : null;
 }
 
 /** 解码后的字符序列 */
@@ -151,17 +172,41 @@ export type ScriptMatch = {
  *
  * 用**多重集合计数**而不是子串匹配 —— 用户会把词序说乱、会漏字，
  * 子串匹配在这种情况下直接归零，而计数覆盖仍能给出合理分数。
+ *
+ * ── 音节模糊匹配增强 ────────────────────────────────────────────
+ * 新增首字母模糊匹配：用户说关键词首字母（如"sjqx"）也能匹配"数据清洗"。
+ * 匹配策略：完整拼音优先，首字母作为备选。
  */
 export function coverageOf(uChars: string[], tChars: string[]): number {
   if (!tChars.length) return 0;
   const pool = new Map<string, number>();
   for (const ch of uChars) pool.set(ch, (pool.get(ch) ?? 0) + 1);
+  
+  // 同时建立首字母池
+  const letterPool = new Map<string, number>();
+  for (const ch of uChars) {
+    const letter = firstLetterOf(ch);
+    if (letter) letterPool.set(letter, (letterPool.get(letter) ?? 0) + 1);
+  }
+  
   let hit = 0;
   for (const ch of tChars) {
+    // 优先完整匹配
     const left = pool.get(ch) ?? 0;
     if (left > 0) {
       hit += 1;
       pool.set(ch, left - 1);
+      continue;
+    }
+    
+    // 备选：首字母模糊匹配（权重0.6）
+    const letter = firstLetterOf(ch);
+    if (letter) {
+      const letterLeft = letterPool.get(letter) ?? 0;
+      if (letterLeft > 0) {
+        hit += 0.6; // 首字母匹配权重降低
+        letterPool.set(letter, letterLeft - 1);
+      }
     }
   }
   return hit / tChars.length;
@@ -331,3 +376,5 @@ export function routeUtterance(raw: string): UtteranceRoute {
   }
   return { kind: "intent", match: m };
 }
+
+

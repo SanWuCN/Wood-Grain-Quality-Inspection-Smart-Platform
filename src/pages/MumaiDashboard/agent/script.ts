@@ -119,7 +119,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§8–10",
     act: "第一幕 · 工单进入与现场部署",
     title: "接单整理",
-    triggers: ["读取这份工单", "整理任务范围和出发清单", "整理任务范围", "读取工单"],
+    triggers: ["读取工单", "整理任务", "工单"],
     lines: [
       {
         role: "main",
@@ -149,13 +149,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§25–27",
     act: "第一幕 · 工单进入与现场部署",
     title: "天气风险查询",
-    triggers: [
-      "联网查找一下现场情况",
-      "提供近三个月的天气数据",
-      "评估该地古建可能存在的风险",
-      "查找现场情况",
-      "近三个月天气",
-    ],
+    triggers: ["查天气", "现场天气", "天气数据"],
     lines: [
       {
         role: "main",
@@ -173,7 +167,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§30–32",
     act: "第一幕 · 工单进入与现场部署",
     title: "任务顺序同步",
-    triggers: ["同步任务顺序", "任务顺序", "工作台同步"],
+    triggers: ["同步任务", "任务顺序"],
     lines: [
       {
         role: "main",
@@ -196,7 +190,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§58–60",
     act: "第一幕 · 工单进入与现场部署",
     title: "开工清单核对",
-    triggers: ["核对开工清单", "显示还没完成的项目", "开工清单", "未完成项"],
+    triggers: ["开工清单", "核对清单"],
     lines: [
       {
         role: "main",
@@ -219,12 +213,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§75–77",
     act: "第一幕 · 工单进入与现场部署",
     title: "补偿参数建议",
-    triggers: [
-      "读取校验结果和现有标定表",
-      "给出本次补偿参数建议",
-      "补偿参数建议",
-      "标定表",
-    ],
+    triggers: ["补偿参数", "标定建议"],
     lines: [
       {
         role: "main",
@@ -244,12 +233,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§119–120",
     act: "第二幕 · 建图重建与风险初筛",
     title: "地图/视频通道巡查",
-    triggers: [
-      "持续检查地图和视频通道",
-      "只提醒影响作业的异常",
-      "检查地图和视频通道",
-      "通道巡查",
-    ],
+    triggers: ["通道巡查", "检查通道"],
     lines: [
       {
         role: "main",
@@ -267,12 +251,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§139–141",
     act: "第二幕 · 建图重建与风险初筛",
     title: "重建素材检查",
-    triggers: [
-      "检查这批重建素材",
-      "列出缺失文件和需要重看的画面",
-      "重建素材",
-      "缺失文件",
-    ],
+    triggers: ["重建素材", "检查素材"],
     lines: [
       {
         role: "main",
@@ -289,13 +268,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§168–170",
     act: "第二幕 · 建图重建与风险初筛",
     title: "四柱风险初筛",
-    triggers: [
-      "比较这四组木构件",
-      "按可见异常给出优先复核顺序",
-      "比较四组木构件",
-      "优先复核顺序",
-      "比较这四根木柱",
-    ],
+    triggers: ["四柱风险", "木构比较", "复核顺序"],
     lines: [
       {
         role: "main",
@@ -321,12 +294,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§171–173",
     act: "第二幕 · 建图重建与风险初筛",
     title: "打开标注原图",
-    triggers: [
-      "打开你标记的原图",
-      "把疑点区域放大",
-      "打开标记的原图",
-      "疑点区域放大",
-    ],
+    triggers: ["打开原图", "疑点放大"],
     lines: [
       {
         role: "main",
@@ -343,12 +311,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§210–212",
     act: "第二幕 · 建图重建与风险初筛",
     title: "巡检任务预检",
-    triggers: [
-      "先检查巡检任务的设备、地图和作业区",
-      "生成下发预览",
-      "巡检任务预检",
-      "下发预览",
-    ],
+    triggers: ["任务预检", "巡检预检"],
     lines: [
       {
         role: "main",
@@ -374,7 +337,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§230",
     act: "第三幕 · 异常拒判与模型更新",
     title: "异常预警（小木主动发起）",
-    triggers: ["适用性预警", "触发适用性预警", "Z04当前批次"],
+    triggers: ["适用预警", "异常预警"],
     lines: [
       {
         role: "main",
@@ -392,12 +355,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§247–249",
     act: "第三幕 · 异常拒判与模型更新",
     title: "异常证据汇总",
-    triggers: [
-      "汇总本次异常证据",
-      "生成补充数据和模型适配的任务清单",
-      "汇总异常证据",
-      "模型适配的任务清单",
-    ],
+    triggers: ["异常证据", "汇总证据"],
     lines: [
       {
         role: "main",
@@ -415,12 +373,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§250–252",
     act: "第三幕 · 异常拒判与模型更新",
     title: "任务卡拆分",
-    triggers: [
-      "把补采、数据审核和适配验证拆成任务卡",
-      "拆成任务卡",
-      "关联本次异常批次",
-      "任务卡",
-    ],
+    triggers: ["任务卡", "拆分任务"],
     lines: [
       {
         role: "main",
@@ -438,12 +391,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§276–277",
     act: "第三幕 · 异常拒判与模型更新",
     title: "采样计划与接收清单核对",
-    triggers: [
-      "对照采样计划检查接收清单",
-      "缺什么就列什么",
-      "检查接收清单",
-      "采样计划",
-    ],
+    triggers: ["接收清单", "采样核对"],
     lines: [
       {
         role: "main",
@@ -461,13 +409,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§299–303",
     act: "第三幕 · 异常拒判与模型更新",
     title: "数据清洗与人工审核",
-    triggers: [
-      "启动数据清洗",
-      "列出需要人工审核的记录",
-      "生成数据集划分",
-      "数据清洗",
-      "人工审核的记录",
-    ],
+    triggers: ["数据清洗", "人工审核"],
     lines: [
       {
         role: "main",
@@ -490,12 +432,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§344–346",
     act: "第三幕 · 异常拒判与模型更新",
     title: "新旧模型验证汇总",
-    triggers: [
-      "汇总新旧模型的验证结果",
-      "检查部署条件",
-      "新旧模型的验证结果",
-      "部署条件",
-    ],
+    triggers: ["模型验证", "部署条件"],
     lines: [
       {
         role: "main",
@@ -512,12 +449,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§372–373",
     act: "第三幕 · 异常拒判与模型更新",
     title: "设备版本回报核对",
-    triggers: [
-      "核对目标版本与设备回报",
-      "设备版本回报",
-      "版本回报核对",
-      "交付包与设备回执",
-    ],
+    triggers: ["版本核对", "设备回报"],
     lines: [
       {
         role: "main",
@@ -544,12 +476,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§410–412",
     act: "第四幕 · 复扫融合与任务交付",
     title: "本批次分析流程",
-    triggers: [
-      "调用本批次分析流程",
-      "完成图像标注和雷达分析",
-      "按测区融合结果",
-      "本批次分析流程",
-    ],
+    triggers: ["批次分析", "融合结果"],
     lines: [
       {
         role: "main",
@@ -565,12 +492,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§413–415",
     act: "第四幕 · 复扫融合与任务交付",
     title: "证据对照与补核清单",
-    triggers: [
-      "把图像疑点和同测区响应放在一起",
-      "列出需要补核的项目",
-      "图像疑点和同测区响应",
-      "补核清单",
-    ],
+    triggers: ["证据对照", "补核清单"],
     lines: [
       {
         role: "main",
@@ -588,12 +510,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§441–443",
     act: "第四幕 · 复扫融合与任务交付",
     title: "工单草稿生成",
-    triggers: [
-      "结合本次检测记录",
-      "生成工单草稿",
-      "列出复核位置、处理建议和附件",
-      "工单草稿",
-    ],
+    triggers: ["工单草稿", "生成草稿"],
     lines: [
       {
         role: "main",
@@ -617,12 +534,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§454–456",
     act: "第四幕 · 复扫融合与任务交付",
     title: "任务复盘生成",
-    triggers: [
-      "生成本次任务复盘",
-      "重点写异常原因、处置过程和后续待办",
-      "任务复盘",
-      "复盘生成",
-    ],
+    triggers: ["任务复盘", "生成复盘"],
     lines: [
       {
         role: "main",
@@ -646,12 +558,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "§476–478",
     act: "第四幕 · 复扫融合与任务交付",
     title: "交付摘要整理",
-    triggers: [
-      "根据校验结果整理交付摘要",
-      "打开还需要处理的条目",
-      "整理交付摘要",
-      "还需要处理的条目",
-    ],
+    triggers: ["交付摘要", "整理摘要"],
     lines: [
       {
         role: "main",
@@ -684,3 +591,8 @@ export function mainLineOf(round: ScriptRound): string {
 }
 
 export const SCRIPT_ROUND_COUNT = SCRIPT_ROUNDS.length;
+
+
+
+
+
