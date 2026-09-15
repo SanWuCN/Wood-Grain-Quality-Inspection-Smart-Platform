@@ -8,13 +8,14 @@
 /** 抽取到的槽位：键是槽位名（pillar / zone / risk / order / batch / page / scene / map / speed） */
 export type EntityBag = Record<string, string | undefined>;
 
-/** 状态（技术方案 §25）：IDLE / LISTENING / RECOGNIZING / UNDERSTANDING /
+/** 状态（技术方案 §25）：IDLE / LISTENING / RECOGNIZING / UNDERSTANDING / THINKING /
  *  PLANNING / EXECUTING / WAITING_TOOL / RESPONDING / FINISHED / ERROR */
 export type AgentState =
   | "IDLE"
   | "LISTENING"
   | "RECOGNIZING"
   | "UNDERSTANDING"
+  | "THINKING"
   | "PLANNING"
   | "EXECUTING"
   | "WAITING_TOOL"
@@ -28,6 +29,7 @@ export const AGENT_STATE_LABEL: Record<AgentState, string> = {
   LISTENING: "正在聆听",
   RECOGNIZING: "语音识别中",
   UNDERSTANDING: "语义理解中",
+  THINKING: "思考中",
   PLANNING: "生成执行计划",
   EXECUTING: "正在执行",
   WAITING_TOOL: "等待工具返回",
@@ -107,3 +109,5 @@ export type BotTurn = {
 };
 
 export type Turn = UserTurn | BotTurn;
+
+

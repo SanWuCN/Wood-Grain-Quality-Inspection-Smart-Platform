@@ -430,6 +430,7 @@ export default function XiaomuDock() {
     if (wake.state === "error" || wake.state === "reconnecting") return "error";
     if (agent.agentState === "ERROR") return "error";
     if (agent.agentState === "RESPONDING") return "speaking";
+    if (agent.agentState === "THINKING") return "thinking";
     if (
       agent.agentState === "UNDERSTANDING" ||
       agent.agentState === "PLANNING" ||
@@ -872,3 +873,4 @@ export default function XiaomuDock() {
     </div>
   );
 }
+

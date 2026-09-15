@@ -67,6 +67,7 @@ const STATE_TONE: Record<AgentState, "idle" | "active" | "ok" | "warn" | "danger
   LISTENING: "active",
   RECOGNIZING: "active",
   UNDERSTANDING: "active",
+  THINKING: "active",
   PLANNING: "active",
   EXECUTING: "active",
   WAITING_TOOL: "warn",
@@ -800,3 +801,4 @@ export default function VoiceConsole() {
     </div>
   );
 }
+
