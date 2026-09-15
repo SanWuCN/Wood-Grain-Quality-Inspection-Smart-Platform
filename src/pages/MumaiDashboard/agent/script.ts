@@ -419,7 +419,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     roundNo: "⑪",
     paragraph: "§230",
     act: "第三幕 · 异常拒判与模型更新",
-    title: "异常预警（小木主动发起）",
+    title: "巡检前检查（小木主动发起）",
     /* 触发来源：本地任务事件（语音不得抢触发） */
     triggerSource: "local-event",
     triggers: [],
@@ -434,7 +434,9 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     voicePack: null,
     intentId: null,
     precondition:
-      "**唯一由小木主动起头的一轮**，没有上一句问句 —— 由架构师在采集页看到「适用域待核验」事件后触发，不靠语音唤醒进入",
+      "**唯一由小木主动起头的一轮**（工作清单 §8 明文：不接受语音抢触发）。" +
+      "触发来源是本地任务事件「任务状态进入巡检前检查」—— 即任务推进到该节点时由平台自动播报，" +
+      "不靠语音唤醒进入；`triggerSource: \"local-event\"` 与空 `triggers` 一起把这条约束写成数据。",
   },
   {
     roundNo: "⑫",
