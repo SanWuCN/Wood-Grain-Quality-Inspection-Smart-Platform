@@ -35,7 +35,7 @@ import {
   voicePackOf,
   type Intent,
 } from "./intents";
-import { advanceOrderReveal, beginOrderReveal, buildRevealSchedule, cancelOrderReveal, splitSegments } from "../ordersReveal";
+import { advanceOrderReveal, alignBeats, beginOrderReveal, buildRevealSchedule, cancelOrderReveal, splitSegments } from "../ordersReveal";
 import { commissionBinding } from "../commissionBinding";
 import { useWorkOrderStore } from "../store/workOrders";
 import { understand, SEMANTIC_THRESHOLDS, type MatchResult } from "./matcher";
@@ -490,7 +490,14 @@ function startOrderDetailReveal(round: ScriptRound, orderId: string, spoken?: un
   beginOrderReveal(orderId, reveal.sections);
 
   const segments = splitSegments(mainLineOf(round));
-  const schedule = buildRevealSchedule(segments, reveal.beats);
+  /*
+    ⚠ 必须先 `alignBeats()`：声明里的拍数是按"这段台词会切出几句话"写的，
+      而实际段数由语言决定（全是顿号就只切得出 1 段）。不对齐的话
+      `buildRevealSchedule` 的 `min(段数, 拍数)` 会把多出来的组**整组丢掉** ——
+      第①轮 3 段/4 拍 → `pending` 永不揭示（永久停在 3/7），
+      第④⑩⑰⑳㉑轮 1 段/3 拍 → 只亮摘要，另两组永不出现。详见 `ordersReveal.alignBeats`。
+  */
+  const schedule = buildRevealSchedule(segments, alignBeats(segments, reveal.beats));
   if (schedule.length === 0) {
     /* 没有可算的拍点（段或 beat 为空）→ 不登记计划，页面完整显示，而不是留个空壳 */
     cancelOrderReveal();

@@ -88,6 +88,43 @@ export type RevealBeat = {
 };
 
 /**
+ * 把"声明的拍点表"对齐到**实际段数**。
+ *
+ * ── 为什么必须有这一步（真踩过，8 轮同时中招）──────────────────────
+ * 声明里的 `beats` 是按"这段台词会切出几句话"写死的，而实际段数是**语言决定的**：
+ * 一句话里全是顿号、没有句号，`splitSegments` 就只能切出 1 段。
+ * 旧实现在 `buildRevealSchedule` 里取 `min(段数, 拍数)` 截断 —— 于是多出来的组
+ * **连定时器都不会有**：第①轮 3 段 / 4 拍 → `pending` 永不揭示，页面永久停在 3/7；
+ * 第④⑩⑰⑳㉑轮只有 1 段 / 3 拍 → 只亮 `order`，另外两组永不出现。
+ * 表现是"小木念完了，板块还缺一块"，而且**只能等 30 秒兜底 TTL** 才补齐。
+ *
+ * ── 规则 ───────────────────────────────────────────────────────────
+ *   · 段数 ≥ 拍数：原样返回（逐拍推进，节奏不变）；
+ *   · 段数 < 拍数：把**每一拍的组按顺序**摊到现有段上，首末段必须各占一拍，
+ *     保证 `sections` 里的每一组都排得进某一拍 —— **一个都不许落下**。
+ *
+ * 宁可某一拍多亮一组（念到最后一句时补齐），也不能留下永不出现的板块：
+ * "少一块"比"少一次停顿"严重得多。
+ *
+ * @param segments 台词实际切出的语义段（顺序即播报顺序）
+ * @param beats    声明的拍点表（与 `segments` 下标对齐意图）
+ */
+export function alignBeats(segments: string[], beats: string[][]): string[][] {
+  const segCount = segments.length;
+  if (segCount === 0) return [];
+  if (beats.length <= segCount) return beats.slice(0, segCount);
+
+  /* 按"拍到段的映射"合并：map[i] 收集落在第 i 段上的所有组，顺序即声明顺序 */
+  const map: string[][] = Array.from({ length: segCount }, () => []);
+  const span = segCount - 1;
+  for (let i = 0; i < beats.length; i += 1) {
+    const at = span === 0 ? 0 : Math.round((i * span) / (beats.length - 1));
+    for (const key of beats[i] ?? []) if (!map[at].includes(key)) map[at].push(key);
+  }
+  return map;
+}
+
+/**
  * 按"语义拍点表"算揭示计划。
  *
  * ── 与旧算法的区别（这是本次要修的行为）────────────────────────────
@@ -95,9 +132,11 @@ export type RevealBeat = {
  * 短句和长句的落点一样长，念到哪、亮到哪就对不上。
  * 现在按**段**累加：第 n 段的时刻 = 前 n-1 段的估算时长之和。
  *
+ * ⚠ 调用方先把 `beats` 交给 `alignBeats()` 对齐到实际段数（见那里的说明）——
+ *   本函数只负责"按段累加算时刻"，不再做任何截断。
+ *
  * @param segments 台词切成的语义段（顺序即播报顺序）
  * @param beats    每段对应要推进的组（与 `segments` 下标对齐；缺省即该段不推进）
- *                 数量不一致时按**较短者**截断 —— 不越界，也不留下"永远不亮"的组
  */
 export function buildRevealSchedule(segments: string[], beats: string[][]): RevealBeat[] {
   const count = Math.min(segments.length, beats.length);

@@ -26,6 +26,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { SCRIPT_ROUNDS } from "./agent/script.ts";
 
 /*
   最小 window 桩：只需要 setTimeout / clearTimeout。
@@ -61,11 +62,13 @@ function resetAll(): void {
 
 const {
   ORDER_DETAIL_SECTIONS,
+  alignBeats,
   buildRevealSchedule,
   beginOrderReveal,
   advanceOrderReveal,
   cancelOrderReveal,
   revealSectionsFor,
+  splitSegments,
 } = await import("./ordersReveal.ts");
 
 /* ------------------------------------------------------------------ *
@@ -199,16 +202,58 @@ test("拍点时间按**段**累加，不是按整段总字数平均分配", () =
   assert.ok(new Set(gaps).size > 1, `各段时长不应完全相同（实际 ${gaps.join(",")}）——若相同说明又按平均数分配了`);
 });
 
-test("拍点数量与段数不匹配时按较短者截断，不越界也不留空组", () => {
-  const fewer = buildRevealSchedule(SEGMENTS_V1, [["order"], ["scope"]]);
-  assert.equal(fewer.length, 2, "拍点少时只产出少量拍点");
-
-  const more = buildRevealSchedule(["只有一段。"], BEATS_V1);
+test("段数少于拍数时把多出来的组摊到现有段上，一组都不许落下", () => {
+  const more = buildRevealSchedule(["只有一段。"], alignBeats(["只有一段。"], BEATS_V1));
   assert.equal(more.length, 1, "段少时只产出实际段数的拍点");
-  assert.deepEqual(more[0].sections, ["order"], "第一拍只推进表格里对应的那一组");
+  assert.deepEqual(more[0].sections, ["order", "scope", "tasks", "pending"],
+    "只有一段时四组必须在这一拍里补齐 —— 否则后三组永远不会亮");
+
+  /* 两段 / 四拍：首段第一组、末段含最后一组，中间顺次铺开 */
+  const two = buildRevealSchedule(["甲。", "乙。"], alignBeats(["甲。", "乙。"], BEATS_V1));
+  assert.equal(two.length, 2, "两段台词就是两个拍点");
+  assert.equal(two[0].sections[0], "order", "第一段必须先亮摘要");
+  assert.ok(two[1].sections.includes("pending"), "最后一段必须把末组补齐");
+  assert.deepEqual([...two[0].sections, ...two[1].sections], [...ORDER_DETAIL_SECTIONS],
+    "两拍合起来要覆盖四组，不重不漏");
+
+  /* 段数 ≥ 拍数：原样返回，逐拍推进的节奏不变 */
+  const aligned = alignBeats(SEGMENTS_V1, BEATS_V1);
+  assert.deepEqual(aligned, BEATS_V1, "段数够时对齐不改变声明");
 });
 
 test("空输入不抛异常，返回空计划", () => {
   assert.deepEqual(buildRevealSchedule([], BEATS_V1), []);
   assert.deepEqual(buildRevealSchedule(SEGMENTS_V1, []), []);
+  assert.deepEqual(alignBeats([], BEATS_V1), [], "没有段就没有拍，不越界");
+});
+
+/* ------------------------------------------------------------------ *
+ * 4. 真实剧本全量核对 —— 这条是"永不揭示"缺陷的回归锁
+ *
+ * 上一次的故障：声明 4 拍、台词只切出 3 段，`min()` 把第 4 组丢掉，
+ * 页面永久停在 3/7，只能等 30 秒兜底 TTL。全量扫一遍，任何一轮再出现
+ * 「声明的组排不进任何一拍」都必须在这里红掉。
+ * ------------------------------------------------------------------ */
+
+test("真实 22 轮：凡声明揭示的组，都必须排得进某一拍（一个都不能落下）", () => {
+  type RevealDecl = NonNullable<(typeof SCRIPT_ROUNDS)[number]["reveal"]>;
+  const rounds: { roundNo: string; reveal: RevealDecl; text: string }[] = [];
+  for (const r of SCRIPT_ROUNDS) {
+    if (r.reveal?.target !== "order-detail") continue;
+    const main = r.lines.find((l) => l.role === "main");
+    assert.ok(main, `第「${r.roundNo}」轮没有 main 台词`);
+    rounds.push({ roundNo: r.roundNo, reveal: r.reveal, text: main.text });
+  }
+  assert.ok(rounds.length >= 8, `应有多轮声明了工单详情揭示（实际 ${rounds.length} 轮）`);
+
+  for (const { roundNo, reveal, text } of rounds) {
+    const segments = splitSegments(text);
+    const schedule = buildRevealSchedule(segments, alignBeats(segments, reveal.beats));
+    const planned = schedule.flatMap((b) => b.sections);
+    const missing = reveal.sections.filter((s) => !planned.includes(s));
+    assert.deepEqual(missing, [],
+      `第「${roundNo}」轮有 ${missing.length} 组永远排不进揭示计划（段数 ${segments.length} / 声明拍数 ${reveal.beats.length}）`);
+    assert.deepEqual(planned, reveal.sections,
+      `第「${roundNo}」轮的揭示顺序必须与声明的组顺序一致`);
+  }
 });
