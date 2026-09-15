@@ -1,6 +1,16 @@
 /**
  * 常驻唤醒通道（P0）—— 把麦克风的原始 PCM 一路送到本地语音服务
  *
+ * ── 关于本文件唯一的 import（`./wakeGate.ts`）────────────────────────
+ * 这个文件刻意**不 import 任何业务模块**：它的依赖（服务地址、回调、
+ * 派发方式）全部由构造参数注入。原因见文件后半段那条注释 ——
+ * `api.tsx` 会 import 本模块（关闭生命周期要调 `abortRound`），
+ * 若本模块再反向 import 业务模块就会成环。
+ *
+ * `./wakeGate.ts` 是**例外且安全**：它是一个零依赖的纯函数模块
+ * （不 import 任何东西、不碰 DOM、不读时间），所以不会构成环。
+ * 它的作用是"播报期间与尾音期不接受唤醒"（工作清单 §9 硬要求）。
+ *
  * ── 这个文件解决什么问题 ────────────────────────────────────────────
  *
  * 现有的 `asr.ts` 只有 AnalyserNode，**拿得到电平、拿不到样本**。
@@ -20,6 +30,8 @@
  * 判定在 P1 接 sherpa-onnx KWS 时加在服务端 —— 那时这个文件一行都不用改，
  * 它只负责"把音频可靠地推上去"这一件事。
  */
+
+import { shouldRejectWake } from "./wakeGate.ts";
 
 /** 采集参数。16k 单声道是语音模型的标准输入，浏览器会自动重采样 */
 
@@ -229,6 +241,15 @@ export class WakeChannel {
   private partialText = "";
   /** 已唤醒、正在收集命令（见 WakeSnapshot.collecting 的说明） */
   private collecting = false;
+  /**
+   * TTS 是否正在播报，以及上次播报结束的时刻（用于「播报期间不唤醒」的门控）。
+   *
+   * 值由外部通过 `noteSpeaking()` 写入 —— 通道本身不持有 `VoiceOutput`
+   * （那是播报侧的实例，两边的生命周期不同）。这样唤醒通道只依赖一个
+   * "布尔 + 时间戳"的最小契约，而不必认识 TTS 的实现。
+   */
+  private speaking = false;
+  private lastSpeechEndAt = 0;
   private resumeTimer: number | null = null;
 
   get wakeCountValue(): number {
@@ -268,6 +289,22 @@ export class WakeChannel {
     this.note = note;
     this.options.onState?.(state, note);
     this.emit();
+  }
+
+  /**
+   * 告知通道"小木现在是否在播报"（工作清单 v1.0 §9：TTS 不得反向唤醒自己）。
+   *
+   * 由播报侧在 `VoiceOutput.onSpeakingChange` 里调用。放在这里的理由：
+   * 通道只需要一个"布尔 + 时间戳"的最小契约，不需要认识 `VoiceOutput`；
+   * 两边生命周期不同，让通道持有 TTS 实例会引出释放顺序问题。
+   *
+   * 播报结束时记时间戳，供 `shouldRejectWake` 判"尾音静默期"。
+   */
+  noteSpeaking(speaking: boolean): void {
+    if (!speaking && this.speaking) {
+      this.lastSpeechEndAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    }
+    this.speaking = speaking;
   }
 
   /** 当前快照（界面与验收脚本都读它） */
@@ -593,6 +630,23 @@ export class WakeChannel {
       if (payload.type === "wake") {
         const route = String(payload.route ?? "");
         const decision = Number(payload.decision_ms ?? 0);
+        /*
+          ── 播报期间与尾音期不接受唤醒（工作清单 v1.0 §9）──────────────
+          小木自己的 TTS 会从扬声器出来被麦克风收回去。通道虽然开了
+          `echoCancellation` 且麦克风不接扬声器，但**回声消除不保证消除自身 TTS**
+          （取决于音量、设备与外放/耳机），所以这里再加一层显式门控：
+          播报中一律拒绝，播报结束后再留一小段静默期挡尾音与混响。
+          不加这一层的后果是"自己念到含触发词的那句就把自己唤醒"，
+          演示现场表现为小木自说自话停不下来。
+        */
+        const gate = shouldRejectWake({
+          speaking: this.speaking,
+          sinceSpeechEndMs: this.lastSpeechEndAt > 0 ? performance.now() - this.lastSpeechEndAt : Number.POSITIVE_INFINITY,
+        });
+        if (gate.reject) {
+          console.info(`[wake] 忽略本次唤醒：${gate.reason}`);
+          return;
+        }
         this.wakeCount += 1;
         this.lastWake = { route, detail: String(payload.detail ?? ""), decisionMs: decision };
         // 新的一轮开始：清掉上一轮的字幕，否则界面会先显示上一句再跳到新的

@@ -29,6 +29,12 @@ import { ask, RETRIEVAL_NOTE, type Runtime } from "./executor";
 import { VoiceInput, recognitionSupported } from "./asr";
 import { closeAgent, hasForeignModal, takePendingInteractionId, takePendingQuestion } from "./api";
 import { VoiceOutput, type TtsStatus } from "./tts";
+/*
+  唤醒通道：这里只用来 `noteSpeaking()` 告知"现在在播报"（见 onSpeakingChange 处）。
+  ⚠ 它不会构成依赖环：`wakeChannel.ts` 除了零依赖的 `wakeGate.ts` 之外不 import 任何模块，
+  依赖全靠构造参数注入。反方向 `api.tsx → wakeChannel` 那条边才是当初要防的环。
+*/
+import { wakeChannel } from "./wakeChannel";
 import {
   clearTurns,
   getAgentState,
@@ -355,6 +361,15 @@ export default function VoiceConsole() {
     output.onSpeakingChange = (speaking) => {
       if (speaking) inputAsrRef.current?.suspend();
       else inputAsrRef.current?.resume();
+      /*
+        ── 同时告知唤醒通道（工作清单 v1.0 §9）────────────────────────
+        小木的 TTS 会从扬声器出来被麦克风收回去。识别侧已经用 suspend/resume
+        挡了，但**常驻唤醒通道是另一条独立的长连接**（它一直在听，
+        见 `wakeChannel.ts` 的说明），不受这条 suspend 影响 ——
+        所以必须单独告诉它"现在在播报"，否则会出现"自己念到触发词就把自己唤醒"。
+        通道侧据此在播报中与尾音静默期内忽略唤醒命中。
+      */
+      wakeChannel().noteSpeaking(speaking);
     };
     outputRef.current = output;
     setTtsStatus(output.status);
