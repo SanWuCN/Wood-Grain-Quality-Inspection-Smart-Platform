@@ -880,3 +880,4 @@ export function hasTool(name: string): boolean {
 export function readLive() {
   return getAgentState().live;
 }
+
