@@ -56,7 +56,7 @@
  */
 
 import { makePyRandom } from "../pyrandom";
-import { DEVICES, DEMO_BUSINESS_DATE } from "./scenario";
+import { DEVICES, DEMO_BUSINESS_DATE } from "./scenario.ts";
 import type {
   AnomalyEvent,
   DeviceLogBoot,
@@ -64,7 +64,7 @@ import type {
   DeviceLogOutcome,
   DeviceLogPacket,
   DeviceLogSource,
-} from "./types";
+} from "./types.ts";
 
 /* ==================================================================
    1. 生成器基础设施

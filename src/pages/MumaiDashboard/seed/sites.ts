@@ -22,8 +22,8 @@
  * 再拆状态只会让图例和颜色映射变复杂。
  */
 
-import { HISTORIC_ORDERS, MISSION, WORK_ORDER } from "./scenario";
-import type { Order, Waypoint } from "./types";
+import { HISTORIC_ORDERS, MISSION, WORK_ORDER } from "./scenario.ts";
+import type { Order, Waypoint } from "./types.ts";
 
 /** 点位状态（地图点位图例与颜色映射的唯一来源，见 `map/status.ts`） */
 export type SiteStatus = "collected" | "inspected" | "risk" | "workorder";

@@ -53,7 +53,7 @@ import type {
   UpdatePackage,
   Waveform,
   Waypoint,
-} from "./types";
+} from "./types.ts";
 
 /* ------------------------------------------------------------------ *
  * 0. 会话与演示日历
@@ -80,9 +80,325 @@ export const DEMO_SESSION = {
     docId: "doc-weather-0901",
     range: "2026-06-11 至 2026-09-10（近三个月）",
     summary: "梅雨期累计降水 412mm，8 月 3 次连续降雨过程，平均相对湿度 78%，日温差最大 11.4℃",
+    /*
+      ⚠ 这里的 `summary` 是给知识库检索用的**整段文本**，不是可参与播报的结构化数据。
+      播报与天气面板一律走下面的 `DEMO_SCENARIO_V3.weather`（同一批冻结值，结构化、可断言）。
+      改数字时两处必须一起改 —— `demoScenario.test.ts` 会核对它们指向同一口径。
+    */
     source: "归档天气档案 · 非实时联网查询",
   },
 } as const;
+
+/* ------------------------------------------------------------------ *
+ * 0.1 纯本地演示数据包 V3（工作清单 v1.0 §6）
+ *
+ * 单一数据入口：播报模板、页面卡片、任务卡、附件与测试**都从这里取值**，
+ * 不得各自手写数字（§6 与 §11.5）。
+ *
+ * 三条设计约束：
+ *   ① **不另造真值** —— 日期沿用上面的 `DEMO_BUSINESS_DATE`；
+ *      与既有 seed 同名的标识符（巡检任务 / 建图版本 / 三维场景 / 工单草稿）
+ *      取值必须与既有导出一致，测试会逐项核对；
+ *   ② **自洽优先于照抄** —— 凡是能从别的字段算出来的（缺失帧、排除数、划分合计、
+ *      归档合计）都**写成派生**，避免"三个文件三个数"（§11.5）；
+ *   ③ **冻结** —— 顶层 `Object.freeze`，运行期任何模块都改不动演示数据。
+ *
+ * 边界（§4）：这里全是**本地演习数据**，不代表真实观测；
+ * 页面显示它时必须带"本地演习数据"角标（见 `weather.badge`）。
+ * ------------------------------------------------------------------ */
+
+/** 天气面板标题：清单 §6.2 逐字给定 */
+const WEATHER_PANEL_TITLE = "平台环境档案 · 截止 2026-09-10";
+
+export const DEMO_SCENARIO_V3 = Object.freeze({
+  /** 演示时钟：§6.1 要求"新工单时间不得继续直接取电脑当前日期，而由可配置的演示时钟统一派生" */
+  clock: Object.freeze({
+    businessDate: DEMO_BUSINESS_DATE,
+    /** 由业务日期派生的时间戳（工单创建时间等一律用它，不用 `new Date()`） */
+    derivationNote: "所有演示时间由 businessDate 派生，禁止读取系统当前时间",
+  }),
+
+  /** 四根木柱与重点构件（§6.1） */
+  components: Object.freeze({
+    count: 4,
+    prefix: "Z",
+    /** 平台编号 Z01…Z04 由服务端事务生成（见 §11.4 的绑定要求） */
+    codes: Object.freeze(["Z01", "Z02", "Z03", "Z04"]),
+    focus: "Z04",
+    focusRegion: "Z04 下部区域",
+  }),
+
+  /** 巡检任务（§6.1） */
+  mission: Object.freeze({
+    id: "MSN-2026-0911-02",
+    waypointCount: 6,
+    routeLengthM: 24.6,
+    /** 演习：按钮只改本地状态，不真实下发（§10 阶段 D） */
+    realDispatch: false,
+  }),
+
+  /** 建图版本（§6.1） */
+  map: Object.freeze({
+    version: "MAP-SH-06",
+    resolutionM: 0.05,
+    coveragePct: 96,
+    fileSizeText: "2.6 MB",
+  }),
+
+  /** 三维场景（§6.1） */
+  twin: Object.freeze({
+    sceneId: "scene-SH-0901",
+    boundingBoxText: "18.6 × 11.4 × 6.9 m",
+  }),
+
+  /** 工单草稿（§6.1） */
+  draftOrder: Object.freeze({
+    no: "WO-2026-0912",
+  }),
+
+  /** 三个月天气快照（§6.2）—— 固定数据，不得表述为真实历史观测 */
+  weather: Object.freeze({
+    rangeStart: "2026-06-11",
+    rangeEnd: "2026-09-10",
+    panelTitle: WEATHER_PANEL_TITLE,
+    badge: "本地演习数据",
+    rain: Object.freeze({
+      totalMm: 412.0,
+      rainyDays: 37,
+      stormDays: 4,
+      longestWetSpellDays: 5,
+      peakDailyMm: 52.6,
+      unit: "mm",
+      risks: Object.freeze(["柱脚积水返潮", "屋面排水", "渗漏痕迹"]),
+    }),
+    humidity: Object.freeze({
+      avgPct: 78,
+      highHumidityDays: 39,
+      maxDailyAvgPct: 92,
+      risks: Object.freeze(["木材含水率偏高", "霉变", "漆层起翘"]),
+    }),
+    wind: Object.freeze({
+      maxGustMs: 17.8,
+      strongWindDays: 6,
+      risks: Object.freeze(["迎风面连接", "松动", "表面风化"]),
+    }),
+    temperature: Object.freeze({
+      maxDailyDeltaC: 11.4,
+      risks: Object.freeze(["干缩湿胀", "细裂纹", "地仗层开裂"]),
+    }),
+    /** §6.2 逐字冻结的标准播报（变量取自上面各数据键） */
+    script:
+      "已完成近三个月天气查询。累计降雨412.0毫米，降雨37天，平均相对湿度78%，最大阵风17.8米每秒。" +
+      "建议优先检查柱脚返潮、屋面排水、漆层起翘和迎风面连接，现场结论以实测为准。",
+  }),
+
+  /** 现场环境（§6.3） */
+  siteEnv: Object.freeze({
+    airTempC: 26.4,
+    relativeHumidityPct: 78,
+    windSpeedMs: 1.6,
+    /** 测点相对重点构件的位置 —— 必须说清对象与距离（§11.10） */
+    distanceToZ04M: 2.4,
+    heightAboveGroundM: 1.1,
+  }),
+
+  /** 重建素材（§6.3；§7 的固定播报逐字用到） */
+  material: Object.freeze({
+    videoCount: 1,
+    durationText: "4分18秒",
+    resolutionText: "3840×1920",
+    keyFrames: 214,
+    lowQualityClips: 2,
+    lowQualityMarks: Object.freeze(["00:43", "02:17"]),
+    missingFiles: 0,
+  }),
+
+  /**
+   * 异常采集（§6.3）。
+   *
+   * `missingFrames` 与计划/收到并列为数据，而**自洽性由 `validateScenario()` 保证**
+   * （见该函数）。为什么不用 getter 现算：本仓库的测试跑在 Node 原生类型剥离下，
+   * 实测**对象字面量里的 `get` 会报 `ERR_INVALID_TYPESCRIPT_SYNTAX`**
+   * （"Expected ',', got 'ident'"）。改成"数据 + 显式校验"后，既避开该限制，
+   * 又让"三个数字必须对得上"这件事变成**可被测试调用**的断言，而不是隐式约定。
+   */
+  anomaly: Object.freeze({
+    batchId: "scan-Z04-001",
+    plannedFrames: 420,
+    receivedFrames: 386,
+    missingFrames: 34,
+    featureShiftSigma: 2.7,
+    /** §11.2：只标记为采集异常，不生成病害结论 */
+    conclusion: "待补采",
+  }),
+
+  /** 数据清洗（§6.3）—— 自洽性同样交给 `validateScenario()` */
+  clean: Object.freeze({
+    rawCount: 12,
+    keptCount: 9,
+    excludedCount: 3,
+    physicalGroups: 6,
+    split: Object.freeze({ train: 4, validation: 1, test: 1 }),
+  }),
+
+  /** 模型验证（§6.3） */
+  model: Object.freeze({
+    missedBefore: 3,
+    missedAfter: 2,
+    falsePositiveBefore: 4,
+    falsePositiveAfter: 2,
+    recallBefore: 0.92,
+    recallAfter: 0.94,
+    deployChecksPassed: 6,
+    deployChecksTotal: 6,
+  }),
+
+  /** 端侧包（§6.3）—— 演习：不可真实刷写 */
+  package: Object.freeze({
+    id: "DEMO-PKG-02",
+    sizeMb: 3.2,
+    targetVersion: "DEMO-M02b",
+    rollbackVersion: "DEMO-M02",
+    selfCheckPassed: 7,
+    simulatedOnly: true,
+  }),
+
+  /** 精细分析 / 三路融合（§6.3） */
+  fusion: Object.freeze({
+    recordId: "fusion-2026-0911-01",
+    radarFrames: 420,
+    imageFrames: 14,
+    edgeResults: 3,
+    preprocessVersion: "comp-v1.4",
+    /** §8 ⑲：两项两路一致 → 优先复核；一项有效比例低于阈值 → 补采 */
+    reliableCount: 2,
+    pendingCount: 1,
+    effectiveRatioPct: 88.4,
+    effectiveRatioThresholdPct: 90,
+  }),
+
+  /** 归档交付（§6.3） */
+  delivery: Object.freeze({
+    total: 24,
+    passed: 21,
+    missing: 1,
+    summaryMismatch: 2,
+  }),
+});
+
+/**
+ * 自洽性校验：凡是"能从别的字段算出来"的指标，都在这里核对一遍。
+ *
+ * ── 为什么要这个函数（而不是 getter）────────────────────────────────
+ *   1. **绕开运行时限制**：本仓库测试跑在 Node 原生类型剥离下，实测对象字面量里
+ *      写 `get x() {...}` 会报 `ERR_INVALID_TYPESCRIPT_SYNTAX`；
+ *   2. **让自洽性可断言**：§11.5 禁止"同一指标在三个文件里手写三个数值"。
+ *      这些成对的值（计划/收到/缺失、原始/保留/排除、划分合计）最容易各自手写，
+ *      把校验集中成一个**可被测试调用**的函数，比隐式约定可靠；
+ *   3. **播报前的前置条件**：页面在用这批数字生成台词前调用它，
+ *      不自洽就进入缺失态，而不是把矛盾的数字念出去（§11.1）。
+ *
+ * @returns 不自洽项的中文说明列表；空数组 = 全部自洽
+ */
+export function validateScenario(): string[] {
+  const v = DEMO_SCENARIO_V3;
+  const problems: string[] = [];
+
+  /*
+    ⚠ 下面这些比较刻意套一层 `String(...)`。
+
+    原因：`Object.freeze` 保留了**字面量类型**（`420`、`386`、`24`…），
+    于是 `v.fusion.radarFrames !== v.anomaly.receivedFrames` 这类比较
+    在**编译期**就被判定为"恒真/恒假"，`tsc` 报 TS2367（no overlap）。
+    而这条校验的意义恰恰是**运行期**的：将来有人只改了其中一个数字，
+    字面量类型会跟着变，只有运行期比较才抓得住"两个数对不上"。
+    `String()` 会同时拓宽类型并保留值语义，比较结果与直接比较数字完全一致，
+    但不再触发 TS2367。这是在不降低类型安全的前提下最直接的做法。
+  */
+  const n = (x: number | string): string => String(x);
+
+  if (n(v.anomaly.missingFrames) !== n(v.anomaly.plannedFrames - v.anomaly.receivedFrames)) {
+    problems.push(
+      `异常采集不自洽：缺失帧 ${v.anomaly.missingFrames} ≠ 计划 ${v.anomaly.plannedFrames} − 收到 ${v.anomaly.receivedFrames}`,
+    );
+  }
+  if (n(v.clean.excludedCount) !== n(v.clean.rawCount - v.clean.keptCount)) {
+    problems.push(
+      `数据清洗不自洽：排除 ${v.clean.excludedCount} ≠ 原始 ${v.clean.rawCount} − 保留 ${v.clean.keptCount}`,
+    );
+  }
+  const splitSum = v.clean.split.train + v.clean.split.validation + v.clean.split.test;
+  if (n(splitSum) !== n(v.clean.physicalGroups)) {
+    problems.push(
+      `数据集划分不自洽：训练+验证+测试 = ${splitSum} ≠ 物理样本组 ${v.clean.physicalGroups}`,
+    );
+  }
+  const deliverySum = v.delivery.passed + v.delivery.missing + v.delivery.summaryMismatch;
+  if (n(deliverySum) !== n(v.delivery.total)) {
+    problems.push(
+      `归档交付不自洽：通过+缺失+摘要不一致 = ${deliverySum} ≠ 总数 ${v.delivery.total}`,
+    );
+  }
+  if (n(v.components.codes.length) !== n(v.components.count)) {
+    problems.push(`木构主体不自洽：编号 ${v.components.codes.length} 个 ≠ 数量 ${v.components.count}`);
+  }
+  if (!v.components.codes.includes(v.components.focus)) {
+    problems.push(`重点构件 ${v.components.focus} 不在编号清单里`);
+  }
+  if (n(v.material.lowQualityClips) !== n(v.material.lowQualityMarks.length)) {
+    problems.push(
+      `低清晰度片段不自洽：数量 ${v.material.lowQualityClips} ≠ 标记点 ${v.material.lowQualityMarks.length} 个`,
+    );
+  }
+  if (v.weather.panelTitle !== `平台环境档案 · 截止 ${v.weather.rangeEnd}`) {
+    problems.push(`天气面板标题与统计区间终止日不一致：${v.weather.panelTitle}`);
+  }
+  if (n(v.fusion.radarFrames) !== n(v.anomaly.receivedFrames)) {
+    problems.push(
+      `精细分析雷达帧 ${v.fusion.radarFrames} 与异常采集收到帧 ${v.anomaly.receivedFrames} 不一致`,
+    );
+  }
+  if (v.model.deployChecksPassed > v.model.deployChecksTotal) {
+    problems.push(`部署条件通过数 ${v.model.deployChecksPassed} 超过总数 ${v.model.deployChecksTotal}`);
+  }
+
+  return problems;
+}
+
+/**
+ * 按**数据键**取演示值（播报模板与页面都用它，避免各自写访问路径）。
+ *
+ * 取不到时返回 `undefined` —— §11.1 要求此时进入**缺失态**，
+ * 而不是给一个"听起来合理"的默认值（那是幻觉的主要来源）。
+ */
+export function scenarioValue(key: string): unknown {
+  if (!key) return undefined;
+  let cursor: unknown = DEMO_SCENARIO_V3 as unknown;
+  for (const part of key.split(".")) {
+    if (cursor === null || typeof cursor !== "object") return undefined;
+    cursor = (cursor as Record<string, unknown>)[part];
+  }
+  return cursor;
+}
+
+/** 全部可取值的数据键（叶节点），供页面与测试遍历核对 */
+export const SCENARIO_KEYS: readonly string[] = (() => {
+  const out: string[] = [];
+  const walk = (node: unknown, prefix: string) => {
+    if (node === null || typeof node !== "object") {
+      if (prefix) out.push(prefix);
+      return;
+    }
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      /* getter 也当叶节点处理（派生值同样是可取值） */
+      const isObj = v !== null && typeof v === "object";
+      if (isObj && !Array.isArray(v)) walk(v, prefix ? `${prefix}.${k}` : k);
+      else out.push(prefix ? `${prefix}.${k}` : k);
+    }
+  };
+  walk(DEMO_SCENARIO_V3, "");
+  return Object.freeze(out);
+})();
 
 /** PRD 7.1 全程阶段 */
 export const STAGES: StageDef[] = [

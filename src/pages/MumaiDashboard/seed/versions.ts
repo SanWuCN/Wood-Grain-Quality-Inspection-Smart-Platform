@@ -26,7 +26,7 @@
  * 与 seed 其它部分同一套 SourceMode 语义。
  */
 
-import type { SourceMode } from "./types";
+import type { SourceMode } from "./types.ts";
 
 /**
  * 交付物类型（PRD 11.3：平台管理三类交付）。
