@@ -63,15 +63,27 @@ export type ScriptRound = {
   /** 交给 TTS 时的语音风格提示 */
   style?: string;
   /**
-   * 「随播报逐步加载」的目标（可选）。
+   * 「随播报逐组展开」的声明（可选）。
    *
-   * ① 接单整理 是唯一需要它的轮次：说完台词后既要把页面**跳到该工单详情**，
-   * 又要让详情页的分区**跟着这句话的节奏逐段出现** ——
-   * 而不是人还没开口，整页内容已经铺满。
+   * ── 为什么从"计数"改成"命名"（v1.1）────────────────────────────────
+   * 旧写法是 `{ target, panels: 3 }` —— 一个数字，语义只活在
+   * `WorkOrderDetail.tsx` 的下标约定里（`stage > 0` / `> 1` / `> 2`）。
+   * 客户交接文档《新工单红头委托与小木联动-AI交接文档 v1.0》要求
+   * "四组模块**按播报语义节点**依次展开"，而计数无法表达"这一句对应哪一组"，
+   * 只能把总时长平均分配 —— 于是"人员 / 环境 / 下发 / 成果"被挤在同一段里
+   * 一起冒出来，而文档明令它们**不得提前出现**。
    *
-   * 只声明"要什么"，怎么排拍点在 `executor.ts` 的 `applyScriptAction()` 里。
+   * ── 两个字段的关系 ──────────────────────────────────────────────────
+   * `sections` 是这一轮**允许**揭示的组（顺序即播报顺序，取值见
+   * `ordersReveal.ts` 的 `ORDER_DETAIL_SECTIONS`）；
+   * `beats[i]` 是**第 i 段台词念完时**该揭示的组。
+   * 拍点时间由 `buildRevealSchedule()` 按段累加算出（不是平均分配）。
    */
-  reveal?: { target: "order-detail"; panels: number };
+  reveal?: {
+    target: "order-detail";
+    sections: string[];
+    beats: string[][];
+  };
   /**
    * 页码联动：这一轮说完后页面该**跳到哪**。
    *
@@ -90,10 +102,12 @@ export type ScriptRound = {
     route: "order";
     /**
      * 选中哪张工单：
-     *   "current" = 当前最新的那张（Ctrl+Q+L 刚建出来的，与第①轮同一口径）
-     *   字符串    = 明确指定
+     *   "bound"   = **显式绑定**的那张（用户点「查看」通知时绑上的）—— 第①轮用这个。
+     *               防幻觉规则 3：不许用 `orders[0]` 猜用户想看哪张；
+     *   "current" = 列表最新那张（其余轮次的既有口径）；
+     *   字符串    = 明确指定。
      */
-    order: "current" | string;
+    order: "bound" | "current" | string;
   };
 };
 
@@ -130,9 +144,20 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     lines: [
       {
         role: "main",
+        /*
+          文案逐字取自《新工单红头委托与小木联动-AI交接文档 v1.0》的「小木回复 v1.0」。
+
+          ⚠ 这四句的顺序**就是**模块展开的节拍（见下面的 reveal.beats），
+            改句子顺序必须同时改 beats，否则会出现"念到第二句却亮了第四组"。
+          ⚠ 产品文本本身不追加语气词（文档明令）。
+          ⚠ 末句提到 Z01–Z04：那是**平台转换事实**（服务端事务生成的编号），
+            文档允许在这里说；但红头委托原文里**不得**出现这些编号（见防幻觉规则）。
+        */
         text:
+          "读取中，工单摘要已生成。" +
+          "任务范围和出发清单已生成。" +
           "已整理为四项任务：现场建档、风险初筛、重点精扫和复核交付。" +
-          "装备清单已按岗位展开，请核对后勾选；附件里未明确的信息，我已单独列出。",
+          "附件里未明确的信息，我已单独列出。本次任务涉及的木构主体为四根木柱，我已按照 Z01 至 Z04 编号。",
       },
     ],
     next: "沈：收到。我来核对范围。本次完成巡检和辅助诊断，形成可追溯记录。请各岗位报告出发前准备情况。",
@@ -142,14 +167,29 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
      * 与台词说的「读取这份工单」根本不是一件事，结果是**只播报、不跳转**：
      * 按 Ctrl+Q+L 建单后说「读取这份工单」，页面停在原地不动。
      *
-     * 改绑 `view_current_order`（查看当前工单）：它的 action 是 `open_order`，
-     * 会把页面跳到 `/orders?order=<当前工单>`；配合下面的 `reveal`，
-     * 详情页的内容再跟着这句话的节奏逐段铺开。
+     * 改绑 `view_current_order`（查看当前工单）：它的 action 是 `open_order`。
      */
     intentId: "view_current_order",
-    /* 详情页分 3 段揭示：工单摘要 → 委托要求与检测主体 → 后续分区 */
-    reveal: { target: "order-detail", panels: 3 },
-    nav: { route: "order", order: "current" },
+    /**
+     * 四组模块按播报**语义段**依次展开。
+     *
+     * `beats[i]` 与正文按标点切出的第 i 段对齐（顺序即播报顺序）：
+     *   ① 读取中，工单摘要已生成        → 工单摘要
+     *   ② 任务范围和出发清单已生成      → 任务范围与出发清单
+     *   ③ 已整理为四项任务…            → 四项任务
+     *   ④ 附件里未明确的信息…四柱编号   → 待确认信息 + 检测主体 + 后续执行模块
+     *
+     * ⚠ 第四组一次带出"待确认 + 主体 + 人员/环境/下发/成果"，是因为文档把
+     *   它们归在同一个播报节点下（见交接文档「模块展开节拍」表末行）。
+     *   人员在未指派时显示"未指派"、下发保持空态 —— 空态也是确定性事实，不算提前展示。
+     */
+    reveal: {
+      target: "order-detail",
+      sections: ["order", "scope", "tasks", "pending"],
+      beats: [["order"], ["scope"], ["tasks"], ["pending"]],
+    },
+    /** 导航到**显式绑定**的那张工单（不是列表第一条）—— 见防幻觉规则 3 */
+    nav: { route: "order", order: "bound" },
   },
   {
     roundNo: "②",
@@ -210,7 +250,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
      * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
      * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
      */
-    reveal: { target: "order-detail", panels: 3 },
+    reveal: {
+      target: "order-detail",
+      sections: ["order", "scope", "pending"],
+      /* 三段节拍：摘要 → 任务范围 → 后续执行模块（与 `ordersReveal.ts` 的组名对齐） */
+      beats: [["order"], ["scope"], ["pending"]],
+    },
     nav: { route: "order", order: "current" },
     voicePack: null,
     intentId: null,
@@ -290,7 +335,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
      * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
      * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
      */
-    reveal: { target: "order-detail", panels: 3 },
+    reveal: {
+      target: "order-detail",
+      sections: ["order", "scope", "pending"],
+      /* 三段节拍：摘要 → 任务范围 → 后续执行模块（与 `ordersReveal.ts` 的组名对齐） */
+      beats: [["order"], ["scope"], ["pending"]],
+    },
     nav: { route: "order", order: "current" },
     voicePack: "AI语音3",
     intentId: "compare_columns",
@@ -332,7 +382,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
      * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
      * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
      */
-    reveal: { target: "order-detail", panels: 3 },
+    reveal: {
+      target: "order-detail",
+      sections: ["order", "scope", "pending"],
+      /* 三段节拍：摘要 → 任务范围 → 后续执行模块（与 `ordersReveal.ts` 的组名对齐） */
+      beats: [["order"], ["scope"], ["pending"]],
+    },
     nav: { route: "order", order: "current" },
     voicePack: null,
     intentId: "start_patrol",
@@ -470,7 +525,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
      * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
      * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
      */
-    reveal: { target: "order-detail", panels: 3 },
+    reveal: {
+      target: "order-detail",
+      sections: ["order", "scope", "pending"],
+      /* 三段节拍：摘要 → 任务范围 → 后续执行模块（与 `ordersReveal.ts` 的组名对齐） */
+      beats: [["order"], ["scope"], ["pending"]],
+    },
     nav: { route: "order", order: "current" },
     voicePack: null,
     intentId: "deployment_check",
@@ -531,7 +591,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
      * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
      * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
      */
-    reveal: { target: "order-detail", panels: 3 },
+    reveal: {
+      target: "order-detail",
+      sections: ["order", "scope", "pending"],
+      /* 三段节拍：摘要 → 任务范围 → 后续执行模块（与 `ordersReveal.ts` 的组名对齐） */
+      beats: [["order"], ["scope"], ["pending"]],
+    },
     nav: { route: "order", order: "current" },
     voicePack: "AI语音8",
     intentId: "draft_workorder",
@@ -555,7 +620,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
      * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
      * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
      */
-    reveal: { target: "order-detail", panels: 3 },
+    reveal: {
+      target: "order-detail",
+      sections: ["order", "scope", "pending"],
+      /* 三段节拍：摘要 → 任务范围 → 后续执行模块（与 `ordersReveal.ts` 的组名对齐） */
+      beats: [["order"], ["scope"], ["pending"]],
+    },
     nav: { route: "order", order: "current" },
     voicePack: null,
     intentId: null,
@@ -579,7 +649,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
      * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
      * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
      */
-    reveal: { target: "order-detail", panels: 3 },
+    reveal: {
+      target: "order-detail",
+      sections: ["order", "scope", "pending"],
+      /* 三段节拍：摘要 → 任务范围 → 后续执行模块（与 `ordersReveal.ts` 的组名对齐） */
+      beats: [["order"], ["scope"], ["pending"]],
+    },
     nav: { route: "order", order: "current" },
     voicePack: null,
     intentId: "unresolved_followup",

@@ -1,9 +1,9 @@
 /**
- * 工单详情的「随播报逐步加载」控制（演示用）
+ * 工单详情的「随播报逐组展开」控制（演示用）
  *
  * ── 要解决的问题 ────────────────────────────────────────────────────
- * 演示时用户说「读取这份工单」，期望的是：小木一边念这份工单的内容，
- * 详情页一边**按同一节奏**把分区铺开 —— 而不是人还没开口、整页内容已经全在那儿。
+ * 演示时用户说「读取这份工单」，期望的是：小木一边念，详情页一边**按同一节奏**
+ * 把大模块铺开 —— 而不是人还没开口、整页内容已经全在那儿。
  *
  * ── 为什么用"计划 + 事件"而不是 URL 参数 ────────────────────────────
  *   · URL 参数（`?reveal=2`）会把播放进度写进历史记录，浏览器前进/后退会看到
@@ -12,13 +12,24 @@
  * 所以用模块级**一次性计划**：由 agent 开场时登记，按拍点推进，播完自动解除。
  *
  * ── 安全边界（很重要）─────────────────────────────────────────────────
- * **没有计划时一律返回 `Infinity`** —— 用户自己点进工单、从地图跳进来、
- * 刷新页面，看到的都是完整详情。只有 agent 明确登记过的那一张工单、
- * 在那一次播报期间，才会逐段揭示。这条边界保证"演示效果"不会传染成"页面坏了"。
+ * **没有计划时一律"全部可见"** —— 用户自己点进工单、从地图跳进来、刷新页面，
+ * 看到的都是完整详情。只有 agent 明确登记过的那一张工单、在那一次播报期间，
+ * 才会逐组揭示。这条边界保证"演示效果"不会传染成"页面坏了"。
+ *
+ * ── 为什么是"命名分组"而不是"计数"（v1.1 改法）──────────────────────
+ * 旧实现是 `beginOrderReveal(orderId, total: number)` + `useOrderReveal()` 返回数字，
+ * 页面侧靠下标约定（`stage > 0` / `> 1` / `> 2`）决定显示哪些分区。问题有两个，
+ * 都在《新工单红头委托与小木联动-AI交接文档 v1.0》里被点名：
+ *   ① 文档要求"四组模块**按播报语义节点**依次展开"。计数无法表达"这一句对应哪一组"，
+ *      只能平均分配，于是"人员 / 环境 / 下发 / 成果"被挤在同一段里一起冒出来 ——
+ *      而文档明令这些**不得提前出现**；
+ *   ② `panels: 3` 的语义只活在 `WorkOrderDetail.tsx` 的下标里，加一组就要同时改
+ *      声明、推进、下标三处，极易漂移。
+ * 现在：剧本声明**组名**、页面按**组名**门控、计划按**组名**推进。
  *
  * 调用关系：
  *   `agent/executor.ts`（剧本轮次）→ `beginOrderReveal` / `advanceOrderReveal`
- *   `pages/WorkOrderDetail.tsx`     → `useOrderReveal(orderId)` 决定显示到第几段
+ *   `pages/WorkOrderDetail.tsx`     → `useOrderReveal(orderId)` 拿到该显示哪些组
  */
 
 import { useEffect, useState } from "react";
@@ -36,9 +47,22 @@ const PLAN_TTL_MS = 30000;
  */
 export const CHARS_PER_SECOND = 5.5;
 
+/** 每段至少留这么久，避免短句连闪（与 scriptStage 时期的口径一致） */
+const MIN_SEGMENT_MS = 420;
+
+/**
+ * 工单详情页的**四大组**，顺序即播报顺序。
+ *
+ * ⚠ 顺序是契约：`script.ts` 的揭示声明与这里必须一致，测试会逐项核对
+ *   （`ordersReveal.test.ts` 的「分段声明」用例），改动时两边一起改。
+ */
+export const ORDER_DETAIL_SECTIONS = ["order", "scope", "tasks", "pending"] as const;
+
+export type OrderDetailSection = (typeof ORDER_DETAIL_SECTIONS)[number];
+
 /**
  * 把台词切成语义段（按标点）。
- * 切句而不是按字数硬切：标点处本来就是说话的停顿，在那里切换分段最自然。
+ * 切句而不是按字数硬切：标点处本来就是说话的停顿，在那里切换分组最自然。
  */
 export function splitSegments(text: string): string[] {
   const parts = String(text)
@@ -50,53 +74,133 @@ export function splitSegments(text: string): string[] {
 
 /** 一段文字的播报耗时估算（毫秒） */
 export function segmentDurationMs(segment: string): number {
-  return Math.max(420, Math.round((segment.length / CHARS_PER_SECOND) * 1000));
+  return Math.max(MIN_SEGMENT_MS, Math.round((segment.length / CHARS_PER_SECOND) * 1000));
+}
+
+/** 一个揭示拍点：第几段念完之后，应把哪些组显示出来（时间按**段**累加算出） */
+export type RevealBeat = {
+  /** 第几段（从 0 开始） */
+  segmentIndex: number;
+  /** 该段念完的时刻（毫秒，相对开口） */
+  atMs: number;
+  /** 到这一刻应揭示的组（只含本拍新推进的） */
+  sections: string[];
+};
+
+/**
+ * 按"语义拍点表"算揭示计划。
+ *
+ * ── 与旧算法的区别（这是本次要修的行为）────────────────────────────
+ * 旧算法把**整段台词的总时长**按分区数平均分配，于是各拍等距 ——
+ * 短句和长句的落点一样长，念到哪、亮到哪就对不上。
+ * 现在按**段**累加：第 n 段的时刻 = 前 n-1 段的估算时长之和。
+ *
+ * @param segments 台词切成的语义段（顺序即播报顺序）
+ * @param beats    每段对应要推进的组（与 `segments` 下标对齐；缺省即该段不推进）
+ *                 数量不一致时按**较短者**截断 —— 不越界，也不留下"永远不亮"的组
+ */
+export function buildRevealSchedule(segments: string[], beats: string[][]): RevealBeat[] {
+  const count = Math.min(segments.length, beats.length);
+  const out: RevealBeat[] = [];
+  let acc = 0;
+  for (let i = 0; i < count; i += 1) {
+    out.push({ segmentIndex: i, atMs: acc, sections: [...(beats[i] ?? [])] });
+    acc += segmentDurationMs(segments[i]);
+  }
+  return out;
 }
 
 type RevealPlan = {
   orderId: string;
-  /** 一共分几段（= 详情页要逐段显示的分区数） */
-  total: number;
-  /** 已经揭示到第几段：0 表示还没开始 */
-  stage: number;
-  /** 兜底定时器：到点自动解除计划（页面随即显示完整内容） */
+  /** 这次计划**允许**揭示的组（顺序即播报顺序） */
+  sections: string[];
+  /** 已经揭示的组 */
+  revealed: Set<string>;
+  /** 兜底定时器：到点自动解除计划（页面随即完整显示） */
   timer: number;
 };
 
-let plan: RevealPlan | null = null;
-const listeners = new Set<() => void>();
+/**
+ * 模块级状态。
+ *
+ * ── ⚠ 为什么不直接用 `let plan = null`（真踩过）────────────────────
+ * Vite dev 下同一个源文件**可能被实例化多份**：`"../ordersReveal"`（相对引用）
+ * 与 `/src/pages/MumaiDashboard/ordersReveal`（绝对引用）会落到不同的模块实例。
+ * 一旦如此，`executor` 登记的计划与 `WorkOrderDetail` 读到的计划**不是同一份** ——
+ * 现象是"台词念完了，页面一组都没亮"（`revealSectionsFor` 永远返回 null 或永远空）。
+ * 把状态挂到 `globalThis` 上，模块被求值几次都只有一份计划。
+ * 本仓库既有做法一致（`window.__mumaiAsk`、`window.__mumaiAgent` 同理）。
+ */
+const STORE_KEY = "__mumaiOrdersRevealStore";
+
+type RevealStore = { plan: RevealPlan | null; listeners: Set<() => void> };
+
+function storeOf(): RevealStore {
+  const host = globalThis as unknown as { [STORE_KEY]?: RevealStore };
+  return (host[STORE_KEY] ??= { plan: null, listeners: new Set() });
+}
+
+/** 当前计划（每次读都从共享 store 取，保证与别的模块实例看到同一份） */
+function currentPlan(): RevealPlan | null {
+  return storeOf().plan;
+}
+
+function setPlan(next: RevealPlan | null): void {
+  storeOf().plan = next;
+}
 
 function notify(): void {
-  for (const listener of listeners) listener();
+  /* 遍历**共享 store** 的监听器：本模块实例订阅的与别处订阅的都要通知到 */
+  for (const listener of storeOf().listeners) listener();
 }
 
 function clearPlan(): void {
-  if (plan) window.clearTimeout(plan.timer);
-  plan = null;
+  const current = currentPlan();
+  if (current) window.clearTimeout(current.timer);
+  setPlan(null);
 }
 
-/** 登记一次揭示计划（agent 在"要念这张工单"时调用）；stage 从 0 开始 */
-export function beginOrderReveal(orderId: string, total: number): void {
-  if (!orderId || total <= 0) return;
+/**
+ * 登记一次揭示计划（agent 在"要念这张工单"时调用）。
+ *
+ * 刚登记时**一组都不揭示**：第一组要等第一句念出来才亮，
+ * 否则会出现"人还没开口、摘要已经在了"。
+ */
+export function beginOrderReveal(orderId: string, sections: readonly string[]): void {
+  if (!orderId || sections.length === 0) return;
   clearPlan();
-  plan = {
+  setPlan({
     orderId,
-    total,
-    stage: 0,
+    sections: [...sections],
+    revealed: new Set<string>(),
     timer: window.setTimeout(() => {
       /* 兜底：到点还没播完就解除计划，页面回到"完整显示"，不留半截 */
       clearPlan();
       notify();
     }, PLAN_TTL_MS),
-  };
+  });
   notify();
 }
 
-/** 推进到第 next 段；到达 total 即视为播完，计划自动解除（页面显示完整内容） */
-export function advanceOrderReveal(orderId: string, next: number): void {
-  if (!plan || plan.orderId !== orderId) return;
-  plan.stage = Math.min(next, plan.total);
-  if (plan.stage >= plan.total) {
+/**
+ * 推进揭示：把 `sections` 里的组标为已揭示。
+ *
+ * 幂等（重复推进同一组无副作用）；只对**本计划绑定的工单**生效（防串单）。
+ * 全部揭示完即视为播完，计划自动解除 —— 页面显示完整内容。
+ */
+export function advanceOrderReveal(orderId: string, sections: readonly string[]): void {
+  /*
+    先把计划取到局部常量再判断：`currentPlan()` 每次返回的是**共享 store** 里的引用，
+    TS 不会把这个调用结果的收窄带进后面的闭包（`every(...)` 里的回调），
+    直接写会报 "possibly null"。取局部引用是最省事也最安全的写法 ——
+    顺带保证整个函数体看到的是**同一份**计划（中途被清掉也不会读空）。
+  */
+  const current = currentPlan();
+  if (!current || current.orderId !== orderId) return;
+  for (const key of sections) {
+    if (current.sections.includes(key)) current.revealed.add(key);
+  }
+  if (current.sections.every((key) => current.revealed.has(key))) {
     clearPlan();
     notify();
     return;
@@ -104,27 +208,45 @@ export function advanceOrderReveal(orderId: string, next: number): void {
   notify();
 }
 
-/** 主动取消（例如用户中途点了别的工单） */
+/** 主动取消（例如用户中途点了别的工单、或交互被中断）→ 立刻完整显示 */
 export function cancelOrderReveal(): void {
-  if (!plan) return;
+  if (!currentPlan()) return;
   clearPlan();
   notify();
 }
 
 /**
- * 页面侧：当前这张工单"应该显示到第几段"。
+ * 页面侧：当前这张工单**该显示哪些组**。
  *
- * 返回值语义：`N` = 只显示前 N 段；`Infinity` = 全部显示（没有计划时的默认值）。
+ * 返回值语义（注意与旧版的区别）：
+ *   · `null`         —— 完整显示。没有计划、或计划不属于这张工单时的默认值；
+ *   · `string[]`     —— 只显示这些组（按声明顺序）。
+ *
+ * 用 `null` 而不是"空数组"表达"完整显示"：空数组是有意义的（一组都还没亮），
+ * 两者混用会让调用方把"刚登记还没开口"错当成"没有计划"，从而一次性铺满。
  */
-export function useOrderReveal(orderId: string | null | undefined): number {
+export function revealSectionsFor(orderId: string | null | undefined): string[] | null {
+  /* 同 advanceOrderReveal：模块级可变变量要先落到局部，闭包里的收窄才成立 */
+  const current = currentPlan();
+  if (!orderId || !current || current.orderId !== orderId) return null;
+  return current.sections.filter((key) => current.revealed.has(key));
+}
+
+/**
+ * React 侧订阅：拿到该工单**该显示哪些组**（`null` = 完整显示）。
+ *
+ * 返回的数组是每次渲染新构造的（`revealSectionsFor` 里 filter 出来的），
+ * 所以调用方**不要**把它放进依赖数组参与相等比较 —— 用 `?.length` 或 `?.includes()`。
+ */
+export function useOrderReveal(orderId: string | null | undefined): string[] | null {
   const [, force] = useState(0);
   useEffect(() => {
     const listener = () => force((n) => n + 1);
-    listeners.add(listener);
+    const shared = storeOf().listeners;
+    shared.add(listener);
     return () => {
-      listeners.delete(listener);
+      shared.delete(listener);
     };
   }, []);
-  if (!orderId || !plan || plan.orderId !== orderId) return Number.POSITIVE_INFINITY;
-  return plan.stage;
+  return revealSectionsFor(orderId);
 }

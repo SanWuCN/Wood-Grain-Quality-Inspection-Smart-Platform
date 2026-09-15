@@ -204,7 +204,19 @@ export function MumaiProvider({ children }: PropsWithChildren) {
 
   const toast = useCallback((text: string, tone: SessionEvent["tone"] = "info", action?: Toast["action"]) => {
     const id = nextId();
-    setToasts((list) => [...list, { id, text, tone, action }]);
+    /*
+      **同一个去向的通知只留一条。**
+      用户实测反馈：连按 Ctrl+Q+L 会堆一屏通知，每条都带「查看」，
+      看起来就像"打开了一大堆委托预览"。
+      判据用 `action.to` —— 它已含具体 orderId（`commission:<orderId>`），
+      所以同一张工单的重复通知会被合并；**不同工单的通知各自保留**
+      （交接文档防幻觉规则 12 要求连续触发多单时每单都能单独查看）。
+      合并时保留新的一条，因为文本可能不同（"已存在（重复触发未重复建单）"）。
+    */
+    setToasts((list) => {
+      const kept = action?.to ? list.filter((item) => item.action?.to !== action.to) : list;
+      return [...kept, { id, text, tone, action }];
+    });
     // 带跳转的通知留久一点：用户可能正在填表，来不及点就没了等于没通知
     window.setTimeout(() => setToasts((list) => list.filter((item) => item.id !== id)), action ? 8000 : 3200);
   }, []);

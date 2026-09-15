@@ -27,6 +27,7 @@ import { useOrderReveal } from "../ordersReveal";
 import { WORK_ORDER_STATUS_TONE } from "./overview.constants";
 import { Btn, DataTable, KV, Modal, SourceTag, StateBlock, StatusChip } from "../ui";
 import { AssignmentPanel } from "./orders/AssignmentPanel";
+import { TaskScopePanel } from "./orders/TaskScopePanel";
 import { EnvironmentPanel } from "./orders/EnvironmentPanel";
 import { DispatchPanel } from "./orders/DispatchPanel";
 import "./orders/orders.css";
@@ -70,8 +71,25 @@ export function WorkOrderDetail({
    * 没有揭示计划时（用户自己点进工单 / 从地图跳进来 / 刷新页面）恒为 `Infinity`，
    * 三个分区都带 `is-in`，页面上看不出任何差别 —— 演示效果不会传染成"页面少了内容"。
    */
-  const revealStage = useOrderReveal(order.id);
-  const revealClass = (index: number) => (revealStage > index ? "wop-reveal is-in" : "wop-reveal");
+  /*
+    揭示门控（v1.1：**按组名**，不再按计数）。
+
+    `revealed === null` 表示"完整显示"——没有计划（用户自己点进工单 / 刷新）、
+    或计划不属于这张工单时的默认值。只有 agent 明确登记过的那一次播报期间，
+    才会逐组揭示。"演示效果"因此不会传染成"页面少了内容"。
+
+    组名与 `script.ts` 第①轮的 `reveal.sections` / `ordersReveal.ts` 的
+    `ORDER_DETAIL_SECTIONS` 一一对应：
+      order   → 工单摘要
+      scope   → 委托要求与检测主体
+      tasks   → 任务范围与出发清单（四项任务 + 出发清单 + 待现场确认）
+      pending → 待确认信息、检测主体清单、附件、人员、环境、下发、作业成果
+    `pending` 一次带出较多，是因为交接文档把它们归在同一个播报节点下
+    （见「模块展开节拍」表末行）；空态本身也是确定性事实，不算提前展示。
+  */
+  const revealed = useOrderReveal(order.id);
+  const revealGate = (key: string) =>
+    revealed === null || revealed.includes(key) ? "wop-reveal is-in" : "wop-reveal";
   /*
     能力集合兜底：服务端每条返回详情的路由都带 capabilities（services/work-orders.mjs 的
     detailFor）。这里再兜一层是**不让一个字段缺失把整页打成白屏** ——
@@ -107,7 +125,7 @@ export function WorkOrderDetail({
   return (
     <>
       <Panel
-        className={revealClass(0)}
+        className={revealGate("order")}
         title={`工单摘要 · ${order.orderNo}`}
         extra={<StatusChip text={order.status} tone={WORK_ORDER_STATUS_TONE[order.status] ?? "info"} />}>
         <KV
@@ -166,7 +184,7 @@ export function WorkOrderDetail({
       </Panel>
 
       <Panel
-        className={revealClass(1)}
+        className={revealGate("scope")}
         title="委托要求与检测主体"
         extra={<span className="muted">{commission.unit} · {commission.date}</span>}>
         <KV
@@ -237,7 +255,16 @@ export function WorkOrderDetail({
         )}
       </Panel>
 
+      {/*
+        第③组：任务范围与出发清单。
+        接在"委托要求"之后、执行模块之前 —— 对应第①轮台词第③段
+        「已整理为四项任务：现场建档、风险初筛、重点精扫和复核交付」。
+        内容全部来自受控配置（`orders/taskScope.ts`），本组件只负责何时显示它。
+      */}
+      <TaskScopePanel className={revealGate("tasks")} />
+
       <AssignmentPanel
+        className={revealGate("pending")}
         detail={detail}
         busy={busy}
         onAssign={async (body) => {
@@ -247,6 +274,7 @@ export function WorkOrderDetail({
 
       <div className="orders-two">
         <EnvironmentPanel
+          className={revealGate("pending")}
           detail={detail}
           busy={busy}
           onSave={async (body) => {
@@ -257,6 +285,7 @@ export function WorkOrderDetail({
           }}
         />
         <DispatchPanel
+          className={revealGate("pending")}
           detail={detail}
           busy={busy}
           onDispatch={async (body) => {
@@ -295,7 +324,7 @@ export function WorkOrderDetail({
       ) : null}
 
       <Panel
-        className={revealClass(2)}
+        className={revealGate("pending")}
         title="作业记录与成果"
         extra={<span className="muted">{logs.length} 条记录</span>}>
         <StateBlock kind="empty" title="本单还没有作业记录" />

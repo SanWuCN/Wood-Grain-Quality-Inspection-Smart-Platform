@@ -9,8 +9,14 @@
             "DOM.Iterable"
         ],
         "module": "ESNext",
+        /*
+          src 下的测试走 Node 原生测试运行器（`node --test **.test.ts`），
+          需要 `node:test` / `node:assert/strict` 的类型；@types/node 已在 devDependencies。
+          两个 types 并存：vite/client 给 import.meta.env，node 给测试文件。
+        */
         "types": [
-            "vite/client"
+            "vite/client",
+            "node"
         ],
         "skipLibCheck": true,
         /* Bundler mode */

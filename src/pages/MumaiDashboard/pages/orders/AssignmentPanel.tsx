@@ -58,10 +58,17 @@ export function AssignmentPanel({
   detail,
   busy,
   onAssign,
+  className = "",
 }: {
   detail: WorkOrderDetail;
   busy: boolean;
   onAssign: (body: AssignmentBody) => Promise<void>;
+  /**
+   * 揭示门控用：父组件 `WorkOrderDetail.tsx` 传 `wop-reveal` / `wop-reveal is-in`，
+   * 决定这一块在播报念到那一拍之前**不出现**（`orders.css` 里是 `display: none`）。
+   * 不传时行为与从前完全一致。
+   */
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const assignment = detail.assignment;
@@ -80,6 +87,7 @@ export function AssignmentPanel({
 
   return (
     <Panel
+      className={className}
       title="负责人及参与人员"
       icon="identity-user"
       extra={<StatusChip text={assignment ? "已指派" : "待指派"} tone={assignment ? "ok" : "warn"} />}>

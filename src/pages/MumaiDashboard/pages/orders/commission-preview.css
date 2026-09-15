@@ -1,0 +1,400 @@
+/* ==================================================================
+   木脉智检 · 红头委托文件预览（commission preview）
+   ------------------------------------------------------------------
+   服务 `pages/orders/CommissionPreview.tsx` 一个组件。类名统一 `cpr-` 前缀，
+   与 `pages.css` 的 `wop-` / `orders/orders.css` 的 `wo-` 分开，互不覆盖。
+
+   两条硬口径：
+     1) 图片只是**质感**。`.cpr__paper` 本身就是一张米白纸（纸底、红头分隔线、
+        衬线正文、右对齐落款、CSS 画的印章），底图 `onError` 后整块不渲染，
+        版式与文字一个不少、一个不错。
+     2) 设计令牌全部**照名引用**（`--bg-page` / `--panel-surface` / `--border-subtle` /
+        `--text-*` / `--space-*` / `--danger` / `--overlay-scrim` /
+        `--font-ui` / `--fs-*` / `--motion-*`），不新造令牌名。
+        纸面是**浅色介质**，它的"介质颜色"（纸白、墨色、印章红）不属于暗色 UI 的
+        语义色域，也没有对应令牌，因此在 `.cpr` 上声明一组 `--cpr-*` **组件作用域**
+        变量（只随这个浮层生效，不写进 `:root`、不污染全局），组件样式只引用这一处，
+        不再散落硬编码色值。
+   ================================================================== */
+
+.cpr {
+  /* 纸白：纸面底色。参照纸质公文用纸，不参与暗色 UI 的层级 */
+  --cpr-paper: #f3ece0;
+  /* 墨色三档：纸面上的正文 / 强调 / 弱化，与上面纸白配套以保证对比度 */
+  --cpr-ink: #2b2118;
+  --cpr-ink-strong: #241c14;
+  --cpr-ink-soft: #6b5a45;
+  /* 纸面分隔虚线：墨色的低透明度派生量 */
+  --cpr-ink-line: rgb(43 33 24 / 22%);
+  /* 红头与印章：公文体裁的红，**不是**任何真实机关的标识色 */
+  --cpr-red-letter: #a5262c;
+  --cpr-red-seal: #c0262c;
+  /* 中文公文体需要衬线：字体栈只在本组件用，找不到就回落到系统衬线 */
+  --cpr-serif: "Songti SC", "SimSun", "Noto Serif SC", serif;
+
+  position: fixed;
+  inset: 0;
+  /*
+    层叠：页面里既有 --voice 系列浮层与 .modal-backdrop(z-index: 400)，
+    委托预览是"盖在一切之上的一次性相机取景"，取 460。
+  */
+  z-index: 460;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: var(--overlay-scrim);
+  animation: cpr-fade var(--motion-normal) ease-out both;
+}
+
+.cpr__sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(960px, 100%);
+  max-height: 100%;
+  border: 1px solid var(--border-default);
+  background: var(--panel-surface);
+  box-shadow: 0 32px 80px rgb(0 0 0 / 55%);
+  animation: cpr-rise var(--motion-normal) ease-out both;
+}
+
+/* ---------------- 顶部说明条：样例标记 + 关闭 ---------------- */
+
+.cpr__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.cpr__badge {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  font-size: var(--fs-aux);
+  line-height: 20px;
+  letter-spacing: 0.08em;
+}
+
+.cpr__bar-note {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.cpr__close {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  background: none;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-aux);
+  cursor: pointer;
+}
+
+.cpr__close:hover,
+.cpr__close:focus-visible {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+/* ---------------- 纸面 ---------------- */
+
+.cpr__scroll {
+  overflow: auto;
+  padding: var(--space-6);
+  /* 取景台：纸之外的底色比遮罩更深一点，纸才不会"飘" */
+  background: var(--bg-page);
+}
+
+.cpr__paper {
+  position: relative;
+  overflow: hidden;
+  margin: 0 auto;
+  width: min(720px, 100%);
+  /*
+    纸白。默认值就是令牌的语义色（浅色介质上的纸），
+    换成别的主题令牌会让正文对比度掉到不可读，因此这里用组件局部兜底写法。
+  */
+  background: var(--cpr-paper);
+  box-shadow:
+    0 18px 40px rgb(0 0 0 / 45%),
+    inset 0 0 60px rgb(120 96 64 / 12%);
+}
+
+/* 纸张质感照片：纯装饰层，压在文字下面；没有它版式照常 */
+.cpr__paper-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.92;
+  pointer-events: none;
+  user-select: none;
+  /* 照片是"被拍下来的纸"，四边略暗、中间亮，模拟拍摄透视的暗角 */
+  filter: saturate(0.95) contrast(1.02);
+}
+
+.cpr__paper-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-10) var(--space-8);
+}
+
+/* ---------------- 红头区 ---------------- */
+
+.cpr__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  text-align: center;
+}
+
+.cpr__head-unit {
+  margin: 0;
+  color: var(--cpr-red-letter);
+  font-family: var(--font-ui);
+  font-size: var(--fs-page);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.35;
+}
+
+/* 红头分隔线：粗红线 + 细红线，公文抬头常见做法；不用国徽、不用任何真实标识 */
+.cpr__head-rule {
+  height: 3px;
+  margin: 0;
+  background: var(--cpr-red-letter);
+  box-shadow: 0 5px 0 -4px var(--cpr-red-letter);
+}
+
+.cpr__title {
+  margin: 0;
+  color: var(--cpr-ink-strong);
+  font-family: var(--font-ui);
+  font-size: var(--fs-panel);
+  font-weight: 700;
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* ---------------- 正文（衬线排版，逐段缩进两格） ---------------- */
+
+.cpr__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.cpr__body p {
+  margin: 0;
+  color: var(--cpr-ink);
+  font-family: var(--cpr-serif);
+  font-size: var(--fs-body);
+  line-height: 1.95;
+  text-align: justify;
+  text-indent: 2em;
+}
+
+/* ---------------- 落款 ---------------- */
+
+.cpr__sign {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  text-align: right;
+}
+
+.cpr__sign-unit,
+.cpr__sign-date {
+  margin: 0;
+  color: var(--cpr-ink-strong);
+  font-family: var(--cpr-serif);
+  font-size: var(--fs-sub);
+  line-height: 1.8;
+}
+
+/* ---------------- 印章质感：CSS 画的红色圆形，字样为样例标记 ---------------- */
+
+.cpr__stamp {
+  display: grid;
+  place-items: center;
+  align-self: flex-end;
+  width: 108px;
+  height: 108px;
+  margin-top: calc(var(--space-2) * -1);
+  border: 3px solid var(--cpr-red-seal);
+  border-radius: 50%;
+  color: var(--cpr-red-seal);
+  /* 印泥质感：颜色不匀、边缘吃纸，不做任何真实公章样式 */
+  background: radial-gradient(circle at 40% 35%, rgb(192 38 44 / 10%), rgb(192 38 44 / 4%) 60%, transparent 70%);
+  mix-blend-mode: multiply;
+  opacity: 0.82;
+  transform: rotate(-9deg);
+}
+
+.cpr__stamp-text {
+  font-family: var(--font-ui);
+  font-size: var(--fs-sub);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+  text-align: center;
+  /* 印章上的字一样要认得出来：这是"演示样例"，不是可识别公章 */
+  writing-mode: horizontal-tb;
+}
+
+/* ---------------- 附件与待确认项 ---------------- */
+
+.cpr__attachments h4,
+.cpr__pending h4 {
+  margin: 0 0 var(--space-2);
+  color: var(--cpr-ink-strong);
+  font-family: var(--font-ui);
+  font-size: var(--fs-sub);
+  font-weight: 700;
+}
+
+.cpr__attachments ul,
+.cpr__pending ul,
+.cpr__summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cpr__attachments li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-bottom: 1px dashed var(--cpr-ink-line);
+}
+
+.cpr__attachments b {
+  color: var(--cpr-ink-strong);
+  font-family: var(--cpr-serif);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+
+.cpr__attachments em {
+  margin-left: auto;
+  color: var(--cpr-ink-soft);
+  font-size: var(--fs-aux);
+  font-style: normal;
+}
+
+.cpr__pending li {
+  position: relative;
+  padding-left: var(--space-4);
+  color: var(--cpr-ink-soft);
+  font-family: var(--cpr-serif);
+  font-size: var(--fs-table);
+  line-height: 1.7;
+}
+
+.cpr__pending li::before {
+  content: "·";
+  position: absolute;
+  left: var(--space-2);
+  color: var(--cpr-red-letter);
+}
+
+.cpr__note {
+  margin: 0;
+  color: var(--cpr-ink-soft);
+  font-family: var(--cpr-serif);
+  font-size: var(--fs-table);
+  line-height: 1.8;
+}
+
+/* ---------------- 受限摘要 ---------------- */
+
+.cpr__restricted {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px dashed var(--cpr-red-letter);
+}
+
+.cpr__summary li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--cpr-ink);
+  font-size: var(--fs-table);
+  line-height: 1.8;
+}
+
+.cpr__summary span {
+  flex: 0 0 5em;
+  color: var(--cpr-ink-soft);
+}
+
+.cpr__summary b {
+  font-weight: 700;
+}
+
+/* ---------------- 入场动画与降级 ---------------- */
+
+@keyframes cpr-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes cpr-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 窄屏 / 投屏小档：纸面收窄但不裁字，正文继续换行而不是省略 */
+@media (max-width: 900px) {
+  .cpr {
+    padding: var(--space-3);
+  }
+
+  .cpr__scroll {
+    padding: var(--space-3);
+  }
+
+  .cpr__paper-body {
+    padding: var(--space-8) var(--space-5);
+  }
+
+  .cpr__stamp {
+    width: 92px;
+    height: 92px;
+  }
+}
+
+/* 关掉动效偏好：不做淡入、不做位移，内容一次到位 */
+@media (prefers-reduced-motion: reduce) {
+  .cpr,
+  .cpr__sheet {
+    animation: none;
+  }
+}

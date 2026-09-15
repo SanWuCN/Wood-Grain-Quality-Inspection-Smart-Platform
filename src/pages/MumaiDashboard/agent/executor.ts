@@ -35,7 +35,8 @@ import {
   voicePackOf,
   type Intent,
 } from "./intents";
-import { advanceOrderReveal, beginOrderReveal, CHARS_PER_SECOND } from "../ordersReveal";
+import { advanceOrderReveal, beginOrderReveal, buildRevealSchedule, cancelOrderReveal, splitSegments } from "../ordersReveal";
+import { commissionBinding } from "../commissionBinding";
 import { useWorkOrderStore } from "../store/workOrders";
 import { understand, SEMANTIC_THRESHOLDS, type MatchResult } from "./matcher";
 import { planFacts, planTask, type TaskPlan } from "./planner";
@@ -371,7 +372,20 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
    * 那个不相干的 intent 动作，避免"先跳到 A、又被拽去 B"。
    */
   if (round.nav?.route === "order") {
-    const wanted = round.nav.order === "current" ? (entities.order ?? "") : round.nav.order;
+    /*
+      `order` 的三种取值：
+        · "bound"   —— 显式绑定的待读取工单（第①轮，防幻觉规则 3）。取不到就**不导航**，
+                       并给出"重新打开新工单通知"的提示 —— 绝不退回 `orders[0]` 猜一张，
+                       那正是文档禁止的行为；
+        · "current" —— 列表最新那张（其余轮次的既有口径，经 entities 解析）；
+        · 其它字符串 —— 明确指定的工单 id。
+    */
+    const wanted =
+      round.nav.order === "bound"
+        ? commissionBinding.get() ?? ""
+        : round.nav.order === "current"
+          ? (entities.order ?? "")
+          : round.nav.order;
     const tool = toolByName("open_order");
     if (tool && wanted) {
       try {
@@ -380,7 +394,11 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
         console.warn(`[script] 第 ${round.roundNo} 轮的导航失败：`, error);
       }
     } else if (!wanted) {
-      console.warn(`[script] 第 ${round.roundNo} 轮要打开工单，但拿不到工单 id（列表可能还没拉回来）`);
+      console.warn(
+        round.nav.order === "bound"
+          ? `[script] 第 ${round.roundNo} 轮要打开**已绑定**的工单，但当前没有绑定 —— 不导航、不猜单（防幻觉规则 3）`
+          : `[script] 第 ${round.roundNo} 轮要打开工单，但拿不到工单 id（列表可能还没拉回来）`,
+      );
     }
   } else if (action) {
     const tool = toolByName(action.tool);
@@ -414,53 +432,69 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
 }
 
 /**
- * 剧本轮次的槽位来源。
+ * 剧本轮次的槽位来源（**防幻觉规则 3 的落点**）。
  *
- * 剧本没有 matcher 抽出来的 `entities`，但第①轮的动作是"打开**这份**工单" ——
- * 指的就是快捷键刚建出来的那张。工单列表由服务端按创建时间倒序返回，取第一条即最新；
- * 列表还没拉回来时，退回详情里正在看的那一张。
+ * 顺序是刻意的：
+ *   1. **显式绑定**的待读取工单 —— 用户点「查看」通知时绑上的那张。
+ *      这是"我想要哪张"的唯一权威来源，优先于任何猜测。
+ *   2. 没绑定时才退回"列表最新那张"（其余轮次的既有口径）。
+ *   3. 列表还没拉回来时，退回详情里正在看的那一张。
+ *
+ * ⚠ 旧实现**只有 2 和 3**（`orders[0]`）。交接文档明令不得用 `orders[0]` 猜，
+ *   因为它在两处会错：用户点的是第二条通知却念了第一条；连按两次快捷键建两单，
+ *   语音永远只读最新那张。两种都是"把 A 的委托当 B 的念出来"。
  */
 function scriptEntities(): EntityBag {
+  const bound = commissionBinding.get();
+  if (bound) return { order: bound };
   const state = useWorkOrderStore.getState();
   const newest = state.orders[0]?.id ?? state.detail?.order?.id ?? "";
   return newest ? { order: newest } : {};
 }
 
 /**
- * 让工单详情**跟着这句台词的节奏**逐段出现。
+ * 让工单详情**跟着这句台词的节奏**逐组出现。
  *
- * 节拍口径与 `tts.ts` 的看门狗一致（按字数估时、不短于 2.5s）：
- * 声音一响先揭示第 1 段（页面不能是空的），随后按比例推进，
- * 最后一段落在约 80% 处 —— 留出收尾，避免"话还没说完页面就铺满了"。
+ * ── 节拍怎么算 ──────────────────────────────────────────────────────
+ * 台词按标点切成语义段，`round.reveal.beats[i]` 说明"第 i 段念完该亮哪一组"；
+ * `buildRevealSchedule()` 把每段的估算时长**累加**成拍点时刻。
+ *
+ * ⚠ 旧算法是把**整段总时长**按分区数平均分配（`estimatedMs * 0.8 * stage / total`），
+ *   各拍等距 —— 短句和长句落点一样长，"念到哪、亮到哪"就对不上。
+ *   交接文档明确要求"按标点切分后的语义段计算，不得再按整段总字数平均分配"。
+ *
+ * ── 收尾（文档第 12 条的落点）───────────────────────────────────────
+ * 播报结束 / 播报失败 / 交互被中断，三种情况都必须让页面回到**完整可见**，
+ * 不得永久停在半展开。前两种在这里处理；第三种由 `cancelOrderReveal()` +
+ * 计划自带的兜底 TTL 处理。
  */
 function startOrderDetailReveal(round: ScriptRound, orderId: string, spoken?: unknown): void {
-  const total = round.reveal?.panels ?? 0;
-  if (!orderId || total <= 0) return;
-  beginOrderReveal(orderId, total);
+  const reveal = round.reveal;
+  if (!orderId || !reveal || reveal.sections.length === 0) return;
 
-  /*
-    ⚠ 估时口径统一到**字/秒**，不再用"每字 260ms"。
-    正文里 64 字 × 260ms ≈ 16.6s，而中文播报约 5.5 字/秒（≈182ms/字）——
-    260ms 明显偏长，这正是"板块比声音慢"的算术来源。
-    语速常量从 `ordersReveal.ts` 取（与揭示机制同源），避免两处口径漂移。
-  */
-  const chars = mainLineOf(round).length;
-  const estimatedMs = Math.max(2500, Math.round((chars / CHARS_PER_SECOND) * 1000));
+  beginOrderReveal(orderId, reveal.sections);
 
-  let done = 0;
+  const segments = splitSegments(mainLineOf(round));
+  const schedule = buildRevealSchedule(segments, reveal.beats);
+  if (schedule.length === 0) {
+    /* 没有可算的拍点（段或 beat 为空）→ 不登记计划，页面完整显示，而不是留个空壳 */
+    cancelOrderReveal();
+    return;
+  }
+
+  let doneSegments = 0;
   const timers: number[] = [];
-  for (let stage = 1; stage <= total; stage += 1) {
-    const at = stage === 1 ? 0 : Math.round((estimatedMs * 0.8 * stage) / total);
+  for (const beat of schedule) {
     timers.push(window.setTimeout(() => {
-      done = Math.max(done, stage);
-      advanceOrderReveal(orderId, stage);
-    }, at));
+      doneSegments = Math.max(doneSegments, beat.segmentIndex + 1);
+      advanceOrderReveal(orderId, beat.sections);
+    }, beat.atMs));
   }
 
   /*
-    真实播报结束 → 把剩下的段落立刻补齐，并撤掉还没到点的定时器。
-    `VoiceOutput.speak()` 是 Promise（音频 onended / 合成 onend 时 resolve，且有看门狗兜底），
-    所以"最后一块亮起"永远不会晚于声音结束 —— 这就是用户要的「随语音播放展开」。
+    真实播报结束 → 把还没到点的拍点一次性补齐，并撤掉定时器。
+    `VoiceOutput.speak()` 是 Promise（音频 onended / 合成 onend 时 resolve，有看门狗兜底），
+    所以"最后一组亮起"永远不会晚于声音结束。
     拿不到 Promise（注入的是同步实现）时什么都不做，退回纯估算。
   */
   if (spoken && typeof (spoken as Promise<void>).then === "function") {
@@ -468,7 +502,10 @@ function startOrderDetailReveal(round: ScriptRound, orderId: string, spoken?: un
       .catch(() => { /* 播报失败也要把页面铺完，不能停在半截 */ })
       .then(() => {
         for (const t of timers) window.clearTimeout(t);
-        if (done < total) advanceOrderReveal(orderId, total);
+        const remaining = schedule.filter((b) => b.segmentIndex >= doneSegments);
+        if (remaining.length) {
+          advanceOrderReveal(orderId, remaining.flatMap((b) => b.sections));
+        }
       });
   }
 }

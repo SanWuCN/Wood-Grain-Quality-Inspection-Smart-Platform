@@ -45,6 +45,14 @@ import { HANDHELD_DEVICE_ID } from "./device/types";
 import { useWorkOrderShortcut } from "./useWorkOrderShortcut";
 import { isWorkOrderEvent, useWorkOrderStore } from "./store/workOrders";
 import { useSharedStore } from "./store/shared";
+/*
+  红头委托预览（交接文档第 5、6 步）：点新工单通知的「查看」时弹它，**路由不动**。
+  `commissionBinding` 负责把"用户想看哪张工单"显式记下来 —— 后续语音读取以它为准，
+  不许用 `orders[0]` 猜（防幻觉硬规则 3）。
+*/
+import { commissionBinding } from "./commissionBinding";
+import { api, type WorkOrderDetail } from "./api/client";
+import { CommissionPreview } from "./pages/orders/CommissionPreview";
 import "./appshell.css";
 import "./pages.css";
 /*
@@ -176,12 +184,75 @@ export default function Shell() {
     document.title = "木脉智检 · 古建筑智能巡检平台";
   }, []);
 
+  /**
+   * 红头委托预览要显示的那张工单详情（`null` = 不显示）。
+   *
+   * 存**详情对象**而不是只存 id：预览的每一个可读字符都必须来自服务端返回的
+   * 工单详情（防幻觉硬规则：图片与语音都不是数据源）。先把详情拉回来，
+   * 拉不到就**不开预览**并给出可恢复提示 —— 宁可不开，也不能拿缓存或常识顶上。
+   *
+   * ⚠ 定义位置必须在 `useWorkOrderShortcut` **之前**：下面那个回调会引用它，
+   *   而 `const` 不提升，写在后面会在首次触发时抛 TDZ 错误（"Cannot access
+   *   before initialization"）—— 症状是"按了快捷键但什么都没发生"。
+   */
+  const [commissionPreview, setCommissionPreview] = useState<WorkOrderDetail | null>(null);
+
+  /**
+   * 已发起但还没落地的请求标记。
+   *
+   * 用 ref 而不是 state：连点「查看」时要在**同一帧**里就拦住第二次请求，
+   * 而 setState 是异步的，第二次点击读到的还是旧值（防不住重复请求）。
+   */
+  const previewRequestRef = useRef<string | null>(null);
+
+  /**
+   * 拉详情并打开委托预览。**不碰路由**（交接文档第 6 步：路由保持不变）。
+   *
+   * ⚠ 同一张工单**已经在看**时不再重开：
+   *   用户实测反馈"打开了一大堆红头文件预览"。
+   *   诱因是连按 Ctrl+Q+L 会留下多条通知，每条都能点「查看」，
+   *   每点一次就重新请求 + 重新挂载一次预览（叠加感很强）。
+   *   现在：同一 orderId 重复点 → 直接忽略；点了另一张工单 → 正常切换。
+   */
+  const openCommissionPreview = useCallback(
+    async (orderId: string) => {
+      if (!orderId) return;
+      if (previewRequestRef.current === orderId) return;
+      previewRequestRef.current = orderId;
+      try {
+        const detail = await api.workOrder(orderId);
+        setCommissionPreview(detail);
+      } catch (error) {
+        /*
+          拉不到就明确说清"读不到"，并提示重新打开通知 ——
+          与 `commissionBinding.resolve()` 的 `missing` 分支同一口径。
+          不留一个半开的预览，也不退回列表第一条去顶替。
+        */
+        setCommissionPreview(null);
+        toast(`当前委托无法读取，请重新打开新工单通知（${error instanceof Error ? error.message : "未知错误"}）`, "danger");
+      } finally {
+        /* 松开标记，让用户关掉预览后还能再次打开同一张 */
+        if (previewRequestRef.current === orderId) previewRequestRef.current = null;
+      }
+    },
+    [toast],
+  );
+
   /* ------------------------------------------------------------------ *
    * 隐藏快捷键 Ctrl + Q + L：小木接单 → 平台工单（PRD §3）
    *
    * 注册点放在外壳上，所以每个已登录页面都能触发；触发器本身负责按键序列识别、
    * 幂等事件 ID 与失败重试，这里只负责「告诉用户发生了什么」。
    * 平台上**不显示**任何快捷键提示，也不加来单入口。
+   *
+   * ── 「查看」为什么不直接跳工单档案（交接文档第 5、6 步）──────────────
+   * 点「查看」要求**先弹红头委托预览，路由保持不动** —— 用户是"拿到一份委托文件"
+   * 而不是"被拽进后台列表"。等他说完「小木小木，读取这份工单」，
+   * 小木才开始播报并同时把页面带到这张工单的详情（第 9~11 步）。
+   *
+   * 同时**把 orderId 显式绑定**下来（防幻觉规则 3）：后续语音读取必须以这个
+   * 绑定为准，不许用 `orders[0]` 猜。连按两次快捷键建两单时，
+   * "最后点的那张"说了算（规则 12）。
    * ------------------------------------------------------------------ */
   useWorkOrderShortcut({
     onCreated: useCallback(
@@ -189,7 +260,13 @@ export default function Shell() {
         toast(
           created ? `收到新工单 ${orderNo}，待项目经理指派` : `新工单 ${orderNo} 已存在（重复触发未重复建单）`,
           created ? "ok" : "warn",
-          { label: "查看", to: `/orders?order=${encodeURIComponent(orderId)}` },
+          /*
+            这里用自描述的去向 `commission:<orderId>` 而不是路由地址：
+            点它要"开预览、不跳路由"，而 Toast 的 action 原本只有 `to` 一个字段。
+            加一个字段（如 `mode: "preview"`）要同时改 context 的类型与所有构造点，
+            而带前缀的 `to` 自解释、改动只落在下面一处消费点。
+          */
+          { label: "查看", to: `commission:${encodeURIComponent(orderId)}` },
         );
       },
       [toast],
@@ -581,8 +658,20 @@ export default function Shell() {
               /*
                 带去向的通知：点它跳过去查看（新工单到达时的「查看」）。
                 **不自动跳页** —— 用户可能正在填表单，草稿必须保留（PRD §3.1）。
+
+                `commission:` 前缀是例外：它表示"打开红头委托预览"，**路由不动**。
+                用户看过委托、说出读取命令之后，才由小木把页面带到工单详情
+                （交接文档第 5、6 步与第 9~11 步）。
               */
-              if (item.action) navigate(item.action.to);
+              const to = item.action?.to;
+              if (to?.startsWith("commission:")) {
+                const orderId = decodeURIComponent(to.slice("commission:".length));
+                // 显式绑定：后续语音读取以它为准，不许用列表第一条猜（防幻觉规则 3）
+                commissionBinding.bind(orderId);
+                if (orderId) void openCommissionPreview(orderId);
+              } else if (to) {
+                navigate(to);
+              }
               dismissToast(item.id);
             }}>
             {item.text}
@@ -608,6 +697,14 @@ export default function Shell() {
         <span>{DEVICES.realCart.name} 未获运动权限（只读监视）</span>
         <span>地图 · 位姿 · 视频 · 车辆 四路通道独立状态</span>
       </div>
+
+      {/*
+        红头委托预览（交接文档第 5、6 步）：点新工单通知的「查看」时出现，**不改路由**。
+        用户说出读取命令后，由小木关闭它并带页面前往工单详情。
+      */}
+      {commissionPreview ? (
+        <CommissionPreview detail={commissionPreview} onClose={() => setCommissionPreview(null)} />
+      ) : null}
     </div>
   );
 }

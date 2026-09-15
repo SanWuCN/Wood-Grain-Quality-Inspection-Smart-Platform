@@ -1,0 +1,127 @@
+/* ==================================================================
+   木脉智检 · 任务范围与出发清单（task scope）
+   ------------------------------------------------------------------
+   服务 `pages/orders/TaskScopePanel.tsx` 一个组件。类名统一 `tscope-` 前缀，
+   与 `pages.css` 的 `wop-` / `orders/orders.css` 的 `wo-` / 委托预览的 `cpr-`
+   分开，互不覆盖。
+
+   设计令牌全部**照名引用**（`--space-*` / `--fs-*` / `--text-*` /
+   `--border-subtle` / `--glow-cyan`），不新造令牌、不新造配色：
+   这一块是纯文字面板，层级靠字号、字重和留白建立（规范 §4.3 的口径）。
+
+   三块内容的排版各有各的理由：
+     1) 四项任务：仓库既有 `DataTable`，只修**多行说明**在固定行高下被压扁的问题；
+     2) 出发清单：`dl` 的「组名 + 装备」两列，组名固定宽度便于逐行点名；
+     3) 待现场确认：项目符号 + 右侧固定占位说明，占位说明**不折叠、不进 title**。
+   ================================================================== */
+
+/* ---------------- 1. 四项任务（DataTable 的说明列要能换行） ---------------- */
+
+/*
+   `pages.css` 的 `.dtable th/td` 是给「一行一条记录」的表格调的：
+   `height: 36px` + `vertical-align: middle` + 表头 `nowrap`。
+   任务说明是一整句话，在这套规则下会以一个被压扁的中列出现，
+   而任务说明是逐字文案，**不能截断**（截断就等于没说清这项任务做什么）。
+
+   只在本组规则里放行多行：行高改为由内容撑开、单元格顶对齐、说明列吃满剩余宽度。
+   其余边框 / 字号 / 悬停底色继续走 `.dtable` 的原样定义，不重复声明。
+*/
+.sub + .dtable th,
+.sub + .dtable td {
+  height: auto;
+  vertical-align: top;
+  white-space: normal;
+}
+
+.sub + .dtable th,
+.sub + .dtable td {
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+/* 序号列（01–04）窄一点，别把「任务」和「说明」两列挤到换行 */
+.sub + .dtable th:nth-child(1),
+.sub + .dtable td:nth-child(1) {
+  width: 4.5em;
+}
+
+/* ---------------- 2. 出发清单 ---------------- */
+
+.tscope-kit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.tscope-kit__row {
+  display: grid;
+  grid-template-columns: 9em 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* 最后一组不再画分隔线：面板底边自己就是边界 */
+.tscope-kit__row:last-child {
+  border-bottom: 0;
+}
+
+.tscope-kit dt {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.tscope-kit dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  line-height: var(--lh-table);
+}
+
+/* ---------------- 3. 待现场确认 ---------------- */
+
+.tscope-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tscope-confirm li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  line-height: var(--lh-table);
+}
+
+/* 项目符号用 CSS 画，不占文本节点（复制出去的文字里不该多出一个点） */
+.tscope-confirm li::before {
+  content: "·";
+  color: var(--glow-cyan);
+}
+
+/* 占位说明：跟在每一项后面，说明"这里不是待办、是附件里没有" */
+.tscope-confirm em {
+  margin-left: auto;
+  font-size: var(--fs-aux);
+  font-style: normal;
+  white-space: nowrap;
+}
+
+/* 窄屏 / 投屏小档：占位说明换行到下一行，不压缩字号、不省略 */
+@media (max-width: 900px) {
+  .tscope-kit__row {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+
+  .tscope-confirm em {
+    margin-left: 0;
+    white-space: normal;
+  }
+}

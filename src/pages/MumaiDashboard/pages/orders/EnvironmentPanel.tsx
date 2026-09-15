@@ -90,11 +90,18 @@ export function EnvironmentPanel({
   busy,
   onSave,
   onValidate,
+  className = "",
 }: {
   detail: WorkOrderDetail;
   busy: boolean;
   onSave: (body: EnvironmentBody) => Promise<void>;
   onValidate: (expectedRevision: number) => Promise<void>;
+  /**
+   * 揭示门控用：父组件 `WorkOrderDetail.tsx` 传 `wop-reveal` / `wop-reveal is-in`，
+   * 决定这一块在播报念到那一拍之前**不出现**（`orders.css` 里是 `display: none`）。
+   * 不传时行为与从前完全一致。
+   */
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const env = detail.environment;
@@ -121,6 +128,7 @@ export function EnvironmentPanel({
 
   return (
     <Panel
+      className={className}
       title="环境记录与配置校验"
       icon="biz-multimodal"
       extra={

@@ -119,10 +119,17 @@ export function DispatchPanel({
   detail,
   busy,
   onDispatch,
+  className = "",
 }: {
   detail: WorkOrderDetail;
   busy: boolean;
   onDispatch: (body: DispatchBody) => Promise<void>;
+  /**
+   * 揭示门控用：父组件 `WorkOrderDetail.tsx` 传 `wop-reveal` / `wop-reveal is-in`，
+   * 决定这一块在播报念到那一拍之前**不出现**（`orders.css` 里是 `display: none`）。
+   * 不传时行为与从前完全一致。
+   */
+  className?: string;
 }) {
   const [selectedId, setSelectedId] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -157,6 +164,7 @@ export function DispatchPanel({
 
   return (
     <Panel
+      className={className}
       title="扫描仪下发"
       icon="biz-handheld-scanner"
       extra={
