@@ -346,7 +346,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     title: "四柱风险初筛",
     /* 触发来源：唤醒词 + 说法 */
     triggerSource: "voice",
-    triggers: ["对比四根木柱", "按风险排序", "检测结果排序"],
+    triggers: ["对比四根木柱", "按风险排序", "检测结果排序", "比较四根木柱", "四根木柱", "比较四组木构件"],
     lines: [
       {
         role: "main",
