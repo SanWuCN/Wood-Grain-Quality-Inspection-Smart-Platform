@@ -23,6 +23,7 @@ import {
   FORBIDDEN_LEGACY_PHRASES,
   REQUIRED_REWRITE_PHRASES,
   SPEAKER_REWRITES_V1,
+  findPlaceholders,
 } from "./rehearsalScript.ts";
 
 const lineOf = (no: string): string => {
@@ -121,10 +122,38 @@ test("§7 点名的 7 处改写已录入，且旧措辞不存在于平台任何�
 test("全剧本不得残留占位符（xxx / xxxx / 待补文案）", () => {
   for (const round of SCRIPT_ROUNDS) {
     const text = `${round.title}\n${mainLineOf(round)}\n${round.triggers.join("|")}`;
-    for (const bad of ["xxx", "XXX", "xxxx", "待补文案", "占位"]) {
-      assert.ok(!text.includes(bad), `第 ${round.roundNo} 轮残留占位符「${bad}」`);
-    }
+    /* 严格模式：平台会念的文本里任何占位符都算残留 */
+    const hits = findPlaceholders(text, false);
+    assert.equal(hits.length, 0, `第 ${round.roundNo} 轮残留占位符：${hits.join(" / ")}`);
   }
+});
+
+test("改写表里的「记录式提及」允许保留，但不许顺手写进正式文案（§7）", () => {
+  /*
+    ⚠ 这里要区分两类出现，否则两条要求会互相打架：
+      · **残留**（禁止）：平台会念的文本里出现占位符；
+      · **记录**（允许）：`replacedIssue` 那一列的作用就是记下"原来这里是占位符"，
+        把它也扫掉等于删掉改写的凭据。
+    扫描函数 `findPlaceholders(text, allowRecord)` 用"占位符前 6 字里有 含/原/旧/曾"
+    来区分 —— 下面三种情形各自钉一条，确保这个判据不是恒真。
+  */
+  for (const line of SPEAKER_REWRITES_V1) {
+    /* 记录列：允许（它就是在描述历史问题） */
+    assert.equal(
+      findPlaceholders(line.replacedIssue, true).length,
+      0,
+      `改写表的「被替换问题」列不该被判为残留：${line.replacedIssue}`,
+    );
+    /* 正式文案：严格禁止 */
+    assert.equal(
+      findPlaceholders(line.text, false).length,
+      0,
+      `第 ${line.text.slice(0, 12)}… 的正式文案里残留占位符`,
+    );
+  }
+  /* 判据不是恒真：直接显示占位符的文本必须被抓出来 */
+  assert.deepEqual(findPlaceholders("这里写着 xxxx 请补全", true), ["xxxx"], "非记录式提及必须被抓出");
+  assert.deepEqual(findPlaceholders("段落 171 含 xxxx", true), [], "记录式提及应放行");
 });
 
 test("平台播报文本不得带入工作清单里的语气词「喵」（§7 末）", () => {

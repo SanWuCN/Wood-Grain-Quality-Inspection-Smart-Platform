@@ -353,11 +353,17 @@ export function validateScenario(): string[] {
   if (v.weather.panelTitle !== `平台环境档案 · 截止 ${v.weather.rangeEnd}`) {
     problems.push(`天气面板标题与统计区间终止日不一致：${v.weather.panelTitle}`);
   }
-  if (n(v.fusion.radarFrames) !== n(v.anomaly.receivedFrames)) {
-    problems.push(
-      `精细分析雷达帧 ${v.fusion.radarFrames} 与异常采集收到帧 ${v.anomaly.receivedFrames} 不一致`,
-    );
-  }
+  /*
+    ⚠ 这里**刻意不校验**「精细分析雷达帧（420）与异常采集收到帧（386）是否相等」。
+
+    为什么（这条例外是踩出来的，写清楚免得后人又加回去）：
+      · ⑫ 的 420 / 386 / 34 是**异常那一次采集**的记录（`scan-Z04-001` 缺帧）；
+      · ⑱ 的 420 / 14 / 3 是**补采·复扫之后**的精细分析帧数，可以补足到计划值。
+      两者是**不同轮的采集**，本来就不该相等。
+    我第一版凭"收到帧应当等于分析帧"的直觉加了这条校验，跑 `tools-夜间/出数据字典.ts`
+    时报出"发现 1 项不自洽" —— **是校验规则错，不是数据错**。
+    按工作清单 §2.2 的唯一优先级（清单冻结值 > 实现者推断），保留清单数值、去掉该规则。
+  */
   if (v.model.deployChecksPassed > v.model.deployChecksTotal) {
     problems.push(`部署条件通过数 ${v.model.deployChecksPassed} 超过总数 ${v.model.deployChecksTotal}`);
   }

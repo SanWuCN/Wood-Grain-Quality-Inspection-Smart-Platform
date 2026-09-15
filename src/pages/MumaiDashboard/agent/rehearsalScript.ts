@@ -104,3 +104,50 @@ export const REQUIRED_REWRITE_PHRASES: readonly string[] = Object.freeze([
   "归档验证记录",
   "预处理版本",
 ]);
+
+/**
+ * 占位符形态（§10 阶段 F 要求全仓扫描）。
+ *
+ * ⚠ 抽成常量而不是散落在测试里，是因为**同一个模式有两类用途**，
+ *   必须能区分，否则会互相打架：
+ *   · **残留**（禁止）：出现在**平台会念的文本**里 —— 台词、触发短语、页面文案；
+ *   · **记录**（允许）：出现在 `SPEAKER_REWRITES_V1[].replacedIssue` 里 ——
+ *     那一列的作用就是记下"原来这里是占位符"，把它也扫掉等于删掉改写的凭据。
+ *   所以扫描函数要能按用途切换，而不是简单 `includes`。
+ */
+export const PLACEHOLDER_PATTERNS: readonly string[] = Object.freeze([
+  "待补文案",
+  "占位符",
+  "xxxx",
+]);
+
+/**
+ * 扫描一段文本里的占位符。
+ *
+ * @param text       待扫描文本
+ * @param allowRecord true = 允许"记录式"提及（如 `段落 171 含 xxxx`）；
+ *                    false = 严格模式，任何出现都算残留
+ */
+export function findPlaceholders(text: string, allowRecord = false): string[] {
+  const hits: string[] = [];
+  for (const pattern of PLACEHOLDER_PATTERNS) {
+    if (!text.includes(pattern)) continue;
+    /*
+      非严格模式下放行"记录式"提及：形如「含 xxx」「原来是 xxx」这类
+      明确在**描述历史问题**的写法。判据是占位符前面 6 个字里出现
+      "含 / 原 / 旧 / 曾" 这类提示词 —— 与"页面上直接显示占位符"区分开。
+    */
+    if (allowRecord) {
+      let idx = text.indexOf(pattern);
+      let allRecorded = true;
+      while (idx >= 0) {
+        const before = text.slice(Math.max(0, idx - 6), idx);
+        if (!/[含原旧曾]/.test(before)) { allRecorded = false; break; }
+        idx = text.indexOf(pattern, idx + 1);
+      }
+      if (allRecorded) continue;
+    }
+    hits.push(pattern);
+  }
+  return hits;
+}

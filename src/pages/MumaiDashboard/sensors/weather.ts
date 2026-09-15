@@ -96,8 +96,33 @@ async function fetchHumidity(signal: AbortSignal): Promise<number> {
 }
 
 /**
+ * 是否允许**真正去公网**取湿度。
+ *
+ * ── 为什么需要这个开关（工作清单 v1.0 §4.1）──────────────────────────
+ * 本文件原本是"现场能上外网就取实时值"的设计，注释里也是这么写的。
+ * 但《新剧本纯本地演示-DSH通宵执行工作清单 v1.0》§4 把边界定死了：
+ *   「1. 浏览器只允许访问同源地址和 `127.0.0.1` 本机服务，**不得增加公网请求**」
+ * 而这是**演示运行时唯一的公网调用点**（`SensorWorkspace` 的"硬件详情"面板用它），
+ * 每 15 分钟自动请求一次 `api.open-meteo.com`。断网演示时它会一直失败重试，
+ * 且"浏览器网络记录里不得出现公网请求"这条验收会直接不通过。
+ *
+ * ── 为什么默认关闭是安全的 ──────────────────────────────────────────
+ * 本文件的**三级取值**早就为"取不到网"准备好了退路：
+ *   live → cache（上次成功值，界面标"缓存"）→ fallback（北京秋季常湿常量，界面标"兜底"）
+ * 关掉 live 之后，面板依旧**始终有数字**，只是来源标注从"实时"变成"缓存/兜底"
+ * —— 这恰恰是纯本地演示想要的诚实标注，不是功能缺失。
+ *
+ * 想恢复联网取值的场合：把下面的常量改成 `true`（或在构建时注入）。
+ * 但**演示前请确认 §4.1 的要求是否仍然适用**。
+ */
+const ALLOW_LIVE_FETCH = false;
+
+/**
  * 面板用的钩子。返回值在任何时刻都可用（`humidity` 一定有数字），
  * 断网只会改变 `source`，不会把这一格变成空值。
+ *
+ * `ALLOW_LIVE_FETCH = false` 时**不发任何网络请求**，直接落到
+ * `cache` / `fallback` 两级 —— 见上面常量的说明。
  */
 export function useBeijingHumidity(): BeijingHumidity {
   const [state, setState] = useState<BeijingHumidity>(initial);
@@ -106,6 +131,17 @@ export function useBeijingHumidity(): BeijingHumidity {
     let disposed = false;
     let timer = 0;
     let active: AbortController | null = null;
+
+    /*
+      离线门：不进 load()、也不起定时器 —— 连"失败重试"都不该发生，
+      否则浏览器网络记录里仍会留下一串被拒绝的公网请求（§4.1 验收会判不合格）。
+    */
+    if (!ALLOW_LIVE_FETCH) {
+      setState((prev) => ({ ...prev, loading: false }));
+      return () => {
+        disposed = true;
+      };
+    }
 
     const load = async () => {
       active?.abort();
