@@ -26,8 +26,32 @@ const TIMEOUT_MS = 3000;
 
 const GIB = 1024 ** 3;
 
+/**
+ * 执行一个采集命令。
+ *
+ * ⚠ **`windowsHide: true` 是硬要求，不能去掉**（2026-09-15 定位到的一个真实故障）。
+ *
+ * `execFile` 在 Windows 上默认**为每个子进程创建一个可见的控制台窗口**。
+ * 采集器每 2 秒跑一拍（见下方 `start(intervalMs = 2000)`），而每一拍都会调
+ * `powershell` / `nvidia-smi` / `netstat` —— 于是桌面上就出现
+ * **每 2 秒弹出一次、随即消失的 cmd 窗口**，成串、停不下来。
+ *
+ * 用户侧的描述是「反复弹出一堆类 cmd 窗口又消失」，而且这类窗口
+ * 与"平台自己在跑"强相关（服务一被停掉，闪烁立刻消失）。
+ * 排查时先怀疑过远控软件、华硕奥创、计划任务，都不是 ——
+ * 真凶就是这里少了一个 `windowsHide`。
+ *
+ * 放在**默认值**里而不是各个调用点：本文件有 8 处 `exec()` 调用
+ * （powershell ×3、nvidia-smi、netstat、df/vm_stat/sysctl/ioreg/diskutil），
+ * 逐处加必然会漏；`...options` 仍在最后，个别调用需要覆盖时依然能覆盖。
+ */
 async function exec(command, args, options = {}) {
-  const { stdout } = await run(command, args, { timeout: TIMEOUT_MS, maxBuffer: 1 << 22, ...options });
+  const { stdout } = await run(command, args, {
+    timeout: TIMEOUT_MS,
+    maxBuffer: 1 << 22,
+    windowsHide: true,
+    ...options,
+  });
   return stdout;
 }
 
