@@ -115,6 +115,33 @@ function stale(gen: number | undefined): boolean {
   return gen !== undefined && gen !== runGeneration;
 }
 
+/**
+ * 播报前的「思考」时长（毫秒）。
+ *
+ * 用户口径：**2.5~4 秒之间取随机数**，不要固定值。
+ *
+ * 为什么是随机而不是固定：固定时长连着念几轮会显出机械感 ——
+ * 每次都"不多不少卡在同一秒"开口，演示时一眼就能看出是写死的延时。
+ * 取随机数之后节奏更像真的在想。
+ *
+ * 为什么下限是 2.5 秒、上限 4 秒：
+ *   · 原先写的 5 秒是**为了看清思考动画**才拉长的（`bb20efc` 从 2 秒翻到 4 秒、
+ *     后来又被调到 5 秒），不是交互本身的需要；
+ *   · 2.5 秒是"思考动画看得清"与"不让人干等"之间的折中 ——
+ *     低于 2 秒思考动画会一闪而过（`a190c45` 修的就是"只显示 0.5 秒"）；
+ *   · 4 秒上限保证整轮节奏不拖。
+ *
+ * ⚠ 改这个范围要同步两处判据，否则会误报失败：
+ *   · `voice-module/tools/验唤醒链路.mjs` 的等待上限（现为 20 秒，覆盖 4 秒足够）
+ *   · 任何按墙上时钟断言"思考完了没"的验收工装
+ */
+const THINK_MIN_MS = 2500;
+const THINK_MAX_MS = 4000;
+
+function thinkingDelayMs(): number {
+  return THINK_MIN_MS + Math.round(Math.random() * (THINK_MAX_MS - THINK_MIN_MS));
+}
+
 const ENTITY_LABEL: Record<string, string> = {
   pillar: "构件",
   zone: "测区",
@@ -808,9 +835,8 @@ export async function ask(text: string, runtime: Runtime, via: "text" | "mic" | 
    */
   const route = routeUtterance(trimmed);
   if (route.kind === "script") {
-    // 思考5秒再说话
     setAgent({ agentState: "THINKING", stateNote: `剧本命中 ${route.round.roundNo}，思考中...` });
-    await sleep(5000);
+    await sleep(thinkingDelayMs());
     if (stale(gen)) return;
     replyScript(route.round, route.match, runtime);
     setAgent({ agentState: "FINISHED", stateNote: "" });
