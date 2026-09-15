@@ -429,6 +429,21 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
   if (round.reveal?.target === "order-detail") {
     startOrderDetailReveal(round, entities.order ?? "", spoken);
   }
+
+  /*
+    ── 演示表面（工作清单 v1.0 §10 阶段 C/D）──────────────────────────
+    这一轮"必须发生的可见动作"里，除了导航与工单详情展开之外的部分
+    （天气四分类、素材质检、异常帧、清洗漏斗、模型对照…）通过一个事件交给外壳渲染。
+
+    为什么在**说完之后**派发、而不是播报开始时：§8 的动作列写的是
+    "播到哪一项就依次展开"，即页面变化要跟着播报走；而表面是一个整块浮层，
+    没有内部分段，所以放在这一轮收尾（`applyScriptAction` 的末尾）最稳 ——
+    此时导航已发出、揭示已登记，用户看到的是"念完 → 屏幕出现对应面板"。
+
+    事件名与 `Shell.tsx` 的监听一一对应；找不到动作的轮次由组件自己返回 null
+    （`actionFor` 查不到就不渲染），所以这里不必再判一次。
+  */
+  window.dispatchEvent(new CustomEvent("mumai:demo-surface", { detail: { roundNo: round.roundNo } }));
 }
 
 /**

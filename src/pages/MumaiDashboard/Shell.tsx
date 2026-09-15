@@ -53,6 +53,12 @@ import { useSharedStore } from "./store/shared";
 import { commissionBinding } from "./commissionBinding";
 import { api, type WorkOrderDetail } from "./api/client";
 import { CommissionPreview } from "./pages/orders/CommissionPreview";
+/*
+  演示表面（工作清单 v1.0 §10 阶段 D）：22 轮每轮"说完之后页面做什么"的可视化。
+  它按 `roundNo` 从动作注册表取数据键渲染，是**一个组件覆盖 15 个表面**的设计 ——
+  不是 15 个各自独立的页面。挂在外壳上，任何已登录页面都能弹。
+*/
+import { DemoSurface } from "./agent/demoSurface";
 import "./appshell.css";
 import "./pages.css";
 /*
@@ -196,6 +202,27 @@ export default function Shell() {
    *   before initialization"）—— 症状是"按了快捷键但什么都没发生"。
    */
   const [commissionPreview, setCommissionPreview] = useState<WorkOrderDetail | null>(null);
+
+  /**
+   * 当前要显示的演示表面（轮次圈号；`null` = 不显示）。
+   *
+   * 由 `executor` 在小木说完某一轮之后派发 `mumai:demo-surface` 事件打开。
+   * 为什么走事件而不是 props：executor 在气泡里跑，Shell 在路由里渲染，
+   * 两棵组件树不相邻；事件是这块代码里既有的跨树通信方式
+   * （`mumai:xiaomu-ask`、`mumai:script-route` 同理）。
+   */
+  const [demoSurfaceRound, setDemoSurfaceRound] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onSurface = (event: Event) => {
+      const detail = (event as CustomEvent<{ roundNo?: string }>).detail;
+      const roundNo = detail?.roundNo;
+      /* 没有圈号就关掉，不留一个说不清是哪一轮的浮层 */
+      setDemoSurfaceRound(roundNo ? String(roundNo) : null);
+    };
+    window.addEventListener("mumai:demo-surface", onSurface);
+    return () => window.removeEventListener("mumai:demo-surface", onSurface);
+  }, []);
 
   /**
    * 已发起但还没落地的请求标记。
@@ -704,6 +731,16 @@ export default function Shell() {
       */}
       {commissionPreview ? (
         <CommissionPreview detail={commissionPreview} onClose={() => setCommissionPreview(null)} />
+      ) : null}
+
+      {/*
+        演示表面（§10 阶段 D）：小木说完某一轮后由 executor 派发事件打开，
+        展示该轮"必须发生的可见动作"对应的数据。同一时刻只显示一个 ——
+        连续说话时后一轮直接顶掉前一轮，避免浮层堆叠（与本轮修过的
+        "通知堆积"是同一类问题）。
+      */}
+      {demoSurfaceRound ? (
+        <DemoSurface roundNo={demoSurfaceRound} onClose={() => setDemoSurfaceRound(null)} />
       ) : null}
     </div>
   );

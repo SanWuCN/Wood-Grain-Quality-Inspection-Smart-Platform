@@ -1,0 +1,173 @@
+/**
+ * 演示表面样式（工作清单 v1.0 §10 阶段 D）
+ *
+ * 走平台既有的深色令牌（`src/styles/tokens.css`），与右下角小木气泡
+ * （`xiaomuDock.css` 改成深色面板之后的那一套）保持同一视觉语言 ——
+ * 演示时浮层与小木气泡会同时在屏幕上，两套配色会显得像两个产品。
+ *
+ * 定位：左下角。理由：右下角被小木气泡占用；左下角空着，
+ * 且与主内容区不重叠（§10-D 隐含要求：浮层不能挡住讲解要看的东西）。
+ */
+
+.dsf {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 76; /* 低于小木气泡（80），高于页面内容 */
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(62vh, 520px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  background: var(--panel-surface, rgba(9, 19, 33, 0.92));
+  border: 1px solid var(--border-default, rgba(78, 168, 255, 0.18));
+  box-shadow: 0 16px 40px rgba(0, 6, 16, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--text-primary, #eaf3ff);
+  overflow: hidden;
+  animation: dsf-in 0.18s ease-out;
+}
+
+@keyframes dsf-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dsf__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  background: var(--panel-surface-2, rgba(9, 19, 33, 0.96));
+  border-bottom: 1px solid var(--border-subtle, rgba(78, 168, 255, 0.12));
+  flex: none;
+}
+
+.dsf__round {
+  flex: none;
+  min-width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: rgba(78, 168, 255, 0.18);
+  color: var(--text-accent, #70c4ff);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dsf__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-title, #ddeeff);
+}
+
+.dsf__badge {
+  flex: none;
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(242, 184, 75, 0.18);
+  color: var(--warning, #f2b84b);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.dsf__close {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted, #91a5bc);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dsf__close:hover {
+  background: rgba(78, 168, 255, 0.16);
+  color: var(--text-primary, #eaf3ff);
+}
+
+.dsf__rows {
+  margin: 0;
+  padding: 6px 10px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+.dsf__row {
+  display: flex;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px dashed rgba(78, 168, 255, 0.08);
+  font-size: 12px;
+}
+
+.dsf__row:last-child {
+  border-bottom: none;
+}
+
+.dsf__row dt {
+  flex: none;
+  min-width: 132px;
+  color: var(--text-tertiary, #70849c);
+}
+
+.dsf__row dd {
+  margin: 0;
+  color: var(--text-primary, #eaf3ff);
+  word-break: break-all;
+}
+
+/* 缺失态：数据包里取不到值时不补写，明确显示为缺失（§11.1） */
+.dsf__row.is-missing dd {
+  color: var(--warning, #f2b84b);
+}
+
+.dsf__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-subtle, rgba(78, 168, 255, 0.12));
+  background: var(--panel-surface-2, rgba(9, 19, 33, 0.96));
+  flex: none;
+}
+
+.dsf__btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border-default, rgba(78, 168, 255, 0.18));
+  border-radius: 7px;
+  background: rgba(78, 168, 255, 0.1);
+  color: var(--text-primary, #eaf3ff);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dsf__btn:hover:not(:disabled) {
+  background: rgba(78, 168, 255, 0.2);
+}
+
+.dsf__btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.dsf__note {
+  color: var(--text-tertiary, #70849c);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dsf {
+    animation: none;
+  }
+}
