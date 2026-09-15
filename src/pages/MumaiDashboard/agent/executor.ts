@@ -808,7 +808,10 @@ export async function ask(text: string, runtime: Runtime, via: "text" | "mic" | 
    */
   const route = routeUtterance(trimmed);
   if (route.kind === "script") {
-    setAgent({ agentState: "RESPONDING", stateNote: `剧本命中 ${route.round.roundNo}` });
+    // 思考5秒再说话
+    setAgent({ agentState: "THINKING", stateNote: `剧本命中 ${route.round.roundNo}，思考中...` });
+    await sleep(5000);
+    if (stale(gen)) return;
     replyScript(route.round, route.match, runtime);
     setAgent({ agentState: "FINISHED", stateNote: "" });
     return;
@@ -880,6 +883,7 @@ export function hasTool(name: string): boolean {
 export function readLive() {
   return getAgentState().live;
 }
+
 
 
 
