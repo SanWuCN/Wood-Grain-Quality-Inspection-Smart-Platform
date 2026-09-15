@@ -37,6 +37,22 @@ import { mainLineOf, SCRIPT_ROUNDS, type ScriptRound } from "./script.ts";
 export const MATCH_THRESHOLD = 0.62;
 export const MIN_MARGIN = 0.06;
 export const MIN_HIT_CHARS = 3;
+/**
+ * 输入长度必须达到**触发说法长度**的这个比例，才算真在说这句话。
+ *
+ * 取 0.6 的依据见 `matchScriptRound` 里那段注释：要拒掉"只说了极短一句"的提及式输入。
+ * 与 `MIN_TRIGGER_COVERAGE` 配套：一个管"听全了没"，一个管"说够了没"。
+ */
+export const MIN_UTTERANCE_RATIO = 0.6;
+
+/**
+ * 触发说法被覆盖的比例下限（"有没有听懂这句话"）。
+ *
+ * 取 0.75：实测 `这份工单` 覆盖「读取这份工单」只有 0.667（必须拒），
+ * 而同音变体 `数据清洗` 覆盖标准说法「清洗这批数据」是 0.750（必须收，真人实测过）。
+ * 而 §8 允许的模糊说法「读取工单」覆盖是 1.000（必须收）。详见 `matchScriptRound`。
+ */
+export const MIN_TRIGGER_COVERAGE = 0.75;
 
 /**
  * 同音/近音归并组。
@@ -298,6 +314,65 @@ export function matchScriptRound(utterance: string): ScriptMatch | null {
       ...base,
       verdict: "too-weak",
       reason: `命中字符太少（${hitChars} < ${MIN_HIT_CHARS}），不足以确定是哪一轮。`,
+    };
+  }
+  /*
+    第三道门槛：**输入长度相对触发说法的比例**。
+
+    ── 为什么需要它（实测出来的假命中）──────────────────────────────
+    打分是"覆盖率 × 可信度"，而覆盖率是**被覆盖的触发字数 ÷ 触发总字数** ——
+    它只看"触发说法被满足了多少"，**完全不看用户说了多长**。
+    于是「这份工单」（4 字）会命中 ① 的触发「读取这份工单」（6 字）：覆盖 4/6 = 0.667，
+    可信度 1.0，得分 0.667 ≥ 0.62 阈值 → hit。
+    用户只是**提了一下工单**，平台却会播完 ① 的台词、跳转工单页并展开四组模块。
+
+    ── 判据取 0.6 的依据 ─────────────────────────────────────────────
+    要同时满足两个已知用例：
+      · 「这份工单」4 字 / 6 字 = 0.667 → 必须**拒**
+      · 「读取工单」4 字 / 4 字 = 1.000 → 必须**收**（§8 允许的模糊说法）
+    0.6 处在两者之间，且对更长的说法更宽松 —— 用户说得越完整越容易命中，
+    这正是"语义短语、不得只匹配单个泛词"（§8）想要的形状。
+  */
+  const utterLen = uChars.length;
+  const triggerLen = top.bestHit ? top.bestHit.totalChars : 0;
+  const triggerCoverage = top.bestHit ? top.bestHit.coverage : 0;
+  /*
+    第三道门槛：**覆盖触发说法的比例**要够高（"有没有听懂这句话"）。
+
+    实测出来的假命中：`这份工单`（用户只是提了一下工单）会命中 ① ——
+    它覆盖「读取这份工单」4/6 = 0.667，可信度 1.0，得分 0.667 ≥ 0.62 阈值 → hit，
+    于是平台播完 ① 的台词、跳到工单页、展开四组模块。而用户并没有下指令。
+
+    为什么"覆盖率"就是对的判据（而不是输入长度）：
+      输入                     覆盖「读取工单」  覆盖「读取这份工单」
+      读取工单（**允许**）          1.000            0.667
+      这份工单（**必须拒**）        0.500            0.667
+    0.8 这条线把"完整说清了一条触发说法"（≥0.8）与"只沾了一半"（≤0.667）分开，
+    两个已知用例各在两侧，且对更完整的说法更宽松。
+
+    ⚠ 与 `MIN_UTTERANCE_RATIO` 的分工：那一条挡的是"触发被高覆盖、但用户其实
+      只说了极短一句"（提一嘴），这一条挡的是"触发压根没被覆盖够"（没听懂）。
+      两道都要有，缺一个就会漏掉另一类假命中。
+  */
+  if (triggerCoverage < MIN_TRIGGER_COVERAGE) {
+    return {
+      ...base,
+      verdict: "too-weak",
+      reason:
+        `最接近的是「${top.bestHit ? top.bestHit.trigger : "-"}」，但只覆盖了 ` +
+        `${(triggerCoverage * 100).toFixed(0)}%（要求 ≥ ${(MIN_TRIGGER_COVERAGE * 100).toFixed(0)}%）—— ` +
+        `没听全这条说法，不当指令。`,
+    };
+  }
+  const lengthRatio = triggerLen > 0 ? utterLen / triggerLen : 0;
+  if (lengthRatio < MIN_UTTERANCE_RATIO) {
+    return {
+      ...base,
+      verdict: "too-weak",
+      reason:
+        `说的是「${utterance}」共 ${utterLen} 字，只占触发说法「${top.bestHit ? top.bestHit.trigger : "-"}」` +
+        `（${triggerLen} 字）的 ${(lengthRatio * 100).toFixed(0)}%，不足 ${(MIN_UTTERANCE_RATIO * 100).toFixed(0)}% —— ` +
+        `像是顺口提到，不当作指令。`,
     };
   }
   if (margin < MIN_MARGIN && second) {

@@ -46,7 +46,12 @@ test("剧本共 22 轮，圈号唯一", () => {
 test("每轮都有标题、至少一个触发说法、且恰有一句主台词", () => {
   for (const round of SCRIPT_ROUNDS) {
     assert.ok(round.title.length > 0, `${round.roundNo} 缺标题`);
-    assert.ok(round.triggers.length >= 1, `${round.roundNo} 没有触发说法`);
+    /* ⚠ ⑪ 是本地事件触发（triggerSource: "local-event"），按设计**没有**语音触发短语 */
+    if (round.triggerSource === "voice") {
+      assert.ok(round.triggers.length >= 1, `${round.roundNo} 声明了语音触发，却没有触发说法`);
+    } else {
+      assert.equal(round.triggers.length, 0, `${round.roundNo} 是本地事件触发，不该登记语音触发短语`);
+    }
     const mains = round.lines.filter((l) => l.role === "main");
     assert.equal(mains.length, 1, `${round.roundNo} 的主台词不是恰好一句`);
     assert.ok(mainLineOf(round).length > 10, `${round.roundNo} 主台词过短，疑似占位`);
@@ -115,7 +120,8 @@ test("⑪ 是唯一由小木主动发起、没有对应意图的预警轮", () =
  */
 test("每一轮登记的准备短语，逐条命中它自己", () => {
   for (const round of SCRIPT_ROUNDS) {
-    assert.ok(round.triggers.length > 0, `第 ${round.roundNo} 轮没有登记任何触发短语`);
+    /* ⑪ 由本地事件触发，没有语音触发短语 —— 跳过它，其余轮必须逐条自洽 */
+    if (round.triggerSource !== "voice") continue;
     for (const phrase of round.triggers) {
       const utterance = stripWakeWord(`小木小木，${phrase}`);
       const m = matchScriptRound(utterance);
@@ -138,7 +144,7 @@ test("同音错字仍能命中（ASR 最常见的错误）", () => {
   const cases: [string, string][] = [
     ["比较这四住木构件，给出优先覆核顺序", "⑧"],      // 柱→住、复→覆
     ["启动数据青洗，列出需要人工合对的记录", "⑮"],      // 清→青、核→合
-    ["汇总新旧摸型的验证结果", "⑯"],                    // 模→摸
+    ["对比两个摸型", "⑯"],                    // 模→摸
     ["把补彩、数据审核和适配验证拆成任务卡", "⑬"],      // 采→彩
     ["生成工丹草稿，列出复核位置", "⑳"],                // 单→丹
   ];
@@ -157,7 +163,7 @@ test("漏字/截断仍能命中（用户只说触发词的一部分）", () => {
     ["补偿参数建议", "⑤"],
     ["重建素材", "⑦"],
     ["巡检任务预检", "⑩"],
-    ["采样计划", "⑭"],
+    ["核对接收清单", "⑭"],
     ["工单草稿", "⑳"],
   ];
   for (const [utterance, expected] of cases) {
@@ -222,7 +228,7 @@ test("剥掉唤醒词后剩下的是要匹配的内容", () => {
 });
 
 test("整句「小木小木 + 关键词」直接可匹配（端到端口径）", () => {
-  const m = matchScriptRound(stripWakeWord("小木小木，比较这四组木构件"));
+  const m = matchScriptRound(stripWakeWord("小木小木，对比四根木柱"));
   assert.ok(m);
   assert.equal(m.round.roundNo, "⑧", m.reason);
   assert.equal(m.verdict, "hit");
