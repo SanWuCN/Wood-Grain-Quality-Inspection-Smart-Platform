@@ -102,7 +102,7 @@ export const ACCOUNTS = [
   // 改完请连同 auth.ts 的 ROUTE_PERMISSION 一起核对（这个字段必须落在
   // 该角色 allowsPath 为真的路径上，否则登录后立刻吃一个「无权限」）。
   { id: "rao", login: "rao", name: "饶", role: "全栈开发工程师", workspace: "采集与交付", page: "/hardware" },
-  { id: "ma", login: "mayutian", name: "马昱天", role: "具身智能工程师", workspace: "建图巡检", page: "/mapping" },
+  { id: "ma", login: "mayutian", name: "马昱天", role: "具身智能工程师", workspace: "建图巡航", page: "/mapping" },
 ];
 
 /** 账号类型（auth.ts 与顶栏 / 登录页共用） */
@@ -126,7 +126,7 @@ export type Account = (typeof ACCOUNTS)[number];
 export const NAV_ITEMS = [
   { key: "overview", label: "任务总览", path: "/", icon: "nav-overview" },
   { key: "orders", label: "工单档案", path: "/orders", icon: "nav-orders" },
-  { key: "mapping", label: "建图巡检", path: "/mapping", icon: "nav-mapping" },
+  { key: "mapping", label: "建图巡航", path: "/mapping", icon: "nav-mapping" },
   { key: "twin", label: "数字孪生", path: "/twin", icon: "nav-twin" },
   { key: "hardware", label: "硬件详情", path: "/hardware", icon: "nav-capture" },
   { key: "firmware", label: "固件及模型", path: "/firmware", icon: "nav-model" },

@@ -16,16 +16,17 @@
  */
 
 import { createServer } from "node:http";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openDatabase } from "./storage/db.mjs";
 import { createApi } from "./api/http.mjs";
 import { createHub } from "./services/hub.mjs";
-import { createDeviceGateway } from "./services/device-gateway.mjs";
+import { createDeviceGateway, parseDeviceTokens } from "./services/device-gateway.mjs";
 import { createWorkOrderService } from "./services/work-orders.mjs";
 import { createUploadService } from "./services/uploads.mjs";
 import { createBleBridge } from "./services/ble-bridge.mjs";
+import { createCartService } from "./services/cart.mjs";
 import { DEFAULT_SESSION_ID, createSession, getSession, listSessions, snapshot } from "./services/session.mjs";
 import { ASSETS_ROOT, ensureAssetsRoot } from "./services/assets.mjs";
 import { ensureDemoPackage } from "./fixtures/preflight.mjs";
@@ -34,6 +35,23 @@ import { installKnowledgeFixture } from "./services/knowledge-store.mjs";
 import { ensureSampleFiles } from "./fixtures/knowledge-samples.mjs";
 import { createJobRunner } from "./services/knowledge-jobs.mjs";
 import { appendEvent } from "./services/session.mjs";
+
+/** 本机安装的设备令牌（设备号 → 令牌），文件不存在就是空的 */
+function deviceTokenSpec() {
+  const fromEnv = process.env.MUMAI_DEVICE_TOKENS ?? "";
+  let fromFile = [];
+  try {
+    const parsed = JSON.parse(readFileSync(resolve("server/data/device-tokens.json"), "utf8"));
+    if (parsed && typeof parsed === "object") {
+      fromFile = Object.entries(parsed)
+        .filter(([deviceId, token]) => deviceId && typeof token === "string" && token)
+        .map(([deviceId, token]) => `${deviceId}:${token}`);
+    }
+  } catch {
+    /* 没有这个文件是正常状态 */
+  }
+  return [fromEnv, ...fromFile].filter(Boolean).join(",");
+}
 
 export function startService({
   port = Number(process.env.MUMAI_PORT ?? 8000),
@@ -65,7 +83,14 @@ export function startService({
     顺序敏感 —— 设备通道先试，命中就结束；两个通道都不认才断开。
   */
   const hub = createHub({ server, db, noServer: true });
-  const devices = createDeviceGateway({ db, sessionId });
+  /*
+    设备令牌表 = 环境变量 + 本机安装文件（`server/data/device-tokens.json`）。
+    加文件这一路是为了**小车**：它的平台地址与令牌要在车上填（小车端接口 v1.0 §6，
+    POST /api/settings/save），平台这边得先有一个能收它的令牌；写成文件就不必
+    为了加一台设备去改启动命令，也和 capture-screen / cart 的安装配置一个路子。
+    文件不进仓库（server/data/ 已 gitignore）。
+  */
+  const devices = createDeviceGateway({ db, sessionId, tokens: parseDeviceTokens(deviceTokenSpec()) });
   server.on("upgrade", (request, socket, head) => {
     if (devices.handleUpgrade(request, socket, head)) return;
     if (hub.handleUpgrade(request, socket, head)) return;
@@ -86,6 +111,21 @@ export function startService({
     而进度是服务端按完成记录数算出来的，不由前端计时器伪造（PRD §9.3）。
   */
   const knowledgeRunner = createJobRunner({ db, sessionId, hub, logger: { log, error: console.error } });
+  /*
+    小车链路（建图巡航页）：平台**下行**读状态与控制，与设备网关的上行方向相反。
+    它自己维持一条到小车的状态 WS，并把状态喂给平台的事件通道
+    （`cart.state` / `cart.link`），页面因此不直连小车、也拿不到控制令牌。
+  */
+  const cart = createCartService({ logger: { warn: (...args) => log("[cart]", ...args) } });
+  /*
+    小车状态 → 平台事件通道。只推 2 Hz 的状态帧与链路变化，
+    页面收到的是**服务端已经判过新鲜度**的同一份快照（见 services/cart.mjs）。
+  */
+  const subscribeCart = (event) => {
+    if (event.type === "state") hub.broadcastCart({ type: "state", payload: cart.snapshot() });
+    else hub.broadcastCart({ type: "link", payload: cart.snapshot() });
+  };
+  const unsubscribeCart = cart.subscribe(subscribeCart);
   const handle = createApi({
     db,
     hub,
@@ -93,6 +133,7 @@ export function startService({
     devices,
     workOrders,
     uploads,
+    cart,
     staticRoot: staticDir ? resolve(staticDir) : null,
     knowledgeRunner,
   });
@@ -122,6 +163,7 @@ export function startService({
         db,
         hub,
         devices,
+        cart,
         sessionId,
         port: actualPort,
         url: `http://localhost:${actualPort}`,
@@ -130,6 +172,8 @@ export function startService({
             knowledgeRunner.stopAll();
             bridge.close();
             devices.close();
+            unsubscribeCart();
+            cart.stop();
             hub.close();
             server.close(() => {
               db.close();

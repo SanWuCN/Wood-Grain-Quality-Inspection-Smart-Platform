@@ -1,0 +1,1030 @@
+/* ==================================================================
+   建图巡航（/mapping）—— 小车真实数据页
+   ------------------------------------------------------------------
+   这一页的视觉规则与平台其它页一致：
+     · 颜色只取 src/styles/tokens.css 的变量，不写死色值（地图画布里的
+       绘制色除外 —— 那是 canvas 里的「地图语言」，与 RViz 对齐才有意义）；
+     · 状态只用语义色（在线绿 / 延迟黄 / 断开红），不做装饰性高饱和块；
+     · 参数带用「小标题 + 键值对」的紧凑网格，一屏能扫完，不做仪表盘墙。
+
+   布局：工具栏（两个模式开关 + 图层开关 + 急停）
+         → 左栏（随模式切换的操作区）
+         → 中栏（地图 / 屏幕画面 / 现场视频 + 状态条）
+         → 底部（全部小车参数，可收起）
+   ================================================================== */
+
+.page--cart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+/* ------------------------------------------------------------------
+   顶部：数据来源与链路状态
+   ------------------------------------------------------------------ */
+
+.cart-source,
+.cart-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-aux);
+  color: var(--text-secondary);
+}
+
+.cart-source i,
+.cart-link i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.cart-source.is-ok i { background: var(--success); }
+.cart-source.is-warn i { background: var(--warning); }
+.cart-source.is-muted i { background: var(--text-tertiary); }
+.cart-link.is-online i { background: var(--success); }
+.cart-link.is-offline i { background: var(--danger); }
+
+/* 模式开关：两个功能，做成一对并排按钮而不是下拉 —— 下拉会藏起「另一半」 */
+.cart-modes {
+  display: inline-flex;
+  border: 1px solid var(--border-default);
+  background: var(--fill-soft, rgba(78, 168, 255, 0.06));
+}
+
+.cart-mode {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-table);
+  cursor: pointer;
+  transition: color var(--motion-fast), background var(--motion-fast);
+}
+
+.cart-mode + .cart-mode {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.cart-mode:hover {
+  color: var(--text-primary);
+  background: var(--bg-panel-hover);
+}
+
+.cart-mode.is-active {
+  color: var(--text-primary);
+  background: var(--fill-strong, rgba(78, 168, 255, 0.16));
+  box-shadow: inset 0 -2px 0 var(--primary);
+}
+
+.cart-refresh {
+  padding: 3px 10px;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-aux);
+  cursor: pointer;
+}
+
+.cart-refresh:hover {
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+}
+
+/* 面板标题栏放得下「模式开关 + 刷新 + 状态」，允许换行 */
+.tech-panel__extra .cart-modes {
+  margin-right: var(--space-2);
+}
+
+.cart-mode__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--glow-cyan);
+  animation: cart-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes cart-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+/* ------------------------------------------------------------------
+   提示条（只读 / 断线 / 上一步失败）
+   ------------------------------------------------------------------ */
+
+.cart-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-default);
+  border-left-width: 3px;
+  background: var(--bg-panel);
+  font-size: var(--fs-aux);
+  color: var(--text-secondary);
+}
+
+.cart-banner b {
+  color: var(--text-title);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cart-banner.is-warn { border-left-color: var(--warning); }
+.cart-banner.is-danger { border-left-color: var(--danger); }
+
+.cart-banner button {
+  margin-left: auto;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-aux);
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.cart-banner button:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+/* ------------------------------------------------------------------
+   主体三栏
+   ------------------------------------------------------------------ */
+
+.cart-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 380px minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.cart-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+/*
+  侧栏内的面板**一律不许被压缩**。
+  少了这条，flex 容器会把「内容更高的面板」压扁去满足总高：
+  表现为后面的地图列表一撑开，前面的「建图」「航点」面板只剩标题栏，
+  看着像功能没做出来。要滚动的是 .cart-side，不是面板自己。
+*/
+.cart-side > * {
+  flex: 0 0 auto;
+}
+
+/*
+  中栏排布：左列「主画面 + 状态条」，右列「现场视频」。
+  为什么视频单独一列而不是叠在主画面下面：它是 4:3 的竖高画面，
+  叠在下面会按宽度反推出很大的高度，把地图挤成一条缝（实测就是这个现象）。
+  单独一列之后，视频的高度由这一列的宽度决定，主画面稳定拿到剩下的全部高度。
+*/
+/*
+  中栏两列：**主画面（RViz / 地图）拿剩下的全部，相机流拿一个稳定宽度**。
+  给相机流固定宽度是有意的：它是 4:3 的现场画面，宽度一变整块就跟着变，
+  屏与图之间的版面会来回跳；固定之后主画面也能稳定拿到最大可用空间。
+  画面本身仍是等比缩放（aspect-ratio + contain），不会因为列宽固定而变形。
+  窄屏（≤1280px）时下面的媒体查询会把它压到 300px 以内。
+*/
+.cart-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 34vw, 640px);
+  grid-template-rows: minmax(0, 1fr);
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.cart-view {
+  grid-column: 1;
+  grid-row: 1;
+  min-height: 0;
+}
+
+.cart-view .tech-panel__body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+}
+
+.cart-view__area {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 1px;
+  background: var(--border-subtle);
+}
+
+.cart-view__pane {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-page);
+  overflow: hidden;
+}
+
+/*
+  隐藏而不是 `display: none`。
+  两个原因，都不是审美问题：
+    · `display: none` 的子树量到的是 0×0，屏幕画面的尺寸要靠舞台尺寸反推，
+      一隐藏就没尺寸可用（实测退化成 240×150）；
+    · 地图画布重新显示时不用重取底图、视图也不丢。
+  绝对定位把它挪出可视区，仍然参与布局测量。
+*/
+.cart-view__pane.is-hidden {
+  position: absolute;
+  left: -10000px;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.cart-view__pane--stream {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/*
+  画面自己的比例盒子。
+  为什么不让 pane 直接带 `aspect-ratio`：pane 是 flex 项，宽度被分配好之后
+  高度还受这一行的高度限制，`aspect-ratio` 就被忽略 —— 结果是画面按容器
+  反推尺寸，四周留黑边，看起来像被压扁。做成内层盒子之后，
+  高度取「宽度 ÷ 原生比例」和「可用高度」里更小的那个，图片 `contain`
+  正好铺满盒子，没有黑边也没有变形。
+  比例取自**实测的原生尺寸**（RViz 1100×450 或 694×434，摄像头 640×480）。
+*/
+.cart-view__box {
+  position: relative;
+  /*
+    同相机流：宽高都 auto + 内联 `aspect-ratio`（RViz 原生比例），
+    盒子尺寸就等于画面尺寸，容器里不出现「画面之外还有一圈」的空带。
+    采样分辨率足够高时，可以在内联样式里把尺寸放大若干倍来占满容器。
+  */
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  background: #000;
+  overflow: hidden;
+}
+
+/*
+  「原始比例显示」在这里落地：画面一律 `object-fit: contain` ——
+  要么完整显示、要么留黑边，**不裁切也不拉伸**。
+  RViz 输出是超宽的 1100×450，摄像头是 4:3（640×480），
+  两个比例差得远，所以下面各给各的容器宽度，互不挤。
+*/
+.cart-view__box img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.cart-view__tag {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 1;
+  padding: 2px 8px;
+  background: rgba(3, 8, 18, 0.72);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* 画面选择：四个 tab，紧凑排在面板标题栏右侧 */
+.cart-volt {
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-table);
+  margin-left: var(--space-2);
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--border-subtle);
+}
+
+.cart-tabs {
+  display: inline-flex;
+  border: 1px solid var(--border-default);
+}
+
+.cart-tabs button {
+  padding: 4px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-aux);
+  cursor: pointer;
+}
+
+.cart-tabs button + button {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.cart-tabs button:hover { color: var(--text-primary); }
+
+.cart-tabs button.is-active {
+  color: var(--text-primary);
+  background: var(--fill-strong, rgba(78, 168, 255, 0.16));
+}
+
+/* ------------------------------------------------------------------
+   地图画布
+   ------------------------------------------------------------------ */
+
+.cart-map {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  background: #1b2430;
+}
+
+.cart-map__canvas {
+  display: block;
+  touch-action: none;
+}
+
+.cart-map__hint {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 4px 10px;
+  background: rgba(3, 8, 18, 0.72);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.cart-map__count {
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+
+.cart-map__reset {
+  pointer-events: auto;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
+.cart-map__reset:hover { color: var(--text-primary); }
+
+/* ------------------------------------------------------------------
+   现场视频（与栅格地图 / RViz 画面分开的一块）
+   ------------------------------------------------------------------ */
+
+.cart-video {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 0;
+  max-width: 100%;
+}
+
+.cart-video .tech-panel__body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 2px;
+}
+
+/*
+  画面按摄像头原始宽高比（4:3）定尺寸。
+  `aspect-ratio` 让容器与画面同比例，`object-fit: contain` 再兜一层：
+  比例一致时无黑边，不一致时留边 —— 无论哪种都不拉伸、不裁切。
+  宽度上限按「高度也放得下」定：4:3 的画面高度 = 宽度 × 0.75。
+*/
+/*
+  画面按**摄像头的像素尺寸**显示（640×480），宽高由页面内联给出，
+  `.cart-video` 这个面板再 `width: fit-content` 收拢到画面宽度 ——
+  面板不会比画面宽，列也就没有多余的空带。高度不够时由 max-height 兜底。
+*/
+.cart-video__frame {
+  position: relative;
+  /*
+    相机流占「屏幕画面排完之后剩下的宽度」。盒子尺寸规则：
+      · 宽高都 auto，由内联的 `aspect-ratio`（摄像头原生比例）同时算出两边；
+      · 两个 max 约束把它限制在可用区域内。
+    这样**盒子里没有富余空间** —— 画面正好铺满，不会出现「画面在盒子里
+    左右留黑边」的观感；比例由 aspect-ratio 保证，也不会被拉伸。
+  */
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  background: #000;
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.cart-video__frame img {
+  /*
+    画面内容一律 `contain`：这一条是**比例的最后一道保险**。
+    上面的盒子给的是可用空间，画面在这里等比放进盒子里 ——
+    盒子比例与原始比例不一致时留黑边，绝不被拉伸。
+  */
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* ------------------------------------------------------------------
+   中栏底部状态条：这一屏的结论区
+   ------------------------------------------------------------------ */
+
+.cart-statusline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1px;
+  background: var(--border-subtle);
+  border: 1px solid var(--border-subtle);
+}
+
+.cart-statusline__cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-panel);
+}
+
+.cart-statusline__cell small {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.cart-statusline__cell b {
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 600;
+}
+
+.cart-statusline__cell em {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.cart-statusline__cell.is-ok b { color: var(--success); }
+.cart-statusline__cell.is-warn b { color: var(--warning); }
+.cart-statusline__cell.is-danger b { color: var(--danger); }
+
+/* ------------------------------------------------------------------
+   左栏内容：说明段、事实行、动作行、字段
+   ------------------------------------------------------------------ */
+
+.cart-copy {
+  margin: 0 0 var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+}
+
+.cart-copy.is-warn { color: var(--warning); }
+.cart-copy.is-danger { color: var(--danger); }
+.cart-copy.is-ok { color: var(--success); }
+
+.cart-copy code {
+  padding: 0 4px;
+  background: var(--fill-soft, rgba(78, 168, 255, 0.08));
+  color: var(--text-accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.cart-facts {
+  list-style: none;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cart-facts li {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: var(--space-2);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+}
+
+.cart-facts b {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+.cart-facts span {
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.cart-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.cart-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--space-2);
+}
+
+.cart-field > span {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.cart-field input[type="text"],
+.cart-field input:not([type]),
+.cart-field select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-workspace);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-table);
+}
+
+.cart-field input:focus,
+.cart-field select:focus {
+  outline: none;
+  border-color: var(--border-active);
+}
+
+.cart-field input[type="range"] {
+  width: 100%;
+  accent-color: var(--primary);
+}
+
+/* 航点列表 */
+.cart-waypoints {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  max-height: 300px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cart-waypoints li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  background: var(--fill-soft, rgba(78, 168, 255, 0.05));
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.cart-waypoints li:hover { border-color: var(--border-default); }
+.cart-waypoints li.is-selected { border-color: var(--border-active); }
+.cart-waypoints li.is-current {
+  background: rgba(57, 213, 163, 0.12);
+  border-color: rgba(57, 213, 163, 0.4);
+}
+
+.cart-waypoints b {
+  color: var(--text-accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.cart-waypoints span {
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cart-waypoints button {
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+
+.cart-waypoints button:hover,
+.cart-waypoints button.is-active {
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+}
+
+/* 已保存地图 */
+.cart-maps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.cart-maps li {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-workspace);
+}
+
+.cart-maps li.is-active { border-color: var(--border-active); }
+
+.cart-maps img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  background: #10161f;
+  border: 1px solid var(--border-subtle);
+  /* 栅格图放大要看得出像素，不做平滑 */
+  image-rendering: pixelated;
+}
+
+.cart-maps__nopreview {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--border-subtle);
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.cart-maps__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cart-maps__meta b {
+  color: var(--text-title);
+  font-size: var(--fs-table);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cart-maps__meta span {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cart-maps__meta em {
+  color: var(--text-tertiary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.cart-maps__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cart-maps__link {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-decoration: none;
+  padding: 2px 6px;
+  border: 1px solid var(--border-subtle);
+}
+
+.cart-maps__link:hover {
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+}
+
+.cart-savedmaps { display: block; }
+
+/* 路线列表（复用地图列表的观感，但更扁） */
+.cart-routes {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cart-routes li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 6px;
+  background: var(--fill-soft, rgba(78, 168, 255, 0.05));
+  font-size: 12.5px;
+}
+
+.cart-routes b {
+  color: var(--text-primary);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cart-routes span {
+  grid-column: 1;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.cart-routes button {
+  grid-row: 1 / span 2;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.cart-routes button:hover { color: var(--text-primary); border-color: var(--border-hover); }
+
+/* ------------------------------------------------------------------
+   底部参数带
+   ------------------------------------------------------------------ */
+
+.cart-params-block {
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+}
+
+.cart-params-block > header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/*
+  车况（实车/实时/协议）+ 急停：`position: absolute` 居中放在参数条标题行上，
+  与两侧内容都不抢位。这样它既在「小车参数那一列」里，又是水平居中的，
+  而且不随左栏滚动 —— 任何时候都在同一个位置。
+*/
+.cart-params-block > header {
+  position: relative;
+}
+
+.cart-params-block__actions {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  white-space: nowrap;
+}
+
+.cart-params-block__state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.cart-params-block.is-collapsed > header { border-bottom: 0; }
+
+.cart-params-block > header h3 {
+  margin: 0;
+  color: var(--text-title);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+}
+
+.cart-params-block__toggle {
+  margin-left: auto;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-aux);
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.cart-params-block__toggle:hover { color: var(--text-primary); }
+
+.cart-params-block__body {
+  max-height: 30vh;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.cart-params {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--space-3);
+}
+
+.cart-params--empty {
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--fs-aux);
+}
+
+.cart-param {
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-workspace);
+}
+
+.cart-param > header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 5px var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.cart-param > header h4 {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+  font-weight: 600;
+}
+
+.cart-param__chips {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.cart-param__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.cart-param > header > .cart-param__chip { margin-left: auto; }
+
+.cart-param__chip i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.cart-param__chip.is-ok { color: var(--success); border-color: rgba(57, 213, 163, 0.35); }
+.cart-param__chip.is-ok i { background: var(--success); }
+.cart-param__chip.is-warn { color: var(--warning); border-color: rgba(242, 184, 75, 0.35); }
+.cart-param__chip.is-warn i { background: var(--warning); }
+.cart-param__chip.is-danger { color: var(--danger); border-color: rgba(255, 92, 112, 0.35); }
+.cart-param__chip.is-danger i { background: var(--danger); }
+
+.cart-param dl {
+  margin: 0;
+  padding: var(--space-2);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 3px var(--space-3);
+}
+
+.cart-param dl > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.cart-param dt {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.cart-param dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cart-param dl > div.is-ok dd { color: var(--success); }
+.cart-param dl > div.is-warn dd { color: var(--warning); }
+.cart-param dl > div.is-danger dd { color: var(--danger); }
+.cart-param dl > div.is-muted dd { color: var(--text-tertiary); }
+
+/* ------------------------------------------------------------------
+   接口对照弹窗
+   ------------------------------------------------------------------ */
+
+.cart-inspector-open {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 20;
+  padding: 4px 10px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-panel);
+  color: var(--text-tertiary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cart-inspector-open:hover {
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+}
+
+.cart-inspector {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-workspace);
+  padding: var(--space-2);
+}
+
+.cart-inspector pre {
+  margin: 0;
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ------------------------------------------------------------------
+   窄屏：左栏收到上方，状态条单列
+   ------------------------------------------------------------------ */
+
+@media (max-width: 1280px) {
+  .cart-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cart-side {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .cart-main {
+    min-height: 520px;
+  }
+}

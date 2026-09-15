@@ -47,6 +47,12 @@ import { isWorkOrderEvent, useWorkOrderStore } from "./store/workOrders";
 import { useSharedStore } from "./store/shared";
 import "./appshell.css";
 import "./pages.css";
+/*
+  建图巡航页（`/mapping`，小车真实数据）的样式单独一份。
+  不并进 pages.css：那份已经八千多行，而这一页的类名全部以 `cart-` 前缀成组，
+  单独一份更好定位、也避免和旧「建图巡检」的 `map-*` / `rviz*` 类互相打架。
+*/
+import "./cart.css";
 // UI 视觉素材 v2.0：主题变量作用域 + 图标/插图样式（PRD §4）
 // 必须放在平台样式之后 —— 作用域内的 v2 变量要能覆盖同名的兜底色
 import "./styles/ui-assets-v2.css";

@@ -290,10 +290,14 @@ export const SCANNER_READING_LAYOUT: DeviceReading[] = [
 /**
  * 采集设备画面（屏幕推流）。
  *
- * 与 `RvizView` 的 `RvizStreamConfig` 同一套口径：演示阶段给静态参考画面，
- * 接实机时把 `image` 留空、填 `url` + `kind`，界面**不用改**就能切到真实推流。
- * 现在 `url` 是 null —— 明确表达「未接入」，不拿静态图冒充实时画面
- * （PRD 3.4：暂停页面状态不等于实际传感器停止；同理，静态图不等于推流）。
+ * 演示阶段给静态参考画面，接实机时把 `image` 留空、填 `url` + `kind`，
+ * 界面**不用改**就能切到真实推流。现在 `url` 是 null —— 明确表达「未接入」，
+ * 不拿静态图冒充实时画面（PRD 3.4：暂停页面状态不等于实际传感器停止；
+ * 同理，静态图不等于推流）。
+ *
+ * 建图巡航页的那两路视频**不走这里**：它们是小车自己的 MJPEG
+ * （`/api/cart/stream/rviz.mjpeg` 与 `.../camera.mjpeg`），由平台服务端代理，
+ * 见 `pages/cart/api.ts`。
  */
 export const CAPTURE_SCREEN_STREAM: {
   image?: string;
@@ -646,7 +650,7 @@ export const MEMBERS: Member[] = [
   { id: "shen", name: "沈", role: "项目经理", duty: "环境校验、分组检查、新旧评估对比、工单审核、交付摘要校验", workspace: "工单与审核" },
   { id: "shi", name: "史", role: "人工智能架构师", duty: "小木调用、资料检索、场景发布、训练演示、封装下发、多模态分析", workspace: "平台总览" },
   { id: "rao", name: "饶", role: "全栈开发工程师", duty: "手持参数确认、原始数据上传、场景成果提交、更新包接收与回验", workspace: "采集与交付" },
-  { id: "ma", name: "马", role: "具身智能工程师", duty: "地图检查、点位配置、巡检监视、样本位置复核、复巡计划", workspace: "建图巡检" },
+  { id: "ma", name: "马", role: "具身智能工程师", duty: "地图检查、点位配置、巡检监视、样本位置复核、复巡计划", workspace: "建图巡航" },
 ];
 
 export const ORDER_LOGS: LogEntry[] = [

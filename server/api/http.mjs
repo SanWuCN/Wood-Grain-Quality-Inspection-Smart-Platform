@@ -55,6 +55,7 @@ import {
 import { readAssetDetail, readGraph, readOverview, searchKnowledge } from "../services/knowledge-query.mjs";
 import { parseJson } from "../storage/db.mjs";
 import { proxyScreen, screenStatus } from "../services/capture-screen.mjs";
+import { CART_ACTIONS } from "../services/cart.mjs";
 import { createSensorService } from "../services/sensortag.mjs";
 import { createPlatformResources } from "../services/platform-resources.service.mjs";
 import { registerUploadRoutes } from "../services/uploads.mjs";
@@ -135,7 +136,7 @@ function readRawBody(req, limit = 2 * 1024 * 1024) {
  * 路由
  * ------------------------------------------------------------------ */
 
-export function createApi({ db, hub, bridge, devices = null, workOrders = null, uploads = null, staticRoot = null, knowledgeRunner = null, logger = console }) {
+export function createApi({ db, hub, bridge, devices = null, workOrders = null, uploads = null, cart = null, staticRoot = null, knowledgeRunner = null, logger = console }) {
   ensureAssetsRoot();
   /*
     路由表是**每个 API 实例一份**，不是模块级。
@@ -169,6 +170,122 @@ export function createApi({ db, hub, bridge, devices = null, workOrders = null, 
   const sensors = createSensorService(db, hub);
   route("GET", "/api/capture/screen/status", () => screenStatus());
   route("GET", "/api/capture/screen/stream", ({ req, res }) => proxyScreen(req, res));
+
+  /* ------------------------------------------------------------------ *
+   * 小车（建图巡航页的唯一数据源）
+   *
+   * 页面**不直连小车**：控制令牌只留在服务端，跨源与 Origin 校验的问题
+   * 也在这里解决（原因见 services/cart.mjs 的文件头）。这一组路由做的只是
+   * 「鉴权 → 转发 → 把小车错误码翻成平台状态码」，不加工任何数值。
+   *
+   * 读接口只要登录态：运维和项目经理都要能看到车况；
+   * 写接口按动作逐个校验权限（与小车的能力一一对应，见 CART_ACTIONS）。
+   * ------------------------------------------------------------------ */
+
+  const requireCart = () => {
+    if (!cart) throw new WorkflowError(503, "NO_CART", "小车链路未启用");
+    return cart;
+  };
+  /** 没配令牌时小车侧是只读的，写动作要给出可读的原因，而不是一个 502 */
+  const requireCartAction = (ctx, action) => {
+    const service = requireCart();
+    const entry = CART_ACTIONS.get(action);
+    if (!entry) throw new WorkflowError(404, "BAD_ACTION", "未知的小车控制动作");
+    if (!allows(ctx.actor, entry.permission)) {
+      throw new WorkflowError(403, "FORBIDDEN", `此账号没有「${entry.permission}」权限，不能执行该操作`);
+    }
+    return service;
+  };
+  /** 把小车服务的异常翻成平台的错误体（错误码原样保留，页面按码判断） */
+  const cartFail = (error) => {
+    throw new WorkflowError(error?.status ?? 502, error?.code ?? "CART_ERROR", error?.message ?? "小车操作失败");
+  };
+
+  route("GET", "/api/cart/status", () => requireCart().snapshot());
+  route("GET", "/api/cart/info", async () => ({ ok: true, info: await requireCart().refreshInfo(), status: requireCart().status() }));
+
+  route("GET", "/api/cart/read/:channel", async (ctx) => {
+    try {
+      return await requireCart().read(ctx.params.channel);
+    } catch (error) {
+      return cartFail(error);
+    }
+  });
+
+  /** 当前栅格地图 PNG。页面靠 revision 判断要不要重取（文档 §3） */
+  route("GET", "/api/cart/map.png", async (ctx) => {
+    try {
+      const image = await requireCart().mapImage();
+      ctx.res.writeHead(200, {
+        "content-type": "image/png",
+        "content-length": image.length,
+        "cache-control": "no-store",
+      });
+      ctx.res.end(image);
+      return null;
+    } catch (error) {
+      return cartFail(error);
+    }
+  }, { auth: false });
+
+  /** 已保存地图的预览图 / Nav2 文件（PGM / YAML / 元数据）原样转发 */
+  route("GET", "/api/cart/maps/:mapId/:file", async (ctx) => {
+    try {
+      const body = await requireCart().savedMapImage(ctx.params.mapId, ctx.params.file);
+      const type =
+        ctx.params.file.endsWith(".png")
+          ? "image/png"
+          : ctx.params.file.endsWith(".yaml")
+            ? "text/yaml; charset=utf-8"
+            : ctx.params.file.endsWith(".json")
+              ? "application/json; charset=utf-8"
+              : "application/octet-stream";
+      ctx.res.writeHead(200, { "content-type": type, "content-length": body.length, "cache-control": "no-store" });
+      ctx.res.end(body);
+      return null;
+    } catch (error) {
+      return cartFail(error);
+    }
+  }, { auth: false });
+
+  /**
+   * 两路 MJPEG（RViz 画面 / 摄像头）。未就绪的通道回 502，不伪造图像。
+   *
+   * 路径写成 `/stream/:channel`（不带扩展名）而不是 `/stream/:channel.mjpeg`：
+   * 路由编译规则是把 `:name` 整段替换成 `([^/]+)`，点号是**段内字符**，
+   * 于是 `/stream/:channel.mjpeg` 编译出来的参数名是 `channel.mjpeg`、
+   * 取到 `params.channel` 永远是 undefined —— 页面拿到 404「未知的视频通道」，
+   * 而小车那边画面是好的。URL 由页面唯一决定（`streamUrl()`），
+   * 这里不靠扩展名判类型，所以直接去掉它，参数名就和代码里写的一致了。
+   */
+  route("GET", "/api/cart/stream/:channel", ({ req, res, params }) =>
+    requireCart().proxyStream(params.channel, req, res), { auth: false });
+
+  /**
+   * 控制动作转发。
+   *
+   * 动作名放请求体而不是 URL 路径：控制动作是 `mapping/start`、`navigation/load`
+   * 这种**带斜杠的两段名**，塞进路径段里会被 `:param` 截断（`[^/]+` 到斜杠就停），
+   * 要支持就得放宽成一层通配匹配 —— 那等于把小车全部 `/api/*` 暴露成可转发面。
+   * 白名单在服务端（`CART_ACTIONS`），页面怎么拼都只能打到那 14 个动作上。
+   *
+   * `X-Request-Id` 由页面生成并在重试时复用 —— 小车按它做幂等（文档 §1），
+   * 平台这层不自己生成：生成一次就得缓存映射，反而把「重试的是不是同一件事」
+   * 这件事从页面手里拿走了。
+   */
+  route("POST", "/api/cart/action", async (ctx) => {
+    const action = String(ctx.body?.action ?? "");
+    const service = requireCartAction(ctx, action);
+    const args = { ...(ctx.body ?? {}) };
+    delete args.action;
+    const requestId = ctx.req.headers["x-request-id"] ?? null;
+    try {
+      const result = await service.control(action, args, requestId);
+      return result ?? { ok: true };
+    } catch (error) {
+      return cartFail(error);
+    }
+  });
 
   /* ------------------------------------------------------------------ *
    * 手持终端（树莓派 / woodpulse）设备网关

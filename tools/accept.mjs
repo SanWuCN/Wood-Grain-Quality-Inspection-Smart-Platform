@@ -31,7 +31,7 @@ import { resolve } from "node:path";
 const ALL_ROUTES = [
   ["/", "任务总览"],
   ["/orders", "工单档案"],
-  ["/mapping", "建图巡检"],
+  ["/mapping", "建图巡航"],
   ["/twin", "数字孪生"],
   ["/hardware", "硬件详情"],
   ["/firmware", "固件及模型"],
