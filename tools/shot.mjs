@@ -157,7 +157,15 @@ ws.onmessage = (event) => {
       logs.push(`[console.${msg.params.type}] ${text}`);
     }
   } else if (m === "Log.entryAdded" && msg.params.entry.level === "error") {
-    logs.push(`[log] ${msg.params.entry.text}`);
+    /*
+      ⚠ **必须把 `entry.url` 一起记下来**（2026-09-16 实测踩到）：
+      "Failed to load resource: 503" 这类条目，`text` 里**没有**是哪个资源，
+      唯一的凭据在 `entry.url`。原来只 push `entry.text`，于是下游
+      （`accept.mjs` 的错误分类）拿不到 URL，无法判断这是"本机未接入的外设链路"
+      还是"真正的服务故障"，只能一律算失败 —— 建图巡航页因此长期假红。
+    */
+    const where = msg.params.entry.url ? ` @ ${msg.params.entry.url}` : "";
+    logs.push(`[log] ${msg.params.entry.text}${where}`);
   }
 };
 

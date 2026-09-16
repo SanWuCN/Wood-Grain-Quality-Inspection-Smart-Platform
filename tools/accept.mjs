@@ -18,6 +18,7 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { classifyLogLines } from "./accept-lib.mjs";
 
 /**
  * 路由表必须与 `src/pages/MumaiDashboard/routes.tsx` 一一对应。
@@ -71,6 +72,59 @@ const init =
 const outDir = resolve("tmp-shot", `accept-${width}`);
 mkdirSync(outDir, { recursive: true });
 
+/**
+ * 向接口**取证**某个资源是不是"本机未接入"。
+ *
+ * 为什么不能只看状态码：503 既可能是"车端没配"（可预期），
+ * 也可能是"服务挂了"（必须失败）。所以要看响应体里的 `configured:false`
+ * 或 `*_UNCONFIGURED` 之类的业务码 —— 拿不到就当失败（判据在 `accept-lib.mjs`）。
+ *
+ * 用 `shi` 的会话令牌去问：未接入的链路对未登录请求回 401，那样就取不到证据了。
+ */
+let probeToken = null;
+async function apiGet(path) {
+  const target = "http://127.0.0.1:8000";
+  if (!probeToken) {
+    const res = await fetch(`${target}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ account: "shi", password: "123456" }),
+    });
+    probeToken = (await res.json())?.token ?? null;
+  }
+  const res = await fetch(target + path, {
+    headers: probeToken ? { authorization: `Bearer ${probeToken}` } : undefined,
+  });
+  let body = null;
+  try { body = await res.json(); } catch { /* 非 JSON（例如纯文本 503） */ }
+  return { status: res.status, body };
+}
+
+async function probeResource(url) {
+  try {
+    return await apiGet(new URL(url).pathname);
+  } catch {
+    return null; /* 探不到 → 判据视为失败，不放行 */
+  }
+}
+
+/**
+ * 探**所属链路的状态端点**。
+ *
+ * 有些资源自己回的是纯文本 503（例如 `/api/cart/stream/camera` → `未配置小车地址`），
+ * 直接探它拿不到任何证据；而同一链路的 `/status` 会明确给 `configured:false`。
+ */
+async function probeState(url) {
+  try {
+    const path = new URL(url).pathname;
+    if (path.startsWith("/api/cart/")) return (await apiGet("/api/cart/status"))?.body ?? null;
+    if (path.startsWith("/api/sensors/")) return (await apiGet("/api/sensors/latest"))?.body ?? null;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 const results = [];
 let failed = 0;
 
@@ -100,9 +154,23 @@ for (const [path, label] of routes) {
 
   const text = `${run.stdout ?? ""}\n${run.stderr ?? ""}`;
   const pick = (re) => (text.match(re) ?? [])[1]?.trim() ?? "-";
-  const errors = (text.match(/^\[(exception|console\.error|log)\].*$/gm) ?? []).filter(
-    (line) => !/THREE\.Clock|deprecated/i.test(line),
-  );
+  /*
+    ── 错误分成「失败」与「可预期」两类（判据在 `accept-lib.mjs`）──────────
+    原先这里只按 THREE.Clock/deprecated 过滤，其余一律算失败，于是把
+    **诚实的"功能未配置"**也计成缺陷：建图巡航页要读小车链路，未配车端地址时
+    后端回 503 `CART_UNCONFIGURED`，页面处理得很好（显示"还没配置这台小车的
+    地址与控制令牌，当前只能查看"），但浏览器照样记一条 resource 错误 ——
+    实测 `/mapping` 因此被判 ✗，而 6 条"错误"全是同一个 503 的重复计数。
+
+    分类不等于删除：先向接口**取证**（`configured:false` 或 `*_UNCONFIGURED`），
+    拿不到证据的照旧算失败（服务真挂了不能被放过）；分出来的条目单独列一节，
+    报告里看得见、但不计入失败数。
+  */
+  const rawErrorLines = text.match(/^\[(exception|console\.error|log)\].*$/gm) ?? [];
+  const { failures: errors, expected: expectedLines } = await classifyLogLines(rawErrorLines, {
+    probe: probeResource,
+    probeState,
+  });
 
   const row = {
     path,
@@ -118,6 +186,8 @@ for (const [path, label] of routes) {
     errors: errors.length,
     /** 出错的原文：只报「错误 1」的话，看报告的人还得自己重跑一遍才知道是什么 */
     errorTexts: errors.slice(0, 3).map((line) => line.replace(/\s+/g, " ").slice(0, 220)),
+    /** 可预期的"未接入"条目：报告里单独列出、不计入失败（判据见 accept-lib.mjs） */
+    expectedUnavailable: expectedLines.map((item) => `${item.url}（${item.evidence}）`),
     panels: (text.match(/tech-panel[^\n]*/g) ?? []).map((line) =>
       line.replace("tech-panel ", ""),
     ),
@@ -179,6 +249,23 @@ const lines = [
         ...results
           .filter((r) => r.errorTexts.length)
           .flatMap((r) => [`### \`${r.path}\``, ...r.errorTexts.map((t) => `- ${t}`), ""]),
+      ]
+    : []),
+  /*
+    可预期的"未接入"单独一段：这些**没有**被当成失败，但必须看得见 ——
+    否则"验收全绿"会让人误以为小车的图传、SensorTag 这些链路都验过了。
+  */
+  ...(results.some((r) => r.expectedUnavailable.length)
+    ? [
+        "## 可预期的未接入（不计入失败，但如实列出）",
+        "",
+        "> 判定依据：接口自证「未配置/未接入」（`configured:false` 或 `*_UNCONFIGURED`）。",
+        "> 这类链路的图传/数据在本机不存在，页面已按未接入状态如实展示；",
+        "> 拿不到该证据的错误**仍然计入失败**。",
+        "",
+        ...results
+          .filter((r) => r.expectedUnavailable.length)
+          .flatMap((r) => [`### \`${r.path}\``, ...r.expectedUnavailable.map((t) => `- ${t}`), ""]),
       ]
     : []),
 ];
