@@ -1,9 +1,9 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { ArtifactEntity, SharedEntity } from "../api/client.ts";
 import type { TerminalScript } from "./terminalScripts.ts";
-import { buildDeliveryWorkflow, buildReceiveFileRows } from "./deliveryWorkflow.ts";
+import { buildDeliveryWorkflow, buildReceiveFileRows, DELIVERY_UNLINKED_NOTE } from "./deliveryWorkflow.ts";
 
 const distillScript: TerminalScript = {
   key: "distill",
@@ -115,7 +115,57 @@ test("产物未登记同一作业号时，不借用其它脚本的量化与复�
     workflow.steps.slice(0, 3).map((step) => step.state),
     ["等待", "等待", "等待"],
   );
-  assert.match(workflow.steps[0]?.detail ?? "", /未关联/);
+  assert.equal(workflow.steps[0]?.detail, DELIVERY_UNLINKED_NOTE);
+});
+
+/*
+  ── 下面两条锁的是"页面不得凭空给产物安一个作业号"（现场口径缺陷）──────
+  原实现里 `DeliveryCenter` **无条件**把固定的蒸馏脚本传进本函数，于是：
+    · 「交付作业」一行对**任何**产物都显示蒸馏作业号 run-20260911-0244；
+    · 量化/复测/封装三格的明细也永远来自那个脚本。
+  产物的真实作业号是 `fromJob`（服务端 artifact.build 写入）：
+    · 种子产物是 `EXP-2026-0911`，人工上传的是 `null` —— 两者都**不是**蒸馏作业。
+  所以这两条要保证：作业号对不上时，页面不显示作业号、也不借用脚本明细。
+*/
+
+test("产物作业号与脚本不一致时，不得把该脚本的作业号挂在产物上", () => {
+  const workflow = buildDeliveryWorkflow(null, artifact({ fromJob: "EXP-2026-0911" }));
+
+  assert.equal(workflow.runId, null,
+    "作业号对不上却仍显示脚本作业号 —— 等于对观众谎称这个产物出自该作业");
+  assert.equal(workflow.command, null);
+  assert.deepEqual(
+    workflow.steps.slice(0, 3).map((step) => step.state),
+    ["等待", "等待", "等待"],
+  );
+  assert.equal(workflow.steps[0]?.detail, DELIVERY_UNLINKED_NOTE);
+});
+
+test("产物作业号与脚本一致时才显示该作业号，且明细仍取自该脚本", () => {
+  const workflow = buildDeliveryWorkflow(distillScript, artifact());
+
+  assert.equal(workflow.runId, "run-20260911-0244");
+  assert.equal(workflow.command, "distill_int8_quant.py");
+  assert.match(workflow.steps[0]?.detail ?? "", /INT8/,
+    "作业号一致时明细必须来自脚本，不能变成一句占位说明");
+});
+
+test("未关联作业的那句话必须全页统一（标题与三格明细同一字符串）", () => {
+  /*
+    实测踩过：交付轨道标题换成"非量化作业产物…"之后，
+    量化/复测/封装三格仍写着旧的"未关联交付作业" —— 同一件事在屏幕上
+    出现两种说法，观众读到的是自相矛盾的两句。所以两处必须共用同一常量。
+  */
+  const workflow = buildDeliveryWorkflow(null, artifact({ fromJob: "EXP-2026-0911" }));
+
+  for (const step of workflow.steps.slice(0, 3)) {
+    assert.equal(step.detail, DELIVERY_UNLINKED_NOTE,
+      `「${step.label}」的说明与全页统一说法不一致`);
+  }
+  assert.ok(DELIVERY_UNLINKED_NOTE.length > 0, "统一说法不能是空串");
+  /* 措辞不得承诺做不到的动作：本页没有量化作业的提交入口 */
+  assert.ok(!/重新提交作业/.test(DELIVERY_UNLINKED_NOTE),
+    "不得写「重新提交作业后回填」——本页没有该入口，属于做不到的承诺");
 });
 
 test("接收文件列表只使用服务端登记文件和本次会话下载结果", () => {

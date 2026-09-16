@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 更新交付（`/firmware?tab=delivery`）
  *
  * 形态是**产物提交与分发**，不是流程展示：
@@ -19,7 +19,7 @@
  * 目标载体与回退方式都不一样，混成一张表就只能比大小了。
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import { Btn, Modal, StateBlock, StatusChip } from "../ui";
@@ -29,10 +29,12 @@ import type { DeliveryTarget } from "../seed/types";
 import { ACCOUNT_NAME } from "../api/accounts";
 import { api, isApiError, type ArtifactEntity, type SharedEntity } from "../api/client";
 import { artifacts as artifactsOf, isOnline, useSharedStore } from "../store/shared";
-import { buildDistillScript } from "./terminalScripts";
+import { buildDistillScript, buildTrainScript } from "./terminalScripts";
 import {
   buildDeliveryWorkflow,
   buildReceiveFileRows,
+  resolveDeliveryScript,
+  DELIVERY_UNLINKED_NOTE,
   type DeliveryWorkflow,
   type ReceiveResult,
 } from "./deliveryWorkflow";
@@ -243,7 +245,8 @@ function ReceiveModal({
         <div><small>平台状态</small><b>{artifact.data.state}</b></div>
         <div><small>服务端取用</small><b>{artifact.data.downloadCount ?? 0} 次</b></div>
         <div><small>摘要回验</small><b>{workflow.receiptSummary}</b></div>
-        <div><small>交付作业</small><b>{workflow.runId}</b></div>
+        {/* 作业号取不到就写清"未关联"，不显示空白也不挂别的作业号 */}
+        <div><small>交付作业</small><b>{workflow.runId ?? "未关联（非量化作业产物）"}</b></div>
       </div>
 
       <h4 className="sub">文件清单</h4>
@@ -334,6 +337,8 @@ export function DeliveryTab() {
   const online = useSharedStore(isOnline);
   const [busy, setBusy] = useState<string | null>(null);
   const distillScript = useMemo(() => buildDistillScript(), []);
+  /** 全量重训脚本：产物的 fromJob 指向它才算出自重训作业 */
+  const trainScript = useMemo(() => buildTrainScript(), []);
 
   const pending = sharedArtifacts.filter((item) => !["已发布", "已下载", "已回验"].includes(item.data.state));
   const published = sharedArtifacts.filter((item) => ["已发布", "已下载", "已回验"].includes(item.data.state));
@@ -537,9 +542,21 @@ export function DeliveryTab() {
    */
   /** 当前产物 = 最新一条已发布/已回验的产物，阶段记录来自量化脚本与共享服务 */
   const current = published[0] ?? null;
+  /*
+    ── 作业号必须按产物自己的 `fromJob` 找脚本（现场口径缺陷修复）──────────
+    原实现无条件传 `distillScript`，于是「交付作业」那行对**任何**产物都显示
+    蒸馏作业号 run-20260911-0244，量化/复测/封装三格也永远来自那个脚本 ——
+    种子产物其实是 `EXP-2026-0911`、人工上传是 `null`，都不出自蒸馏作业。
+    现在先按 `fromJob` 匹配；匹配不到就传 `null`，页面显示"未关联交付作业"。
+  */
+  const scriptFor = useCallback(
+    (item: SharedEntity<ArtifactEntity> | null) =>
+      item ? resolveDeliveryScript([distillScript, trainScript], item.data.fromJob) : null,
+    [distillScript, trainScript],
+  );
   const workflow = useMemo(
-    () => (current ? buildDeliveryWorkflow(distillScript, current) : null),
-    [current, distillScript],
+    () => (current ? buildDeliveryWorkflow(scriptFor(current), current) : null),
+    [current, scriptFor],
   );
   const receiveArtifact = receiveId ? sharedArtifacts.find((item) => item.id === receiveId) ?? null : null;
 
@@ -563,7 +580,10 @@ export function DeliveryTab() {
           <div className="dl-track__head">
             <b>{current.data.name}</b>
             <span>
-              {current.data.target} · {current.data.modelVersion} · 作业 {workflow.runId} · {workflow.command}
+              {current.data.target} · {current.data.modelVersion} ·{" "}
+              {workflow.runId
+                ? `作业 ${workflow.runId} · ${workflow.command}`
+                : DELIVERY_UNLINKED_NOTE}
             </span>
           </div>
           <ol className="dl-track">
@@ -774,7 +794,7 @@ export function DeliveryTab() {
       {receiveArtifact ? (
         <ReceiveModal
           artifact={receiveArtifact}
-          workflow={buildDeliveryWorkflow(distillScript, receiveArtifact)}
+          workflow={buildDeliveryWorkflow(scriptFor(receiveArtifact), receiveArtifact)}
           online={online}
           busy={busy}
           canReceive={can("deployment:receive")}
