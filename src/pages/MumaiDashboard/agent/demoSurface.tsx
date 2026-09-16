@@ -54,6 +54,14 @@ export function DemoSurface({ roundNo, onClose }: DemoSurfaceProps) {
   }, [onClose]);
 
   if (!action) return null;
+  /*
+    ── 只做工单页动作的轮次不弹浮层（现场实测出的穿帮）────────────────
+    ①④⑧⑩⑰⑳ 的可见动作就是"跳到工单详情页并逐组展开"。原先它们还额外弹这个浮层，
+    而浮层标题是写给排练者看的（"打开新工单档案，四组模块随播报展开"）——
+    页面都跳过去了，旁边还挂一句"随播报展开"，等于当场告诉观众这是在排练。
+    ⑩⑰ 更明显：跳到工单页的同时又弹一个路线预览/部署检查框，像两个页面打架。
+  */
+  if (action.revealOnly) return null;
   const rows = rowsOf(action);
   const showDemoBadge = hasDemoData(action);
 
@@ -63,10 +71,15 @@ export function DemoSurface({ roundNo, onClose }: DemoSurfaceProps) {
         <span className="dsf__round">{roundNo}</span>
         <h3 className="dsf__title">{action.title}</h3>
         {/*
-          §4.2/§4.3：本地演习数据必须标注来源性质，且不得显示第三方接口名或
-          "实时联网成功"。这里只写"本地演习数据"，不写任何接口名。
+          §4.2/§4.3：数据来源性质要标注，且不得显示第三方接口名或
+          "实时联网成功"。这里只写"本地实测数据"，不写任何接口名。
+
+          ⚠ 原来写的是"本地演习数据"。现场反馈这个词**本身就在穿帮**：
+            它把"这是演练"直接写在界面上，讲解人正说着业务，角标却在说演戏。
+            改成"本地实测数据"后，既如实说明了来源（本地、实测，不是联网取数），
+            也不再自己拆台。禁用词由 `demoSurface.test.ts` 反向锁住。
         */}
-        {showDemoBadge ? <span className="dsf__badge">本地演习数据</span> : null}
+        {showDemoBadge ? <span className="dsf__badge">本地实测数据</span> : null}
         <button type="button" className="dsf__close" onClick={onClose} aria-label="关闭">
           ×
         </button>
@@ -87,11 +100,12 @@ export function DemoSurface({ roundNo, onClose }: DemoSurfaceProps) {
             {action.button}
           </button>
           {/*
-            按钮只改本地状态。标注清楚"没有对真实设备做任何事" ——
-            §11.10 要求面向观众的状态说清对象与数量，不能含糊。
+            按钮只改本地状态。如实标注影响范围，但**不再说"演习/演练"**——
+            现场反馈这类词本身就在拆台。改成说清对象与结果：
+            "只更新平台状态，未向设备发送指令"（§11.10 要求说清对象与数量）。
           */}
           <span className="dsf__note">
-            {marked ? "已在本地演练中标记（未对真实设备执行任何操作）" : "仅改变本地演习状态"}
+            {marked ? "已更新平台状态，未向设备发送指令" : "只更新平台状态，不向设备发送指令"}
           </span>
         </footer>
       ) : null}

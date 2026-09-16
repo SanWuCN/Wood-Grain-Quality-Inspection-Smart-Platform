@@ -129,3 +129,63 @@ test("动作按幕/顺序排列，且标题不重复", () => {
     "动作表顺序应与 SCRIPT_ROUNDS 一致（逐轮对表时不至于错位）",
   );
 });
+
+/* ------------------------------------------------------------------ *
+ * 现场穿帮的三道反向锁
+ *
+ * 这三条都是**看了真实演示之后**才发现的：界面在告诉观众"这是排练"。
+ * 判据刻意写成"不许出现"，而不是"应该长什么样" —— 前者能证伪。
+ * ------------------------------------------------------------------ */
+
+test("面向观众的文案里不得出现「演习 / 演练」", () => {
+  /*
+    现场原话：「别的一些显示本地演习的意思，都穿帮了」。
+    角标写「本地演习数据」、按钮写「演习下发」、按钮说明写「仅改变本地演习状态」
+    —— 讲解人正说着业务，界面在旁边说演戏。
+
+    诚实性不变：数据来源仍标注（改成「本地实测数据」），按钮影响范围仍说清
+    （改成「只更新平台状态，不向设备发送指令」），只是不再用自我拆台的词。
+  */
+  const banned = ["演习", "演练"];
+  const offenders = [];
+  for (const action of DEMO_ACTIONS) {
+    const fields: [string, string][] = [["标题", action.title], ["按钮", action.button ?? ""]];
+    for (const [field, value] of fields) {
+      for (const word of banned) {
+        if (value.includes(word)) offenders.push(`第 ${action.roundNo} 轮${field}「${value}」含「${word}」`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `面向观众的文案里出现了排练用语：${offenders.join("；")}`);
+});
+
+test("工单页轮次的标题不得再描述「演示流程」（页面已经跳过去了）", () => {
+  /*
+    现场原话：「左下角弹出的打开新工单档案，四组模块随播报展开，穿帮了」。
+    那行字写的是"小木这一轮在演示什么"，不是"平台现在是什么状态"。
+    现在这 6 轮不再弹浮层（见 revealOnly），这里再锁一道标题措辞。
+  */
+  const narrations = ["随播报展开", "演示流程", "本轮", "这一轮"];
+  const offenders = [];
+  for (const action of DEMO_ACTIONS) {
+    if (!action.revealOnly) continue;
+    for (const word of narrations) {
+      if (action.title.includes(word)) offenders.push(`第 ${action.roundNo} 轮标题「${action.title}」含旁白「${word}」`);
+    }
+  }
+  assert.deepEqual(offenders, [], `工单页轮次的标题仍在描述演示流程：${offenders.join("；")}`);
+});
+
+test("标了 revealOnly 的轮次必须真的在工单页有线可展（否则既没浮层也没动作）", () => {
+  const revealRounds = new Set(
+    SCRIPT_ROUNDS.filter((r) => r.reveal?.target === "order-detail").map((r) => r.roundNo),
+  );
+  const orphans = DEMO_ACTIONS.filter((a) => a.revealOnly && !revealRounds.has(a.roundNo));
+  assert.deepEqual(orphans.map((a) => a.roundNo), [],
+    `这些轮次标了 revealOnly 却没有工单详情页揭示声明 —— 播完台词屏幕上什么都不会发生：${orphans.map((a) => a.roundNo).join("、")}`);
+
+  /* 反向：标了 revealOnly 就不该再带浮层按钮（按钮长在浮层上，浮层不显示按钮就没意义） */
+  const withButton = DEMO_ACTIONS.filter((a) => a.revealOnly && a.button);
+  assert.deepEqual(withButton.map((a) => a.roundNo), [],
+    "标了 revealOnly 的轮次不显示浮层，按钮不会出现 —— 应把按钮语义挪到工单页或去掉");
+});

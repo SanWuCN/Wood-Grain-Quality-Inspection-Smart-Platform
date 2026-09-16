@@ -46,7 +46,7 @@ test("rowsOf 逐键产出标签与值，且值带单位", () => {
   assert.ok(rainTotal, "应有累计降雨这一行");
   assert.equal(rainTotal!.label, "累计降雨");
   assert.equal(rainTotal!.value, "412 mm", `值应带单位（实际「${rainTotal!.value}」）`);
-  assert.equal(rainTotal!.demoData, true, "天气快照属于本地演习数据，必须标注");
+  assert.equal(rainTotal!.demoData, true, "天气快照属于本地实测数据，必须标注来源性质");
 
   /* 数组值用顿号连接（编号清单、标记时间点都是数组） */
   const codes = rowsOf(DEMO_ACTIONS.find((a) => a.roundNo === "①")!).find(

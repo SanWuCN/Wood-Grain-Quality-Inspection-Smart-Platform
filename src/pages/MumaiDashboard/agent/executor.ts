@@ -80,6 +80,14 @@ export type Runtime = {
 /** 每步之间的真实延时上限，让观众看清执行过程（§24 的重点就是「看得见」） */
 const STEP_DELAY = 900;
 
+/**
+ * 播报结束后等"工单页挂载"的上限（毫秒）。
+ *
+ * 超过这个时间还没探到挂载点，就照旧把剩余板块补齐 ——
+ * 宁可没有展开动画，也不能让页面停在半展开（§12 第 12 条）。
+ */
+const CATCHUP_MOUNT_DEADLINE_MS = 8000;
+
 const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
 /* ------------------------------------------------------------------ *
@@ -504,32 +512,69 @@ function startOrderDetailReveal(round: ScriptRound, orderId: string, spoken?: un
     return;
   }
 
-  let doneSegments = 0;
-  const timers: number[] = [];
+  const planStart = Date.now();
   for (const beat of schedule) {
-    timers.push(window.setTimeout(() => {
-      doneSegments = Math.max(doneSegments, beat.segmentIndex + 1);
-      advanceOrderReveal(orderId, beat.sections);
-    }, beat.atMs));
+    window.setTimeout(() => advanceOrderReveal(orderId, beat.sections), beat.atMs);
   }
 
   /*
-    真实播报结束 → 把还没到点的拍点一次性补齐，并撤掉定时器。
-    `VoiceOutput.speak()` 是 Promise（音频 onended / 合成 onend 时 resolve，有看门狗兜底），
-    所以"最后一组亮起"永远不会晚于声音结束。
+    真实播报结束 → **只补"按时间已经该亮"的那几拍**，没到点的交给原定时器继续走。
+    `VoiceOutput.speak()` 是 Promise（音频 onended / 合成 onend 时 resolve，有看门狗兜底）。
     拿不到 Promise（注入的是同步实现）时什么都不做，退回纯估算。
+
+    ── 为什么不把剩下的拍点一次性推完（真踩过）────────────────────────
+    旧写法是播报一结束就 `clearTimeout` 全部定时器 + 把剩余组**一次推完**。
+    后果：播报比页面挂载快时（headless 无音频、或本机播报很短而导航较慢），
+    页面刚出现就被一次推成 7/7 —— **逐组展开等于没发生**，观感是
+    "页面先全亮、然后才跳过去"。实测时序：计划登记 0.23 秒后就被解除，点亮数 0 → 1 → 7。
+
+    改成"补到当前时刻该有的进度"之后：
+      · 声音念完时页面早就挂载 → 各拍按原节奏走完，观感不变；
+      · 声音念完时页面才挂载（或还没挂载）→ 先补上已经该亮的那几组，
+        其余仍按 `atMs` 节奏展开，而不是一次铺满。
+    页面永远不会停在半展开：账没结清就继续走，计划自带的 30 秒 TTL 是最后一道兜底。
   */
   if (spoken && typeof (spoken as Promise<void>).then === "function") {
     void (spoken as Promise<void>)
       .catch(() => { /* 播报失败也要把页面铺完，不能停在半截 */ })
       .then(() => {
-        for (const t of timers) window.clearTimeout(t);
-        const remaining = schedule.filter((b) => b.segmentIndex >= doneSegments);
-        if (remaining.length) {
-          advanceOrderReveal(orderId, remaining.flatMap((b) => b.sections));
-        }
+        settleAfterMount(() => {
+          const elapsed = Date.now() - planStart;
+          const due = schedule.filter((b) => b.atMs <= elapsed);
+          if (due.length) advanceOrderReveal(orderId, due.flatMap((b) => b.sections));
+        });
       });
   }
+}
+
+/**
+ * 等工单详情页**真的挂载**之后再执行 `settle`（最多等 `CATCHUP_MOUNT_DEADLINE_MS`）。
+ *
+ * 为什么不用固定延时：导航耗时取决于接口 —— 固定延时要么不够（页面还没来、
+ * 计划先被解掉，展开效果丢失），要么白等（页面早就到了）。
+ * 直接探测挂载点最准，这也是判断"能不能看见展开动画"的唯一依据。
+ */
+function settleAfterMount(settle: () => void): void {
+  const startedAt = Date.now();
+  const probe = () => {
+    /*
+      两个条件都看，缺一不可：
+        · `.wop-actions` —— 工单详情页骨架已渲染（说明导航真的到了）；
+        · `.wop-reveal` —— 逐组展开的挂载点已存在（说明四组确实在这个页面上）。
+      ⚠ 踩过的坑：第一版只探 `.wop`（一个不存在的根类），探测**永远为假** →
+        立刻走到"到点补齐"，逐组展开等于没发生
+        （实测时序：计划登记 0.2 秒后就被解除，点亮数从 0 直接跳到 7）。
+        判据本身写错，看起来却像"功能没生效"。
+    */
+    const pageReady = document.querySelector(".wop-actions") !== null;
+    const groupsReady = document.querySelector(".wop-reveal") !== null;
+    if ((pageReady && groupsReady) || Date.now() - startedAt >= CATCHUP_MOUNT_DEADLINE_MS) {
+      settle();
+      return;
+    }
+    window.setTimeout(probe, 120);
+  };
+  probe();
 }
 
 /**
@@ -894,6 +939,17 @@ export async function ask(text: string, runtime: Runtime, via: "text" | "mic" | 
    */
   const route = routeUtterance(trimmed);
   if (route.kind === "script") {
+    /*
+      ── 先把屏幕上残留的浮层收掉（现场实测出的穿帮）──────────────────
+      演示动线是：按 Ctrl+Q+L → 点通知里的「查看」→ 弹出红头委托预览
+      → 喊「读取这份工单」。此时预览还盖在屏幕上，而这一轮要导航到工单页：
+      画面变成"工单页在下面加载、委托预览还压在上面"，看起来像两个页面打架。
+
+      真人会先关掉那张预览再操作，所以**命中剧本这一刻就替他关掉**。
+      时机放在这里（理解完成、还没进思考延时）而不是导航之后：
+      关窗要发生在用户"说完话"的瞬间，不能拖到播报开始。
+    */
+    window.dispatchEvent(new CustomEvent("mumai:dismiss-overlays"));
     setAgent({ agentState: "THINKING", stateNote: `剧本命中 ${route.round.roundNo}，思考中...` });
     await sleep(thinkingDelayMs());
     if (stale(gen)) return;

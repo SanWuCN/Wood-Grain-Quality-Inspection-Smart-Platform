@@ -50,9 +50,24 @@ export type DemoAction = {
    * 组件按这些键取值渲染，**不接收字面量**。
    */
   dataKeys: string[];
-  /** 可选：表面底部的一个本地按钮（只改演习状态） */
+  /**
+   * 这一轮的可见动作**只在工单详情页发生**（导航 + 逐组展开），不再弹演示表面。
+   *
+   * ── 为什么要这个标记（现场实测出的穿帮）────────────────────────────
+   * ①④⑧⑩⑰⑳ 这 6 轮都会跳到工单详情页。原先它们**同时**弹一个左下角浮层，
+   * 而浮层标题是写给排练者看的（例如「打开新工单档案，四组模块随播报展开」）——
+   * 页面已经跳过去了，旁边还挂一句"随播报展开"，讲解人当场被拆台。
+   * ⑩⑰ 更糟：它们的 `surface` 指向别的类型，于是"跳到工单页"又"弹一个
+   * 路线预览 / 部署检查浮层"，看着像两个页面打架。
+   *
+   * 现在这 6 轮只用工单页本身表达动作（它本来就有四组逐段展开）。
+   * 约束由 `demoActions.test.ts` 保证：标了 `revealOnly` 的轮次**必须**在
+   * `script.ts` 里有 `reveal.order-detail` 声明，否则就成了"既没浮层也没页面动作"。
+   */
+  revealOnly?: boolean;
+  /** 可选：表面底部的一个本地按钮（只改本地状态） */
   button?: string;
-  /** 这个动作是否只影响本地演习状态（§10 阶段 D 要求；恒为 true，显式写出来） */
+  /** 这个动作是否只影响本地状态（§10 阶段 D 要求；恒为 true，显式写出来） */
   simulated: boolean;
 };
 
@@ -66,14 +81,16 @@ export type DemoAction = {
 export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
   {
     roundNo: "①",
-    title: "打开新工单档案，四组模块随播报展开",
+    title: "打开工单档案，任务范围与执行模块就位",
     surface: "order",
+    /* 这一轮的页面动作就是工单详情页本身（逐组展开），不再叠加浮层 —— 现场实测会像两个页面打架 */
+    revealOnly: true,
     dataKeys: ["components.codes", "components.focus", "draftOrder.no"],
     simulated: true,
   },
   {
     roundNo: "②",
-    title: "打开平台环境档案（本地演习数据）",
+    title: "打开平台环境档案",
     surface: "weather",
     dataKeys: [
       "weather.panelTitle",
@@ -99,13 +116,15 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     title: "工作台生成四张任务卡，第一张进入进行中",
     surface: "tasks",
     dataKeys: ["components.codes", "components.focus"],
-    button: "在本地演练中标记已同步",
+    button: "在平台上标记已同步",
     simulated: true,
   },
   {
     roundNo: "④",
     title: "定位开工清单里唯一待确认项",
     surface: "order",
+    /* 这一轮的页面动作就是工单详情页本身（逐组展开），不再叠加浮层 —— 现场实测会像两个页面打架 */
+    revealOnly: true,
     dataKeys: ["components.codes", "siteEnv.airTempC"],
     simulated: true,
   },
@@ -114,7 +133,7 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     title: "打开环境补偿参数对比卡",
     surface: "params",
     dataKeys: ["siteEnv.airTempC", "siteEnv.relativeHumidityPct", "siteEnv.windSpeedMs"],
-    button: "应用演习参数",
+    button: "应用建议参数",
     simulated: true,
   },
   {
@@ -143,6 +162,8 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     roundNo: "⑧",
     title: "四柱卡片按风险重排并高亮 Z04",
     surface: "order",
+    /* 这一轮的页面动作就是工单详情页本身（逐组展开），不再叠加浮层 —— 现场实测会像两个页面打架 */
+    revealOnly: true,
     dataKeys: ["components.codes", "components.focus", "components.focusRegion"],
     simulated: true,
   },
@@ -155,10 +176,16 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
   },
   {
     roundNo: "⑩",
-    title: "打开路线预览与确认按钮（不真实下发）",
+    title: "工单页展开下发区，路线预览可见（未下发）",
     surface: "channels",
+    /* 这一轮的页面动作就是工单详情页本身（逐组展开），不再叠加浮层 —— 现场实测会像两个页面打架 */
+    revealOnly: true,
     dataKeys: ["mission.id", "mission.waypointCount", "mission.routeLengthM"],
-    button: "演习下发（仅改本地状态）",
+    /*
+      ⚠ 这里**不能**再挂按钮：浮层不显示了，按钮就没有落点（测试会拦）。
+      这一轮真正该有的"确认下发"在工单页的下发区里（`DispatchPanel`），
+      不是浮层上的一个演习按钮。台词也已经说清"预览已打开，尚未真实下发"。
+    */
     simulated: true,
   },
   {
@@ -229,8 +256,10 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
   },
   {
     roundNo: "⑰",
-    title: "打开部署检查页，显著标注演习不刷写",
+    title: "工单页展开下发区，版本与自检结果可见",
     surface: "deploy",
+    /* 这一轮的页面动作就是工单详情页本身（逐组展开），不再叠加浮层 —— 现场实测会像两个页面打架 */
+    revealOnly: true,
     dataKeys: [
       "package.id",
       "package.sizeMb",
@@ -238,7 +267,12 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
       "package.rollbackVersion",
       "package.selfCheckPassed",
     ],
-    button: "演习核对（不执行真实刷写）",
+    /*
+      ⚠ 同 ⑩：浮层不显示了，就不再挂浮层按钮。
+      "不得真实刷写"这条约束没有丢，它由两层保证 ——
+      ① 工具门槛（高风险工具剧本一律不执行，由 验剧本工具链 工装核对）；
+      ② 台词第⑰轮自己只说"自检7项通过、回退版本完整"，没有任何"已刷写"的说法。
+    */
     simulated: true,
   },
   {
@@ -268,8 +302,10 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
   },
   {
     roundNo: "⑳",
-    title: "跳转工单草稿页，附件 / 范围 / 证据 / 审核栏随播报展开",
+    title: "跳转工单草稿页，附件、范围、证据与审核栏就位",
     surface: "order",
+    /* 这一轮的页面动作就是工单详情页本身（逐组展开），不再叠加浮层 —— 现场实测会像两个页面打架 */
+    revealOnly: true,
     dataKeys: ["draftOrder.no", "components.focusRegion", "delivery.total"],
     simulated: true,
   },

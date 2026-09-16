@@ -221,7 +221,25 @@ export default function Shell() {
       setDemoSurfaceRound(roundNo ? String(roundNo) : null);
     };
     window.addEventListener("mumai:demo-surface", onSurface);
-    return () => window.removeEventListener("mumai:demo-surface", onSurface);
+
+    /*
+      ── 语音命中剧本时收掉屏幕上的浮层（现场实测出的穿帮）────────────
+      演示动线：Ctrl+Q+L → 点「查看」→ 红头委托预览弹出 → 喊「读取这份工单」。
+      喊完画面要跳到工单页，但那张预览还盖在上面，看着像"两个页面打架"。
+      真人会先关掉它，所以这里替用户关：把委托预览与本层的演示表面一起收掉。
+
+      为什么不由 `openCommissionPreview` 自己收：本组件里没有"这一轮是语音来的"
+      这个信息；`executor` 才是判定命中轮次的地方，由它派发事件最直接。
+    */
+    const onDismiss = () => {
+      setCommissionPreview(null);
+      setDemoSurfaceRound(null);
+    };
+    window.addEventListener("mumai:dismiss-overlays", onDismiss);
+    return () => {
+      window.removeEventListener("mumai:demo-surface", onSurface);
+      window.removeEventListener("mumai:dismiss-overlays", onDismiss);
+    };
   }, []);
 
   /**
