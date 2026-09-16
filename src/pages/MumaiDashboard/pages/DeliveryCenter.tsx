@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 更新交付（`/firmware?tab=delivery`）
  *
  * 形态是**产物提交与分发**，不是流程展示：
@@ -246,7 +246,7 @@ function ReceiveModal({
         <div><small>服务端取用</small><b>{artifact.data.downloadCount ?? 0} 次</b></div>
         <div><small>摘要回验</small><b>{workflow.receiptSummary}</b></div>
         {/* 作业号取不到就写清"未关联"，不显示空白也不挂别的作业号 */}
-        <div><small>交付作业</small><b>{workflow.runId ?? "未关联（非量化作业产物）"}</b></div>
+        <div><small>交付作业</small><b>{workflow.runId ?? "未关联"}</b></div>
       </div>
 
       <h4 className="sub">文件清单</h4>
@@ -547,7 +547,7 @@ export function DeliveryTab() {
     原实现无条件传 `distillScript`，于是「交付作业」那行对**任何**产物都显示
     蒸馏作业号 run-20260911-0244，量化/复测/封装三格也永远来自那个脚本 ——
     种子产物其实是 `EXP-2026-0911`、人工上传是 `null`，都不出自蒸馏作业。
-    现在先按 `fromJob` 匹配；匹配不到就传 `null`，页面显示"未关联交付作业"。
+    现在先按 `fromJob` 匹配；匹配不到就传 `null`，页面统一显示 `DELIVERY_UNLINKED_NOTE`。
   */
   const scriptFor = useCallback(
     (item: SharedEntity<ArtifactEntity> | null) =>
