@@ -271,8 +271,8 @@ export default function Knowledge() {
       <header className="kb-header">
         <div className="kb-title">
           <h1>数据与知识中心</h1>
-          <span className="kb-chip" title="资料、关联与索引状态来自演示会话">
-            演示环境
+          <span className="kb-chip" title="资料、关联与索引状态来自当前归档会话">
+            归档环境
           </span>
           <span className="kb-scope">
             项目 · <strong>{overview?.scope.label ?? "示例寺"}</strong>
@@ -545,14 +545,14 @@ export default function Knowledge() {
         }}
       />
 
-      <KbDrawer open={noteOpen} title="数据说明" subtitle="演示环境的能力边界与数据处理方式" onClose={() => setNoteOpen(false)}>
+      <KbDrawer open={noteOpen} title="数据说明" subtitle="归档环境的能力边界与数据处理方式" onClose={() => setNoteOpen(false)}>
         <p className="kb-note-paragraph">
-          当前为演示环境。资料、关联与索引状态来自演示会话；支持导入的资产按接入规则处理。检索模式与文件能力可在此查看。
+          当前为归档环境。资料、关联与索引状态来自当前工作会话；支持导入的资产按接入规则处理。检索模式与文件能力可在此查看。
         </p>
 
         <KbKV
           items={[
-            { k: "演示场景", v: fixture?.scenarioId ?? "knowledge-demo-v1" },
+            { k: "归档场景", v: fixture?.scenarioId ?? "knowledge-demo-v1" },
             { k: "夹具 seed", v: fixture ? String(fixture.seed) : "—" },
             /*
               下面四个数来自同一份总览快照（轮询时整份替换），是会变的数。
@@ -572,7 +572,7 @@ export default function Knowledge() {
           <p className="kb-note-paragraph">
             平台里的资产分两层：**可展开明细**有文件名、版本、来源与分块，可以筛选、打开详情、参与检索；
             **规模样本**是历史归档里同类资料的计数（例如五万余张现场照片），只参与统计。
-            演示库不会把十几万条记录逐条生成 —— 那既没必要，也会让首次启动慢到不可用。
+            预置资料库不会把十几万条记录逐条生成，这既无必要，也会显著拖慢首次启动。
             列表页每个主类都会同时标出「总量」与「可展开条数」，两者不会混成一个数字。
           </p>
         </KbCollapse>
@@ -635,7 +635,7 @@ export default function Knowledge() {
           <ul className="kb-note-list">
             <li>检索复用中文 2–4 元词项统计与余弦相似度，先按项目、对象、日期与版本过滤候选，再排名。</li>
             <li>评分绑定当前服务版本的语料统计，构建后缓存；不每次输入都遍历全部内容。</li>
-            <li>「向量条目」是演示索引里真实存在的逻辑记录，768 只是配置维度，不代表落盘了稠密向量。</li>
+            <li>「向量条目」是浏览器本地索引中的逻辑记录，768 只是配置维度，不代表落盘了稠密向量。</li>
             <li>默认输出证据列表。没有合格命中时显示「未检索到匹配证据」，低分结果只作为候选列出，不写成回答。</li>
           </ul>
         </KbCollapse>
@@ -656,7 +656,7 @@ export default function Knowledge() {
         ) : null}
 
         {fixture && fixture.errors.length ? <p className="kb-toast kb-toast--danger">夹具自检未通过：{fixture.errors.join("；")}</p> : null}
-        {!fixture ? <KbEmpty title="暂无夹具报告" hint="当前会话没有安装演示夹具，说明仅显示平台能力边界。" /> : null}
+        {!fixture ? <KbEmpty title="暂无夹具报告" hint="当前会话没有安装内置资料，说明仅显示平台能力边界。" /> : null}
       </KbDrawer>
     </div>
   );

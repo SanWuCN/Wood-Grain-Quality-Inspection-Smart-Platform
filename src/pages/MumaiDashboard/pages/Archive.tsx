@@ -182,7 +182,7 @@ export default function Archive() {
       <Toolbar
         note={
           <>
-            <SourceTag label="演示回放" />
+            <SourceTag label="归档回放" />
             <span>完整性校验不替代内容审核；大文件应流式读取并缓存摘要</span>
           </>
         }>
@@ -369,7 +369,7 @@ export default function Archive() {
                 <dt>固件类型</dt>
                 <dd>
                   {UPDATE_PACKAGE.artifactKind === "demo_nonflashable"
-                    ? "不可烧录演示包"
+                    ? "不可烧录验证包"
                     : UPDATE_PACKAGE.artifactKind}
                 </dd>
               </div>

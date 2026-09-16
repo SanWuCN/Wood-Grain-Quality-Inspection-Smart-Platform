@@ -279,7 +279,7 @@ export default function Dashboard() {
         <div className="motto">让古建被看见 · 让历史有未来</div>
         <div>
           <span>
-            数据源 <b>演示回放</b>
+            数据源 <b>归档回放</b>
           </span>
           <span>实时位置 31.2304°N 121.4737°E</span>
           <time>

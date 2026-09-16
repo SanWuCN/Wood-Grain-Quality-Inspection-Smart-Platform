@@ -840,10 +840,12 @@ export function createApi({ db, hub, bridge, devices = null, workOrders = null, 
      * 需求是「只有全栈开发工程师可以上传模型」，所以字节这一层也要拦。
      */
     const dir = String(ctx.query.dir ?? "uploads");
-    if (dir === "scenes") {
-      const allowed = (permissionsOf(ctx.actor) ?? []).includes("scene:submit");
+    if (dir === "scenes" || dir === "artifacts") {
+      const requiredAction = dir === "scenes" ? "scene:submit" : "package:deliver";
+      const allowed = (permissionsOf(ctx.actor) ?? []).includes(requiredAction);
       if (!allowed) {
-        throw new WorkflowError(403, "FORBIDDEN", `账号 ${ctx.actor} 无「场景成果提交」权限，不能上传场景模型`);
+        const label = dir === "scenes" ? "场景成果提交" : "交付产物提交";
+        throw new WorkflowError(403, "FORBIDDEN", `账号 ${ctx.actor} 无「${label}」权限，不能上传到 ${dir} 目录`);
       }
     }
     const record = await saveStream(ctx.req, {

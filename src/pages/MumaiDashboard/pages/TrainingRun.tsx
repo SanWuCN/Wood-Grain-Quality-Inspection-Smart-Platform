@@ -62,6 +62,7 @@ import type {
   TrainingConfigField,
 } from "../seed/types";
 import { buildDistillScript, buildTrainScript } from "./terminalScripts";
+import { buildTrainingTracking, type TrainingTracking } from "./trainingTracking";
 
 /** 毫秒 → 控制台时钟 mm:ss。脚本本身不打时间戳，用控制台自己的运行时钟补 */
 function clockFromMs(ms: number): string {
@@ -124,6 +125,99 @@ const fmtMetric = (metric: NodeMetric, value: number) =>
  */
 const fmtSignedInt = (value: number) => `${value > 0 ? "+" : ""}${Math.round(value)}`;
 const fmtSignedPct = (value: number) => `${value > 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
+
+function trackingTone(state: "待提交" | "运行中" | "已完成"): "ok" | "info" | "muted" {
+  if (state === "已完成") return "ok";
+  if (state === "运行中") return "info";
+  return "muted";
+}
+
+function TrackingPanel({ tracking }: { tracking: TrainingTracking }) {
+  return (
+    <Panel
+      title="任务追踪"
+      extra={<StatusChip text={tracking.current.state} tone={trackingTone(tracking.current.state)} dot />}
+      className="fw-panel fw-panel--tracking">
+      <div className="fw-tracking">
+        <section className="fw-tracking__lane fw-tracking__lane--current">
+          <header>
+            <div>
+              <b>当前回放任务</b>
+              <small>归档日志独立回放，不改写归档记录</small>
+            </div>
+            <StatusChip text={tracking.current.stageLabel} tone={tracking.current.state === "运行中" ? "info" : "muted"} />
+          </header>
+          <dl className="fw-tracking__meta">
+            <div>
+              <dt>回放状态</dt>
+              <dd>{tracking.current.state}</dd>
+            </div>
+            <div>
+              <dt>回放更新时间</dt>
+              <dd>{tracking.current.updatedAt ?? "尚未提交"}</dd>
+            </div>
+          </dl>
+          <ol className="fw-tracking__steps">
+            {tracking.current.steps.map((step) => (
+              <li key={step.key} className={`is-${step.state === "已完成" ? "done" : step.state === "进行中" ? "active" : "wait"}`}>
+                <span className="fw-tracking__dot" />
+                <b>{step.label}</b>
+                <small>{step.at ?? "等待"}</small>
+              </li>
+            ))}
+          </ol>
+          {tracking.current.alerts.length ? (
+            <ul className="fw-tracking__alerts">
+              {tracking.current.alerts.map((alert, index) => <li key={`${alert}-${index}`}>{alert}</li>)}
+            </ul>
+          ) : <p className="fw-tracking__clear">当前回放暂无告警</p>}
+        </section>
+
+        <section className="fw-tracking__lane fw-tracking__lane--archive">
+          <header>
+            <div>
+              <b>归档验证记录</b>
+              <small>实验包只读摘要</small>
+            </div>
+            <StatusChip
+              text={`${tracking.archive.passed}/${tracking.archive.total} 项通过`}
+              tone={tracking.archive.passed === tracking.archive.total ? "ok" : "warn"}
+              dot
+            />
+          </header>
+          <dl className="fw-tracking__meta">
+            <div>
+              <dt>实验编号</dt>
+              <dd>{tracking.archive.experimentId}</dd>
+            </div>
+            <div>
+              <dt>版本对照</dt>
+              <dd>{tracking.archive.versionText}</dd>
+            </div>
+            <div>
+              <dt>记录时间</dt>
+              <dd>{tracking.archive.updatedAt ?? "—"}</dd>
+            </div>
+          </dl>
+          <ol className="fw-tracking__steps">
+            {tracking.archive.steps.map((step) => (
+              <li key={step.key} className={`is-${step.state === "已完成" ? "done" : step.state === "进行中" ? "active" : "wait"}`}>
+                <span className="fw-tracking__dot" />
+                <b>{step.label}</b>
+                <small>{step.at ?? "—"}</small>
+              </li>
+            ))}
+          </ol>
+          {tracking.archive.alerts.length ? (
+            <ul className="fw-tracking__alerts">
+              {tracking.archive.alerts.map((alert, index) => <li key={`${alert}-${index}`}>{alert}</li>)}
+            </ul>
+          ) : <p className="fw-tracking__clear">归档验收项全部通过</p>}
+        </section>
+      </div>
+    </Panel>
+  );
+}
 
 /* ------------------------------------------------------------------ *
  * ① 训练任务与配置
@@ -856,7 +950,7 @@ function DataPanel({
       title="采集数据"
       extra={
         <span className="fw-console__actions">
-          <SourceTag label="模拟采集" />
+          <SourceTag label="预置采集记录" />
           {pending > 0 ? (
             /* 待审核数会随着导入数据包变化（导入的包一律先进待审核区）；
                文案裹成单个 span，避开 `.chip` 的 flex gap */
@@ -1063,7 +1157,7 @@ function ImportModal({
       componentId: /Z\d{2}/.exec(candidate.name)?.[0] ?? null,
       frames: null,
       sizeText: `${(candidate.bytes / 1024 / 1024).toFixed(1)} MB`,
-      capturedAt: "2026-09-11 41:00",
+      capturedAt: "T+41:00",
       state: "待审核",
       checks,
     });
@@ -1352,11 +1446,14 @@ export function TrainingTab() {
    * PRD §4.2 说法一致。原来曲线与对比各占一块、谁也不是主角，日志还占着一整块。
    * 现在两种视图各自让一个面板横跨整行成为主角，日志默认折叠。
    */
-  const [view, setView] = useState<"curve" | "compare">("curve");
+  const [view, setView] = useState<"curve" | "compare" | "tracking">("curve");
   /** 日志是否展开：运行中自动展开，跑完收回去 */
   const [logOpen, setLogOpen] = useState(false);
   /** 训练配置弹窗：参数与说明下沉到二级，一级页面只留摘要 */
   const [configOpen, setConfigOpen] = useState(false);
+  /** 当前任务的运行状态与更新时间，和归档实验包分开保存 */
+  const [runStarted, setRunStarted] = useState(false);
+  const [runtimeUpdatedAt, setRuntimeUpdatedAt] = useState<string | null>(null);
 
   /** 配置草稿：只存改动过的项，没改的跟着实验包走 */
   const [draft, setDraft] = useState<Record<string, number>>({});
@@ -1388,6 +1485,8 @@ export function TrainingTab() {
     setVisible(experiment.log.length);
     setRunning(false);
     setDraft({});
+    setRunStarted(false);
+    setRuntimeUpdatedAt(null);
   }, [experiment]);
 
   const dirty = useMemo(
@@ -1413,6 +1512,17 @@ export function TrainingTab() {
 
   const progress = Math.round((visible / Math.max(experiment.log.length, 1)) * 100);
 
+  const tracking = useMemo(
+    () =>
+      buildTrainingTracking(experiment, {
+        started: runStarted,
+        running,
+        visibleLogCount: visible,
+        updatedAt: runtimeUpdatedAt,
+      }),
+    [experiment, runStarted, running, visible, runtimeUpdatedAt],
+  );
+
   /** 当前回放到的轮次：取已显示日志里最后一个带 epoch 的行 */
   const cursor = useMemo(() => {
     let epoch = 0;
@@ -1436,15 +1546,18 @@ export function TrainingTab() {
   const replay = () => {
     stopTimer();
     setVisible(0);
+    setRunStarted(true);
+    setRuntimeUpdatedAt(new Date().toLocaleString("zh-CN", { hour12: false }).replace(/\//g, "-"));
     setRunning(true);
     // 开跑就切回曲线视图并展开日志：这时候要看的是训练过程本身
     setView("curve");
     setLogOpen(true);
     let index = 0;
-    window.setTimeout(() => {
+    timer.current = window.setTimeout(() => {
       timer.current = window.setInterval(() => {
         index += 1;
         setVisible(index);
+        setRuntimeUpdatedAt(new Date().toLocaleString("zh-CN", { hour12: false }).replace(/\//g, "-"));
         if (index >= experiment.log.length) {
           stopTimer();
           setRunning(false);
@@ -1622,6 +1735,12 @@ export function TrainingTab() {
           title={running ? "训练进行中，跑完自动切到对比" : "同一测试集下的新旧模型对比"}>
           新旧对比
         </Btn>
+        <Btn
+          active={view === "tracking"}
+          onClick={() => setView("tracking")}
+          title="当前任务与归档验证记录">
+          任务追踪
+        </Btn>
         <span className="fw-training__mode-note">
           {running
             ? "训练进行中：曲线为主，日志已展开"
@@ -1665,8 +1784,10 @@ export function TrainingTab() {
 
       <NodePanel node={experiment.node} cursor={drawnEpochs} totalEpochs={totalEpochs} />
 
-      {/* 主视图：曲线或对比，谁在当前视图里谁横跨整行 */}
-      {view === "curve" ? (
+      {/* 主视图：曲线、对比或任务追踪，当前视图横跨整行 */}
+      {view === "tracking" ? (
+        <TrackingPanel tracking={tracking} />
+      ) : view === "curve" ? (
         <LossPanel experiment={experiment} drawn={drawnEpochs} dominant />
       ) : (
         <ComparisonPanel experiment={experiment} dominant />

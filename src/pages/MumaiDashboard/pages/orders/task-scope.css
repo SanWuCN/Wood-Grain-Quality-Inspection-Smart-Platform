@@ -125,3 +125,69 @@
     white-space: normal;
   }
 }
+
+/* ---------------- 4. 现场安全登记 ---------------- */
+
+.site-safety__locations {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.site-safety__locations > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-1) var(--space-2);
+  align-content: start;
+  min-width: 0;
+  padding: var(--space-3);
+  border-left: 2px solid var(--ma-ok);
+  background: var(--bg-page);
+}
+
+.site-safety__locations > div.is-pending {
+  border-left-color: var(--ma-warn);
+}
+
+.site-safety__locations dt {
+  grid-column: 1 / -1;
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+}
+
+.site-safety__locations dd {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  margin: 0;
+}
+
+.site-safety__locations dd b {
+  color: var(--ma-text);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+}
+
+.site-safety__locations dd span,
+.site-safety__meta {
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-body);
+}
+
+.site-safety__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+}
+
+@media (max-width: 900px) {
+  .site-safety__locations {
+    grid-template-columns: 1fr;
+  }
+}

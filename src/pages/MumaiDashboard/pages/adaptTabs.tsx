@@ -26,11 +26,11 @@
  *   采集 3.4 / 异常排查 3.4 / 数据集 3.5 / 训练验证 3.6 / 更新交付 3.6 / 融合分析 3.7
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import NumberAnimation from "@/components/numberAnimation";
 import { useMumai } from "../context";
 import { Modal } from "../ui";
-import { DatasetCleanFlow } from "./DatasetCleanFlow";
+import { DatasetCleanFlow, type CleanVersionResult } from "./DatasetCleanFlow";
 import { Panel } from "../Panel";
 import {
   Btn,
@@ -47,6 +47,11 @@ import {
   SAMPLES,
 } from "../seed/scenario";
 import type { SplitGroup } from "../seed/types";
+import {
+  buildCalibrationRows,
+  buildEvidenceMatches,
+  calibrationSummary,
+} from "./fusionInspection";
 
 
 /* ------------------------------------------------------------------ *
@@ -63,11 +68,16 @@ export function DatasetTab() {
   const groups = useMemo(() => [...new Set(SAMPLES.map((sample) => sample.physicalSampleId))], []);
   const [group, setGroup] = useState(groups[0] ?? "");
   const [target, setTarget] = useState<SplitGroup["name"]>("训练集");
-  /** 清洗流程产出的新版本号；为空表示本轮还没生成过 */
-  const [datasetVersion, setDatasetVersion] = useState<string | null>(null);
+  /** 清洗流程产出的新版本成员；为空表示本轮还没生成过 */
+  const [versionResult, setVersionResult] = useState<CleanVersionResult | null>(null);
+  const activeSamples = useMemo(() => {
+    if (!versionResult) return SAMPLES;
+    const included = new Set(versionResult.includedRecordIds);
+    return SAMPLES.filter((sample) => included.has(sample.recordId));
+  }, [versionResult]);
 
   /** PRD 3.5 / 12：经理程序真读训练 / 验证 / 测试的物理样本 ID，输出交集与冲突清单 */
-  const grouping = useMemo(() => checkGrouping({ ...DATASET, splits }, SAMPLES), [splits]);
+  const grouping = useMemo(() => checkGrouping({ ...DATASET, splits }, activeSamples), [activeSamples, splits]);
 
   /**
    * 未纳入任何集合的样本与混入监督训练的未知标签：
@@ -75,12 +85,12 @@ export function DatasetTab() {
    */
   const usedIds = useMemo(() => new Set(splits.flatMap((split) => split.sampleIds)), [splits]);
   const orphans = useMemo(
-    () => [...new Set(SAMPLES.map((sample) => sample.physicalSampleId))].filter((id) => !usedIds.has(id)),
-    [usedIds],
+    () => [...new Set(activeSamples.map((sample) => sample.physicalSampleId))].filter((id) => !usedIds.has(id)),
+    [activeSamples, usedIds],
   );
   const unknownInSupervised = useMemo(
-    () => SAMPLES.filter((sample) => sample.knownState === "未知待核验" && usedIds.has(sample.physicalSampleId)),
-    [usedIds],
+    () => activeSamples.filter((sample) => sample.knownState === "未知待核验" && usedIds.has(sample.physicalSampleId)),
+    [activeSamples, usedIds],
   );
 
   /** A13：故意让同一木样跨集合，验证经理程序能检出交集 */
@@ -89,7 +99,7 @@ export function DatasetTab() {
       split.name === target ? { ...split, sampleIds: [...new Set([...split.sampleIds, group])] } : split,
     );
     setSplits(next);
-    const after = checkGrouping({ ...DATASET, splits: next }, SAMPLES);
+    const after = checkGrouping({ ...DATASET, splits: next }, activeSamples);
     toast(
       after.conflicts.length
         ? `已把 ${group} 同时编入${target}：检出 ${after.conflicts.length} 组跨集合冲突`
@@ -106,7 +116,7 @@ export function DatasetTab() {
         : { ...split, sampleIds: split.sampleIds.filter((id) => id !== group) },
     );
     setSplits(next);
-    const after = checkGrouping({ ...DATASET, splits: next }, SAMPLES);
+    const after = checkGrouping({ ...DATASET, splits: next }, activeSamples);
     const cleanIntersection = after.intersections.every((pair) => pair.ids.length === 0);
     const failed = after.details.filter((detail) => !detail.ok).map((detail) => detail.label);
     toast(
@@ -124,14 +134,26 @@ export function DatasetTab() {
         糊弄」）。这里挂真实的分段流程：选数据集 → 配置 → 预检查 → 执行 →
         人工核验 → 生成版本；每步都要点，结果由规则在当前样本上真算。
       */}
-      <DatasetCleanFlow onVersioned={(label) => setDatasetVersion(label)} />
+      <DatasetCleanFlow
+        onVersioned={(result) => {
+          const included = new Set(result.includedRecordIds);
+          const includedGroups = new Set(
+            SAMPLES.filter((sample) => included.has(sample.recordId)).map((sample) => sample.physicalSampleId),
+          );
+          setVersionResult(result);
+          setSplits((current) => current.map((split) => ({
+            ...split,
+            sampleIds: split.sampleIds.filter((sampleId) => includedGroups.has(sampleId)),
+          })));
+        }}
+      />
 
       <Panel
-        title="本轮版本"
+        title={versionResult ? "本轮生成版本" : "归档清洗审计记录"}
         extra={
           <StatusChip
-            text={datasetVersion ? datasetVersion : DATASET.frozen ? `已冻结 ${DATASET.frozenAt}` : "未冻结"}
-            tone={datasetVersion || DATASET.frozen ? "ok" : "warn"}
+            text={versionResult ? versionResult.label : DATASET.frozen ? `已冻结 ${DATASET.frozenAt}` : "未冻结"}
+            tone={versionResult || DATASET.frozen ? "ok" : "warn"}
           />
         }>
         <DataTable
@@ -146,11 +168,11 @@ export function DatasetTab() {
         />
       </Panel>
 
-      <Panel title="样本清单" extra={<span className="muted">{SAMPLES.length} 条记录</span>}>
+      <Panel title="样本清单" extra={<span className="muted">{activeSamples.length} 条记录</span>}>
         <DataTable
           compact
           head={["样本", "记录", "材种来源", "已知状态", "质量", "说明"]}
-          rows={SAMPLES.map((sample) => [
+          rows={activeSamples.map((sample) => [
             <b key={`p-${sample.recordId}`}>{sample.physicalSampleId}</b>,
             sample.recordId,
             sample.materialSource,
@@ -282,7 +304,7 @@ export function DatasetTab() {
           ])}
         />
         <p className="note">
-          执行时间 {grouping.executedAt} · 数据版本 {grouping.dataVersion}
+          页面计算时间 {grouping.executedAt} · 数据版本 {grouping.dataVersion}
           {grouping.error ? ` · ${grouping.error}` : ""}
         </p>
 
@@ -350,6 +372,12 @@ export function FusionTab() {
   const { toast } = useMumai();
   /** 保存是一次会写版本的正式动作，先弹二级确认（一级页面不直接落库） */
   const [saveOpen, setSaveOpen] = useState(false);
+  const [focusMatch, setFocusMatch] = useState<string | null>(null);
+  const visualEvidenceRef = useRef<HTMLElement | null>(null);
+  const radarEvidenceRef = useRef<HTMLElement | null>(null);
+  const calibrationRows = useMemo(() => buildCalibrationRows(FUSION_RECORD), []);
+  const evidenceMatches = useMemo(() => buildEvidenceMatches(FUSION_RECORD), []);
+  const calibration = useMemo(() => calibrationSummary(FUSION_RECORD), []);
 
   return (
     /*
@@ -388,32 +416,35 @@ export function FusionTab() {
           </ul>
         </Panel>
 
-        <Panel title="图像标注">
+        <Panel
+          ref={visualEvidenceRef}
+          title="视觉标定"
+          icon="biz-manual-mark"
+          extra={<SourceTag label="归档标注 JSON" />}>
+          <div className="fusion-calibration-summary">
+            <span><b>{calibration.frameCount}</b> 帧有标注</span>
+            <span><b>{calibration.zoneCount}</b> 个测区</span>
+            <span><b>{calibration.linkedCount}</b> 组已关联</span>
+            <span><b>{calibration.metricCalibratedCount}</b> 项物理尺度</span>
+          </div>
           <DataTable
-            head={["标注框", "图像", "标签", "置信度", "测区"]}
-            rows={FUSION_RECORD.annotations.map((item) => [
+            head={["标注框", "原始帧", "标签", "置信度", "坐标状态"]}
+            rows={calibrationRows.map((item) => [
               item.boxId,
-              item.image,
+              item.frameId,
               item.label,
               /* 逐条量测值：保留两位（与 toFixed(2) 同口径），入场时滚到位。
                  `group={false}`：量测值原来没有千分位，别凭空多出逗号 */
               <NumberAnimation key={item.boxId} value={item.confidence} digits={2} group={false} />,
-              item.zone,
+              <span key={`${item.boxId}-state`} title={`${item.zone} · ${item.metricState}`}>
+                {item.coordinateState}
+              </span>,
             ])}
           />
-          <h4 className="sub">测区匹配</h4>
-          <DataTable
-            head={["视觉测区", "雷达测区", "是否一致", "说明"]}
-            rows={FUSION_RECORD.zoneMatch.map((item) => [
-              item.visual,
-              item.radar,
-              <StatusChip key={item.visual} text={item.matched ? "一致" : "不一致"} tone={item.matched ? "ok" : "warn"} />,
-              item.note,
-            ])}
-          />
+          <p className="note">当前归档只支持构件与测区级关联，未提供相机内参、畸变系数或毫米级比例，页面不补写这些参数。</p>
         </Panel>
 
-        <Panel title="雷达特征">
+        <Panel ref={radarEvidenceRef} title="雷达特征">
           <DataTable
             head={["响应段", "测区", "幅值", "质量"]}
             rows={FUSION_RECORD.radarFeatures.map((item) => [
@@ -430,6 +461,53 @@ export function FusionTab() {
       {/* 规则条数是从种子现算的状态量；原来这里挂的
           「明确规则，非分数相加」是在向读者解释这套融合是怎么设计的（§5 判据） */}
       <Panel title="融合规则与结果" extra={<span className="muted">{FUSION_RULES.length} 条规则</span>}>
+        <h4 className="sub">图像疑点匹配</h4>
+        <ol className="fusion-match-list" aria-label="图像疑点与雷达特征匹配结果">
+          {evidenceMatches.map((item, index) => {
+            const focused = focusMatch === item.annotation.boxId;
+            return (
+              <li key={item.annotation.boxId} className={focused ? "is-focused" : ""}>
+                <button
+                  type="button"
+                  onClick={() => setFocusMatch(focused ? null : item.annotation.boxId)}
+                  aria-expanded={focused}>
+                  <i aria-hidden>{index + 1}</i>
+                  <span>
+                    <b>{item.annotation.image}</b>
+                    <small>{item.annotation.boxId} · {item.annotation.label}</small>
+                  </span>
+                  <span className="fusion-match-list__link" aria-hidden>
+                    <em /><em /><em />
+                  </span>
+                  <span>
+                    <b>{item.radar.segment}</b>
+                    <small>幅值 {item.radar.amplitude.toFixed(2)} · {item.radar.zone}</small>
+                  </span>
+                  <StatusChip
+                    text={item.quality}
+                    tone={item.quality === "已关联" ? "ok" : "warn"}
+                  />
+                </button>
+                {focused ? (
+                  <div className="fusion-match-list__detail">
+                    <span>{item.note}</span>
+                    <span>{item.output ? `${item.output.riskId} · ${item.output.priority}` : "未生成融合输出"}</span>
+                    <span>来源：{item.annotation.source}</span>
+                    <div className="fusion-match-list__actions">
+                      <Btn onClick={() => visualEvidenceRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}>
+                        定位原始帧记录
+                      </Btn>
+                      <Btn onClick={() => radarEvidenceRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}>
+                        定位雷达特征记录
+                      </Btn>
+                    </div>
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ol>
+
         <ul className="fusion-rules">
           {FUSION_RULES.map((rule) => (
             <li key={rule.key}>

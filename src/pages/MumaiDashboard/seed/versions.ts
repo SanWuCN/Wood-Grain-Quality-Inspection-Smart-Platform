@@ -38,7 +38,7 @@ import type { SourceMode } from "./types.ts";
 export type ArtifactKind =
   | "独立模型包"
   | "集成模型固件包"
-  | "演示包"
+  | "验证包"
   | "配置包"
   | "平台构建"
   | "索引快照";
@@ -139,15 +139,15 @@ export const VERSION_ITEMS: VersionItem[] = [
     reported: { live: "未获运动权限（只读监视）", demo: "DEMO-CART-1.6.0" },
     switchable: true,
     releases: [
-      { version: "DEMO-CART-1.7.0-rc2", releasedAt: "2026-09-10", status: "候选", artifactKind: "演示包", size: "18.4 MB", change: "航点执行改为到点确认后再走下一段，避免窄通道内抢行", depends: "地图 MAP-SH-06", digest: "7a3d15e8b062" },
-      { version: "DEMO-CART-1.7.0-rc1", releasedAt: "2026-09-02", status: "已弃用", artifactKind: "演示包", size: "18.3 MB", change: "引入速度前瞻，转弯处提前减速；实测在松江点位过冲，未转正", depends: "地图 MAP-SH-06", digest: "f2a94c07e513" },
-      { version: "DEMO-CART-1.6.0", releasedAt: "2026-08-14", status: "当前生效", artifactKind: "演示包", size: "18.1 MB", change: "建图与巡检任务拆分；任务暂停后可原地恢复继续", depends: "地图 MAP-SH-05 及以上", digest: "b6409c2fe713" },
-      { version: "DEMO-CART-1.5.3", releasedAt: "2026-07-02", status: "可回退", artifactKind: "演示包", size: "17.9 MB", change: "修正长走廊回环失败；重定位耗时由 8s 降到 3s", depends: "地图 MAP-SH-05", digest: "41c8ea07b395" },
-      { version: "DEMO-CART-1.5.0", releasedAt: "2026-05-19", status: "已弃用", artifactKind: "演示包", size: "17.6 MB", change: "局部路径改用 TEB；障碍物缓冲半径可配置", depends: "地图 MAP-SH-04", digest: "9e0b36d1ca48" },
-      { version: "DEMO-CART-1.4.2", releasedAt: "2026-04-08", status: "已弃用", artifactKind: "演示包", size: "17.2 MB", change: "修正暂停后仍向前滑行约 0.4m 的问题", depends: "地图 MAP-SH-04", digest: "5d71fa02be96" },
-      { version: "DEMO-CART-1.4.0", releasedAt: "2026-02-25", status: "已弃用", artifactKind: "演示包", size: "17.0 MB", change: "接入 rosbridge，平台可只读监视位姿与规划路径", depends: "地图 MAP-SH-03", digest: "a83c50e7d214" },
-      { version: "DEMO-CART-1.3.0", releasedAt: "2026-01-14", status: "已弃用", artifactKind: "演示包", size: "16.5 MB", change: "麦克纳姆轮底盘改为全向运动学模型，支持横移", depends: "地图 MAP-SH-02", digest: "2b64d9f10a75" },
-      { version: "DEMO-CART-1.2.0", releasedAt: "2025-11-26", status: "已弃用", artifactKind: "演示包", size: "15.8 MB", change: "首次接入 slam_toolbox 建图，替换手工标定地图", depends: "—", digest: "cf03a7815be2" },
+      { version: "DEMO-CART-1.7.0-rc2", releasedAt: "2026-09-10", status: "候选", artifactKind: "验证包", size: "18.4 MB", change: "航点执行改为到点确认后再走下一段，避免窄通道内抢行", depends: "地图 MAP-SH-06", digest: "7a3d15e8b062" },
+      { version: "DEMO-CART-1.7.0-rc1", releasedAt: "2026-09-02", status: "已弃用", artifactKind: "验证包", size: "18.3 MB", change: "引入速度前瞻，转弯处提前减速；实测在松江点位过冲，未转正", depends: "地图 MAP-SH-06", digest: "f2a94c07e513" },
+      { version: "DEMO-CART-1.6.0", releasedAt: "2026-08-14", status: "当前生效", artifactKind: "验证包", size: "18.1 MB", change: "建图与巡检任务拆分；任务暂停后可原地恢复继续", depends: "地图 MAP-SH-05 及以上", digest: "b6409c2fe713" },
+      { version: "DEMO-CART-1.5.3", releasedAt: "2026-07-02", status: "可回退", artifactKind: "验证包", size: "17.9 MB", change: "修正长走廊回环失败；重定位耗时由 8s 降到 3s", depends: "地图 MAP-SH-05", digest: "41c8ea07b395" },
+      { version: "DEMO-CART-1.5.0", releasedAt: "2026-05-19", status: "已弃用", artifactKind: "验证包", size: "17.6 MB", change: "局部路径改用 TEB；障碍物缓冲半径可配置", depends: "地图 MAP-SH-04", digest: "9e0b36d1ca48" },
+      { version: "DEMO-CART-1.4.2", releasedAt: "2026-04-08", status: "已弃用", artifactKind: "验证包", size: "17.2 MB", change: "修正暂停后仍向前滑行约 0.4m 的问题", depends: "地图 MAP-SH-04", digest: "5d71fa02be96" },
+      { version: "DEMO-CART-1.4.0", releasedAt: "2026-02-25", status: "已弃用", artifactKind: "验证包", size: "17.0 MB", change: "接入 rosbridge，平台可只读监视位姿与规划路径", depends: "地图 MAP-SH-03", digest: "a83c50e7d214" },
+      { version: "DEMO-CART-1.3.0", releasedAt: "2026-01-14", status: "已弃用", artifactKind: "验证包", size: "16.5 MB", change: "麦克纳姆轮底盘改为全向运动学模型，支持横移", depends: "地图 MAP-SH-02", digest: "2b64d9f10a75" },
+      { version: "DEMO-CART-1.2.0", releasedAt: "2025-11-26", status: "已弃用", artifactKind: "验证包", size: "15.8 MB", change: "首次接入 slam_toolbox 建图，替换手工标定地图", depends: "—", digest: "cf03a7815be2" },
     ],
   },
 
@@ -224,7 +224,7 @@ export const VERSION_ITEMS: VersionItem[] = [
     reported: { live: null, demo: "v1.0.0" },
     switchable: false,
     releases: [
-      { version: "v1.0.0", releasedAt: "2026-09-11", status: "当前生效", artifactKind: "平台构建", size: "—", change: "第二章演示版本：九页路由、四角色权限、小木工具编排", depends: "—", digest: "local-build" },
+      { version: "v1.0.0", releasedAt: "2026-09-11", status: "当前生效", artifactKind: "平台构建", size: "—", change: "第二章交付版本：九页路由、四角色权限、小木工具编排", depends: "—", digest: "local-build" },
       { version: "v0.9.4", releasedAt: "2026-09-04", status: "可回退", artifactKind: "平台构建", size: "—", change: "总览页四块看板定稿；地图点位标注与点击联动", depends: "—", digest: "b6e2019fd847" },
       { version: "v0.9.3", releasedAt: "2026-08-27", status: "已弃用", artifactKind: "平台构建", size: "—", change: "检测适配拆成硬件详情与固件及模型两个页面", depends: "—", digest: "93c7f04a2e15" },
       { version: "v0.9.2", releasedAt: "2026-08-18", status: "已弃用", artifactKind: "平台构建", size: "—", change: "三维地图迁移，支持全国与上海双模式切换", depends: "—", digest: "5d18ba70c396" },
@@ -234,7 +234,7 @@ export const VERSION_ITEMS: VersionItem[] = [
       { version: "v0.8.0", releasedAt: "2026-06-24", status: "已弃用", artifactKind: "平台构建", size: "—", change: "知识库检索改为本地索引，不再依赖外部向量服务", depends: "知识库索引 KB-06", digest: "7c40f8b1ea35" },
       { version: "v0.7.1", releasedAt: "2026-06-09", status: "已弃用", artifactKind: "平台构建", size: "—", change: "报告归档页完整性校验；摘要按 SHA-256 逐项比对", depends: "—", digest: "f5b2c90713de" },
       { version: "v0.7.0", releasedAt: "2026-05-21", status: "已弃用", artifactKind: "平台构建", size: "—", change: "工单档案页与风险等级状态机", depends: "—", digest: "68a3e0f5c927" },
-      { version: "v0.6.0", releasedAt: "2026-04-30", status: "已弃用", artifactKind: "平台构建", size: "—", change: "离线演示骨架：种子数据与回放口播时间轴", depends: "—", digest: "0e94d7a2b183" },
+      { version: "v0.6.0", releasedAt: "2026-04-30", status: "已弃用", artifactKind: "平台构建", size: "—", change: "离线回放骨架：种子数据与口播时间轴", depends: "—", digest: "0e94d7a2b183" },
       { version: "v0.5.0", releasedAt: "2026-03-18", status: "已弃用", artifactKind: "平台构建", size: "—", change: "首个可运行原型，仅总览与工单两页", depends: "—", digest: "d2075ce9164a" },
     ],
   },

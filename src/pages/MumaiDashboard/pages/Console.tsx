@@ -113,7 +113,7 @@ export default function Console() {
           </>
         }>
         <Btn tone="primary" disabled={!online || busy !== null} onClick={() => void newSession()}>
-          {busy === "new-session" ? "新建中…" : "新建演示会话"}
+          {busy === "new-session" ? "新建中…" : "新建工作会话"}
         </Btn>
         <Btn disabled={!online || busy !== null} onClick={() => void exportDiagnostics()}>
           {busy === "diagnostics" ? "导出中…" : "导出诊断包"}
@@ -143,7 +143,7 @@ export default function Console() {
           **序号**（`事件 1001` 这种从 1000 起算的单调序号）给 `group={false}` ——
           序号按标识书写，没有千分位，滚动起来也不能凭空变成「1,001」。
         */}
-        <Panel title="演示会话" extra={<span className="muted"><NumberAnimation value={overview?.sessions.length ?? 0} /> 场</span>}>
+        <Panel title="工作会话" extra={<span className="muted"><NumberAnimation value={overview?.sessions.length ?? 0} /> 场</span>}>
           <ul className="cs-sessions">
             {(overview?.sessions ?? []).map((session) => (
               <li key={session.id} className={session.id === currentSessionId ? "is-current" : ""}>

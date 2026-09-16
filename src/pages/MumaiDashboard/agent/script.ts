@@ -368,7 +368,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     nav: { route: "order", order: "current" },
     voicePack: "AI语音3",
     intentId: "compare_columns",
-    precondition: "真实视觉模型未接通时，结果须明确标注为「预设标注演示」",
+    precondition: "真实视觉模型未接通时，结果须明确标注为「预置标注记录」",
   },
   {
     roundNo: "⑨",
@@ -388,7 +388,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "史：报告项目经理，平台建议优先复核 Z04 下部。",
     voicePack: null,
     intentId: "open_evidence",
-    precondition: "不得虚构放大定位",
+    precondition: "不得擅自放大定位",
   },
   {
     roundNo: "⑩",
@@ -722,8 +722,6 @@ export function mainLineOf(round: ScriptRound): string {
 }
 
 export const SCRIPT_ROUND_COUNT = SCRIPT_ROUNDS.length;
-
-
 
 
 

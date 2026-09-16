@@ -87,7 +87,7 @@ export default function SensorWorkspace({ batchId, screen }: { batchId: string; 
     const timer=window.setInterval(()=> {
       const t=(performance.now()-start)/1000, at=Date.now();
       const q=new Quaternion().setFromEuler(new Euler(Math.sin(t*.8)*.3,Math.sin(t*.45)*.8,Math.sin(t*.6)*.22));
-      setDemoFrame({sessionId:sensor.sessionId,batchId,deviceId:'demo-scanner',deviceName:'开发姿态演示',model:'GLB',firmware:'',streamId:'demo',seq:Math.floor(t*30),sampledAt:at,receivedAt:at,poseAt:at,readings:{},fieldAt:{},quaternion:q.toArray() as Quat,source:'demo',heading:'relative'});
+      setDemoFrame({sessionId:sensor.sessionId,batchId,deviceId:'demo-scanner',deviceName:'开发姿态预览',model:'GLB',firmware:'',streamId:'demo',seq:Math.floor(t*30),sampledAt:at,receivedAt:at,poseAt:at,readings:{},fieldAt:{},quaternion:q.toArray() as Quat,source:'demo',heading:'relative'});
     },33);
     return ()=>clearInterval(timer);
   },[demo,batchId,sensor.sessionId]);
@@ -139,7 +139,7 @@ export default function SensorWorkspace({ batchId, screen }: { batchId: string; 
      * 这种对不上的情况。其余各列仍是 SensorTag 的原始实测值。
      */
     const humidityCell = `${humidity.humidity}（${humidity.source === 'live' ? '北京市·联网' : humidity.source === 'cache' ? '北京市·上次数据' : '北京市·默认值'}）`;
-    const batteryCell = `${FIXED_BATTERY_PCT}（演示固定值）`;
+    const batteryCell = `${FIXED_BATTERY_PCT}（固定参考值，非设备上报）`;
     const rows=[['deviceId','batchId','sampledAt','source','temperatureRawC','temperatureCalibratedC','illuminanceRawLux','illuminanceCalibratedLux','temperatureStatus','lightStatus','humidityPct','batteryPct','pressureHpa','qx','qy','qz','qw'],...all.map((f)=>[f.deviceId,f.batchId,new Date(f.sampledAt).toISOString(),'ble:sensortag',f.readings.ambientTemp??'',f.calibrated?.ambientTemp??'',f.readings.light??'',f.calibrated?.light??'',freshness(f.fieldAt.ambientTemp,f.receivedAt),freshness(f.fieldAt.light,f.receivedAt),humidityCell,batteryCell,f.readings.pressure??'',...(f.quaternion??['','','',''])])];
     const csv='\uFEFF'+rows.map((row)=>row.map((v)=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\r\n');
     const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
@@ -169,7 +169,7 @@ export default function SensorWorkspace({ batchId, screen }: { batchId: string; 
     : '北京市 · 联网失败且无缓存，使用默认值';
   const metricView = (key: keyof Readings, digits: number, live: number | undefined): { value: number | undefined; digits: number; chip: string; tone: Tone; stale: boolean; foot: string | undefined } => {
     if (key === 'humidity') return { value: humidity.humidity, digits: 1, chip: humidityChip.text, tone: humidityChip.tone, stale: humidityChip.stale, foot: humidityFoot };
-    if (key === 'battery') return { value: FIXED_BATTERY_PCT, digits: 0, chip: '写死', tone: 'muted' as const, stale: false, foot: `演示固定值 · 设备 ${currentDevice}` };
+    if (key === 'battery') return { value: FIXED_BATTERY_PCT, digits: 0, chip: '参考值', tone: 'muted' as const, stale: false, foot: `固定配置，非设备上报 · ${currentDevice}` };
     const state = freshness(frame?.fieldAt[key], sensor.now);
     return { value: demo ? undefined : live, digits, chip: state, tone: toneOf(state), stale: state !== '实时', foot: undefined as string | undefined };
   };
@@ -195,19 +195,19 @@ export default function SensorWorkspace({ batchId, screen }: { batchId: string; 
   return <>
     <div className="capture-visuals">
       {screen}
-      <Panel title="扫描枪姿态" className={`sensor-pose${demo?' is-demo':''}`} extra={<StatusChip text={demo?'开发调试 · 模拟姿态':poseState} tone={demo?'warn':toneOf(poseState)} dot />}>
+      <Panel title="扫描枪姿态" className={`sensor-pose${demo?' is-demo':''}`} extra={<StatusChip text={demo?'本地姿态预览':poseState} tone={demo?'warn':toneOf(poseState)} dot />}>
         <div className="sensor-pose__caption"><span>{demo?'模型动作预览':frame ? '扫描枪 · 姿态跟随' : '扫描枪 · 等待连接'}</span><span>仅同步旋转</span></div>
         <div className="sensor-model" role="img" aria-label="扫描枪三维模型，拖动旋转视角，滚轮缩放">
           <Suspense fallback={<div className="sensor-model-error">正在准备 3D 模型…</div>}><ScannerModel key={demo ? "demo" : poseEpoch ?? "waiting"} quaternion={displayQ} follow={follow && poseState==='实时'} reset={reset}/></Suspense>
-          {demo ? <span className="sensor-demo-watermark">模拟姿态 · 非实机</span> : null}
-          {!frame?.quaternion ? <span className="sensor-model__hint">模型已就绪 · 等待真实姿态数据</span> : !follow ? <span className="sensor-model__hint">跟随已暂停 · 读数继续接收</span> : poseState!=='实时' ? <span className="sensor-model__hint">保持最后姿态 · {timeLabel(frame.poseAt)}</span> : null}
+          {demo ? <span className="sensor-demo-watermark">姿态预览 · 未连接设备</span> : null}
+          {!frame?.quaternion ? <span className="sensor-model__hint">模型已就绪 · 等待设备姿态数据</span> : !follow ? <span className="sensor-model__hint">跟随已暂停 · 读数继续接收</span> : poseState!=='实时' ? <span className="sensor-model__hint">保持最后姿态 · {timeLabel(frame.poseAt)}</span> : null}
         </div>
         <div className="sensor-angles">{[['俯仰 Pitch',angles.y],['偏航 Yaw',angles.z],['侧倾 Roll',angles.x]].map(([label,value])=><div key={String(label)}><span>{label}</span><b><NumberAnimation value={frame?.quaternion ? MathUtils.radToDeg(Number(value)) : null} digits={1} duration={0.25} style={{fontSize:'inherit',color:'inherit'}} /><small>°</small></b></div>)}</div>
         <div className="sensor-pose__actions"><Btn onClick={zeroPose} disabled={!frame?.quaternion || poseState!=='实时'}>姿态归零</Btn><Btn onClick={()=>setFollow(!follow)}>{follow?'暂停跟随':'开启跟随'}</Btn><Btn tone="ghost" onClick={()=>setReset(v=>v+1)}>恢复视角</Btn></div>
-        <div className="sensor-pose__foot"><span>{zero !== identity ? '已归零 · ' : ''}相对航向 · 六轴融合</span><button type="button" onClick={()=>{setDemo(!demo);setZero(identity);setFollow(true);}}>{demo?'退出姿态演示':'姿态演示'}</button></div>
+        <div className="sensor-pose__foot"><span>{zero !== identity ? '已归零 · ' : ''}相对航向 · 六轴融合</span><button type="button" onClick={()=>{setDemo(!demo);setZero(identity);setFollow(true);}}>{demo?'退出姿态预览':'姿态预览'}</button></div>
       </Panel>
-    <section className="sensor-strip" aria-label="实时数据">
-      <div className="sensor-strip__head"><div><b>实时数据</b><span>{demo?'演示仅展示模型，环境读数未模拟':sensor.bridge.state==='online' ? '扫描枪已连接' : '等待扫描枪连接'}</span></div><div><Btn tone="ghost" onClick={()=>{setDialog('details');setMessage('');}}>数据详情</Btn><Btn onClick={()=>{setDialog('connection');setMessage('');}}>连接设置</Btn></div></div>
+    <section className="sensor-strip" aria-label="设备数据">
+      <div className="sensor-strip__head"><div><b>设备数据</b><span>{demo?'姿态预览仅展示模型，环境读数未接入':sensor.bridge.state==='online' ? '扫描枪已连接' : '等待扫描枪连接'}</span></div><div><Btn tone="ghost" onClick={()=>{setDialog('details');setMessage('');}}>数据详情</Btn><Btn onClick={()=>{setDialog('connection');setMessage('');}}>连接设置</Btn></div></div>
       <div className="sensor-metrics">{METRICS.map(({key,label,unit,digits})=> {
         const value=demo ? undefined : (key==='ambientTemp' || key==='light') ? frame?.calibrated?.[key] ?? frame?.readings[key] : frame?.readings[key];
         const at=demo ? undefined : frame?.fieldAt[key];

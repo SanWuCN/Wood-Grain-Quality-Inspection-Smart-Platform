@@ -75,7 +75,7 @@ export const DEMO_SESSION = {
   },
   sourceMode: "replay" as SourceMode,
   /** 界面统一显示「演示回放」标识 */
-  sourceLabel: "演示回放",
+  sourceLabel: "归档回放",
   weatherArchive: {
     docId: "doc-weather-0901",
     range: "2026-06-11 至 2026-09-10（近三个月）",
@@ -85,7 +85,7 @@ export const DEMO_SESSION = {
       播报与天气面板一律走下面的 `DEMO_SCENARIO_V3.weather`（同一批冻结值，结构化、可断言）。
       改数字时两处必须一起改 —— `demoScenario.test.ts` 会核对它们指向同一口径。
     */
-    source: "归档天气档案 · 非实时联网查询",
+    source: "归档天气档案 · 当前未启用联网查询",
   },
 } as const;
 
@@ -115,7 +115,7 @@ export const DEMO_SCENARIO_V3 = Object.freeze({
   clock: Object.freeze({
     businessDate: DEMO_BUSINESS_DATE,
     /** 由业务日期派生的时间戳（工单创建时间等一律用它，不用 `new Date()`） */
-    derivationNote: "所有演示时间由 businessDate 派生，禁止读取系统当前时间",
+    derivationNote: "所有业务时间由 businessDate 派生，不读取系统当前时间",
   }),
 
   /** 四根木柱与重点构件（§6.1） */
@@ -520,9 +520,9 @@ export const CLOCK_PHASES: ClockPhase[] = [
 /** 演示控制台事件按钮 */
 export const DEMO_EVENTS: DemoEvent[] = [
   { key: "domain-pending", label: "触发适用域待核验", detail: "冻结 scan-Z04-001 诊断输出，四柱状态置为待核验", effect: "该批诊断输出冻结，传感器状态置为等待操作员确认停止", tone: "red" },
-  { key: "preset-annotation", label: "切换为预设标注演示", detail: "明确标注「预设标注演示」，不称为实时视觉推理", effect: "初筛结果来源标记为预设标注", tone: "amber" },
+  { key: "preset-annotation", label: "切换为预置标注记录", detail: "明确标注「预置标注记录」，不称为实时视觉推理", effect: "初筛结果来源标记为预置标注", tone: "amber" },
   { key: "source-switch", label: "切换数据来源：智能巡检车 / 算力服务器", detail: "只能在任务停止后进行（PRD 3.2）", effect: "通道来源改为「智能巡检车 · replay」或「算力服务器 · live」", tone: "amber" },
-  { key: "deliver-package", label: "下发演示更新包", detail: "DEMO-PKG-02 · demo_nonflashable", effect: "交付步骤从「封装」推进到「下发」", tone: "cyan" },
+  { key: "deliver-package", label: "下发验证更新包", detail: "DEMO-PKG-02 · demo_nonflashable", effect: "交付步骤从「封装」推进到「下发」", tone: "cyan" },
   { key: "draft-order", label: "生成复核工单草稿", detail: "小木按所选风险生成草稿并带入证据", effect: "新建 WO-2026-0912，状态为草稿", tone: "cyan" },
   { key: "archive-check", label: "运行归档完整性校验", detail: "逐项存在性检查 + SHA-256 摘要对比", effect: "输出缺失与不一致文件清单", tone: "cyan" },
   { key: "present-open", label: "投到展示窗口", detail: "打开 #/present，presentation 角色，纯展示无导航", effect: "展示窗口接管大屏，显示控制权显式交接", tone: "cyan" },
@@ -858,7 +858,7 @@ export const DRAFT_ORDER: Order = {
     { assetId: "asset-fusion-03", name: "fusion_record_FUSION-03.json", kind: "清单", sizeText: "42 KB", from: "融合记录", sourceMode: "simulation" },
     { assetId: "asset-img-04", name: "Z04_lower_annotations.json", kind: "图像", sizeText: "88 KB", from: "视觉标注", sourceMode: "simulation" },
   ],
-  acceptanceNote: "验收不通过回到处理中；本演示不建立外部施工登录端。",
+  acceptanceNote: "验收不通过回到处理中；当前版本不建立外部施工登录端。",
   revisitPlanId: "RV-2026-1009",
   sourceMode: "simulation",
 };
@@ -970,7 +970,7 @@ export const HH_PRIOR = {
 
 export const MEMBERS: Member[] = [
   { id: "shen", name: "沈", role: "项目经理", duty: "环境校验、分组检查、新旧评估对比、工单审核、交付摘要校验", workspace: "工单与审核" },
-  { id: "shi", name: "史", role: "人工智能架构师", duty: "小木调用、资料检索、场景发布、训练演示、封装下发、多模态分析", workspace: "平台总览" },
+  { id: "shi", name: "史", role: "人工智能架构师", duty: "小木调用、资料检索、场景发布、训练回放、封装下发、多模态分析", workspace: "平台总览" },
   { id: "rao", name: "饶", role: "全栈开发工程师", duty: "手持参数确认、原始数据上传、场景成果提交、更新包接收与回验", workspace: "采集与交付" },
   { id: "ma", name: "马", role: "具身智能工程师", duty: "地图检查、点位配置、巡检监视、样本位置复核、复巡计划", workspace: "建图巡航" },
 ];
@@ -982,12 +982,12 @@ export const ORDER_LOGS: LogEntry[] = [
   { at: "2026-09-11 12:44", actor: "饶", action: "设备接收配置", object: "CFG-02", result: "ack 已返回，设备已确认" },
   { at: "2026-09-11 15:20", actor: "马", action: "保存地图版本", object: "MAP-SH-06", result: "待检查" },
   { at: "2026-09-11 21:38", actor: "史", action: "发布场景", object: "GS-2026.09", result: "已发布，各客户端收到通知" },
-  { at: "2026-09-11 28:04", actor: "史", action: "异常事件", object: "scan-Z04-001", result: "适用域待核验，诊断输出冻结" },
-  { at: "2026-09-11 33:52", actor: "沈", action: "分组检查", object: "DS-06", result: "三组物理样本 ID 交集为空" },
-  { at: "2026-09-11 36:47", actor: "沈", action: "新旧评估对比", object: "EXP-2026-0911", result: "验收规则 5 项通过" },
-  { at: "2026-09-11 38:26", actor: "饶", action: "执行模拟更新", object: "DEMO-PKG-02", result: "版本回执 DEMO-M02b" },
-  { at: "2026-09-11 43:19", actor: "马", action: "核对测区", object: "Z04-lower", result: "柱号、标高与扫描方向一致" },
-  { at: "2026-09-11 44:31", actor: "史", action: "生成工单草稿", object: "WO-2026-0912", result: "等待经理确认" },
+  { at: "T+28:04", actor: "史", action: "异常事件", object: "scan-Z04-001", result: "适用域待核验，诊断输出冻结" },
+  { at: "T+33:52", actor: "沈", action: "分组检查", object: "DS-06", result: "三组物理样本 ID 交集为空" },
+  { at: "T+36:47", actor: "沈", action: "新旧评估对比", object: "EXP-2026-0911", result: "验收规则 5 项通过" },
+  { at: "T+38:26", actor: "饶", action: "执行验证包更新", object: "DEMO-PKG-02", result: "版本回执 DEMO-M02b" },
+  { at: "T+43:19", actor: "马", action: "核对测区", object: "Z04-lower", result: "柱号、标高与扫描方向一致" },
+  { at: "T+44:31", actor: "史", action: "生成工单草稿", object: "WO-2026-0912", result: "等待经理确认" },
 ];
 
 /* ------------------------------------------------------------------ *
@@ -1181,8 +1181,8 @@ export const HOTSPOTS: HotspotEvidence[] = [
     fusion: { ruleVersion: "FUSION-03", priority: "待核对", branches: ["视觉：异常", "雷达：异常", "质量：雷达单路不合格"] },
     history: [
       { at: "2026-05-18", text: "R04 柱脚渗水痕迹，已施工反馈，待验收", operator: "沈" },
-      { at: "2026-09-11 28:04", text: "初扫触发适用域待核验，诊断输出冻结", operator: "史" },
-      { at: "2026-09-11 39:44", text: "复扫批次 scan-Z04-002 三处样例异常回传", operator: "饶" },
+      { at: "T+28:04", text: "初扫触发适用域待核验，诊断输出冻结", operator: "史" },
+      { at: "T+39:44", text: "复扫批次 scan-Z04-002 三处样例异常回传", operator: "饶" },
     ],
   },
   {
@@ -1210,7 +1210,7 @@ export const HOTSPOTS: HotspotEvidence[] = [
 export const SCAN_BATCHES: ScanBatch[] = [
   {
     batchId: "scan-Z04-001", componentId: "Z04", zoneId: "Z04-lower", round: "初扫",
-    configVersion: "CFG-02", modelVersion: "DEMO-M02", rawLevel: "spectrum", startedAt: "2026-09-11 27:36",
+    configVersion: "CFG-02", modelVersion: "DEMO-M02", rawLevel: "spectrum", startedAt: "T+27:36",
     receive: {
       radar: { received: 386, expected: 420, state: "部分接收" },
       image: { received: 12, expected: 12, state: "完成" },
@@ -1220,7 +1220,7 @@ export const SCAN_BATCHES: ScanBatch[] = [
   },
   {
     batchId: "scan-Z04-002", componentId: "Z04", zoneId: "Z04-lower", round: "复扫",
-    configVersion: "CFG-02", modelVersion: "DEMO-M02b", rawLevel: "spectrum", startedAt: "2026-09-11 39:26",
+    configVersion: "CFG-02", modelVersion: "DEMO-M02b", rawLevel: "spectrum", startedAt: "T+39:26",
     receive: {
       radar: { received: 420, expected: 420, state: "完成" },
       image: { received: 14, expected: 14, state: "完成" },
@@ -1230,7 +1230,7 @@ export const SCAN_BATCHES: ScanBatch[] = [
   },
   {
     batchId: "ref-batch-01", componentId: "REF", zoneId: "REF-A", round: "初扫",
-    configVersion: "CFG-02", modelVersion: "DEMO-M02", rawLevel: "ADC", startedAt: "2026-09-11 31:22",
+    configVersion: "CFG-02", modelVersion: "DEMO-M02", rawLevel: "ADC", startedAt: "T+31:22",
     receive: {
       radar: { received: 168, expected: 168, state: "完成" },
       image: { received: 8, expected: 8, state: "完成" },
@@ -1320,14 +1320,14 @@ export const WAVEFORMS: Waveform[] = [
 export const ANOMALY_EVENTS_LEGACY: AnomalyEvent[] = [
   {
     id: "evt-domain-01",
-    at: "2026-09-11 28:04",
+    at: "T+28:04",
     kind: "适用域待核验",
     summary: "Z04 初扫批次触发模型适用性检查，诊断输出已冻结",
     detail:
       "输入质量合格、特征偏移超限、模型配置不覆盖该材种，三项合并后触发。该批次暂不输出病害结论。",
     frozenBatch: "scan-Z04-001",
     outputsFrozen: true,
-    trigger: "演示控制事件",
+    trigger: "排练控制事件",
     deviceEvidence: [
       { at: "28:12", text: "供电电压 12.4V，传感器响应正常", result: "正常" },
       { at: "28:40", text: "参考件回波与出厂基线一致（偏差 0.3dB）", result: "正常" },
@@ -1350,14 +1350,14 @@ export const ANOMALY_EVENTS_LEGACY: AnomalyEvent[] = [
   },
   {
     id: "evt-recv-01",
-    at: "2026-09-11 28:41",
+    at: "T+28:41",
     kind: "接收不完整",
     summary: "scan-Z04-001 雷达原始数据 386/420，34 帧未回传",
     detail:
       "整批校验未通过，不报「数据全部回传」。缺帧集中在批次后段，与暂停时间点吻合。",
     frozenBatch: "scan-Z04-001",
     outputsFrozen: false,
-    trigger: "演示控制事件",
+    trigger: "排练控制事件",
     deviceEvidence: [
       { at: "28:41", text: "雷达 386/420、图像 12/12、结果 0/1", result: "部分接收" },
       { at: "28:44", text: "缺帧区间与 28:20 暂停时刻重叠", result: "记录" },
@@ -1372,13 +1372,13 @@ export const ANOMALY_EVENTS_LEGACY: AnomalyEvent[] = [
   },
   {
     id: "evt-signal-01",
-    at: "2026-09-11 28:52",
+    at: "T+28:52",
     kind: "信号质量",
     summary: "有效数据比例 91.9%，低于整批校验阈值",
     detail: "信号可用但有效比例偏低。整批校验未通过前不进入后续分析；需补采后再判定。",
     frozenBatch: "scan-Z04-001",
     outputsFrozen: false,
-    trigger: "演示控制事件",
+    trigger: "排练控制事件",
     deviceEvidence: [
       { at: "28:18", text: "空帧 0，非有限值 0，饱和帧比例 2.1%", result: "合格" },
       { at: "28:52", text: "有效数据比例 91.9%", result: "待复核" },
@@ -1400,7 +1400,7 @@ export const ANOMALY_EVENTS_LEGACY: AnomalyEvent[] = [
       "图像可提示外观异常，不能确认内部是否存在空洞，也不能直接判定承载能力。已建立 Z04 下部精扫任务。",
     frozenBatch: "—",
     outputsFrozen: false,
-    trigger: "演示控制事件",
+    trigger: "排练控制事件",
     deviceEvidence: [
       { at: "22:06", text: "关键帧 keyframe-Z04-03 与 Z01-02 对比", result: "记录" },
     ],
@@ -1511,7 +1511,7 @@ export const DATA_PACKAGES: DataPackage[] = [
   {
     id: "pkg-Z04-001-raw", name: "scan-Z04-001_radar_spectrum.zip", kind: "原始雷达数据",
     rawLevel: "spectrum", source: "毫米波扫描仪", batchId: "scan-Z04-001", componentId: "Z04",
-    frames: 386, sizeText: "412 MB", capturedAt: "2026-09-11 27:36", state: "已入库",
+    frames: 386, sizeText: "412 MB", capturedAt: "T+27:36", state: "已入库",
     checks: [
       { key: "schema", label: "格式与字段", pass: true, detail: "420 点频谱 / 每帧含时间戳与测区编号" },
       { key: "dup", label: "重复摘要", pass: true, detail: "无重复帧段" },
@@ -1522,7 +1522,7 @@ export const DATA_PACKAGES: DataPackage[] = [
   {
     id: "pkg-Z04-001-img", name: "scan-Z04-001_images.zip", kind: "表面图像",
     rawLevel: "opaque", source: "毫米波扫描仪", batchId: "scan-Z04-001", componentId: "Z04",
-    frames: 12, sizeText: "38.4 MB", capturedAt: "2026-09-11 27:52", state: "已入库",
+    frames: 12, sizeText: "38.4 MB", capturedAt: "T+27:52", state: "已入库",
     checks: [
       { key: "schema", label: "格式与字段", pass: true, detail: "JPEG 12 帧，含张号与拍摄方向" },
       { key: "dup", label: "重复摘要", pass: true, detail: "无重复图像" },
@@ -1531,7 +1531,7 @@ export const DATA_PACKAGES: DataPackage[] = [
   {
     id: "pkg-Z04-002-raw", name: "scan-Z04-002_radar_spectrum.zip", kind: "原始雷达数据",
     rawLevel: "spectrum", source: "毫米波扫描仪", batchId: "scan-Z04-002", componentId: "Z04",
-    frames: 420, sizeText: "448 MB", capturedAt: "2026-09-11 39:26", state: "已入库",
+    frames: 420, sizeText: "448 MB", capturedAt: "T+39:26", state: "已入库",
     checks: [
       { key: "schema", label: "格式与字段", pass: true, detail: "420 点频谱，帧号连续" },
       { key: "dup", label: "重复摘要", pass: true, detail: "与初扫无重叠帧段" },
@@ -1542,7 +1542,7 @@ export const DATA_PACKAGES: DataPackage[] = [
   {
     id: "pkg-ref-g1", name: "ref-Z04-g1_radar_adc.zip", kind: "原始雷达数据",
     rawLevel: "ADC", source: "毫米波扫描仪", batchId: "ref-batch-01", componentId: "REF",
-    frames: 168, sizeText: "196 MB", capturedAt: "2026-09-11 31:22", state: "已入库",
+    frames: 168, sizeText: "196 MB", capturedAt: "T+31:22", state: "已入库",
     checks: [
       { key: "schema", label: "格式与字段", pass: true, detail: "ADC 原始采样，含距离与方向标注" },
       { key: "dup", label: "重复摘要", pass: false, detail: "r-0003 与 r-0002 摘要高度相似，疑似重复" },
@@ -1552,7 +1552,7 @@ export const DATA_PACKAGES: DataPackage[] = [
   {
     id: "pkg-ref-g3", name: "ref-Z04-g3_radar_adc.zip", kind: "原始雷达数据",
     rawLevel: "ADC", source: "毫米波扫描仪", batchId: "ref-batch-01", componentId: "REF",
-    frames: 96, sizeText: "112 MB", capturedAt: "2026-09-11 32:05", state: "待审核",
+    frames: 96, sizeText: "112 MB", capturedAt: "T+32:05", state: "待审核",
     checks: [
       { key: "schema", label: "格式与字段", pass: true, detail: "ADC 原始采样" },
       { key: "sat", label: "饱和比例", pass: false, detail: "r-0007 饱和比例 11.8%，超出阈值 5%" },
@@ -1580,7 +1580,7 @@ export const DATA_PACKAGES: DataPackage[] = [
   {
     id: "pkg-Z04-result", name: "scan-Z04-002_result.json", kind: "结果文件",
     rawLevel: "result_only", source: "扫描枪推理进程", batchId: "scan-Z04-002", componentId: "Z04",
-    frames: 3, sizeText: "24 KB", capturedAt: "2026-09-11 39:41", state: "已入库",
+    frames: 3, sizeText: "24 KB", capturedAt: "T+39:41", state: "已入库",
     checks: [
       { key: "schema", label: "格式与字段", pass: true, detail: "含模型版本、阈值与逐段判定" },
       { key: "ver", label: "模型版本可追溯", pass: true, detail: "DEMO-M02b / PIPE-A" },
@@ -1597,7 +1597,7 @@ export const DATA_PACKAGES: DataPackage[] = [
   {
     id: "pkg-ref-g2", name: "ref-Z04-g2_radar_adc.zip", kind: "原始雷达数据",
     rawLevel: "ADC", source: "毫米波扫描仪", batchId: "ref-batch-01", componentId: "REF",
-    frames: 84, sizeText: "98 MB", capturedAt: "2026-09-11 31:48", state: "待审核",
+    frames: 84, sizeText: "98 MB", capturedAt: "T+31:48", state: "待审核",
     checks: [
       { key: "schema", label: "格式与字段", pass: true, detail: "ADC 原始采样" },
       { key: "file", label: "文件完整性", pass: false, detail: "scan_001.csv 为 0 字节空文件" },
@@ -1653,7 +1653,7 @@ export const DATASET: Dataset = {
   id: "DS-06",
   label: "DS-06 · 楠木适配样本集（冻结）",
   frozen: true,
-  frozenAt: "2026-09-11 34:12",
+  frozenAt: "T+34:12",
   reviewAssign: [
     { owner: "饶", task: "信号复核：饱和、掉帧与采集异常", state: "已通过" },
     { owner: "马", task: "来源与位置复核：样本编号、扫描方向、测区", state: "已通过" },
@@ -1775,7 +1775,7 @@ const JOB_LOG: JobLogLine[] = [
   { at: "34:20", level: "INFO", step: "queue", text: "job EXP-2026-0911 已入队，等待执行节点" },
   { at: "34:22", level: "INFO", step: "queue", text: "调度到 node-train-02（GPU 1 张，可用显存 24 GB）" },
   { at: "34:24", level: "INFO", step: "queue", text: "载入实验包：config.json / epochs.csv / predictions_*.csv / model_card.json" },
-  { at: "34:26", level: "INFO", step: "queue", text: "artifact_kind=demo_nonflashable · 归档演示任务，与现场任务分开记录" },
+  { at: "34:26", level: "INFO", step: "queue", text: "artifact_kind=demo_nonflashable · 归档回放任务，与现场任务分开记录" },
 
   { at: "34:34", level: "INFO", step: "prepare", text: "数据集 DS-06 校验通过：12 条记录 / 6 个物理样本组" },
   { at: "34:36", level: "INFO", step: "prepare", text: "排除不可用 3 条（空文件 1、列数不一致 2），保留 9 条" },
@@ -1868,7 +1868,7 @@ function predictions(version: "old" | "new"): Experiment["predictionsOld"] {
 
 export const EXPERIMENT: Experiment = {
   id: "EXP-2026-0911",
-  title: "Z04 新材适配 · 小样本微调（演示记录）",
+  title: "Z04 新材适配 · 小样本微调（归档记录）",
   baselineVersion: "DEMO-M02",
   candidateVersion: "DEMO-M02b",
   datasetVersion: "DS-06（已冻结）",
@@ -1990,7 +1990,7 @@ export const DELIVERY_ARTIFACTS: DeliveryArtifact[] = [
     producedAt: "2026-09-11 21:37", sizeText: "3.2 MB", sha256: "a17e5b93c204", state: "已发布",
     checks: [
       { key: "kind", label: "包类型", pass: true, detail: "artifact_kind=demo_nonflashable，不可烧录" },
-      { key: "compat", label: "兼容性", pass: true, detail: "4 项通过，烧录能力项按演示包标记为不适用" },
+      { key: "compat", label: "兼容性", pass: true, detail: "4 项通过，烧录能力项按验证包标记为不适用" },
     ],
   },
   {
@@ -2020,7 +2020,7 @@ export const UPDATE_PACKAGE: UpdatePackage = {
   preprocess: "comp-v1.4 / ref-normalized（与训练完全一致）",
   inputSpec: "1×420 频谱向量，float32 输入，INT8 权重",
   outputSpec: "3 类材质概率 + 异常二分类分数（不做两路分数相加）",
-  targetEnv: "手持采集端 ESP32-S3 + 树莓派上位机（模拟设备记录）",
+  targetEnv: "手持采集端 ESP32-S3 + 树莓派上位机（归档设备记录）",
   sha256: "3f9c1d2a7b45e8c0a1d6f3b29c7e5408a2b6d19f4c8e3a70d5b2f61c9e0a4d78",
   sizeText: "3.2 MB",
   fallbackVersion: "DEMO-M02（旧版本已保留，可恢复）",
@@ -2034,19 +2034,19 @@ export const UPDATE_PACKAGE: UpdatePackage = {
     { key: "c2", label: "输入长度", pass: true, detail: "420 ≤ 设备最大输入 512" },
     { key: "c3", label: "算子支持", pass: true, detail: "conv2d / bn / relu / gap / fc 均在支持列表" },
     { key: "c4", label: "恢复版本可用", pass: true, detail: "DEMO-M02 备份完整，摘要一致" },
-    { key: "c5", label: "烧录能力", pass: false, detail: "演示包 artifact_kind=demo_nonflashable，禁止调用刷写工具" },
+    { key: "c5", label: "烧录能力", pass: false, detail: "验证包 artifact_kind=demo_nonflashable，禁止调用刷写工具" },
   ],
   steps: [
     { key: "quant", label: "量化记录", owner: "史", state: "已完成", at: "37:12", note: "INT8 量化与复测完成" },
-    { key: "compat", label: "兼容性检查", owner: "史", state: "已完成", at: "37:26", note: "4 项通过，烧录能力项按演示包标记为不适用" },
+    { key: "compat", label: "兼容性检查", owner: "史", state: "已完成", at: "37:26", note: "4 项通过，烧录能力项按验证包标记为不适用" },
     { key: "pack", label: "封装", owner: "史", state: "已完成", at: "37:48", note: "生成 DEMO-PKG-02.demo.zip" },
     { key: "deliver", label: "下发", owner: "史", state: "已完成", at: "38:02", note: "指定接收人饶、设备 scan-dev-02" },
     { key: "receive", label: "接收", owner: "饶", state: "已完成", at: "38:14", note: "摘要校验通过，旧版本已保留" },
-    { key: "update", label: "更新", owner: "饶", state: "已完成", at: "38:26", note: "模拟更新写入完成" },
+    { key: "update", label: "更新", owner: "饶", state: "已完成", at: "T+38:26", note: "验证包写入完成" },
     { key: "selfcheck", label: "重启自检", owner: "饶", state: "已完成", at: "38:52", note: "固定参考输入回验通过" },
     { key: "confirm", label: "版本确认", owner: "史", state: "已完成", at: "39:04", note: "demo_reported_version = DEMO-M02b" },
   ],
-  deviceVersion: { liveReported: "FW-1.4.2（实机未变，演示期间继续使用已验证程序）", demoReported: "DEMO-M02b / FW-DEMO-1.4.2" },
+  deviceVersion: { liveReported: "FW-1.4.2（实机未变，回放期间继续使用已验证程序）", demoReported: "DEMO-M02b / FW-DEMO-1.4.2" },
   sourceMode: "simulation",
 };
 
@@ -2098,9 +2098,9 @@ export const FUSION_RECORD: FusionRecord = {
     { label: "预处理版本", value: "comp-v1.4", ok: true, note: "平台与手持端一致" },
   ],
   annotations: [
-    { boxId: "anno-box-03", image: "img-Z04-lower-f05.jpg", label: "孔洞状疑点", confidence: 0.84, zone: "Z04-lower", source: "视觉标注 JSON（预设标注演示）" },
-    { boxId: "anno-box-07", image: "img-Z04-lower-f08.jpg", label: "疑似受潮区", confidence: 0.71, zone: "Z04-lower", source: "视觉标注 JSON（预设标注演示）" },
-    { boxId: "anno-box-11", image: "img-Z04-lower-f11.jpg", label: "孔洞状疑点", confidence: 0.87, zone: "Z04-lower", source: "视觉标注 JSON（预设标注演示）" },
+    { boxId: "anno-box-03", image: "img-Z04-lower-f05.jpg", label: "孔洞状疑点", confidence: 0.84, zone: "Z04-lower", source: "视觉标注 JSON · 归档标注" },
+    { boxId: "anno-box-07", image: "img-Z04-lower-f08.jpg", label: "疑似受潮区", confidence: 0.71, zone: "Z04-lower", source: "视觉标注 JSON · 归档标注" },
+    { boxId: "anno-box-11", image: "img-Z04-lower-f11.jpg", label: "孔洞状疑点", confidence: 0.87, zone: "Z04-lower", source: "视觉标注 JSON · 归档标注" },
   ],
   radarFeatures: [
     { segment: "echo-Z04-lower-seg-07", zone: "Z04-lower", amplitude: 0.71, quality: "合格" },
@@ -2189,9 +2189,9 @@ export const KNOWLEDGE_DOCS: KnowledgeDoc[] = [
     ],
   },
   {
-    docId: "doc-weather", title: "示例寺近三个月归档天气档案", category: "天气档案", project: "示例寺", date: "2026-09-10", version: "v1.0", digest: "sha256:44b0c7a1…9e30d2", source: "weather_archive_2026Q3.csv（归档，非实时联网）",
+    docId: "doc-weather", title: "示例寺近三个月归档天气档案", category: "天气档案", project: "示例寺", date: "2026-09-10", version: "v1.0", digest: "sha256:44b0c7a1…9e30d2", source: "weather_archive_2026Q3.csv（归档，当前未启用联网）",
     chunks: [
-      { chunkId: "w-01", section: "降水与湿度", text: "2026 年 6 月 11 日至 9 月 10 日，梅雨期累计降水 412mm，8 月出现 3 次连续降雨过程；期间平均相对湿度 78%，最高单日 94%，日温差最大 11.4℃。数据来自归档天气档案，非实时联网查询。" },
+      { chunkId: "w-01", section: "降水与湿度", text: "2026 年 6 月 11 日至 9 月 10 日，梅雨期累计降水 412mm，8 月出现 3 次连续降雨过程；期间平均相对湿度 78%，最高单日 94%，日温差最大 11.4℃。数据来自归档天气档案，当前未启用联网查询。" },
       { chunkId: "w-02", section: "对木构的影响提示", text: "持续高湿条件下，木构件表层与内部含水状态可能不同步；环境记录用于判断采集条件，并为参数补偿提供输入。归档数据只能作为环境先验，不能替代现场实测。" },
     ],
   },
@@ -2214,7 +2214,7 @@ export const KNOWLEDGE_DOCS: KnowledgeDoc[] = [
     docId: "doc-repair-feedback", title: "维修反馈与验收说明（历史）", category: "维修反馈", project: "示例寺", date: "2026-07-22", version: "v1.1", digest: "sha256:9b3f7c0e…81f4b6", source: "feedback_2026Q2.md",
     chunks: [
       { chunkId: "f-01", section: "反馈记录", text: "R01 至 R04 的施工单位反馈材料已提交，R01 至 R03 验收通过并关闭。R04 的完工资料只进入待验收，人工验收通过后才关闭；上传材料不等于处理完成。" },
-      { chunkId: "f-02", section: "两段式流程", text: "施工反馈与验收使用两个独立操作。首版不建立外部施工登录端，由授权演示账号录入反馈与验收案例。" },
+      { chunkId: "f-02", section: "两段式流程", text: "施工反馈与验收使用两个独立操作。首版不建立外部施工登录端，由授权项目账号录入归档反馈与验收记录。" },
     ],
   },
 ];
@@ -2389,7 +2389,7 @@ export const KNOWLEDGE_FILE_SEEDS: {
 验收按结构安全与外观要求分别判断。结构安全不满足的，无论外观是否达标都不能关闭；结构安全满足但外观仍可见缺陷的，可以关闭并备注后续观察要求。
 
 ## 权限与留痕
-反馈与验收均记录操作人、时间与依据。首版不建立外部施工登录端，由授权演示账号录入反馈与验收案例，操作留痕用于演示追溯链路。`,
+反馈与验收均记录操作人、时间与依据。首版不建立外部施工登录端，由授权项目账号录入归档反馈与验收记录，操作留痕用于追溯链路。`,
   },
   {
     fileId: "f-quarantine",
@@ -2407,7 +2407,7 @@ export const KNOWLEDGE_FILE_SEEDS: {
 ## 重复与变更识别
 导入时对文件内容计算摘要，摘要相同的文件标为未变更、不重复入库；摘要变化的文件标为已变更，只重新处理该文件。整批重跑时先清空索引再全量重建，历史版本仍然保留可回滚。
 
-## 演示边界
-本页不连接后端、不调用嵌入模型。上传只在浏览器内读取文件，解析、分块、向量化与写索引均为前端演示流程，页面上的每一个数字都由种子数据或真实计算得到。`,
+## 本地处理边界
+本页不连接后端、不调用嵌入模型。上传只在浏览器内读取文件，解析、分块、向量化状态与写索引均为浏览器本地流程；页面数值来自预置资料或浏览器计算结果。`,
   },
 ];

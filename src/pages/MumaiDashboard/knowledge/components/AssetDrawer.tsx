@@ -125,7 +125,7 @@ function ContentTab({ detail, actions }: { detail: AssetDetail; actions: Knowled
           ) : (
             <em className="kb-detail-note">{attachment.note}</em>
           )}
-          {content ? <em className="kb-detail-note"> · 提取方式 {content.extractionMode === "fixture" ? "演示夹具" : content.extractionMode === "uploaded" ? "导入文本" : content.extractionMode}</em> : null}
+          {content ? <em className="kb-detail-note"> · 提取方式 {content.extractionMode === "fixture" ? "内置资料" : content.extractionMode === "uploaded" ? "导入文本" : content.extractionMode}</em> : null}
         </div>
       </div>
 
@@ -234,7 +234,7 @@ function IndexTab({ detail }: { detail: AssetDetail }) {
           { k: "分块数", v: `${formatCount(index.chunkCount)} 个` },
           { k: "向量条目", v: `${formatCount(index.vectorCount)} 条` },
           { k: "分块配置版本", v: <code>{index.configRevision ?? "—"}</code> },
-          { k: "配置维度", v: index.dimensionConfig ? `${index.dimensionConfig}（演示索引模式）` : "—" },
+          { k: "配置维度", v: index.dimensionConfig ? `${index.dimensionConfig}（浏览器本地索引）` : "—" },
           { k: "索引状态", v: <KbState text={asset.indexState} tone={indexStateTone(asset.indexState)} /> },
         ]}
       />

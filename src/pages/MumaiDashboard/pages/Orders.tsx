@@ -24,6 +24,7 @@ import { useMumai } from "../context";
 import { isReadOnlyPath, permissionHint } from "../auth";
 import { WorkOrderCreateModal } from "./WorkOrderCreate";
 import { WorkOrderDetail, type WorkOrderDetailActions } from "./WorkOrderDetail";
+import { SiteSafetyPanel } from "./orders/SiteSafetyPanel";
 import { Panel } from "../Panel";
 import { Icon } from "../icons";
 import { Btn, DataTable, KV, Modal, PermNote, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
@@ -415,7 +416,7 @@ export default function Orders() {
       <Toolbar
         note={
           <>
-            <SourceTag label="演示回放" />
+            <SourceTag label="归档回放" />
             {readOnly ? (
               // 放权之后必须说明「你在这里只能看」，否则一排灰按钮只会让人猜原因
               <span>只读查阅：工单与配置可看，本页审核动作需要工单审核权限</span>
@@ -603,11 +604,13 @@ export default function Orders() {
                       <em>
                         {item.kind} · {item.sizeText}
                       </em>
-                      <SourceTag label={item.sourceMode === "replay" ? "演示回放" : item.sourceMode} />
+                      <SourceTag label={item.sourceMode === "replay" ? "归档回放" : item.sourceMode} />
                     </li>
                   ))}
                 </ul>
               </Panel>
+
+              <SiteSafetyPanel orderId={legacySelected.id} />
 
               <div className="orders-two">
                 {/* 环境记录与校验（演示回放单走共享会话的配置流程） */}

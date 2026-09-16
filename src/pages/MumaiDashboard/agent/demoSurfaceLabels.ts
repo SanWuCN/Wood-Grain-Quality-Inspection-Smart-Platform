@@ -24,7 +24,7 @@ export type FieldLabel = {
 
 export const FIELD_LABELS: Record<string, FieldLabel> = {
   /* §6.1 时间与工单 */
-  "clock.businessDate": { label: "演示业务日期" },
+  "clock.businessDate": { label: "业务日期" },
   "components.count": { label: "木构主体数量", unit: "根" },
   "components.codes": { label: "平台编号" },
   "components.focus": { label: "重点构件" },

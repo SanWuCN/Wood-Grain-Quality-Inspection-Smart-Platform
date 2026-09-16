@@ -34,6 +34,8 @@ export type CleanOutcome = {
   steps: CleanStepStat[];
 };
 
+export type CleanDecision = "accept" | "exclude";
+
 /** 阈值：配置阶段可改 */
 export type CleanThresholds = {
   /** 饱和比例上限（%）：超过则待审核 */
@@ -81,8 +83,8 @@ export function runClean(samples: Sample[], thresholds: CleanThresholds): CleanO
     steps.push({ key, label, input, kept: alive.size, review, detail });
   };
 
-  // ① 字段与空值：路径缺失、记录号重复、未知标签且没有标签依据
-  stage("fields", "字段与空值检查", "路径为空或记录号重复的记录不进入下游", () => {
+  // ① 字段与空值：路径缺失、记录号重复、已有不可用结论或未知标签无依据
+  stage("fields", "字段与空值检查", "缺失字段与已有不可用质量结论进入人工核验", () => {
     let hit = 0;
     const seen = new Set<string>();
     for (const sample of samples) {
@@ -95,6 +97,10 @@ export function runClean(samples: Sample[], thresholds: CleanThresholds): CleanO
         continue;
       }
       seen.add(sample.recordId);
+      if (sample.quality === "不可用") {
+        if (take(sample.recordId, "字段与空值检查", sample.qualityReason, `quality=${sample.quality}`)) hit += 1;
+        continue;
+      }
       if (sample.knownState === "未知待核验" && !sample.labelBasis) {
         if (take(sample.recordId, "字段与空值检查", "未知标签且无标签依据", "label_basis=—")) hit += 1;
       }
@@ -102,19 +108,14 @@ export function runClean(samples: Sample[], thresholds: CleanThresholds): CleanO
     return hit;
   });
 
-  // ② 重复帧：同一物理样本下只留一条
-  stage("dedupe", "重复帧筛查", thresholds.dedupe ? "同一物理样本的重复帧只保留一条" : "本次关闭（按用户配置）", () => {
+  // ② 重复帧：只处理数据清单明确记录 duplicateOf 的记录，不把同木样多方向采样误判为重复
+  stage("dedupe", "重复帧筛查", thresholds.dedupe ? "仅核验已登记 duplicateOf 的记录" : "本次关闭（按用户配置）", () => {
+    if (!thresholds.dedupe) return 0;
     let hit = 0;
-    const keptByGroup = new Map<string, string>();
     for (const sample of samples) {
       if (!alive.has(sample.recordId)) continue;
-      const first = keptByGroup.get(sample.physicalSampleId);
-      if (!first) {
-        keptByGroup.set(sample.physicalSampleId, sample.recordId);
-        continue;
-      }
-      if (thresholds.dedupe || sample.duplicateOf !== null) {
-        if (take(sample.recordId, "重复帧筛查", `与 ${first} 同物理样本`, `dup=${sample.duplicateOf ?? first}`)) hit += 1;
+      if (sample.duplicateOf !== null) {
+        if (take(sample.recordId, "重复帧筛查", `与 ${sample.duplicateOf} 摘要重复`, `dup=${sample.duplicateOf}`)) hit += 1;
       }
     }
     return hit;
@@ -163,4 +164,28 @@ export function runClean(samples: Sample[], thresholds: CleanThresholds): CleanO
   });
 
   return { kept: alive.size, flagged, steps };
+}
+
+/** 根据逐条人工结论生成版本成员，未决记录不会被悄悄纳入或删除。 */
+export function selectCleanVersionRecords(
+  samples: Sample[],
+  outcome: CleanOutcome,
+  decisions: Record<string, CleanDecision>,
+) {
+  const flagged = new Set(outcome.flagged.map((item) => item.recordId));
+  const includedRecordIds: string[] = [];
+  const removedRecordIds: string[] = [];
+  const undecidedRecordIds: string[] = [];
+
+  for (const sample of samples) {
+    if (!flagged.has(sample.recordId) || decisions[sample.recordId] === "exclude") {
+      includedRecordIds.push(sample.recordId);
+    } else if (decisions[sample.recordId] === "accept") {
+      removedRecordIds.push(sample.recordId);
+    } else {
+      undecidedRecordIds.push(sample.recordId);
+    }
+  }
+
+  return { includedRecordIds, removedRecordIds, undecidedRecordIds };
 }

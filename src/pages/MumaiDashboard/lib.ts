@@ -773,8 +773,8 @@ export function clockStamp(): string {
 
 export function sourceLabel(mode: string): string {
   if (mode === "live") return "现场实采";
-  if (mode === "simulation") return "模拟数据";
-  return "演示回放";
+  if (mode === "simulation") return "仿真通道";
+  return "归档回放";
 }
 
 export function clamp(value: number, min: number, max: number): number {

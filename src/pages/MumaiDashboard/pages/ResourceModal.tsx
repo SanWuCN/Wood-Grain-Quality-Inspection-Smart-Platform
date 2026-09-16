@@ -111,7 +111,7 @@ export default function ResourceModal({
         <>
           <span className="muted">
             {/* GPU 型号与每台显存是映射配置（常量，不是轮询指标），保持静止 */}
-            资源按后端主机实测比例映射，服务器为演示配置（{data?.mappingExplain.gpuModel ?? "NVIDIA GeForce RTX 4090"} ·{" "}
+            资源按后端主机实测比例映射，服务器采用预置配置（{data?.mappingExplain.gpuModel ?? "NVIDIA GeForce RTX 4090"} ·{" "}
             {data?.mappingExplain.vramTotalGiB ?? 24} GiB 显存/台）
           </span>
           <Btn tone="ghost" onClick={() => setExplainOpen((open) => !open)} aria-expanded={explainOpen}>
@@ -431,7 +431,7 @@ function PowerTab({ data, servers, page, pageCount, onPage }: TabProps) {
         </div>
       </dl>
       <p className="note">
-        这是服务器功耗的**演示映射**，不是实际插座功率、GPU 板卡功率或电费测量值。
+        这是服务器负载的**估算映射**，不代表插座功率、GPU 板卡功率或电费实测值。
         GPU 样本不可用时功耗显示「—」，不退化成 600 W。
       </p>
       <div className="rm-table">

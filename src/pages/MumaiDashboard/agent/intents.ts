@@ -468,7 +468,7 @@ export const INTENTS: Intent[] = [
     slots: [],
     response: {
       text:
-        "{platformCopy}当前演示场景：{scenarioTitle}（{scenarioId}）；业务日期 {businessDate}，" +
+        "{platformCopy}当前工作场景：{scenarioTitle}（{scenarioId}）；业务日期 {businessDate}，" +
         "全程阶段共 {stageCount} 个，已完成到「{stageLabel}」。本平台不部署本地大模型，" +
         "小木按意图目录调用白名单工具，回复用模板加真实工具结果。",
       /**
@@ -503,7 +503,7 @@ export const INTENTS: Intent[] = [
       "进入工单档案",
       "帮我打开巡检任务页面",
       "让我看看数字孪生",
-      "打开演示控制台",
+      "打开排练控制台",
       "进入报告归档页面",
     ],
     slots: [{ name: "page", kind: "page", required: true, hint: "页面名，例如地图 / 知识库 / 工单档案" }],

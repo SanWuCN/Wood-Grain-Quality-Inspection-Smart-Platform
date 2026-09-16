@@ -198,7 +198,7 @@ export function metricCards(metrics: Metrics, servingVersion: string | null): Me
       key: "vectors",
       label: "向量条目",
       value: formatCount(metrics.vectors),
-      hint: "演示索引模式 · 一块一条",
+      hint: "浏览器本地索引 · 一块一条",
       tone: "default",
       action: { kind: "tab", tab: "indexes" },
     },
@@ -332,7 +332,7 @@ export const ASSET_TABLE_COLUMNS = [
 /** 「原始附件未随演示包提供」的判定：不能出现可点却无文件的下载按钮（PRD §11.2） */
 export function attachmentState(asset: KnowledgeAsset): { downloadable: boolean; note: string | null } {
   if (asset.fileId) return { downloadable: true, note: null };
-  return { downloadable: false, note: "原始附件未随演示包提供" };
+  return { downloadable: false, note: "原始附件未随归档数据提供" };
 }
 
 /** 阶段进度文案：进度只能用完成记录数表达，没有独立计时器（PRD §9.3） */

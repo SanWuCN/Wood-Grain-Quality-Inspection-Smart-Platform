@@ -29,7 +29,7 @@ export const ATTACHMENT_UNKNOWN = "附件未明确";
 export const FIELD_PLACEHOLDER = "—";
 
 /** 视觉上的样例标记（印章与角标共用，避免两处写法漂移） */
-export const DEMO_LABEL = "演示样例";
+export const DEMO_LABEL = "版式样张";
 
 /** 受限账号能看到的说明，语气与项目既有空态一致 */
 export const RESTRICTED_NOTE = "当前账号未获准查看委托正文与随单附件，仅显示本账号可见的摘要。";

@@ -19,17 +19,23 @@
  * 目标载体与回退方式都不一样，混成一张表就只能比大小了。
  */
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import { Btn, Modal, StateBlock, StatusChip } from "../ui";
 import { useMumai } from "../context";
 import { permissionHint } from "../auth";
-import { DELIVERY_ARTIFACTS } from "../seed/scenario";
-import type { DeliveryArtifact, DeliveryTarget } from "../seed/types";
+import type { DeliveryTarget } from "../seed/types";
 import { ACCOUNT_NAME } from "../api/accounts";
 import { api, isApiError, type ArtifactEntity, type SharedEntity } from "../api/client";
 import { artifacts as artifactsOf, isOnline, useSharedStore } from "../store/shared";
+import { buildDistillScript } from "./terminalScripts";
+import {
+  buildDeliveryWorkflow,
+  buildReceiveFileRows,
+  type DeliveryWorkflow,
+  type ReceiveResult,
+} from "./deliveryWorkflow";
 
 const TARGETS: DeliveryTarget[] = ["硬件侧端模型", "平台模型", "小车 OTA"];
 
@@ -53,7 +59,7 @@ function inferTarget(name: string): DeliveryTarget {
 
 /** 文件名 → 展示用的版本号：去掉扩展名，够用且不会编造版本 */
 function versionFromName(name: string): string {
-  return name.replace(/\.(engine|bin|pt|onnx|tar|gz|zip)$/i, "");
+  return name.match(/(?:^|[_-])(v?\d+(?:\.\d+){1,3})(?:[_-]|\.)/i)?.[1] ?? "未标注";
 }
 
 /**
@@ -82,20 +88,6 @@ function SizeText({ text }: { text: string }) {
   );
 }
 
-/**
- * 「本轮产物」四段轨道的一步。
- *
- * `detail` 放宽成 `ReactNode`：里面有「已取用 N 次」这种会变的数，
- * 数字要逐帧改自己那个文本节点，就不能先被拼成一个字符串。
- */
-type TrackStep = {
-  key: string;
-  label: string;
-  done: boolean;
-  owner: string;
-  detail: ReactNode;
-};
-
 /* ------------------------------------------------------------------ *
  * 上传产物
  * ------------------------------------------------------------------ */
@@ -105,38 +97,25 @@ function UploadModal({
   onSubmit,
 }: {
   onClose: () => void;
-  onSubmit: (artifact: DeliveryArtifact) => void;
+  onSubmit: (file: File, target: DeliveryTarget) => Promise<void>;
 }) {
   const { toast } = useMumai();
-  const [file, setFile] = useState<{ name: string; bytes: number } | null>(null);
+  const [file, setFile] = useState<File | null>(null);
   const [target, setTarget] = useState<DeliveryTarget>("硬件侧端模型");
 
   const extOk = file ? ALLOWED_EXT.some((ext) => file.name.toLowerCase().endsWith(ext)) : false;
-  const sizeOk = Boolean(file && file.bytes > 0);
+  const sizeOk = Boolean(file && file.size > 0);
   const canSubmit = Boolean(file) && extOk && sizeOk;
 
-  const submit = () => {
+  const submit = async () => {
     if (!file || !canSubmit) return;
-    onSubmit({
-      id: `art-upload-${Date.now()}`,
-      name: file.name,
-      target,
-      modelVersion: versionFromName(file.name),
-      // 手工上传没有对应的训练任务，留空 —— 不编一个任务号上去
-      fromJob: null,
-      // 本机时间：上传发生在什么时候，用户看得见（评审 F09 要求真实日期时间）
-      producedAt: new Date().toLocaleString("zh-CN", { hour12: false }).replace(/\//g, "-"),
-      sizeText: `${(file.bytes / 1024 / 1024).toFixed(2)} MB`,
-      sha256: "待平台计算",
-      state: "待提交",
-      checks: [
-        { key: "ext", label: "文件格式", pass: true, detail: `识别为 ${ALLOWED_EXT.find((e) => file.name.toLowerCase().endsWith(e))}` },
-        { key: "digest", label: "摘要", pass: false, detail: "上传后由平台计算，尚未复核" },
-        { key: "verify", label: "提交前校验", pass: false, detail: "尚未跑目标侧校验，提交后进入待校验" },
-      ],
-    });
-    toast(`${file.name} 已加入待提交产物`, "ok");
-    onClose();
+    try {
+      await onSubmit(file, target);
+      toast(`${file.name} 已登记，等待提交前校验`, "ok");
+      onClose();
+    } catch (error) {
+      toast(isApiError(error) ? error.message : "文件登记失败", "danger");
+    }
   };
 
   return (
@@ -162,7 +141,7 @@ function UploadModal({
           onChange={(event) => {
             const picked = event.target.files?.[0];
             if (!picked) return;
-            setFile({ name: picked.name, bytes: picked.size });
+            setFile(picked);
             setTarget(inferTarget(picked.name));
           }}
         />
@@ -178,7 +157,7 @@ function UploadModal({
                   内联样式优先级高于那条选择器，这里把它退回行内、字号颜色继续继承。
                 */}
                 <NumberAnimation
-                  value={file.bytes / 1024 / 1024}
+                  value={file.size / 1024 / 1024}
                   digits={2}
                   group={false}
                   style={{ display: "inline", fontSize: "inherit", color: "inherit" }}
@@ -211,6 +190,128 @@ function UploadModal({
   );
 }
 
+type DownloadOutcome = { name: string; size: number; sha256: string | null };
+
+function ReceiveModal({
+  artifact,
+  workflow,
+  online,
+  busy,
+  canReceive,
+  onClose,
+  onDownload,
+  onVerify,
+}: {
+  artifact: SharedEntity<ArtifactEntity>;
+  workflow: DeliveryWorkflow;
+  online: boolean;
+  busy: string | null;
+  canReceive: boolean;
+  onClose: () => void;
+  onDownload: (artifact: SharedEntity<ArtifactEntity>, file: { fileId: string; role: string }) => Promise<DownloadOutcome | null>;
+  onVerify: (artifact: SharedEntity<ArtifactEntity>, file: File) => Promise<boolean>;
+}) {
+  const [results, setResults] = useState<Record<string, ReceiveResult>>({});
+  const [verifyState, setVerifyState] = useState<"idle" | "passed" | "failed">("idle");
+  const rows = buildReceiveFileRows(artifact, results);
+  const received = rows.filter((row) => row.state === "已接收").length;
+  const failed = rows.filter((row) => row.state === "失败").length;
+  const total = rows.length;
+
+  return (
+    <Modal
+      wide
+      title="数据接收台"
+      subtitle={`${artifact.data.name} · ${artifact.data.modelVersion} · ${artifact.data.target}`}
+      onClose={onClose}
+      footer={
+        <>
+          <span className="muted">{online ? `本次接收 ${received}/${total} 个文件` : "共享服务未连接"}</span>
+          <Btn onClick={onClose}>关闭</Btn>
+        </>
+      }>
+      <div className="receive-head">
+        <div>
+          <b>接收进度</b>
+          <span>{received}/{total} 个文件已写入本次接收记录</span>
+        </div>
+        <strong>{total ? Math.round((received / total) * 100) : 0}%</strong>
+        <progress max={Math.max(total, 1)} value={received} />
+      </div>
+
+      <div className="receive-meta">
+        <div><small>平台状态</small><b>{artifact.data.state}</b></div>
+        <div><small>服务端取用</small><b>{artifact.data.downloadCount ?? 0} 次</b></div>
+        <div><small>摘要回验</small><b>{workflow.receiptSummary}</b></div>
+        <div><small>交付作业</small><b>{workflow.runId}</b></div>
+      </div>
+
+      <h4 className="sub">文件清单</h4>
+      <ul className="receive-files">
+        {rows.length ? rows.map((row) => {
+          const file = artifact.data.files.find((item) => item.fileId === row.fileId);
+          if (!file) return null;
+          return (
+            <li key={row.fileId} className={`is-${row.state === "已接收" ? "ok" : row.state === "失败" ? "bad" : "wait"}`}>
+              <span className="receive-files__copy">
+                <b>{row.role}</b>
+                <small>{row.fileId}</small>
+              </span>
+              <StatusChip text={row.state} tone={row.state === "已接收" ? "ok" : row.state === "失败" ? "danger" : "muted"} dot />
+              <span className="receive-files__digest">{row.sha256 ? `SHA-256 ${row.sha256.slice(0, 16)}…` : row.message ?? "等待接收"}</span>
+              <Btn
+                disabled={!online || !canReceive || busy !== null}
+                title={!canReceive ? permissionHint("deployment:receive") : "接收服务端登记文件"}
+                onClick={() => {
+                  void onDownload(artifact, file).then((saved) => {
+                    setResults((current) => ({
+                      ...current,
+                      [file.fileId]: saved
+                        ? { state: "已接收", size: saved.size, sha256: saved.sha256 }
+                        : { state: "失败", message: "下载失败，请检查连接" },
+                    }));
+                  });
+                }}>
+                {row.state === "失败" ? "重试" : row.state === "已接收" ? "重新接收" : "接收"}
+              </Btn>
+            </li>
+          );
+        }) : <li className="receive-files__empty">服务端未登记可接收文件</li>}
+      </ul>
+
+      <div className="receive-verify">
+        <div>
+          <b>摘要回验</b>
+          <span>选择接收后的文件，由浏览器计算 SHA-256 后提交平台核对</span>
+        </div>
+        <label className={`btn${!online || !canReceive ? " is-disabled" : ""}`}>
+          {verifyState === "passed" ? "回验通过" : verifyState === "failed" ? "重新回验" : "选择文件回验"}
+          <input
+            type="file"
+            hidden
+            disabled={!online || !canReceive || busy !== null}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (!file) return;
+              void onVerify(artifact, file).then((pass) => setVerifyState(pass ? "passed" : "failed"));
+            }}
+          />
+        </label>
+      </div>
+
+      {failed > 0 ? <p className="receive-alert">有 {failed} 个文件接收失败，可在对应行重试</p> : null}
+      {artifact.data.receipts.some((receipt) => !receipt.pass) ? (
+        <ul className="receive-alerts">
+          {artifact.data.receipts.filter((receipt) => !receipt.pass).map((receipt, index) => (
+            <li key={`${receipt.at}-${index}`}>{receipt.at.slice(0, 19).replace("T", " ")} · {receipt.note || "摘要回验未通过"}</li>
+          ))}
+        </ul>
+      ) : null}
+    </Modal>
+  );
+}
+
 /* ------------------------------------------------------------------ *
  * 页签
  * ------------------------------------------------------------------ */
@@ -218,11 +319,9 @@ function UploadModal({
 export function DeliveryTab() {
   const { toast, pushEvent, can } = useMumai();
   /** 产物清单放进 state：提交会就地把它从待提交挪到已发布 */
-  const [artifacts, setArtifacts] = useState<DeliveryArtifact[]>(DELIVERY_ARTIFACTS);
-  const [selectedId, setSelectedId] = useState<string>(
-    DELIVERY_ARTIFACTS.find((item) => item.state === "待提交")?.id ?? "",
-  );
+  const [selectedId, setSelectedId] = useState<string>("");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [receiveId, setReceiveId] = useState<string | null>(null);
 
   /**
    * 已发布产物来自共享服务，不再来自本地 useState。
@@ -234,34 +333,75 @@ export function DeliveryTab() {
   const sharedArtifacts = useSharedStore(artifactsOf);
   const online = useSharedStore(isOnline);
   const [busy, setBusy] = useState<string | null>(null);
+  const distillScript = useMemo(() => buildDistillScript(), []);
 
-  const pending = artifacts.filter((item) => item.state === "待提交");
+  const pending = sharedArtifacts.filter((item) => !["已发布", "已下载", "已回验"].includes(item.data.state));
+  const published = sharedArtifacts.filter((item) => ["已发布", "已下载", "已回验"].includes(item.data.state));
   const selected = pending.find((item) => item.id === selectedId) ?? pending[0] ?? null;
 
-  const failed = useMemo(
-    () => selected?.checks.filter((check) => !check.pass) ?? [],
+  const selectedChecks = useMemo(
+    () => selected
+      ? [
+          {
+            key: "file",
+            label: "文件登记",
+            pass: selected.data.files.length > 0,
+            detail: `${selected.data.files.length} 个服务端文件引用`,
+          },
+          {
+            key: "digest",
+            label: "摘要",
+            pass: Boolean(selected.data.sha256),
+            detail: selected.data.sha256 || "服务端尚未生成摘要",
+          },
+          {
+            key: "state",
+            label: "服务端构建状态",
+            pass: selected.data.state === "checked",
+            detail: selected.data.state,
+          },
+        ]
+      : [],
     [selected],
   );
+  const failed = useMemo(() => selectedChecks.filter((check) => !check.pass), [selectedChecks]);
 
   const canSubmit = can("package:deliver");
 
-  /** 提交：产物从「待提交」变成「已发布」，其他工程师这才看得到 */
-  const submit = (artifact: DeliveryArtifact) => {
-    setArtifacts((current) =>
-      current.map((item) =>
-        item.id === artifact.id
-          ? {
-              ...item,
-              state: "已发布" as const,
-              checks: item.checks.map((check) =>
-                check.key === "verify" || check.key === "digest" ? { ...check, pass: true, detail: "提交时由平台校验通过" } : check,
-              ),
-            }
-          : item,
-      ),
-    );
-    pushEvent(`产物 ${artifact.name} 已提交到平台`, "ok");
-    toast(`${artifact.name} 已发布，其他工程师可以下载`, "ok");
+  /** 提交走服务端命令，只有服务端返回后才显示发布成功 */
+  const submit = async (artifact: SharedEntity<ArtifactEntity>) => {
+    setBusy(`publish:${artifact.id}`);
+    try {
+      const result = await useSharedStore.getState().send({
+        action: "artifact.publish",
+        entityId: artifact.id,
+        expectedRevision: artifact.revision,
+        payload: {},
+      });
+      const publishedArtifact = result.entity?.data as ArtifactEntity | undefined;
+      pushEvent(`产物 ${publishedArtifact?.name ?? artifact.data.name} 已提交到平台`, "ok");
+      toast(`${publishedArtifact?.name ?? artifact.data.name} 已发布，其他工程师可以下载`, "ok");
+    } catch (error) {
+      toast(isApiError(error) ? error.message : "产物发布失败", "danger");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const registerUpload = async (file: File, target: DeliveryTarget) => {
+    if (!online) throw new Error("连接不上共享服务，无法登记产物");
+    const uploaded = await api.upload(file, useSharedStore.getState().sessionId, "artifacts");
+    await useSharedStore.getState().send({
+      action: "artifact.build",
+      payload: {
+        name: file.name,
+        kind: "模型包",
+        target,
+        modelVersion: versionFromName(file.name),
+        demoOnly: true,
+        files: [{ fileId: uploaded.fileId, role: "整包" }],
+      },
+    });
   };
 
   /**
@@ -273,25 +413,23 @@ export function DeliveryTab() {
    * 并把产物的状态从「已发布」推到「已下载」—— 切页与刷新都不会回退，
    * 因为那条状态在服务端，不在这个组件的 useState 里。
    */
-  const download = async (artifact: SharedEntity<ArtifactEntity>) => {
-    const entry =
-      artifact.data.files.find((item) => item.role === "整包") ??
-      artifact.data.files.find((item) => item.role === "清单") ??
-      artifact.data.files[0];
-    if (!entry) {
-      toast("这条产物没有登记文件，无法下载", "danger");
-      return;
-    }
+  const download = async (
+    artifact: SharedEntity<ArtifactEntity>,
+    entry: { fileId: string; role: string },
+  ): Promise<DownloadOutcome | null> => {
     setBusy(`download:${artifact.id}`);
     try {
-      const saved = await api.download(entry.fileId, artifact.data.name);
+      const fallbackName = `${artifact.data.name.replace(/\.[^.]+$/, "")}-${entry.role}`;
+      const saved = await api.download(entry.fileId, fallbackName);
       pushEvent(
         `已下载 ${saved.name}（${(saved.size / 1024).toFixed(1)} KB，摘要 ${saved.sha256?.slice(0, 12) ?? "—"}…）`,
         "ok",
       );
       toast(`已下载 ${saved.name}`, "ok");
+      return saved;
     } catch (error) {
       toast(isApiError(error) ? error.message : "下载失败", "danger");
+      return null;
     } finally {
       setBusy(null);
     }
@@ -304,7 +442,7 @@ export function DeliveryTab() {
    * 这样「摘要一致」是真的算出来的，不是拿服务端自己的值回填一个通过 ——
    * 选错文件就会走失败分支（验收 T11 要的正是这个）。
    */
-  const verify = async (artifact: SharedEntity<ArtifactEntity>, file: File) => {
+  const verify = async (artifact: SharedEntity<ArtifactEntity>, file: File): Promise<boolean> => {
     setBusy(`verify:${artifact.id}`);
     try {
       const buffer = await file.arrayBuffer();
@@ -314,7 +452,7 @@ export function DeliveryTab() {
         action: "artifact.receipt",
         entityId: artifact.id,
         expectedRevision: artifact.revision,
-        payload: { reportedVersion: artifact.data.modelVersion, verifiedHash: hash, deviceMode: "demo" },
+        payload: { reportedVersion: artifact.data.modelVersion, verifiedHash: hash, deviceMode: "manual-receive" },
       });
       const receipt = result.result.receipt as { pass: boolean; note: string } | undefined;
       toast(receipt?.note ?? "回验完成", receipt?.pass ? "ok" : "danger");
@@ -322,40 +460,45 @@ export function DeliveryTab() {
         `${artifact.data.name} 回验${receipt?.pass ? "通过" : "未通过"}：本地摘要 ${hash.slice(0, 12)}…`,
         receipt?.pass ? "ok" : "danger",
       );
+      return Boolean(receipt?.pass);
     } catch (error) {
       toast(isApiError(error) ? error.message : "回验失败", "danger");
+      return false;
     } finally {
       setBusy(null);
     }
   };
 
-  const renderRow = (artifact: DeliveryArtifact) => (
+  const renderRow = (entity: SharedEntity<ArtifactEntity>) => {
+    const artifact = entity.data;
+    const rowFailed = artifact.state !== "checked" ? ["state"] : [];
+    return (
     <li
-      key={artifact.id}
-      className={`art-row${selected?.id === artifact.id ? " is-selected" : ""}`}>
+      key={entity.id}
+      className={`art-row${selected?.id === entity.id ? " is-selected" : ""}`}>
       <button
         type="button"
         className="art-row__main is-static"
-        onClick={() => setSelectedId(artifact.id)}>
+        onClick={() => setSelectedId(entity.id)}>
         <span className="art-row__name">
           <b>{artifact.name}</b>
           <i>
-            {artifact.fromJob ?? "手工上传"} · {artifact.producedAt}
+            {artifact.fromJob ?? "手工上传"} · {entity.updatedAt.slice(0, 16).replace("T", " ")}
           </i>
         </span>
-        <StatusChip text={artifact.target} tone={TARGET_TONE[artifact.target] ?? "info"} />
+        <StatusChip text={artifact.target} tone={TARGET_TONE[artifact.target as DeliveryTarget] ?? "info"} />
         <span className="art-row__ver">{artifact.modelVersion}</span>
         <span className="art-row__num">
           <SizeText text={artifact.sizeText} />
         </span>
         <span className="art-row__num">{artifact.sha256}</span>
         <span className="art-row__checks">
-          {artifact.checks.filter((check) => !check.pass).length > 0 ? (
+          {rowFailed.length > 0 ? (
             <StatusChip
               /* chip 是 `inline-flex + gap:5px`：整段文案包一层 span，数字才不会被 gap 撑开 */
               text={
                 <span>
-                  <NumberAnimation value={artifact.checks.filter((check) => !check.pass).length} /> 项待处理
+                  <NumberAnimation value={rowFailed.length} /> 项待处理
                 </span>
               }
               tone="warn"
@@ -368,20 +511,21 @@ export function DeliveryTab() {
       <span className="art-row__act">
         <Btn
           tone="primary"
-          disabled={!canSubmit || artifact.checks.some((check) => !check.pass)}
+          disabled={!canSubmit || rowFailed.length > 0 || !online || busy !== null}
           title={
             !canSubmit
               ? permissionHint("package:deliver")
-              : artifact.checks.some((check) => !check.pass)
-                ? "有未通过的提交前校验，不能发布"
+              : rowFailed.length > 0
+                ? "产物尚未完成服务端校验，不能发布"
                 : "提交到平台，其他工程师可下载"
           }
-          onClick={() => submit(artifact)}>
+          onClick={() => void submit(entity)}>
           提交
         </Btn>
       </span>
     </li>
-  );
+    );
+  };
 
   /**
    * 四段轨道：生成 → 校验 → 发布 → 接收。
@@ -391,77 +535,45 @@ export function DeliveryTab() {
    * 所以把**当前产物**提到最上面，用一条轨道说明它走到哪一步、下一步该谁做什么 ——
    * 下面是全量表格，看细节时再往下翻。
    */
-  /** 当前产物 = 最新一条已发布/已回验的产物 */
-  const current = sharedArtifacts[0] ?? null;
-
-  const track = useMemo(() => {
-    if (!current) return null;
-    const state = current.data.state;
-    const receipts = current.data.receipts ?? [];
-    const verified = receipts.some((item) => item.pass);
-    const downloaded = (current.data.downloadCount ?? 0) > 0;
-    const steps: TrackStep[] = [
-      { key: "build", label: "生成", done: true, owner: "史 · 人工智能架构师", detail: current.data.fromJob ?? "手工上传" },
-      { key: "check", label: "校验", done: true, owner: "平台", detail: `${current.data.sizeText} · 摘要 ${current.data.sha256.slice(0, 12)}…` },
-      {
-        key: "publish",
-        label: "发布",
-        done: state !== "待提交",
-        owner: "史 · 人工智能架构师",
-        detail: current.data.publishedAt ? `发布于 ${current.data.publishedAt.slice(0, 19).replace("T", " ")}` : "尚未发布",
-      },
-      {
-        key: "receive",
-        label: "接收",
-        done: downloaded,
-        owner: "饶 · 全栈开发工程师",
-        detail: downloaded ? (
-          <>
-            已取用 <NumberAnimation value={current.data.downloadCount} /> 次
-            {verified ? " · 摘要已回验" : " · 等待提交摘要"}
-          </>
-        ) : (
-          "尚未取用"
-        ),
-      },
-    ];
-    return {
-      name: current.data.name,
-      version: current.data.modelVersion,
-      target: current.data.target,
-      demoOnly: current.data.demoOnly,
-      steps,
-      verified,
-    };
-  }, [current]);
+  /** 当前产物 = 最新一条已发布/已回验的产物，阶段记录来自量化脚本与共享服务 */
+  const current = published[0] ?? null;
+  const workflow = useMemo(
+    () => (current ? buildDeliveryWorkflow(distillScript, current) : null),
+    [current, distillScript],
+  );
+  const receiveArtifact = receiveId ? sharedArtifacts.find((item) => item.id === receiveId) ?? null : null;
 
   return (
     <div className="delivery">
-      {track ? (
+      {current && workflow ? (
         <Panel
           title="本轮产物"
           extra={
-            <StatusChip
-              text={track.verified ? "已回验" : current?.data.state ?? "—"}
-              tone={track.verified ? "ok" : "info"}
-            />
+            <span className="fw-console__actions">
+              <StatusChip
+                text={current.data.state}
+                tone={current.data.state === "已回验" ? "ok" : "info"}
+              />
+              <Btn tone="ghost" disabled={!online} onClick={() => setReceiveId(current.id)}>
+                打开接收台
+              </Btn>
+            </span>
           }
           className="dl-track-panel">
           <div className="dl-track__head">
-            <b>{track.name}</b>
+            <b>{current.data.name}</b>
             <span>
-              {track.target} · {track.version}
-              {track.demoOnly ? " · 演示资产，不可烧录" : ""}
+              {current.data.target} · {current.data.modelVersion} · 作业 {workflow.runId} · {workflow.command}
             </span>
           </div>
           <ol className="dl-track">
-            {track.steps.map((step, index) => {
-              const next = !step.done && track.steps.slice(0, index).every((item) => item.done);
+            {workflow.steps.map((step, index) => {
+              const next = step.state === "进行中" || (step.state === "等待" && workflow.steps.slice(0, index).every((item) => item.state === "已完成"));
               return (
-                <li key={step.key} className={`${step.done ? "is-done" : next ? "is-next" : "is-wait"}`}>
+                <li key={step.key} className={`${step.state === "已完成" ? "is-done" : next ? "is-next" : "is-wait"}`}>
                   <span className="dl-track__dot" />
                   <b>{step.label}</b>
-                  <em>{step.owner}</em>
+                  <em>{step.state}</em>
                   <span className="dl-track__detail">{step.detail}</span>
                 </li>
               );
@@ -474,7 +586,11 @@ export function DeliveryTab() {
         title="待提交产物"
         extra={
           <span className="fw-console__actions">
-            <Btn tone="ghost" onClick={() => setUploadOpen(true)}>
+            <Btn
+              tone="ghost"
+              disabled={!canSubmit || !online}
+              title={!canSubmit ? permissionHint("package:deliver") : online ? "上传产物文件" : "共享服务未连接"}
+              onClick={() => setUploadOpen(true)}>
               上传产物
             </Btn>
           </span>
@@ -529,7 +645,7 @@ export function DeliveryTab() {
         {selected ? (
           <>
             <ul className="pkg-checks">
-              {selected.checks.map((check) => (
+              {selectedChecks.map((check) => (
                 <li key={check.key} className={check.pass ? "is-ok" : "is-bad"}>
                   <b>{check.label}</b>
                   <span>{check.detail}</span>
@@ -553,7 +669,7 @@ export function DeliveryTab() {
         extra={
           online ? (
             <span className="muted">
-              <NumberAnimation value={sharedArtifacts.length} /> 项 · 平台可下载
+              <NumberAnimation value={published.length} /> 项 · 平台可下载
             </span>
           ) : (
             <StatusChip text="未连接共享服务" tone="warn" />
@@ -570,15 +686,15 @@ export function DeliveryTab() {
           <span />
         </div>
         <ul className="art-list">
-          {sharedArtifacts.length ? (
-            sharedArtifacts.map((item) => (
+          {published.length ? (
+            published.map((item) => (
               <li key={item.id} className="art-row">
                 <span className="art-row__main">
                   <span className="art-row__name">
                     <b>{item.data.name}</b>
                     <i>
                       {item.data.fromJob ?? "手工上传"} · rev <NumberAnimation value={item.revision} />
-                      {item.data.demoOnly ? " · 演示资产" : ""}
+                      {item.data.demoOnly ? " · 不可烧录归档资产" : ""}
                     </i>
                   </span>
                   <StatusChip text={item.data.target} tone="info" />
@@ -601,25 +717,11 @@ export function DeliveryTab() {
                 </span>
                 <span className="art-row__act">
                   <Btn
-                    disabled={!online || busy !== null}
-                    title={online ? "下载真实产物文件" : "连接不上共享服务，无法下载"}
-                    onClick={() => void download(item)}>
-                    下载
+                    disabled={!online}
+                    title={online ? "打开文件接收、进度与回验视图" : "连接不上共享服务，无法接收"}
+                    onClick={() => setReceiveId(item.id)}>
+                    打开接收台
                   </Btn>
-                  {/* 回验：选回刚下载的文件，浏览器算摘要再提交 */}
-                  <label className={`btn${!online || !can("deployment:receive") ? " is-disabled" : ""}`}>
-                    回验
-                    <input
-                      type="file"
-                      hidden
-                      disabled={!online || !can("deployment:receive") || busy !== null}
-                      onChange={(event) => {
-                        const picked = event.target.files?.[0];
-                        event.target.value = "";
-                        if (picked) void verify(item, picked);
-                      }}
-                    />
-                  </label>
                 </span>
               </li>
             ))
@@ -665,10 +767,20 @@ export function DeliveryTab() {
       {uploadOpen ? (
         <UploadModal
           onClose={() => setUploadOpen(false)}
-          onSubmit={(artifact) => {
-            setArtifacts((current) => [artifact, ...current]);
-            setSelectedId(artifact.id);
-          }}
+          onSubmit={registerUpload}
+        />
+      ) : null}
+
+      {receiveArtifact ? (
+        <ReceiveModal
+          artifact={receiveArtifact}
+          workflow={buildDeliveryWorkflow(distillScript, receiveArtifact)}
+          online={online}
+          busy={busy}
+          canReceive={can("deployment:receive")}
+          onClose={() => setReceiveId(null)}
+          onDownload={download}
+          onVerify={verify}
         />
       ) : null}
     </div>

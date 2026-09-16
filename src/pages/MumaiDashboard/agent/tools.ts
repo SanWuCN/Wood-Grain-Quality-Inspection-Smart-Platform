@@ -384,7 +384,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "robot_stop",
     label: "停止小车",
-    description: "立即停止机器人运动（演示为回放态，只改任务状态与提示，不驱动真实设备）",
+    description: "立即停止机器人运动（归档回放态只改任务状态与提示，不驱动真实设备）",
     parameters: { type: "object", properties: {}, required: [] },
     risk: 2,
     requireConfirmation: false,
@@ -482,7 +482,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "load_map",
     label: "装载地图",
-    description: "把指定地图版本装载为当前地图（演示为切换展示版本，不触发真实 SLAM 载入）",
+    description: "把指定地图版本装载为当前地图（归档回放态仅切换展示版本，不触发真实 SLAM 载入）",
     parameters: {
       type: "object",
       properties: { map: { type: "string", description: "地图版本 id，例如 MAP-SH-06" } },
@@ -524,7 +524,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "start_scan",
     label: "开始扫描采集",
-    description: "让手持端开始扫描采集（演示为批次状态推进）",
+    description: "让手持端开始扫描采集（归档回放态仅推进批次状态）",
     parameters: {
       type: "object",
       properties: { batch: { type: "string", description: "批次号" } },

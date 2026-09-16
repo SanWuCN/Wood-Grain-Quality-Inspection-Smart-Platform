@@ -446,7 +446,7 @@ export type AnomalyEvent = {
   detail: string;
   frozenBatch: string;
   outputsFrozen: boolean;
-  trigger: "演示控制事件" | "实机检查结果";
+  trigger: "排练控制事件" | "实机检查结果";
   /** 证据分两类：设备侧看设备是否正常，模型侧看模型是否适用 */
   deviceEvidence: { at: string; text: string; result: string }[];
   modelEvidence: { at: string; text: string; result: string }[];

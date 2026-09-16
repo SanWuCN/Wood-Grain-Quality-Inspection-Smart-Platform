@@ -640,7 +640,7 @@ export default function SmallWoodPanel() {
       <footer className="xm__foot">
         <span>工单 {currentOrder.id}</span>
         <span>构件 {componentById(currentOrder.componentIds[0])?.id ?? "Z04"}</span>
-        <span>演示回放</span>
+        <span>归档回放</span>
       </footer>
     </aside>
   );

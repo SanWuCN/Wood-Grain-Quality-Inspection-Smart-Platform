@@ -206,7 +206,7 @@ export default function ParameterStrip({ state }: { state: CartState | null }) {
           { label: "RViz RTMP", value: streams?.rtmp?.rviz ?? DASH },
           { label: "摄像头 RTMP", value: streams?.rtmp?.camera ?? DASH },
           { label: "状态协议版本", value: state.schema_version ?? DASH },
-          { label: "数据形态", value: state.simulated ? "演示（--simulate）" : "实车", tone: state.simulated ? "warn" : "ok" },
+          { label: "数据形态", value: state.simulated ? "仿真通道（--simulate）" : "实车", tone: state.simulated ? "warn" : "ok" },
           {
             label: "状态采样时刻",
             value: state.sampled_at ? new Date(state.sampled_at * 1000).toLocaleTimeString("zh-CN", { hour12: false }) : DASH,

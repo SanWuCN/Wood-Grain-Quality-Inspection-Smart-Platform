@@ -690,14 +690,14 @@ export const LOG_OUTCOMES: DeviceLogOutcome[] = ["正常", "需留意", "异常"
 const CORE_EVENTS: AnomalyEvent[] = [
   {
     id: "evt-domain-01",
-    at: "2026-09-11 28:04",
+    at: "T+28:04",
     kind: "适用域待核验",
     summary: "Z04 初扫批次触发模型适用性检查，诊断输出已冻结",
     detail:
       "输入质量合格、特征偏移超限、模型配置不覆盖该材种，三项合并后触发。该批次暂不输出病害结论。",
     frozenBatch: "scan-Z04-001",
     outputsFrozen: true,
-    trigger: "演示控制事件",
+    trigger: "排练控制事件",
     deviceEvidence: [
       { at: "28:12", text: "供电电压 12.4V，传感器响应正常", result: "正常" },
       { at: "28:40", text: "参考件回波与出厂基线一致（偏差 0.3dB）", result: "正常" },
@@ -720,14 +720,14 @@ const CORE_EVENTS: AnomalyEvent[] = [
   },
   {
     id: "evt-recv-01",
-    at: "2026-09-11 28:41",
+    at: "T+28:41",
     kind: "接收不完整",
     summary: "scan-Z04-001 雷达原始数据 386/420，34 帧未回传",
     detail:
       "整批校验未通过，不报「数据全部回传」。缺帧集中在批次后段，与暂停时间点吻合。",
     frozenBatch: "scan-Z04-001",
     outputsFrozen: false,
-    trigger: "演示控制事件",
+    trigger: "排练控制事件",
     deviceEvidence: [
       { at: "28:41", text: "雷达 386/420、图像 12/12、结果 0/1", result: "部分接收" },
       { at: "28:44", text: "缺帧区间与 28:20 暂停时刻重叠", result: "记录" },
@@ -742,13 +742,13 @@ const CORE_EVENTS: AnomalyEvent[] = [
   },
   {
     id: "evt-signal-01",
-    at: "2026-09-11 28:52",
+    at: "T+28:52",
     kind: "信号质量",
     summary: "有效数据比例 91.9%，低于整批校验阈值",
     detail: "信号可用但有效比例偏低。整批校验未通过前不进入后续分析；需补采后再判定。",
     frozenBatch: "scan-Z04-001",
     outputsFrozen: false,
-    trigger: "演示控制事件",
+    trigger: "排练控制事件",
     deviceEvidence: [
       { at: "28:18", text: "空帧 0，非有限值 0，饱和帧比例 2.1%", result: "合格" },
       { at: "28:52", text: "有效数据比例 91.9%", result: "待复核" },
@@ -770,7 +770,7 @@ const CORE_EVENTS: AnomalyEvent[] = [
       "图像可提示外观异常，不能确认内部是否存在空洞，也不能直接判定承载能力。已建立 Z04 下部精扫任务。",
     frozenBatch: "—",
     outputsFrozen: false,
-    trigger: "演示控制事件",
+    trigger: "排练控制事件",
     deviceEvidence: [
       { at: "22:06", text: "关键帧 keyframe-Z04-03 与 Z01-02 对比", result: "记录" },
     ],
@@ -894,7 +894,7 @@ const ADDED_EVENTS: AnomalyEvent[] = [
   },
   {
     id: "evt-brownoff-01",
-    at: "2026-09-10 24:18",
+    at: "T+24:18",
     kind: "瞬时压降",
     summary: "供电电压瞬降 0.31V 持续 22ms，未触发欠压保护",
     detail:
@@ -1010,7 +1010,7 @@ const ADDED_EVENTS: AnomalyEvent[] = [
   },
   {
     id: "evt-dup-sample-01",
-    at: "2026-09-11 26:02",
+    at: "T+26:02",
     kind: "样本疑似重复",
     summary: "r-0003 与 r-0002 摘要高度相似，判为疑似重复",
     detail:
@@ -1034,14 +1034,14 @@ const ADDED_EVENTS: AnomalyEvent[] = [
   },
   {
     id: "evt-frameshort-01",
-    at: "2026-09-11 30:12",
+    at: "T+30:12",
     kind: "补采完成",
     summary: "Z04 缺帧区间补采完成，帧计数与预期一致",
     detail:
       "针对 28:20 暂停造成的 34 帧缺口安排补采。补采纳入 scan-Z04-002，不修改 scan-Z04-001 的原始记录。",
     frozenBatch: "scan-Z04-002",
     outputsFrozen: false,
-    trigger: "演示控制事件",
+    trigger: "排练控制事件",
     deviceEvidence: [
       { at: "30:12", text: "补采 34 帧，序号与缺口区间逐一对齐", result: "正常" },
       { at: "30:40", text: "scan-Z04-002 雷达 420/420、图像 14/14、结果 3/3", result: "完成" },
@@ -1059,14 +1059,14 @@ const ADDED_EVENTS: AnomalyEvent[] = [
   /* ---------------- 仍未结案（少数，且都是剧本里真实存在的悬念） ---------------- */
   {
     id: "evt-z04-rescan-01",
-    at: "2026-09-11 39:26",
+    at: "T+39:26",
     kind: "复扫数据待判定",
     summary: "Z04 复扫完成，DEMO-M02b 输出待与视觉疑点交叉确认",
     detail:
       "复扫数据完整，但模型版本已变更（DEMO-M02 → DEMO-M02b），两个版本的输出不能直接合并比较；需按融合规则出优先级后再给结论。",
     frozenBatch: "scan-Z04-002",
     outputsFrozen: false,
-    trigger: "演示控制事件",
+    trigger: "排练控制事件",
     deviceEvidence: [
       { at: "39:26", text: "复扫批次 scan-Z04-002 数据完整，设备侧无异常", result: "正常" },
       { at: "40:02", text: "参考件复核通过，本次配置与复扫一致", result: "正常" },
@@ -1085,7 +1085,7 @@ const ADDED_EVENTS: AnomalyEvent[] = [
   },
   {
     id: "evt-z02-rough-01",
-    at: "2026-09-11 42:05",
+    at: "T+42:05",
     kind: "待补采确认",
     summary: "Z02 表面轻微褪色，回波未见对应异常，需补采确认",
     detail:

@@ -254,7 +254,7 @@ export function DeviceFigure({
   const entry = illustrationManifest[id];
   return (
     <figure className={`mumai-device-figure${entry?.conceptPlaceholder ? " mumai-device-figure--concept" : ""}`}>
-      <Illustration id={id} height={height} alt={`${caption}（示意图，非实时相机帧）`} />
+      <Illustration id={id} height={height} alt={`${caption}（参考图，当前未接入相机）`} />
       <figcaption>{caption}</figcaption>
     </figure>
   );

@@ -204,6 +204,13 @@ export type ArtifactEntity = {  id: string;
   downloadedBy?: string;
   downloadedAt?: string;
   downloadCount?: number;
+  receivedFiles?: {
+    fileId: string;
+    actor: string;
+    at: string;
+    size: number | null;
+    sha256: string | null;
+  }[];
   receipts: {
     at: string;
     actor: string;

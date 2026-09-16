@@ -96,7 +96,7 @@ type ReportState = {
 function reportState(item: VersionItem, effective: string): ReportState {
   const demo = item.reported.demo;
   if (demo === null) {
-    return { tone: "muted", conflict: false, text: "未回报", title: "演示侧尚未回报版本，不能据此判定一致" };
+    return { tone: "muted", conflict: false, text: "未回报", title: "回放端尚未回报版本，不能据此判定一致" };
   }
   const [rawVersion, rawNote = ""] = demo.split("（");
   const version = rawVersion.trim();
@@ -465,7 +465,7 @@ export default function Firmware() {
   };
 
   /** 页面共用的来源标识：本页所有数据都是回放 / 模拟，PRD 1.2 要求常驻 */
-  const sourceLabel = tab === "training" || tab === "delivery" ? "演示记录" : "演示回放";
+  const sourceLabel = tab === "training" || tab === "delivery" ? "归档记录" : "归档回放";
 
   return (
     <div className="page page--adapt">

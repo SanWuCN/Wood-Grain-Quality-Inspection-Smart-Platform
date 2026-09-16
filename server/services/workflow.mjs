@@ -404,6 +404,9 @@ const HANDLERS = {
     const files = payload.files ?? [];
     if (!files.length) throw new WorkflowError(422, "NO_FILES", "没有文件，不能生成产物");
     const id = payload.artifactId ?? `ART-${Date.now().toString(36).toUpperCase()}`;
+    const packageFile = files.find((item) => item.role === "整包") ?? files[0];
+    const packageMeta = packageFile ? getFile(ctx.db, packageFile.fileId) : null;
+    if (!packageMeta) throw new WorkflowError(422, "FILE_REQUIRED", "整包文件未登记，不能生成产物");
     const entity = writeEntity(ctx.db, ctx.sessionId, "artifact", id, {
       id,
       name: payload.name ?? `${id}.zip`,
@@ -415,6 +418,8 @@ const HANDLERS = {
       // 真实文件：fileId 指向 files 表里的实际字节，下载走 /api/files/{id}/download
       files,
       state: "checked",
+      sha256: packageMeta.sha256,
+      sizeText: `${(packageMeta.size / 1024 / 1024).toFixed(2)} MB`,
       builtBy: ctx.actorId,
       builtAt: nowIso(),
       publishedBy: null,
@@ -431,8 +436,11 @@ const HANDLERS = {
 
   "artifact.publish": (ctx) => {
     const target = requireEntity(ctx, "artifact");
-    if (target.data.state === "已发布") {
-      return { entityKind: "artifact", entity: target, result: { artifactId: target.id, state: "已发布" }, events: [] };
+    if (["已发布", "已下载", "已回验"].includes(target.data.state)) {
+      return { entityKind: "artifact", entity: target, result: { artifactId: target.id, state: target.data.state }, events: [] };
+    }
+    if (target.data.state !== "checked") {
+      throw new WorkflowError(422, "CHECK_REQUIRED", "产物尚未完成服务端校验，不能发布");
     }
     const entity = writeEntity(ctx.db, ctx.sessionId, "artifact", target.id, {
       ...target.data,
@@ -483,7 +491,7 @@ const HANDLERS = {
         ? "提交的摘要与平台登记值不一致，回验失败"
         : !diskMatch
           ? "平台侧磁盘字节与登记摘要不一致，回验失败"
-          : "摘要一致，演示版本已更新",
+          : "摘要一致，更新包已完成回验",
     };
     const entity = writeEntity(ctx.db, ctx.sessionId, "artifact", target.id, {
       ...target.data,
@@ -530,12 +538,24 @@ export function markArtifactDownloaded(db, { sessionId, fileId, actorId }) {
     const data = parseJson(row.data, {});
     if (!(data.files ?? []).some((item) => item.fileId === fileId)) continue;
     if (data.state === "已回验") return null; // 已回验的产物不再回退
+    const file = getFile(db, fileId);
+    const downloadedAt = nowIso();
     const entity = writeEntity(db, sessionId, "artifact", row.id, {
       ...data,
       state: "已下载",
       downloadedBy: actorId,
-      downloadedAt: nowIso(),
+      downloadedAt,
       downloadCount: (data.downloadCount ?? 0) + 1,
+      receivedFiles: [
+        ...(data.receivedFiles ?? []),
+        {
+          fileId,
+          actor: actorId,
+          at: downloadedAt,
+          size: file?.size ?? null,
+          sha256: file?.sha256 ?? null,
+        },
+      ],
     });
     return { entityKind: "artifact", entity, artifactId: row.id };
   }

@@ -406,7 +406,7 @@ export default function VoiceConsole() {
       },
       onNotice: (text) => {
         setBanner(text);
-        setAgent({ agentState: "IDLE", stateNote: "麦克风不可用，使用演示语句或文本输入", asrNote: text, micActive: false });
+        setAgent({ agentState: "IDLE", stateNote: "麦克风不可用，使用预置语句或文本输入", asrNote: text, micActive: false });
       },
       onError: (text) => setBanner(text),
       onBargeIn: () => {
@@ -588,11 +588,11 @@ export default function VoiceConsole() {
           ? recognitionSupported()
             ? "真实语音识别通道（webkitSpeechRecognition · zh-CN · interimResults）"
             : "麦克风电平可用，但浏览器不支持 SpeechRecognition，请用示例问句或文本输入"
-          : "脚本化演示模式：点示例问句即可",
+          : "预置语句模式：点示例问句即可",
       });
       if (granted && recognitionSupported()) input$.startRecognition();
       if (!granted) {
-        setBanner("没有拿到麦克风权限，已切换到脚本化演示：点任意示例问句即可看到完整链路。");
+        setBanner("没有拿到麦克风权限，已切换到预置语句模式：点任意示例问句即可使用完整链路。");
       }
     },
     [],
@@ -602,7 +602,7 @@ export default function VoiceConsole() {
   const scriptedHold = useCallback(() => {
     const pick = EXAMPLE_PICKS[Math.floor(Math.random() * EXAMPLE_PICKS.length)];
     inputAsrRef.current?.simulate(pick.example);
-    setBanner("当前处于脚本化演示模式：正在逐字模拟流式识别（真实麦克风路径需要权限）。");
+    setBanner("当前处于预置语句模式：正在逐字生成输入文本（真实麦克风路径需要权限）。");
   }, []);
 
   const activeTone = STATE_TONE[state.agentState];
@@ -639,7 +639,7 @@ export default function VoiceConsole() {
             <em>{state.stateNote}</em>
           </div>
 
-          <div className="vc-meter" title="麦克风电平（真实音量或脚本模拟）">
+          <div className="vc-meter" title="麦克风电平（麦克风输入或预置语句输入）">
             <div className="vc-meter__bar">
               <i style={{ width: `${Math.round(state.level * 100)}%` }} />
             </div>
@@ -680,7 +680,7 @@ export default function VoiceConsole() {
           </div>
           <div className="vc-subtitle__meta">
             <span>
-              ASR 通道：{state.micActive ? "真实麦克风" : "脚本化演示（逐字模拟流式识别）"}
+              ASR 通道：{state.micActive ? "真实麦克风" : "预置语句（逐字生成输入文本）"}
             </span>
             <span>{state.asrNote}</span>
             <span>
@@ -705,7 +705,7 @@ export default function VoiceConsole() {
         <div className="vc__list" ref={listRef}>
           {state.turns.length === 0 ? (
             <div className="vc-empty">
-              <b>演示链路</b>
+              <b>语音链路</b>
               <ol>
                 <li>麦克风 / 示例问句 → VAD 判定说话开始与结束</li>
                 <li>流式 ASR → 实时字幕（partial → final）</li>
@@ -768,7 +768,7 @@ export default function VoiceConsole() {
                 if (pushHold) void pressToTalk(false);
               }}
               onDoubleClick={scriptedHold}
-              title="按住说话（双击 = 脚本化演示一次）">
+              title="按住说话（双击 = 输入一条预置语句）">
               按住说话
             </button>
             <form
@@ -816,4 +816,3 @@ export default function VoiceConsole() {
     </div>
   );
 }
-

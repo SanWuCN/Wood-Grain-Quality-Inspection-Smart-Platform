@@ -271,7 +271,7 @@ function DevicePanel() {
     {
       key: "scanner",
       name: DEVICES.scanner.name,
-      mode: "模拟采集",
+      mode: "预置采集记录",
       state: channels.some((channel) => channel.state !== "online") ? "延迟" : "在线",
       tone: channels.some((channel) => channel.state !== "online") ? ("warn" as const) : ("ok" as const),
       hint: "设备详情",
@@ -1111,7 +1111,7 @@ export default function Overview() {
       <footer className="ov__foot">
         <span className="ov__motto">{OVERVIEW_SLOGAN}</span>
         <span>
-          数据源 {currentOrder.sourceMode === "replay" ? "演示回放" : currentOrder.sourceMode} · 地图版本 {MISSION_MAP_VERSION}
+          数据源 {currentOrder.sourceMode === "replay" ? "归档回放" : currentOrder.sourceMode} · 地图版本 {MISSION_MAP_VERSION}
         </span>
         <span>
           实时位置 {DEMO_GEO_POSITION.lat.toFixed(4)}°N {DEMO_GEO_POSITION.lon.toFixed(4)}°E

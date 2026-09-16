@@ -544,7 +544,7 @@ export function useCartLive({ sessionId, enabled = true }: { sessionId: string; 
  */
 export function sourceLabel(state: CartState | null): { text: string; tone: "ok" | "warn" | "muted" } {
   if (!state) return { text: "数据源未知", tone: "muted" };
-  if (state.simulated) return { text: `演示数据 · ${state.device_id ?? "未命名设备"}`, tone: "warn" };
+  if (state.simulated) return { text: `仿真通道 · ${state.device_id ?? "未命名设备"}`, tone: "warn" };
   return { text: `实车数据 · ${state.device_id ?? "未命名设备"}`, tone: "ok" };
 }
 

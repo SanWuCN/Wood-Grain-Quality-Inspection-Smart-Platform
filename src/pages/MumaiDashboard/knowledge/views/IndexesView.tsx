@@ -56,7 +56,7 @@ export function IndexesView({
         title="索引服务状态"
         className="kb-service"
         scroll={false}
-        note={<span className="kb-muted">演示索引模式 · {overview.adapterMode} · 维度配置 {overview.dimensionConfig}</span>}
+        note={<span className="kb-muted">浏览器本地索引 · {overview.adapterMode} · 维度配置 {overview.dimensionConfig}</span>}
         actions={
           <div className="kb-toolbar">
             <Btn onClick={() => void actions.sync({ scope: "backlog", triggerSource: "索引运维" })} disabled={!actions.canIndex || actions.busy}>
@@ -102,7 +102,7 @@ export function IndexesView({
 
         <details className="kb-collapse" open={configOpen}>
           <summary>
-            纳入规则 · 分块策略 · 演示索引参数 <span className="kb-collapse-caret" aria-hidden>▾</span>
+            纳入规则 · 分块策略 · 本地索引参数 <span className="kb-collapse-caret" aria-hidden>▾</span>
           </summary>
           <div className="kb-collapse-body">
             <IndexConfigForm actions={actions} revision={overview.configRevision} searchConfig={overview.searchConfig} limits={overview.limits} />

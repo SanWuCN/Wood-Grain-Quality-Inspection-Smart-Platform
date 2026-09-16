@@ -98,7 +98,7 @@ export default function CaptureScreen() {
     <div className="capture-screen-meta"><span>树莓派屏幕</span><span><NumberAnimation value={size.width} group={false} /> × <NumberAnimation value={size.height} group={false} />{live ? <> · <NumberAnimation value={fps || null} /> FPS</> : ''}</span></div>
     <div className={`cap-screen${live ? ' is-live' : ''}`} style={{ aspectRatio: `${size.width} / ${size.height}` }}>
       <canvas ref={canvas} width={1024} height={600} className="cap-screen__media" role="img" aria-label="树莓派采集设备实时屏幕" />
-      {!live ? <span className="cap-screen__placeholder"><Icon name="nav-capture" size={32} aria-hidden /><b>{state === 'connecting' ? '正在连接采集设备画面' : state === 'unconfigured' ? '采集设备屏幕尚未接入' : '屏幕信号已中断，正在重连'}</b><em>屏幕、姿态与实时数据独立接收。</em></span> : null}
+      {!live ? <span className="cap-screen__placeholder"><Icon name="nav-capture" size={32} aria-hidden /><b>{state === 'connecting' ? '正在连接采集设备画面' : state === 'unconfigured' ? '采集设备屏幕尚未接入' : '屏幕信号已中断，正在重连'}</b><em>屏幕、姿态与设备数据独立接收。</em></span> : null}
     </div>
     <div className="capture-screen-footer"><span>{live ? '实时桌面 · 只读监看' : '等待设备屏幕信号'}</span><div><Btn tone="ghost" onClick={() => setRetry(v => v + 1)}>重新连接</Btn><Btn tone="ghost" onClick={() => setExpanded(true)}>放大画面</Btn></div></div>
   </Panel>

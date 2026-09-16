@@ -30,7 +30,7 @@
  * 改了读数，结论跟着变，不会出现「读数已经不合格、结论还写着合格」。
  */
 
-import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
@@ -42,6 +42,7 @@ import { TriageTab } from "./TriageLog";
 import { api } from "../api/client";
 import { useDeviceLink, useDevicePreview, type DeviceLink } from "../device/useDeviceLink";
 import { BATCH_STATE_LABEL, HANDHELD_DEVICE_ID, toScanBatch, type DeviceReport } from "../device/types";
+import { deriveDeviceDataSource, toDeviceStreamEntry, type DeviceStreamEntry } from "../device/deviceDataStream";
 import { CHANNELS, DEVICES, SCAN_BATCHES, SCANNER_READING_LAYOUT } from "../seed/scenario";
 import { VERSION_ITEMS } from "../seed/versions";
 import type { ChannelStatus, DeviceReading, ScanBatch } from "../seed/types";
@@ -367,7 +368,7 @@ function DeviceStatusPanel({ link, deviceId }: { link: DeviceLink; deviceId: str
     : [
         { k: "设备", v: DEVICES.scanner.name },
         { k: "设备编号", v: DEVICES.scanner.id },
-        { k: "数据来源", v: <SourceTag label="模拟采集" /> },
+        { k: "数据来源", v: <SourceTag label="预置采集记录" /> },
         { k: "连接", v: <StatusChip text="已连接 · 只读监视" tone="ok" dot /> },
       ];
 
@@ -745,7 +746,7 @@ function TelemetryPanel({ link }: { link: DeviceLink }) {
     }
     const versions = telemetry.versions as { configVersion?: string; demoModelVersion?: string } | undefined;
     if (versions?.configVersion) push("生效配置", versions.configVersion);
-    if (versions?.demoModelVersion) push("演示模型", versions.demoModelVersion);
+    if (versions?.demoModelVersion) push("回放模型", versions.demoModelVersion);
   }
   return (
     <Panel
@@ -814,6 +815,67 @@ function PreviewPanel({ link, deviceId }: { link: DeviceLink; deviceId: string }
   );
 }
 
+function DeviceDataStreamPanel({ link, batchId, deviceId }: { link: DeviceLink; batchId: string; deviceId: string }) {
+  const source = useMemo(() => deriveDeviceDataSource(link.view, batchId, deviceId), [batchId, deviceId, link.view]);
+  const current = useMemo(() => toDeviceStreamEntry(link.view, batchId, deviceId), [batchId, deviceId, link.view]);
+  const [entries, setEntries] = useState<DeviceStreamEntry[]>([]);
+
+  useEffect(() => {
+    if (!current) {
+      setEntries([]);
+      return;
+    }
+    setEntries((previous) => {
+      const sameSource = previous.filter(
+        (item) => item.deviceId === current.deviceId && item.batchId === current.batchId,
+      );
+      if (sameSource[0]?.id === current.id) return sameSource;
+      return [current, ...sameSource].slice(0, 8);
+    });
+  }, [current]);
+
+  return (
+    <Panel
+      title="本次设备数据流"
+      extra={
+        <StatusChip
+          text={source ? `${source.deviceId} · ${source.batchId}` : "等待本次设备上报"}
+          tone={source ? "ok" : "muted"}
+          dot
+        />
+      }
+      className="hw-panel hw-col-6">
+      {source ? (
+        <>
+          <dl className="hw-stream-source">
+            <div><dt>设备</dt><dd>{source.deviceName} · {source.deviceId}</dd></div>
+            <div><dt>采集批次</dt><dd>{source.batchId} · {source.batchRound}</dd></div>
+            <div><dt>来源通道</dt><dd>{source.channels.join(" / ") || "设备未报告通道"}</dd></div>
+            <div><dt>接收时间</dt><dd>{clockOf(source.receivedAt)}</dd></div>
+          </dl>
+          <div className="hw-stream-window" aria-live="polite" aria-label="设备数据接收流">
+            <ol className="hw-stream-list">
+              {entries.map((entry) => (
+                <li key={entry.id}>
+                  <time>{clockOf(entry.receivedAt)}</time>
+                  <b>{entry.batchId}</b>
+                  <span>{entry.channels}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </>
+      ) : (
+        <StateBlock
+          kind="empty"
+          title="尚未收到当前设备与批次的数据"
+          hint="设备上报中必须包含当前批次编号；平台不会借用其他设备或批次的记录。"
+        />
+      )}
+    </Panel>
+  );
+}
+
 /* ------------------------------------------------------------------ *
  * 硬件监看
  * ------------------------------------------------------------------ */
@@ -840,6 +902,7 @@ const MONITOR_LAYOUT: Record<string, [number, number]> = {
   preview: [2, 2],
   readings: [3, 1],
   telemetry: [3, 2],
+  stream: [4, 1],
 };
 
 /** 把排版位置写成 CSS 变量，CSS 侧用 grid-row / grid-column 读取 */
@@ -848,7 +911,7 @@ const place = (key: keyof typeof MONITOR_LAYOUT) => {
   return { style: { "--hw-row": row, "--hw-col": col } as CSSProperties };
 };
 
-function MonitorTab({ link, deviceId }: { link: DeviceLink; deviceId: string }) {
+function MonitorTab({ link, deviceId, batchId }: { link: DeviceLink; deviceId: string; batchId: string }) {
   return (
     <div className="hw-monitor">
       <div {...place("status")}>
@@ -868,6 +931,9 @@ function MonitorTab({ link, deviceId }: { link: DeviceLink; deviceId: string }) 
       </div>
       <div {...place("preview")}>
         <PreviewPanel link={link} deviceId={deviceId} />
+      </div>
+      <div {...place("stream")}>
+        <DeviceDataStreamPanel link={link} batchId={batchId} deviceId={deviceId} />
       </div>
     </div>
   );
@@ -909,16 +975,16 @@ export default function Hardware() {
                 tab === "monitor"
                   ? live
                     ? "真机接入"
-                    : "演示回放"
+                    : "归档回放"
                   : tab === "capture"
-                    ? "采集工作台"
-                    : "演示回放"
+                    ? "归档采集记录"
+                    : "归档回放"
               }
             />
             <span>当前批次 {batch}</span>
             <span>
               {tab === "capture" ? (
-                "扫描枪实时接入"
+                "归档采集记录已加载"
               ) : tab === "monitor" ? (
                 <>
                   {/* 设备号是标识（不动），后面的链路状态里带活的秒数（动） */}
@@ -946,7 +1012,7 @@ export default function Hardware() {
         />
       ) : null}
 
-      {frozen && tab === "capture" ? <div className="capture-freeze-note"><b>诊断输出已冻结</b><span>该批次缺少有效标定记录，等待专业复核；仍可监看采集画面和传感器数据。</span></div> : null}
+      {frozen && tab === "capture" ? <div className="capture-freeze-note"><b>诊断输出已冻结</b><span>该批次缺少有效标定记录，等待专业复核；可查看归档采集画面和传感器记录。</span></div> : null}
       {/*
         异常排查页要求「两列等高、整页不滚动」（所以列表在面板内部滚），
         所以这一档把 .adapt-body 自己的滚动关掉。其余页签内容较长、
@@ -956,7 +1022,7 @@ export default function Hardware() {
         {tab === "capture" ? <CaptureTab /> : null}
         {tab === "triage" ? <TriageTab /> : null}
         {tab === "monitor" ? (
-          <MonitorTab link={link} deviceId={deviceId} />
+          <MonitorTab link={link} deviceId={deviceId} batchId={batch} />
         ) : null}
       </div>
     </div>

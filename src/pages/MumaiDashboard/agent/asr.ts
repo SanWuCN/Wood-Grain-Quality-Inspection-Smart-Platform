@@ -132,7 +132,7 @@ export type AsrStatus = {
   notice: string;
 };
 
-const FALLBACK_TEXT = "当前设备不可用真实语音识别，已切换到脚本化演示：点示例问句即可看到完整链路。";
+const FALLBACK_TEXT = "当前设备不可用真实语音识别，已切换到预置语句模式：点示例问句即可使用完整链路。";
 
 /** 浏览器是否提供 SpeechRecognition（Chromium 需要 webkit 前缀） */
 export function recognitionCtor(): SpeechRecognitionCtor | null {
@@ -205,7 +205,7 @@ export class VoiceInput {
   /** 抢麦克风权限并启动电平分析；失败时返回 false（调用方自动切脚本模式） */
   async startMic(): Promise<boolean> {
     if (!microphoneSupported()) {
-      this.handlers.onNotice("当前环境没有麦克风接口（非安全上下文或浏览器不支持），已切换到演示语句模式。");
+      this.handlers.onNotice("当前环境没有麦克风接口（非安全上下文或浏览器不支持），已切换到预置语句模式。");
       return false;
     }
     try {
@@ -245,8 +245,8 @@ export class VoiceInput {
       const name = error instanceof Error ? error.name : "Error";
       this.handlers.onNotice(
         name === "NotAllowedError"
-          ? "麦克风权限被拒绝，已切换到演示语句模式：点示例问句同样能看到完整链路。"
-          : `麦克风不可用（${name}），已切换到演示语句模式。`,
+          ? "麦克风权限被拒绝，已切换到预置语句模式：点示例问句同样可使用完整链路。"
+          : `麦克风不可用（${name}），已切换到预置语句模式。`,
       );
       return false;
     }
@@ -466,11 +466,11 @@ export class VoiceInput {
         // abort 造成的 aborted / interrupted 不是故障，别拿它去打扰用户
         if (this.disposed || this.suspended) return;
         if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-          this.handlers.onNotice("浏览器的语音识别服务拒绝了请求，已切换到演示语句模式。");
+          this.handlers.onNotice("浏览器的语音识别服务拒绝了请求，已切换到预置语句模式。");
         } else if (event.error === "no-speech") {
           this.handlers.onNotice("没有检测到语音，可以点示例问句或直接输入文本。");
         } else {
-          this.handlers.onNotice(`语音识别返回 ${event.error}，脚本化演示仍然可用。`);
+          this.handlers.onNotice(`语音识别返回 ${event.error}，预置语句模式仍然可用。`);
         }
       };
       recognition.onend = () => {

@@ -80,7 +80,7 @@ export function CommissionPreview({ detail, onClose, paperSrc = DEFAULT_PAPER_SR
         onMouseDown={(event) => event.stopPropagation()}>
         <header className="cpr__bar">
           <span className="cpr__badge">{DEMO_LABEL}</span>
-          <span className="cpr__bar-note">虚构样例 · 非真实行政公文 · 仅用于演示</span>
+          <span className="cpr__bar-note">版式样张 · 不具行政效力 · 不得作为公文使用</span>
           <button type="button" className="cpr__close" onClick={onClose} autoFocus>
             <Icon name="action-close" size={16} aria-hidden />
             <span>关闭</span>

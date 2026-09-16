@@ -117,7 +117,7 @@ export const PERMISSION_LABEL: Record<Permission, string> = {
   "knowledge:manage": "导入与维护资产",
   "scene:publish": "场景发布",
   "scene:upload": "场景模型上传",
-  "training:run": "训练演示",
+  "training:run": "训练执行",
   "package:deliver": "封装下发",
   "fusion:run": "多模态分析",
   "env:ack": "环境配置接收并返回 ack",

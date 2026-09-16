@@ -170,7 +170,7 @@ function CaptureView({ componentId, batchId }: { componentId: string; batchId: s
             <small>采集批次</small>
             <strong>{batch?.batchId ?? "—"}</strong>
             <em>
-              {batch?.round ?? "—"} · {batch?.sourceMode === "replay" ? "演示回放" : "实采"}
+              {batch?.round ?? "—"} · {batch?.sourceMode === "replay" ? "归档回放" : "实采"}
             </em>
           </li>
           <li>
@@ -310,7 +310,7 @@ function DeliveryView() {
             <li>
               <small>模型版本</small>
               <strong>{current.data.modelVersion}</strong>
-              <em>{current.data.demoOnly ? "演示资产，不可烧录" : "生产产物"}</em>
+              <em>{current.data.demoOnly ? "受限资产，不可烧录" : "生产产物"}</em>
             </li>
             <li>
               <small>回验</small>
@@ -493,7 +493,7 @@ export default function Present() {
           {online ? null : <StatusChip text="未连接共享服务" tone="danger" />}
           <span>
             {/* 会话 ID 与投放时间是标识 / 时间戳，保持静止 */}
-            演示回放 · 会话 {sessionId}
+            归档回放 · 会话 {sessionId}
             {focus.deliveredAt ? ` · 投放于 ${focus.deliveredAt.slice(11, 19)}` : ""}
           </span>
           {focus.viewType === "map"

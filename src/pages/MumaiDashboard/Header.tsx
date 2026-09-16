@@ -138,7 +138,7 @@ export default function Header({
                 type="button"
                 className="appshell__present"
                 onClick={onConsole}
-                title="排练控制台：新建演示会话、捕获与恢复阶段快照">
+                title="排练控制台：新建工作会话、捕获与恢复阶段快照">
                 {/*
                   PRD §3.3 迁移表：「database、wave、arrow 保留原图标 ——
                   新包没有同义替代时继续使用」。排练控制台的会话/快照属于数据语义，

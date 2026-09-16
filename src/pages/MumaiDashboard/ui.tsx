@@ -97,7 +97,7 @@ export function StatusChip({
   );
 }
 
-export function SourceTag({ label = "演示回放" }: { label?: string }) {
+export function SourceTag({ label = "归档回放" }: { label?: string }) {
   return (
     <span className="source-tag" title="数据来源">
       <i />

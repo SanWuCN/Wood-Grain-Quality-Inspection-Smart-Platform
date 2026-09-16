@@ -20,9 +20,16 @@ import { useMemo, useState, type ReactNode } from "react";
 import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import { Btn, Modal, StatusChip } from "../ui";
-import { DATA_PACKAGES, SAMPLES } from "../seed/scenario";
+import { DATASET, SAMPLES } from "../seed/scenario";
 import { clockStamp } from "../lib";
-import { DEFAULT_THRESHOLDS, runClean, type CleanOutcome, type CleanThresholds } from "../cleanLogic";
+import {
+  DEFAULT_THRESHOLDS,
+  runClean,
+  selectCleanVersionRecords,
+  type CleanOutcome,
+  type CleanThresholds,
+} from "../cleanLogic";
+import { buildCleanProgress } from "./operationInsights";
 
 type Stage = "pick" | "configure" | "precheck" | "cleaned" | "reviewed" | "versioned";
 
@@ -37,9 +44,16 @@ const STAGE_LABEL: Record<Stage, string> = {
   versioned: "生成数据集版本",
 };
 
-export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string) => void }) {
+export type CleanVersionResult = {
+  label: string;
+  sourceDatasetId: string;
+  generatedAt: string;
+  includedRecordIds: string[];
+  removedRecordIds: string[];
+};
+
+export function DatasetCleanFlow({ onVersioned }: { onVersioned: (result: CleanVersionResult) => void }) {
   const [stage, setStage] = useState<Stage>("pick");
-  const [datasetId, setDatasetId] = useState<string>(DATA_PACKAGES[0]?.id ?? "");
   const [thresholds, setThresholds] = useState<CleanThresholds>(DEFAULT_THRESHOLDS);
   const [configOpen, setConfigOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -49,7 +63,8 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
   const [outcome, setOutcome] = useState<(CleanOutcome & { at: string }) | null>(null);
   const [versionLabel, setVersionLabel] = useState<string | null>(null);
 
-  const dataset = DATA_PACKAGES.find((item) => item.id === datasetId) ?? DATA_PACKAGES[0];
+  const sourceBatchCount = useMemo(() => new Set(SAMPLES.map((sample) => sample.sourceBatch)).size, []);
+  const physicalSampleCount = useMemo(() => new Set(SAMPLES.map((sample) => sample.physicalSampleId)).size, []);
   const stepIndex = STAGE_ORDER.indexOf(stage);
 
   /** 预检查：真的看一眼这份数据集能不能洗（体量、格式、标签依据、分组） */
@@ -75,7 +90,11 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
             </>
           ),
         },
-        { label: "格式声明", ok: Boolean(dataset?.rawLevel), detail: `${dataset?.name ?? "—"} · ${dataset?.rawLevel ?? "—"}` },
+        {
+          label: "来源与路径",
+          ok: SAMPLES.every((sample) => Boolean(sample.path && sample.sourceBatch)),
+          detail: `${sourceBatchCount} 个来源批次 · ${records} 条路径已登记`,
+        },
         {
           label: "标签依据覆盖",
           ok: withLabel === records,
@@ -124,12 +143,29 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
   );
   const total = outcome?.flagged.length ?? 0;
   const undecided = total - accepted - excluded;
+  const progress = buildCleanProgress({
+    stage,
+    totalRecords: SAMPLES.length,
+    outcome: outcome ? { kept: outcome.kept, flagged: outcome.flagged.length } : undefined,
+    acceptedAnomalies: accepted,
+    excludedFalsePositives: excluded,
+  });
 
   const makeVersion = () => {
+    if (!outcome) return;
+    const membership = selectCleanVersionRecords(SAMPLES, outcome, decisions);
+    if (membership.undecidedRecordIds.length > 0) return;
     const label = "DS-07（本轮清洗产物）";
+    const generatedAt = clockStamp();
     setVersionLabel(label);
     setStage("versioned");
-    onVersioned(label);
+    onVersioned({
+      label,
+      sourceDatasetId: DATASET.id,
+      generatedAt,
+      includedRecordIds: membership.includedRecordIds,
+      removedRecordIds: membership.removedRecordIds,
+    });
   };
 
   return (
@@ -167,29 +203,47 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
           ))}
         </ol>
 
+        <section className="dc-overview" aria-label="清洗作业进度">
+          <div className="dc-overview__progress">
+            <span>全流程完成度</span>
+            <strong><NumberAnimation value={progress.percent} group={false} /><small>%</small></strong>
+            <progress max={100} value={progress.percent} aria-label="数据清洗全流程完成度" />
+          </div>
+          <dl>
+            <div><dt>记录总数</dt><dd><NumberAnimation value={SAMPLES.length} /></dd></div>
+            <div><dt>已处理</dt><dd><NumberAnimation value={progress.processed} /></dd></div>
+            <div className={progress.pendingReview ? "is-warn" : ""}><dt>待人工核验</dt><dd><NumberAnimation value={progress.pendingReview} /></dd></div>
+            <div><dt>核验状态</dt><dd>{progress.reviewState}</dd></div>
+          </dl>
+        </section>
+
+        {outcome ? (
+          <section className="dc-process" aria-label="清洗执行明细">
+            <header><b>清洗执行明细</b><span>{outcome.at} · {outcome.steps.length} 个算法步骤</span></header>
+            <ol>
+              {outcome.steps.map((item, index) => (
+                <li key={item.key}>
+                  <span className="dc-process__index">{String(index + 1).padStart(2, "0")}</span>
+                  <span className="dc-process__copy"><b>{item.label}</b><small>{item.detail}</small></span>
+                  <span className="dc-process__counts">输入 {item.input} · 保留 {item.kept} · 待核验 {item.review}</span>
+                  <progress max={item.input || 1} value={item.kept + item.review} aria-label={`${item.label}处理进度`} />
+                  <StatusChip text="已执行" tone="ok" />
+                </li>
+              ))}
+            </ol>
+          </section>
+        ) : null}
+
         {stage === "pick" ? (
           <div className="dc-stage">
             <label className="field">
-              <span>原始数据集</span>
-              <select value={datasetId} onChange={(event) => setDatasetId(event.target.value)}>
-                {DATA_PACKAGES.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name} · {item.rawLevel} · {item.sizeText}
-                  </option>
-                ))}
-              </select>
+              <span>当前清洗数据集</span>
+              <input value={DATASET.label} readOnly />
             </label>
             <span className="muted">
-              {/* 帧数跟着所选数据集变（选另一个包就是另一个量级），走数字动效 */}
-              {dataset?.frames === null ? (
-                "帧数待解析"
-              ) : (
-                <>
-                  {/* `group={false}`：帧数是记录条数，原样不带千分位 */}
-                  <NumberAnimation value={dataset?.frames ?? 0} group={false} /> 帧
-                </>
-              )}{" "}
-              · 采集于 {dataset?.capturedAt}
+              <NumberAnimation value={SAMPLES.length} group={false} /> 条记录 ·{" "}
+              <NumberAnimation value={physicalSampleCount} group={false} /> 个物理样本 ·{" "}
+              <NumberAnimation value={sourceBatchCount} group={false} /> 个来源批次
             </span>
             <Btn tone="primary" onClick={() => setStage("configure")}>
               下一步：配置算法与阈值
@@ -319,7 +373,7 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
               <li>
                 <small>保留记录</small>
                 <b>
-                  <NumberAnimation value={outcome?.kept ?? 0} />
+                  <NumberAnimation value={progress.outputRecords} />
                 </b>
               </li>
               <li>
@@ -343,7 +397,7 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (label: string)
       {configOpen ? (
         <Modal
           title="清洗算法与阈值"
-          subtitle={`${dataset?.name ?? "—"} · 共 ${SAMPLES.length} 条记录`}
+          subtitle={`${DATASET.label} · 共 ${SAMPLES.length} 条记录`}
           onClose={() => setConfigOpen(false)}
           footer={
             <>

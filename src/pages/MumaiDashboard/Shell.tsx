@@ -444,7 +444,7 @@ export default function Shell() {
             title: `${model ?? "手持终端"} · 已离线 ${age} 秒，硬件页保留最后一份数据`,
           };
         case "waiting":
-          return { text: "未接入", tone: "muted", title: "终端还没上报过设备数据；硬件详情页显示的是演示种子数据" };
+          return { text: "未接入", tone: "muted", title: "终端还没上报过设备数据；硬件详情页显示预置记录" };
         case "unavailable":
           return { text: "通道不可达", tone: "danger", title: deviceLink.error || "读不到设备数据" };
         default:
@@ -487,7 +487,7 @@ export default function Shell() {
         label: "模型",
         text: modelVersion,
         tone: "info",
-        title: `演示模型（不是控制器固件） · 推理流水线 ${pipeline}`,
+        title: `回放模型（不是控制器固件） · 推理流水线 ${pipeline}`,
       },
     ];
   }, [deviceLink, mission, sessionId, sharedError, sharedStatus]);
@@ -637,7 +637,7 @@ export default function Shell() {
               <i />
               <i />
             </div>
-            <strong>正在装载演示种子</strong>
+            <strong>正在装载归档数据</strong>
             <em>scenario / work order / environment / RAG index snapshot</em>
             <div className="appshell__boot-bar">
               <i />
@@ -727,7 +727,7 @@ export default function Shell() {
 
       <div className="appshell__ticker">
         <span>
-          数据源 <b>演示回放</b>
+          数据源 <b>归档回放</b>
         </span>
         {/*
           会话号与事件序号都**不做**动效：
