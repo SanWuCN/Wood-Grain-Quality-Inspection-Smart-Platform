@@ -16,7 +16,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, readToken } from "../api/client";
+import { api, probeActor, readToken, reloginWithSession } from "../api/client";
+import { isTransientPollFailure, nextPollDelayMs } from "./pollBackoff.ts";
+import { createTokenGate } from "./tokenGate.ts";
 import type { DeviceEvent, DeviceHardwareView } from "./types";
 
 export type DevicePhase = "loading" | "live" | "stale" | "offline" | "waiting" | "unavailable";
@@ -61,15 +63,29 @@ export function useDeviceLink(
     disposed.current = false;
     if (!enabled) return undefined;
     let loading = false;
+    /** 连续失败次数：成功一次就清零，用于退避（判据见 `pollBackoff.ts`） */
+    let failures = 0;
+    let timer: number | null = null;
+    /*
+      令牌保鲜闸门：令牌已失效时先补登录再打业务请求。
+      没有它的话，"后端重启过 + 页面还开着"这一批请求必然 401，
+      浏览器会记账（控制台红字），事后补登录成功也擦不掉 —— 见 `tokenGate.ts`。
+    */
+    const tokenOk = createTokenGate({
+      readToken,
+      probeActor,
+      relogin: () => reloginWithSession(),
+    });
 
     const poll = async () => {
       if (loading || disposed.current) return;
       /*
         还没登录令牌时不发请求：页面挂载早于 `ensureSession` 完成，先打一轮
         必然是 401，控制台里全是红字，排查真问题时要先穿过这些噪音。
-        轮询不会停 —— 令牌一到位，下一轮自然就取到了。
+        令牌**已失效**（后端重启换了签名密钥）同理 —— 所以这里走闸门而不是只判空。
+        轮询不会停：下一轮令牌到位/换新后自然就取到了。
       */
-      if (!readToken()) return;
+      if (!(await tokenOk())) { schedule(); return; }
       loading = true;
       try {
         const next = await api.deviceHardware(deviceId);
@@ -78,18 +94,42 @@ export function useDeviceLink(
           setUpdatedAt(Date.now());
           setError("");
         }
+        failures = 0;
       } catch (cause) {
         if (!disposed.current) {
           // 服务不可达 / 未登录：保留上一份数据，只是明确标出「取不到」
           setError(cause instanceof Error ? cause.message : "设备数据读取失败");
         }
+        /*
+          只对"等一下会好"的失败退避（401 令牌没到位 / 5xx / 网络层）。
+          权限不足、设备不存在这类等多久都不会好的，照常按原节奏重试并显示错误 ——
+          用退避把它们藏起来反而是害了排查。
+        */
+        const status = (cause as { status?: number } | null)?.status;
+        failures = isTransientPollFailure(status) ? failures + 1 : 0;
       } finally {
         loading = false;
       }
+      schedule();
+    };
+
+    /**
+     * 按"这次该等多久"排下一次轮询。
+     *
+     * ⚠ 从 `setInterval` 改成自排的 `setTimeout`：间隔要随失败次数变化，
+     *   而 `setInterval` 的周期是固定的，改不了。实测连续失败时原来每 2 秒
+     *   就打一次、控制台刷满 401，`accept.mjs` 的"console error = 0"因此时红时绿。
+     */
+    const schedule = () => {
+      if (disposed.current) return;
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(poll, nextPollDelayMs(pollMs, failures));
     };
 
     const pollEvents = async () => {
-      if (disposed.current || !readToken()) return;
+      if (disposed.current) return;
+      /* 同样走闸门：事件轮询与读数轮询会同时到点，闸门内部共用一次探测 */
+      if (!(await tokenOk())) return;
       try {
         const next = await api.deviceEvents(deviceId, 40);
         if (!disposed.current) setEvents(next.events);
@@ -100,11 +140,11 @@ export function useDeviceLink(
 
     poll();
     pollEvents();
-    const timer = window.setInterval(poll, pollMs);
+    /* 设备读数按自适应间隔自排（见 schedule 的说明）；事件是附加信息，保持固定节奏 */
     const eventTimer = window.setInterval(pollEvents, eventsMs);
     return () => {
       disposed.current = true;
-      window.clearInterval(timer);
+      if (timer !== null) window.clearTimeout(timer);
       window.clearInterval(eventTimer);
     };
   }, [deviceId, pollMs, eventsMs, enabled, version]);

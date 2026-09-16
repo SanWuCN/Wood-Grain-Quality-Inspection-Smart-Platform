@@ -360,6 +360,26 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   return body as T;
 }
 
+/**
+ * 令牌保鲜的探测与补登录（给轮询类调用方复用）。
+ *
+ * ── 为什么要把这两个动作单独导出 ────────────────────────────────────
+ * `useDeviceLink` 的轮询在"手里有令牌、但令牌已失效"时会打出一批必然 401 的请求。
+ * `apiRequest` 内部虽然会自动补登录并重放成功，但那一次 401 响应**已经被浏览器
+ * 记进控制台**，事后无法撤销 —— 而 `tools/accept.mjs` 的判据里有"console error = 0"，
+ * 于是同一份代码连跑三遍时红时绿。
+ *
+ * 所以轮询在请求之前先做一次**不产生红字**的探测：`/api/auth/me` 对无效令牌回
+ * `actor: null`（正常答案，不是 401）；拿到 null 就用本地会话补一次登录。
+ * 详见 `src/pages/MumaiDashboard/device/tokenGate.ts`。
+ */
+export async function probeActor(): Promise<Actor | null> {
+  const me = await apiRequest<{ actor: Actor | null }>("/api/auth/me");
+  return me?.actor ?? null;
+}
+
+export { reloginWithSession };
+
 /* ------------------------------------------------------------------ *
  * 接口
  * ------------------------------------------------------------------ */
