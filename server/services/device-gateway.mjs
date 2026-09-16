@@ -44,6 +44,19 @@ const DEFAULT_STALE_MS = 6000;
 const DEVICE_ID_PATTERN = /^[\w.:-]{1,64}$/;
 
 /**
+ * 默认设备令牌（内网演示用）。
+ *
+ * ⚠ 必须把**空串**也当作"没配"（2026-09-16 实测踩到）：
+ *   平台后端从某些终端/脚本启动时 `MUMAI_DEVICE_TOKENS` 会是**空字符串**，
+ *   而 `String(raw ?? "demo-token")` 的默认值**只在 null/undefined 时生效** ——
+ *   空串被 split 成 `[""]`、又被 `if (!text) continue` 跳过，结果是 **0 个令牌**，
+ *   于是**任何设备**上报都 401（`/api/health` 里 `devices.tokens = 0`），
+ *   而《手持终端接入与验收》承诺的正是"只有令牌（无 deviceId: 前缀）表示任意设备可用"。
+ *   回归测试：`server/services/device-tokens.test.mjs`。
+ */
+export const DEFAULT_DEVICE_TOKEN = "demo-token";
+
+/**
  * 设备令牌表。
  *
  * 形如 `MUMAI_DEVICE_TOKENS="handheld-02:demo-token,other:xyz"`；
@@ -54,7 +67,9 @@ const DEVICE_ID_PATTERN = /^[\w.:-]{1,64}$/;
 function parseTokens(raw) {
   const perDevice = new Map();
   const anyDevice = new Set();
-  for (const entry of String(raw ?? "demo-token").split(",")) {
+  /* 空串 / 只有空白 / null / undefined → 一律退回默认令牌（见上方说明） */
+  const configured = String(raw ?? "").trim();
+  for (const entry of (configured || DEFAULT_DEVICE_TOKEN).split(",")) {
     const text = entry.trim();
     if (!text) continue;
     const at = text.indexOf(":");

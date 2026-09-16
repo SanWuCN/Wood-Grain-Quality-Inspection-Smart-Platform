@@ -38,6 +38,7 @@ import { appendFileSync, createReadStream, existsSync, mkdirSync, statSync } fro
 import { basename, join } from "node:path";
 import { ASSETS_ROOT } from "./assets.mjs";
 import { verifyToken } from "./auth.mjs";
+import { DEFAULT_DEVICE_TOKEN } from "./device-gateway.mjs";
 import { WorkflowError } from "./workflow.mjs";
 
 /* ------------------------------------------------------------------ *
@@ -115,11 +116,16 @@ function normalizeSha256(value) {
  * 默认 `demo-token` 与终端 `deploy/config.pi5.json` 的出厂值一致。
  * 这里重新读一遍环境变量而不是从网关借实例：uploads 在 `server/index.mjs` 里只拿 db，
  * 不该为了一个令牌判断把设备网关也拖成它的构造依赖。
+ *
+ * ⚠ **空串也算没配**：`String(raw ?? "demo-token")` 只在 null/undefined 时生效，
+ *   而实测环境里这个变量常常是空字符串 —— 那样会解析出 0 个令牌，
+ *   设备上行一律 401。默认值统一取 `DEFAULT_DEVICE_TOKEN`，两处不再各写一份字面量。
  */
 function parseDeviceTokens(raw) {
   const perDevice = new Map();
   const anyDevice = new Set();
-  for (const entry of String(raw ?? "demo-token").split(",")) {
+  const configured = String(raw ?? "").trim();
+  for (const entry of (configured || DEFAULT_DEVICE_TOKEN).split(",")) {
     const text = entry.trim();
     if (!text) continue;
     const at = text.indexOf(":");
