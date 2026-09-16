@@ -1,0 +1,841 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>木脉智检平台 · 软件技术架构 v2.0</title>
+  <style>
+    :root {
+      --ink: #06111d;
+      --surface: #0b1928;
+      --surface-2: #0f2234;
+      --surface-3: #142b3d;
+      --line: #347491;
+      --line-hot: #7dd8eb;
+      --text: #ecf8fb;
+      --muted: #89a9b7;
+      --cyan: #71d6e7;
+      --amber: #edb85e;
+      --coral: #df7b6f;
+      --green: #76cda5;
+      --steel: #6689a5;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #030a12;
+    }
+
+    body {
+      color: var(--text);
+      font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+    }
+
+    .viewport {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      background:
+        linear-gradient(rgba(63, 112, 143, 0.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(63, 112, 143, 0.07) 1px, transparent 1px),
+        #030a12;
+      background-size: 32px 32px;
+    }
+
+    .stage {
+      position: absolute;
+      width: 1600px;
+      height: 900px;
+      padding: 24px;
+      overflow: hidden;
+      transform-origin: center center;
+      background:
+        linear-gradient(118deg, transparent 0 67%, rgba(68, 128, 160, 0.08) 67% 67.5%, transparent 67.5%),
+        radial-gradient(circle at 52% 0, rgba(45, 125, 169, 0.16), transparent 41%),
+        linear-gradient(135deg, #071321, #091827 52%, #06111c);
+      border: 3px solid #214b64;
+      box-shadow:
+        inset 0 0 0 1px #72bad1,
+        inset 0 0 58px rgba(14, 88, 126, 0.22),
+        0 18px 80px rgba(0, 0, 0, 0.55);
+    }
+
+    .stage::before,
+    .stage::after {
+      content: "";
+      position: absolute;
+      pointer-events: none;
+    }
+
+    .stage::before {
+      inset: 9px;
+      border: 1px solid rgba(112, 192, 216, 0.24);
+    }
+
+    .stage::after {
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 6px;
+      background: linear-gradient(90deg, var(--cyan), transparent 19%, transparent 81%, var(--amber));
+    }
+
+    .layout {
+      position: relative;
+      z-index: 1;
+      height: 100%;
+      display: grid;
+      grid-template-rows: 92px minmax(0, 1fr) 116px;
+      gap: 12px;
+    }
+
+    .masthead {
+      position: relative;
+      display: grid;
+      grid-template-columns: 410px 1fr auto;
+      align-items: center;
+      min-width: 0;
+      padding: 0 22px;
+      background:
+        linear-gradient(90deg, rgba(34, 91, 126, 0.68), rgba(11, 31, 51, 0.9) 45%, rgba(9, 24, 39, 0.94));
+      border: 2px solid #3c7898;
+      clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+      box-shadow: inset 0 0 0 1px rgba(121, 205, 228, 0.18);
+    }
+
+    .masthead::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 280px;
+      height: 4px;
+      background: var(--cyan);
+      box-shadow: 286px 0 0 #2c6687;
+    }
+
+    .title-kicker,
+    .section-en,
+    .tag,
+    .eyebrow,
+    .node-code,
+    .bus-label,
+    .meta-key {
+      font-family: Bahnschrift, "DIN Alternate", "Microsoft YaHei UI", sans-serif;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .title-kicker {
+      margin-bottom: 5px;
+      color: var(--cyan);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 30px;
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: 0;
+      text-shadow: 0 0 18px rgba(113, 214, 231, 0.25);
+    }
+
+    .masthead-summary {
+      min-width: 0;
+      padding: 0 28px;
+      border-left: 1px solid rgba(116, 193, 216, 0.28);
+      color: #aac1cb;
+      font-size: 14px;
+      line-height: 1.7;
+      text-wrap: pretty;
+    }
+
+    .masthead-meta {
+      display: grid;
+      grid-template-columns: repeat(3, auto);
+      gap: 8px;
+    }
+
+    .meta-chip {
+      min-width: 108px;
+      padding: 9px 11px 8px;
+      background: rgba(5, 17, 29, 0.7);
+      border: 1px solid #356c89;
+      box-shadow: inset 0 -2px 0 rgba(113, 214, 231, 0.22);
+    }
+
+    .meta-key {
+      display: block;
+      color: #6e93a6;
+      font-size: 9px;
+      margin-bottom: 4px;
+    }
+
+    .meta-value {
+      color: #dff8fb;
+      font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .core-grid {
+      display: grid;
+      grid-template-columns: 0.92fr 1.48fr 0.96fr;
+      gap: 12px;
+      min-height: 0;
+    }
+
+    .center-stack {
+      display: grid;
+      grid-template-rows: 1.08fr 0.92fr;
+      gap: 12px;
+      min-height: 0;
+    }
+
+    .panel {
+      --accent: var(--cyan);
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      background: linear-gradient(150deg, rgba(18, 40, 59, 0.98), rgba(8, 22, 36, 0.98));
+      border: 3px solid #285d78;
+      clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+      box-shadow:
+        inset 0 0 0 1px rgba(125, 216, 235, 0.28),
+        inset 0 0 32px rgba(22, 86, 118, 0.11);
+    }
+
+    .panel::before {
+      content: "";
+      position: absolute;
+      inset: 7px;
+      z-index: 0;
+      pointer-events: none;
+      border: 1px solid rgba(85, 142, 170, 0.23);
+    }
+
+    .panel::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 72px;
+      height: 4px;
+      z-index: 3;
+      background: var(--accent);
+      box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 42%, transparent);
+    }
+
+    .panel[data-tone="amber"] {
+      --accent: var(--amber);
+      border-color: #765b34;
+    }
+
+    .panel[data-tone="green"] {
+      --accent: var(--green);
+      border-color: #376e5d;
+    }
+
+    .panel[data-tone="coral"] {
+      --accent: var(--coral);
+      border-color: #774943;
+    }
+
+    .panel-head {
+      position: relative;
+      z-index: 2;
+      height: 43px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      background: linear-gradient(90deg, rgba(47, 84, 105, 0.84), rgba(25, 54, 73, 0.78));
+      border-bottom: 2px solid #345f77;
+    }
+
+    .panel-head::after {
+      content: "";
+      position: absolute;
+      right: 8px;
+      bottom: -2px;
+      width: 28px;
+      height: 2px;
+      background: var(--accent);
+    }
+
+    .section-title {
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    .section-index {
+      color: var(--accent);
+      font-family: Bahnschrift, sans-serif;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .section-title h2 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+
+    .section-en {
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .head-code {
+      color: #8fb1c0;
+      font-family: Bahnschrift, sans-serif;
+      font-size: 10px;
+    }
+
+    .panel-body {
+      position: relative;
+      z-index: 1;
+      height: calc(100% - 43px);
+      padding: 13px;
+    }
+
+    .feature-list {
+      height: 100%;
+      display: grid;
+      grid-template-rows: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .feature {
+      display: grid;
+      grid-template-columns: 38px minmax(0, 1fr);
+      align-items: center;
+      min-height: 0;
+      padding: 9px 10px;
+      background: rgba(23, 45, 63, 0.72);
+      border: 2px solid #2b4c60;
+      box-shadow: inset 3px 0 0 var(--feature-accent, var(--cyan));
+    }
+
+    .feature:nth-child(2) { --feature-accent: var(--amber); }
+    .feature:nth-child(3) { --feature-accent: var(--green); }
+    .feature:nth-child(4) { --feature-accent: var(--coral); }
+
+    .feature-code {
+      color: var(--feature-accent, var(--cyan));
+      font-family: Bahnschrift, sans-serif;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .feature h3,
+    .data-block h3,
+    .service-cell h3 {
+      margin: 0 0 5px;
+      color: #f2fbfd;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .feature p,
+    .data-block p,
+    .service-cell p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+      text-wrap: pretty;
+    }
+
+    .agent-body {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 10px;
+    }
+
+    .agent-note {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 9px;
+      background: rgba(5, 19, 32, 0.72);
+      border: 1px solid #315b70;
+      color: #9eb8c4;
+      font-size: 11px;
+    }
+
+    .agent-note strong {
+      color: var(--cyan);
+      font-family: Bahnschrift, sans-serif;
+      font-size: 11px;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 14px;
+      align-items: stretch;
+      min-height: 0;
+    }
+
+    .flow-node {
+      position: relative;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 10px 9px 8px;
+      background: #10273a;
+      border: 2px solid #3c6e87;
+      box-shadow: inset 0 -3px 0 var(--node-accent, var(--cyan));
+    }
+
+    .flow-node:nth-child(2) { --node-accent: #58b7d5; }
+    .flow-node:nth-child(3) { --node-accent: var(--amber); }
+    .flow-node:nth-child(4) { --node-accent: #8aa8d4; }
+    .flow-node:nth-child(5) { --node-accent: var(--green); }
+    .flow-node:nth-child(6) { --node-accent: var(--coral); }
+
+    .flow-node:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -13px;
+      width: 10px;
+      height: 2px;
+      background: #70bed4;
+      box-shadow: 5px -3px 0 -1px #70bed4, 5px 3px 0 -1px #70bed4;
+    }
+
+    .node-code {
+      color: var(--node-accent, var(--cyan));
+      font-size: 9px;
+      font-weight: 800;
+    }
+
+    .flow-node h3 {
+      margin: 8px 0 5px;
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .flow-node p {
+      margin: 0;
+      color: #7f9dac;
+      font-size: 9px;
+      line-height: 1.35;
+    }
+
+    .agent-contracts {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 7px;
+    }
+
+    .contract {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 8px;
+      border: 1px solid #294f64;
+      background: rgba(11, 30, 47, 0.8);
+      font-size: 9px;
+    }
+
+    .contract span:first-child {
+      color: #6f91a2;
+    }
+
+    .contract span:last-child {
+      color: #b8d6de;
+      font-family: Bahnschrift, sans-serif;
+      white-space: nowrap;
+    }
+
+    .service-grid {
+      height: 100%;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-rows: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .service-cell {
+      position: relative;
+      min-height: 0;
+      padding: 10px 12px 8px 43px;
+      background: rgba(22, 45, 64, 0.72);
+      border: 2px solid #345b70;
+    }
+
+    .service-id {
+      position: absolute;
+      left: 9px;
+      top: 10px;
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      color: var(--amber);
+      font-family: Bahnschrift, sans-serif;
+      font-size: 10px;
+      font-weight: 800;
+      border: 1px solid #82673b;
+      background: #132538;
+    }
+
+    .data-stack {
+      height: 100%;
+      display: grid;
+      grid-template-rows: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .data-block {
+      min-height: 0;
+      padding: 10px 11px;
+      background: rgba(22, 43, 61, 0.75);
+      border: 2px solid #365466;
+    }
+
+    .data-block:nth-child(1) { border-color: #4f7b91; }
+    .data-block:nth-child(2) { border-color: #55715f; }
+    .data-block:nth-child(3) { border-color: #765d38; }
+    .data-block:nth-child(4) { border-color: #704944; }
+
+    .data-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 6px;
+      color: #718f9e;
+      font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif;
+      font-size: 9px;
+    }
+
+    .data-row span:last-child {
+      color: #b4d0d8;
+      text-align: right;
+    }
+
+    .bus {
+      --accent: var(--cyan);
+      position: relative;
+      display: grid;
+      grid-template-columns: 245px 1fr;
+      gap: 14px;
+      align-items: stretch;
+      min-width: 0;
+      padding: 12px 14px;
+      background: linear-gradient(90deg, #112a3e, #0a1d2e 60%, #101f2a);
+      border: 3px solid #326a88;
+      box-shadow: inset 0 0 0 1px rgba(122, 212, 234, 0.26);
+      clip-path: polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%);
+    }
+
+    .bus-title {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding-left: 10px;
+      border-left: 4px solid var(--cyan);
+    }
+
+    .bus-title h2 {
+      margin: 3px 0 5px;
+      font-size: 16px;
+    }
+
+    .bus-title p {
+      margin: 0;
+      color: #7898a8;
+      font-size: 10px;
+    }
+
+    .bus-lane {
+      display: grid;
+      grid-template-columns: 1fr 32px 1fr 32px 1.08fr 32px 1.35fr;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .bus-node {
+      min-width: 0;
+      height: 68px;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 11px;
+      background: #0d2132;
+      border: 2px solid #3a647a;
+    }
+
+    .bus-node:last-child {
+      border-color: #78613d;
+    }
+
+    .bus-index {
+      width: 28px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      color: var(--cyan);
+      font-family: Bahnschrift, sans-serif;
+      font-size: 11px;
+      font-weight: 800;
+      border-right: 2px solid #376278;
+    }
+
+    .bus-node:last-child .bus-index {
+      color: var(--amber);
+      border-color: #755d36;
+    }
+
+    .bus-label {
+      color: #f0f9fb;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .bus-detail {
+      margin-top: 5px;
+      color: #7898a8;
+      font-size: 9px;
+      line-height: 1.3;
+    }
+
+    .bus-arrow {
+      position: relative;
+      height: 2px;
+      background: #4b849e;
+    }
+
+    .bus-arrow::after {
+      content: "";
+      position: absolute;
+      right: 0;
+      top: -4px;
+      border-left: 7px solid #69bfd5;
+      border-top: 5px solid transparent;
+      border-bottom: 5px solid transparent;
+    }
+
+    .eyebrow {
+      color: var(--cyan);
+      font-size: 9px;
+      font-weight: 800;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 7px;
+    }
+
+    .tag {
+      padding: 3px 6px;
+      color: #a9c8d2;
+      font-size: 8px;
+      border: 1px solid #34596c;
+      background: rgba(6, 19, 31, 0.62);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        scroll-behavior: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="viewport" aria-label="木脉智检平台软件技术架构图">
+    <section class="stage" id="stage">
+      <div class="layout">
+        <header class="masthead">
+          <div>
+            <div class="title-kicker">MUMAI INSPECTION · SYSTEM BLUEPRINT</div>
+            <h1>软件技术架构</h1>
+          </div>
+          <div class="masthead-summary">
+            木纹质检业务平台以浏览器工作台为操作中心，由 Node 共享服务统一承载业务 API、实时事件与设备通道，小木智能体通过本地语音边车完成离线唤醒、识别与任务执行。
+          </div>
+          <div class="masthead-meta" aria-label="架构属性">
+            <div class="meta-chip"><span class="meta-key">DEPLOYMENT</span><span class="meta-value">LOCAL FIRST</span></div>
+            <div class="meta-chip"><span class="meta-key">TRANSPORT</span><span class="meta-value">HTTP + WS</span></div>
+            <div class="meta-chip"><span class="meta-key">VOICE</span><span class="meta-value">OFFLINE</span></div>
+          </div>
+        </header>
+
+        <div class="core-grid">
+          <section class="panel" aria-labelledby="experience-title">
+            <header class="panel-head">
+              <div class="section-title">
+                <span class="section-index">A.</span>
+                <h2 id="experience-title">体验与业务层</h2>
+                <span class="section-en">EXPERIENCE</span>
+              </div>
+              <span class="head-code">WEB APP</span>
+            </header>
+            <div class="panel-body">
+              <div class="feature-list">
+                <article class="feature">
+                  <span class="feature-code">A1</span>
+                  <div><h3>智检业务工作台</h3><p>总览、工单、排练控制台与交付流程</p></div>
+                </article>
+                <article class="feature">
+                  <span class="feature-code">A2</span>
+                  <div><h3>三维与地理场景</h3><p>数字孪生、站点地图、扫描与高斯场景</p></div>
+                </article>
+                <article class="feature">
+                  <span class="feature-code">A3</span>
+                  <div><h3>知识与档案中心</h3><p>知识检索、索引关系、资产归档与版本追踪</p></div>
+                </article>
+                <article class="feature">
+                  <span class="feature-code">A4</span>
+                  <div><h3>硬件与演示界面</h3><p>硬件、固件、传感器与演示呈现页面</p></div>
+                </article>
+              </div>
+            </div>
+          </section>
+
+          <div class="center-stack">
+            <section class="panel" aria-labelledby="agent-title">
+              <header class="panel-head">
+                <div class="section-title">
+                  <span class="section-index">B.</span>
+                  <h2 id="agent-title">小木智能体链路</h2>
+                  <span class="section-en">XIAO MU AGENT</span>
+                </div>
+                <span class="head-code">LOCAL VOICE LOOP</span>
+              </header>
+              <div class="panel-body agent-body">
+                <div class="agent-note">
+                  <span>麦克风音频不上传云端，唤醒通道与单句识别通道独立运行</span>
+                  <strong>16 kHz · MONO · PCM</strong>
+                </div>
+                <div class="flow" aria-label="语音到任务执行流程">
+                  <article class="flow-node"><span class="node-code">01 / INPUT</span><h3>音频采集</h3><p>AudioWorklet<br>静音门控</p></article>
+                  <article class="flow-node"><span class="node-code">02 / WAKE</span><h3>唤醒检测</h3><p>WakeChannel<br>WakeGate</p></article>
+                  <article class="flow-node"><span class="node-code">03 / ASR</span><h3>离线识别</h3><p>KWS + ASR<br>流式字幕</p></article>
+                  <article class="flow-node"><span class="node-code">04 / PLAN</span><h3>意图规划</h3><p>Matcher<br>Planner</p></article>
+                  <article class="flow-node"><span class="node-code">05 / ACT</span><h3>任务执行</h3><p>Executor<br>Tools</p></article>
+                  <article class="flow-node"><span class="node-code">06 / OUTPUT</span><h3>反馈呈现</h3><p>界面状态<br>本地播报</p></article>
+                </div>
+                <div class="agent-contracts">
+                  <div class="contract"><span>唤醒长连接</span><span>/voice-wake</span></div>
+                  <div class="contract"><span>单句识别</span><span>/voice-asr</span></div>
+                  <div class="contract"><span>状态单一来源</span><span>AGENT STORE</span></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel" data-tone="amber" aria-labelledby="service-title">
+              <header class="panel-head">
+                <div class="section-title">
+                  <span class="section-index">C.</span>
+                  <h2 id="service-title">共享服务控制面</h2>
+                  <span class="section-en">SERVICE CONTROL</span>
+                </div>
+                <span class="head-code">NODE.JS</span>
+              </header>
+              <div class="panel-body">
+                <div class="service-grid">
+                  <article class="service-cell"><span class="service-id">01</span><h3>HTTP API 网关</h3><p>鉴权、会话、工单、上传与平台资源路由</p></article>
+                  <article class="service-cell"><span class="service-id">02</span><h3>实时事件中心</h3><p>统一 WebSocket 事件广播与浏览器退避重连</p></article>
+                  <article class="service-cell"><span class="service-id">03</span><h3>设备接入网关</h3><p>设备令牌、在线状态与专用设备通道</p></article>
+                  <article class="service-cell"><span class="service-id">04</span><h3>领域服务集合</h3><p>知识、档案、资产、传感器与工作流服务</p></article>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <section class="panel" data-tone="green" aria-labelledby="data-title">
+            <header class="panel-head">
+              <div class="section-title">
+                <span class="section-index">D.</span>
+                <h2 id="data-title">数据与运行资源</h2>
+                <span class="section-en">DATA & RUNTIME</span>
+              </div>
+              <span class="head-code">LOCAL ASSETS</span>
+            </header>
+            <div class="panel-body">
+              <div class="data-stack">
+                <article class="data-block">
+                  <h3>结构化业务数据</h3>
+                  <p>会话、实体、工单、设备与阶段快照</p>
+                  <div class="data-row"><span>OWNER</span><span>server/storage/db.mjs</span></div>
+                </article>
+                <article class="data-block">
+                  <h3>知识与归档资产</h3>
+                  <p>知识分块、索引关系、演示包与文件归档</p>
+                  <div class="data-row"><span>SERVICES</span><span>knowledge / assets / archive</span></div>
+                </article>
+                <article class="data-block">
+                  <h3>本地语音模型</h3>
+                  <p>中文 KWS 模型、识别模型与业务词表</p>
+                  <div class="data-row"><span>RUNTIME</span><span>sherpa-onnx / CTranslate2</span></div>
+                </article>
+                <article class="data-block">
+                  <h3>前端静态资源</h3>
+                  <p>三维场景、字体、图表资源与构建产物</p>
+                  <div class="data-row"><span>DELIVERY</span><span>public / dist / assets</span></div>
+                </article>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <section class="bus" aria-labelledby="bus-title">
+          <div class="bus-title">
+            <span class="eyebrow">E. INFRASTRUCTURE BUS</span>
+            <h2 id="bus-title">本机运行与通信总线</h2>
+            <p>单机部署，服务边界清晰，外设按需接入</p>
+          </div>
+          <div class="bus-lane">
+            <article class="bus-node"><span class="bus-index">01</span><div><div class="bus-label">BROWSER APP</div><div class="bus-detail">React 19 · Router · Zustand · Three.js</div></div></article>
+            <span class="bus-arrow" aria-hidden="true"></span>
+            <article class="bus-node"><span class="bus-index">02</span><div><div class="bus-label">HTTP / WEBSOCKET</div><div class="bus-detail">/api · /ws · 自动重连</div></div></article>
+            <span class="bus-arrow" aria-hidden="true"></span>
+            <article class="bus-node"><span class="bus-index">03</span><div><div class="bus-label">NODE SHARED SERVICE</div><div class="bus-detail">API · Hub · Gateway · Workflow</div></div></article>
+            <span class="bus-arrow" aria-hidden="true"></span>
+            <article class="bus-node"><span class="bus-index">04</span><div><div class="bus-label">LOCAL SIDECARS & DEVICES</div><div class="bus-detail">Python 语音边车 · 设备通道 · 小车桥接</div></div></article>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const stage = document.getElementById("stage");
+    const fitStage = () => {
+      const scale = Math.min(window.innerWidth / 1600, window.innerHeight / 900);
+      stage.style.transform = `scale(${scale})`;
+    };
+    window.addEventListener("resize", fitStage, { passive: true });
+    fitStage();
+  </script>
+</body>
+</html>
