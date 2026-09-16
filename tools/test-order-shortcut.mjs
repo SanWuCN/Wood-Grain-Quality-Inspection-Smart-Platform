@@ -26,11 +26,20 @@ function findChrome() {
   const override = process.env.CHROME_PATH;
   if (override && existsSync(override)) return override;
   const candidates = [
+    /* macOS */
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    /* Linux */
     "/usr/bin/google-chrome",
     "/usr/bin/chromium",
+    /* Windows（原脚本只有 macOS/Linux 路径，Windows 上一跑就抛
+       "未找到 Chrome / Chromium"；补上这三个后无需再设 CHROME_PATH。
+       位置来自 Chrome/Edge 的默认安装路径，用户级安装走 LOCALAPPDATA 那条） */
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    `${process.env.LOCALAPPDATA ?? ""}\\Google\\Chrome\\Application\\chrome.exe`,
+    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
   ];
   const hit = candidates.find((path) => existsSync(path));
   if (!hit) throw new Error(`未找到 Chrome / Chromium，可用 CHROME_PATH 指定。已尝试：\n  ${candidates.join("\n  ")}`);

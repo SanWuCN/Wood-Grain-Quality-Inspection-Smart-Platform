@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>木脉智检 · 平台概念图 v1.2</title>
+<style>
+  :root{
+    --bg:#0a1321; --panel:#0e1c2e; --line:rgba(78,168,255,.20);
+    --glow:#6ee7ff; --primary:#4ea8ff; --text:#e8f3ff; --muted:#8ea8c3;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; width:1500px; padding:64px 70px 56px; background:var(--bg); color:var(--text);
+    font-family:"Microsoft YaHei","PingFang SC","HarmonyOS Sans SC",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  svg.defs{position:absolute; width:0; height:0}
+
+  /* ── 头：只留名字 + 一句定位 ── */
+  header{border-bottom:1px solid var(--line); padding-bottom:26px}
+  h1{margin:0; font-size:46px; letter-spacing:2px}
+  h1 span{color:var(--glow)}
+  .kick{margin-top:12px; font-size:20px; color:var(--muted); letter-spacing:.5px}
+
+  /* ── 主图：一条闭环（概念节点 + 箭头）── */
+  .flow{margin:54px 0 46px; display:flex; align-items:center; justify-content:space-between; gap:6px}
+  .node{flex:1; text-align:center}
+  .node .ring{
+    width:104px; height:104px; margin:0 auto 16px; border:1px solid var(--line); border-radius:50%;
+    display:flex; align-items:center; justify-content:center; background:var(--panel); color:var(--glow);
+  }
+  .node .ring svg{width:44px; height:44px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round}
+  .node b{display:block; font-size:20px; font-weight:600; letter-spacing:.5px}
+  .node small{display:block; margin-top:7px; font-size:14px; line-height:1.6; color:var(--muted)}
+  .link{width:34px; height:1px; background:linear-gradient(90deg,rgba(78,168,255,.15),var(--primary)); position:relative; flex:0 0 auto}
+  .link::after{content:""; position:absolute; right:-1px; top:-3px; border:4px solid transparent; border-left-color:var(--primary)}
+
+  /* ── 两条贯穿层：概念上"横跨整条闭环" ── */
+  .layers{display:grid; gap:14px}
+  .layer{display:grid; grid-template-columns:56px 200px 1fr; align-items:center; gap:20px;
+         border:1px solid var(--line); background:var(--panel); padding:20px 24px; min-width:0}
+  .layer svg{width:34px; height:34px; fill:none; stroke:var(--glow); stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round}
+  .layer b{font-size:20px; font-weight:600}
+  .layer span{font-size:17px; color:#cfe2f5; overflow-wrap:anywhere}
+  .layer em{color:var(--muted); font-style:normal; font-size:15px; margin-left:10px}
+
+  /* ── 三条原则（概念，不给数字）── */
+  .principles{margin-top:34px; display:grid; grid-template-columns:repeat(3,1fr); gap:16px}
+  .p{border-top:1px solid var(--line); padding-top:16px; display:grid; grid-template-columns:26px 1fr; gap:12px; min-width:0}
+  .p svg{width:22px; height:22px; fill:none; stroke:var(--primary); stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round}
+  .p b{display:block; font-size:17px; margin-bottom:4px}
+  .p small{font-size:14px; color:var(--muted); line-height:1.6}
+
+  .slogan{margin-top:56px; padding-top:26px; border-top:1px solid var(--line); font-size:30px; letter-spacing:1px; text-align:center}
+  .slogan b{color:var(--glow); font-weight:600}
+</style>
+</head>
+<body>
+<svg class="defs" aria-hidden="true">
+  <symbol id="c-field" viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></symbol>
+  <symbol id="c-store" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></symbol>
+  <symbol id="c-scan" viewBox="0 0 24 24"><path d="M3 12h4l2-5 3 10 2.5-6 2 3h4.5"/></symbol>
+  <symbol id="c-order" viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></symbol>
+  <symbol id="c-loop" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></symbol>
+  <symbol id="c-archive" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10h14V9M10 13h4"/></symbol>
+  <symbol id="c-map" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3.2 3.4 3.2 14.6 0 18M12 3c-3.2 3.4-3.2 14.6 0 18"/></symbol>
+  <symbol id="c-voice" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
+  <symbol id="c-true" viewBox="0 0 24 24"><path d="M12 3l7 3.5v5c0 4-3 7.6-7 9.5-4-1.9-7-5.5-7-9.5v-5L12 3z"/><path d="M9 12l2.2 2.2L15.5 10"/></symbol>
+  <symbol id="c-trace" viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.2 16.4C11 14 13 10.5 15.6 8.2"/></symbol>
+  <symbol id="c-pass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.6 2.6L16 9.5"/></symbol>
+</svg>
+
+<header>
+  <h1>木脉智检 · <span>古建筑智能巡检平台</span></h1>
+  <div class="kick">不碰文物，也要把里外看清；说一句话，地图动、页面跳、数据落。</div>
+</header>
+
+<div class="flow">
+  <div class="node">
+    <div class="ring"><svg><use href="#c-field"/></svg></div>
+    <b>现场采集</b>
+    <small>贴着文物走一圈</small>
+  </div>
+  <div class="link"></div>
+  <div class="node">
+    <div class="ring"><svg><use href="#c-store"/></svg></div>
+    <b>原样入库</b>
+    <small>原始件先留下</small>
+  </div>
+  <div class="link"></div>
+  <div class="node">
+    <div class="ring"><svg><use href="#c-scan"/></svg></div>
+    <b>检测判断</b>
+    <small>两路证据互证</small>
+  </div>
+  <div class="link"></div>
+  <div class="node">
+    <div class="ring"><svg><use href="#c-order"/></svg></div>
+    <b>工单流转</b>
+    <small>谁做、到哪一步</small>
+  </div>
+  <div class="link"></div>
+  <div class="node">
+    <div class="ring"><svg><use href="#c-loop"/></svg></div>
+    <b>复巡闭环</b>
+    <small>没闭环的回清单</small>
+  </div>
+  <div class="link"></div>
+  <div class="node">
+    <div class="ring"><svg><use href="#c-archive"/></svg></div>
+    <b>归档交付</b>
+    <small>可校验、可追溯</small>
+  </div>
+</div>
+
+<div class="layers">
+  <div class="layer">
+    <svg><use href="#c-map"/></svg>
+    <b>空间层 · 三维地图</b>
+    <span>从全国一路钻到单根柱子 —— 所有事都发生在同一张图上<em>不是十张报表，是一个现场</em></span>
+  </div>
+  <div class="layer">
+    <svg><use href="#c-voice"/></svg>
+    <b>交互层 · 小木</b>
+    <span>喊一声就能操作，说人话就能干活 —— 语音不是一个输入框，是操作方式<em>说、指、跳、做，一句话到底</em></span>
+  </div>
+</div>
+
+<div class="principles">
+  <div class="p">
+    <svg><use href="#c-true"/></svg>
+    <div><b>真数据</b><small>设备直连、读数标来源；没有的就写"未接入"</small></div>
+  </div>
+  <div class="p">
+    <svg><use href="#c-trace"/></svg>
+    <div><b>可追溯</b><small>每一步都留痕：谁、何时、依据什么</small></div>
+  </div>
+  <div class="p">
+    <svg><use href="#c-pass"/></svg>
+    <div><b>可验收</b><small>拿自家验收矩阵说话，不是自己说好</small></div>
+  </div>
+</div>
+
+<div class="slogan">让每一次判断，<b>都有据可查</b>。</div>
+</body>
+</html>

@@ -31,9 +31,12 @@ import {
 import { evaluateFacts, factToneOf, type FactContext, type FactRow, type LiveSnapshot } from "./facts";
 import {
   FALLBACK_TEXT,
+  INTENT_BY_ID,
   voicePackOf,
   type Intent,
 } from "./intents";
+import { advanceOrderReveal, beginOrderReveal, CHARS_PER_SECOND } from "../ordersReveal";
+import { useWorkOrderStore } from "../store/workOrders";
 import { understand, SEMANTIC_THRESHOLDS, type MatchResult } from "./matcher";
 import { planFacts, planTask, type TaskPlan } from "./planner";
 import {
@@ -51,6 +54,7 @@ import {
 } from "./store";
 import { resolveArgs, toolByName, TOOL_BY_NAME, type ToolDef } from "./tools";
 import { mainLineOf, type ScriptRound } from "./script";
+
 import { routeUtterance, type ScriptMatch } from "./scriptMatch";
 import type { AgentStep, BotTurn, EntityBag } from "./types";
 
@@ -60,7 +64,16 @@ export type Runtime = {
   /** 会话上下文：阶段、账号、通道摘要、数据来源 */
   session: Pick<FactContext, "stageKey" | "accountLabel" | "sourceMode" | "channelSummary">;
   /** 播报（TTS） */
-  speak: (text: string) => void;
+  /**
+   * 播报（TTS）。
+   *
+   * ⚠ 返回类型是 `void | Promise<void>`，**不要**收窄成 `void`：
+   * `VoiceOutput.speak()` 本来就是 Promise（音频 onended / 合成 onend 时 resolve），
+   * 剧本轮次靠它把"逐段展开"校准到**真实播报时长**。
+   * 声明成 `void` 会让调用方拿不到这个 Promise，只能退回按字数估算 ——
+   * 实测那会让板块比声音慢好几秒（64 字估算 16.6s，实际约 11.6s）。
+   */
+  speak: (text: string) => void | Promise<void>;
 };
 
 /** 每步之间的真实延时上限，让观众看清执行过程（§24 的重点就是「看得见」） */
@@ -285,8 +298,152 @@ function replyScript(round: ScriptRound, match: ScriptMatch, runtime: Runtime): 
         : ""),
   });
   pushTurn(turn);
-  runtime.speak(turn.text);
+  const spoken = runtime.speak(turn.text);
+  /**
+   * 剧本轮次**也要执行该轮声明的动作**。
+   *
+   * 原来这里播完就 `return turn` —— 于是第①轮「读取这份工单」说完之后页面纹丝不动，
+   * 用户看到的是"小木只是回了句话"（这正是本次要修的现象）。
+   *
+   * 播报是同步的、工具往返是异步的，所以这里**不 await**：先让声音起来，
+   * 导航与逐段揭示随后跟上，与现场观感一致（等到 await 回来再出声就慢了半拍）。
+   *
+   * ── 把播报的 Promise 传下去，用来**校准**揭示节奏 ────────────────────
+   * 「随语音播放展开板块」这件事，原先只有"按字数估时"一条路：
+   * 估算偏长时，声音早已念完、板块还在慢慢亮（实测第①轮揭示跨 13.5s，
+   * 而 64 字的台词按 5.5 字/秒 约 11.6s —— 观感就是"页面跟不上嘴"）。
+   * `VoiceOutput.speak()` 本身是 Promise（音频 `onended` / 合成 `onend` 时 resolve，
+   * 且有看门狗兜底），把它传下去，就能在**真实播报结束**时把最后一段落定，
+   * 而不是继续等估算。拿不到 Promise（注入的是同步实现）时退回纯估算，行为不变。
+   */
+  void applyScriptAction(round, runtime, spoken);
   return turn;
+}
+
+/**
+ * 执行剧本轮次声明的动作，并在需要时驱动「随播报逐步加载」。
+ *
+ * 两条硬约束：
+ *   ① **只跑低风险工具**（`risk === 0`）。剧本是排练稿，不能因为改了台词就顺手
+ *      执行高风险动作；导航类（`open_order` / `open_panel`）的风险都是 0。
+ *   ② **不伪造成功**。台词已经说完了，工具失败只记日志、不补播成功话术。
+ */
+async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: unknown): Promise<void> {
+  const intent = round.intentId ? INTENT_BY_ID[round.intentId] : undefined;
+  const action = intent?.action;
+  const entities = scriptEntities();
+
+  /**
+   * **显式导航优先**（`round.nav`）。
+   *
+   * 为什么不只靠下面那段"跑该轮 intent 的 action"：逐轮验证时发现
+   * 22 轮里只有少数几轮的 intent 恰好指向工单页 —— ④ ㉑ ㉒ 的 `intentId` 是 null
+   * （没有 action 可跑），⑧ ⑩ ⑰ 的动作指向别的页面，⑳ 甚至跳到字面量
+   * `?order=draft`（占位符没人替换）。结果就是"台词念完了，页面纹丝不动"。
+   * 现在把导航写成剧本自己的声明，与 intent 解耦；`nav` 存在时**也不再跑**
+   * 那个不相干的 intent 动作，避免"先跳到 A、又被拽去 B"。
+   */
+  if (round.nav?.route === "order") {
+    const wanted = round.nav.order === "current" ? (entities.order ?? "") : round.nav.order;
+    const tool = toolByName("open_order");
+    if (tool && wanted) {
+      try {
+        await runTool(tool, { order: wanted }, runtime, entities, false);
+      } catch (error) {
+        console.warn(`[script] 第 ${round.roundNo} 轮的导航失败：`, error);
+      }
+    } else if (!wanted) {
+      console.warn(`[script] 第 ${round.roundNo} 轮要打开工单，但拿不到工单 id（列表可能还没拉回来）`);
+    }
+  } else if (action) {
+    const tool = toolByName(action.tool);
+    /**
+     * 门槛是「**不产生副作用、也不需要二次确认**」，不是「风险为 0」。
+     *
+     * 踩过的坑：这里一开始写 `tool.risk === 0`，结果第①轮的 `open_order`
+     * 风险等级是 **1**（打开页面/跳转类都不是 0），于是导航被自己挡掉，
+     * 现象与"没接动作"一模一样 —— 排查时先怀疑了路由、又怀疑了权限，最后才发现是门槛。
+     *
+     * 现在按语义放行：`risk <= 1` 且 `requireConfirmation === false`
+     * （导航、选中、只读）；风险 ≥2 或需要确认的动作**一律不执行**——
+     * 那类必须走正常意图链路，让用户在意图层显式确认。
+     */
+    const scriptsMayRun = tool && tool.risk <= 1 && !tool.requireConfirmation;
+    if (scriptsMayRun) {
+      try {
+        await runTool(tool, resolveArgs(action.params, entities), runtime, entities, false);
+      } catch (error) {
+        console.warn(`[script] 第 ${round.roundNo} 轮的动作 ${action.tool} 执行失败：`, error);
+      }
+    } else if (tool) {
+      console.warn(
+        `[script] 第 ${round.roundNo} 轮的动作 ${action.tool}（风险 ${tool.risk}${tool.requireConfirmation ? "，需确认" : ""}）剧本不执行`,
+      );
+    }
+  }
+  if (round.reveal?.target === "order-detail") {
+    startOrderDetailReveal(round, entities.order ?? "", spoken);
+  }
+}
+
+/**
+ * 剧本轮次的槽位来源。
+ *
+ * 剧本没有 matcher 抽出来的 `entities`，但第①轮的动作是"打开**这份**工单" ——
+ * 指的就是快捷键刚建出来的那张。工单列表由服务端按创建时间倒序返回，取第一条即最新；
+ * 列表还没拉回来时，退回详情里正在看的那一张。
+ */
+function scriptEntities(): EntityBag {
+  const state = useWorkOrderStore.getState();
+  const newest = state.orders[0]?.id ?? state.detail?.order?.id ?? "";
+  return newest ? { order: newest } : {};
+}
+
+/**
+ * 让工单详情**跟着这句台词的节奏**逐段出现。
+ *
+ * 节拍口径与 `tts.ts` 的看门狗一致（按字数估时、不短于 2.5s）：
+ * 声音一响先揭示第 1 段（页面不能是空的），随后按比例推进，
+ * 最后一段落在约 80% 处 —— 留出收尾，避免"话还没说完页面就铺满了"。
+ */
+function startOrderDetailReveal(round: ScriptRound, orderId: string, spoken?: unknown): void {
+  const total = round.reveal?.panels ?? 0;
+  if (!orderId || total <= 0) return;
+  beginOrderReveal(orderId, total);
+
+  /*
+    ⚠ 估时口径统一到**字/秒**，不再用"每字 260ms"。
+    正文里 64 字 × 260ms ≈ 16.6s，而中文播报约 5.5 字/秒（≈182ms/字）——
+    260ms 明显偏长，这正是"板块比声音慢"的算术来源。
+    语速常量从 `ordersReveal.ts` 取（与揭示机制同源），避免两处口径漂移。
+  */
+  const chars = mainLineOf(round).length;
+  const estimatedMs = Math.max(2500, Math.round((chars / CHARS_PER_SECOND) * 1000));
+
+  let done = 0;
+  const timers: number[] = [];
+  for (let stage = 1; stage <= total; stage += 1) {
+    const at = stage === 1 ? 0 : Math.round((estimatedMs * 0.8 * stage) / total);
+    timers.push(window.setTimeout(() => {
+      done = Math.max(done, stage);
+      advanceOrderReveal(orderId, stage);
+    }, at));
+  }
+
+  /*
+    真实播报结束 → 把剩下的段落立刻补齐，并撤掉还没到点的定时器。
+    `VoiceOutput.speak()` 是 Promise（音频 onended / 合成 onend 时 resolve，且有看门狗兜底），
+    所以"最后一块亮起"永远不会晚于声音结束 —— 这就是用户要的「随语音播放展开」。
+    拿不到 Promise（注入的是同步实现）时什么都不做，退回纯估算。
+  */
+  if (spoken && typeof (spoken as Promise<void>).then === "function") {
+    void (spoken as Promise<void>)
+      .catch(() => { /* 播报失败也要把页面铺完，不能停在半截 */ })
+      .then(() => {
+        for (const t of timers) window.clearTimeout(t);
+        if (done < total) advanceOrderReveal(orderId, total);
+      });
+  }
 }
 
 /**

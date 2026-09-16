@@ -110,6 +110,18 @@ function collect(): Step[] {
   if (fab) {
     steps.push({ el: fab, from: { scale: 0.6, y: 16 }, duration: 0.5, delay: 0.7 });
   }
+  /*
+    小木浮标：与右下角的「小木助手」浮标（`.appshell__fab`）**同一拍**落位。
+    它此前完全没被入场覆盖（见 entrance.css 里那段说明：它是 `.appshell__stage`
+    的兄弟节点，而原来的规则只作用于 stage 的子节点），
+    表现为"刷新时整页还在滑入，小木已经稳稳在原位"。
+    ⚠ 只动 `y` 与 `opacity`，**不用 scale** —— 浮标尺寸由拖拽缩放控制
+    （`--xd-size`），叠加缩放会和用户操作打架。
+  */
+  const xiaomu = q(".xd");
+  if (xiaomu) {
+    steps.push({ el: xiaomu, from: { y: 14 }, duration: 0.5, delay: 0.7 });
+  }
   const login = q(".appshell__login");
   if (login) {
     steps.push({ el: login, from: { y: 22 }, duration: 0.6, delay: 0.66 });

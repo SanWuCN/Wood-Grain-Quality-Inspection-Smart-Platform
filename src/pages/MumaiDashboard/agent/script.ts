@@ -62,6 +62,39 @@ export type ScriptRound = {
   precondition?: string;
   /** 交给 TTS 时的语音风格提示 */
   style?: string;
+  /**
+   * 「随播报逐步加载」的目标（可选）。
+   *
+   * ① 接单整理 是唯一需要它的轮次：说完台词后既要把页面**跳到该工单详情**，
+   * 又要让详情页的分区**跟着这句话的节奏逐段出现** ——
+   * 而不是人还没开口，整页内容已经铺满。
+   *
+   * 只声明"要什么"，怎么排拍点在 `executor.ts` 的 `applyScriptAction()` 里。
+   */
+  reveal?: { target: "order-detail"; panels: number };
+  /**
+   * 页码联动：这一轮说完后页面该**跳到哪**。
+   *
+   * ── 为什么需要它（实测暴露的缺口）──────────────────────────────────
+   * 原先"跳转"是靠**该轮 intent 的 action** 顺带完成的（第①轮正好是
+   * `view_current_order` → `open_order`）。但 22 轮里只有少数几轮的 intent
+   * 恰好指向工单页：
+   *   · ④ ㉑ ㉒ 的 `intentId` 是 `null` —— 根本没有 action 可跑，页面纹丝不动；
+   *   · ⑧ ⑩ ⑰ 的动作指向别的页面（构件对比 / 巡检 / 部署检查）；
+   *   · ⑳ 跳到了字面量 `?order=draft` —— 占位符没人替换，选中不到任何工单。
+   * 逐轮验证时这几条全是"跳转失败"。所以把导航**显式声明出来**，
+   * 不再依赖"该轮的意图碰巧是导航类"。
+   */
+  nav?: {
+    /** 目标页面：目前只有工单详情一种 */
+    route: "order";
+    /**
+     * 选中哪张工单：
+     *   "current" = 当前最新的那张（Ctrl+Q+L 刚建出来的，与第①轮同一口径）
+     *   字符串    = 明确指定
+     */
+    order: "current" | string;
+  };
 };
 
 /** 一句台词 */
@@ -97,7 +130,19 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     ],
     next: "沈：收到。我来核对范围。本次完成巡检和辅助诊断，形成可追溯记录。请各岗位报告出发前准备情况。",
     voicePack: null,
-    intentId: "history_summary",
+    /**
+     * ⚠ 这一轮原来绑的是 `history_summary`（查历史巡检风险汇总）——
+     * 与台词说的「读取这份工单」根本不是一件事，结果是**只播报、不跳转**：
+     * 按 Ctrl+Q+L 建单后说「读取这份工单」，页面停在原地不动。
+     *
+     * 改绑 `view_current_order`（查看当前工单）：它的 action 是 `open_order`，
+     * 会把页面跳到 `/orders?order=<当前工单>`；配合下面的 `reveal`，
+     * 详情页的内容再跟着这句话的节奏逐段铺开。
+     */
+    intentId: "view_current_order",
+    /* 详情页分 3 段揭示：工单摘要 → 委托要求与检测主体 → 后续分区 */
+    reveal: { target: "order-detail", panels: 3 },
+    nav: { route: "order", order: "current" },
   },
   {
     roundNo: "②",
@@ -160,6 +205,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
       },
     ],
     next: "沈：现在开始执行任务。具身智能工程师做好小车建图和全景相机录制准备。",
+    /*
+     * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
+     * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
+     */
+    reveal: { target: "order-detail", panels: 3 },
+    nav: { route: "order", order: "current" },
     voicePack: null,
     intentId: null,
   },
@@ -255,6 +306,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
       },
     ],
     next: "史：小木，打开你标记的原图，把疑点区域放大。",
+    /*
+     * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
+     * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
+     */
+    reveal: { target: "order-detail", panels: 3 },
+    nav: { route: "order", order: "current" },
     voicePack: "AI语音3",
     intentId: "compare_columns",
     precondition: "真实视觉模型未接通时，结果须明确标注为「预设标注演示」",
@@ -301,6 +358,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
       },
     ],
     next: "史：已选中目标小车、地图版本和巡检点位，显示任务预览后执行下发。",
+    /*
+     * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
+     * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
+     */
+    reveal: { target: "order-detail", panels: 3 },
+    nav: { route: "order", order: "current" },
     voicePack: null,
     intentId: "start_patrol",
   },
@@ -464,6 +527,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
       },
     ],
     next: "饶：更新完成，版本核对一致，参考输入检查通过。",
+    /*
+     * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
+     * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
+     */
+    reveal: { target: "order-detail", panels: 3 },
+    nav: { route: "order", order: "current" },
     voicePack: null,
     intentId: "deployment_check",
     precondition: "不按倒计时编造成功",
@@ -534,6 +603,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
       },
     ],
     next: "沈：工单里要写清楚后续责任人。持续受潮的区域先排查积水、排水和渗漏源头。",
+    /*
+     * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
+     * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
+     */
+    reveal: { target: "order-detail", panels: 3 },
+    nav: { route: "order", order: "current" },
     voicePack: "AI语音8",
     intentId: "draft_workorder",
   },
@@ -557,6 +632,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
       },
     ],
     next: "史：我们将工单状态分为待复核、待处理、处理中和待验收。",
+    /*
+     * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
+     * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
+     */
+    reveal: { target: "order-detail", panels: 3 },
+    nav: { route: "order", order: "current" },
     voicePack: null,
     intentId: null,
   },
@@ -580,6 +661,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
       },
     ],
     next: "沈：本次待办事项是否已登记？",
+    /*
+     * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
+     * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
+     */
+    reveal: { target: "order-detail", panels: 3 },
+    nav: { route: "order", order: "current" },
     voicePack: null,
     intentId: "unresolved_followup",
   },
