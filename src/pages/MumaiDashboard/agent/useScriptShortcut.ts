@@ -5,6 +5,13 @@
  *   按键序列（`scriptShortcutSequence.ts` 判定）
  *     → `VoiceInput.simulate()` 逐字吐出这句话（每字 100–300ms 随机，模拟流式 ASR）
  *     → 与语音控制台**同一条** `ask()` 理解链路（executor：剧本路由 → 意图兜底 → 播报）
+ *     → 并带上条目里的 `roundNo`，走 `ask()` 的**指定轮次直达**分支
+ *
+ * ── 为什么要带段号（2026-09-17 修）────────────────────────────────
+ * 演示人按了哪个键就是确定要看哪一轮，不该让模糊匹配去猜。旧实现只把触发语丢给
+ * 匹配器，于是：段203/段205 两条条目的触发语**逐字相同**（同是「小木，启动数据清洗…」），
+ * 按键命中哪一轮全看匹配器；⑪ 轮那条触发语为空，`onFinal` 又把空文本丢掉，
+ * 结果 `Ctrl+Q+B` 按了毫无反应。现在两条问题一起消掉。
  *
  * ── 为什么不用控制台那个 VoiceInput 实例 ──────────────────────────
  * 控制台是**可选打开**的面板（`AgentHost` 按需挂载），而快捷键要在任何页面都能用；
@@ -35,22 +42,68 @@ import {
 
 /** 一条"按快捷键就会说出这句话"的剧本对话 */
 export type ScriptShortcutEntry = {
-  /** 触发键（1..9，对应 Ctrl+Q+<key>） */
+  /** 触发键（1..9 / a..z，对应 Ctrl+Q+<key>） */
   key: string;
   /** 这一轮要说的话（逐字照剧本；模拟识别时会一个字一个字蹦出来） */
   text: string;
   /** 人看的标签（哪一幕/哪一轮），进日志与清单用 */
   label: string;
+  /**
+   * 这一条**指定**要播的剧本轮次（圈号，如 "①"、"⑪"）。
+   *
+   * ── 为什么必须带（而不是让匹配器去猜）────────────────────────────
+   * 演示人按了哪个键，就是**确定**要看哪一轮 —— 没有"可能听错"这回事。
+   * 不带段号的话，这条链路会把触发语丢给模糊匹配，于是出现两种现场事故：
+   *   · 两条条目的触发语**逐字相同**时（段203 与段205 就是同一句
+   *     「小木，启动数据清洗…」），按键命中的是哪一轮全看匹配器心情；
+   *   · 台词被改写后触发语与剧本对不上，按键就静默落到意图兜底。
+   * 带上了就走 `executor.ask(..., { roundNo })` 的**直达通道**（score: 1 / verdict: hit）。
+   */
+  roundNo?: string;
+  /**
+   * 这一条要念的是该轮里的**哪一句**（逐字，必须是该轮 lines 里真实存在的）。
+   *
+   * 一轮可能有多句戏（⑮ 主台词 + `audit` 审核播报；④ 主台词 + 段15 同步备份）。
+   * 不带这个字段时只念主台词 —— 于是"指向备用句的那条快捷键"会念成主台词，
+   * 按的是段221、听到的却是段229。带上它，按的键与念的话才是同一句。
+   */
+  lineOverride?: string;
 };
 
 export type UseScriptShortcutOptions = {
   entries: readonly ScriptShortcutEntry[];
   runtime: Runtime;
   /** 认出这句话之后交出去（默认走 `ask()`；测试里可注入假实现） */
-  onSubmit?: (text: string, runtime: Runtime) => void | Promise<void>;
+  onSubmit?: (
+    text: string,
+    runtime: Runtime,
+    entry: ScriptShortcutEntry,
+  ) => void | Promise<void>;
   /** 是否启用（默认启用） */
   enabled?: boolean;
 };
+
+/**
+ * 一条条目该按什么参数交给理解链路（默认路径用）。
+ *
+ * ── 为什么单独抽出来 ──────────────────────────────────────────────
+ * `useScriptShortcut` 是 React 钩子，`node --test` 里挂不起来（没有渲染器），
+ * 而"到底有没有把段号传下去"恰恰是**最需要钉住**的一环：
+ * 漏传不会报错、不会崩，只会静默退回模糊匹配 —— 台上表现是"按键后进了别的轮次"。
+ * 所以把这段判断抽成纯函数，测试直接调它，不必挂组件。
+ */
+export function askArgsFor(entry: ScriptShortcutEntry): {
+  text: string;
+  target: { roundNo?: string; lineOverride?: string } | undefined;
+} {
+  const target: { roundNo?: string; lineOverride?: string } = {};
+  if (entry.roundNo) target.roundNo = entry.roundNo;
+  if (entry.lineOverride) target.lineOverride = entry.lineOverride;
+  return {
+    text: entry.text,
+    target: Object.keys(target).length ? target : undefined,
+  };
+}
 
 export function useScriptShortcut({
   entries,
@@ -70,9 +123,17 @@ export function useScriptShortcut({
 
   const simulateRef = useRef<VoiceInput | null>(null);
 
+  /** 正在模拟的那一条（`onFinal` 只有文本，拿段号要靠它） */
+  const pendingRef = useRef<ScriptShortcutEntry | null>(null);
+
   /* ---------- 自带一个只做"脚本化模拟"的 VoiceInput ---------- */
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
+    /*
+      当前正在模拟的那一条：`onFinal` 要拿到它的段号，但回调签名只有文本。
+      用 ref 记住"这一次模拟的是谁"，与串行队列配对（一次只跑一条）。
+    */
+    const pending = pendingRef;
     const input = new VoiceInput({
       onListening: () => setAgent({ agentState: "LISTENING", stateNote: "识别中（脚本化模拟）" }),
       onPartial: (text, final) =>
@@ -83,8 +144,15 @@ export function useScriptShortcut({
       onFinal: (text) => {
         if (!text.trim()) return;
         setAgent({ finalText: text, partial: "" });
-        const submit = onSubmit ?? ((t: string, rt: Runtime) => ask(t, rt, "example"));
-        void submit(text, runtimeRef.current);
+        const entry = pending.current;
+        pending.current = null;
+        const submit =
+          onSubmit ??
+          ((t: string, rt: Runtime, e: ScriptShortcutEntry) => {
+            const { target } = askArgsFor(e);
+            return ask(t, rt, "example", target);
+          });
+        void submit(text, runtimeRef.current, entry ?? { key: "", text, label: "" });
       },
       onNotice: () => {
         /* 脚本化模拟不依赖麦克风，不会有通道提示 */
@@ -107,6 +175,16 @@ export function useScriptShortcut({
     queue.current = queue.current.then(async () => {
       const input = simulateRef.current;
       if (!input) return;
+      /*
+        ⚠ 空文本也要能触发。
+        ⑪ 轮（段155）在剧本里**没有触发语**（它是本地事件/旁白起头），
+        早期实现直接 `simulate("")`，而 `onFinal` 会把空文本丢掉 ——
+        现场表现就是"按了 Ctrl+Q+B 什么都没发生"，且与"键没生效"无法区分。
+        现在这一条由条目表给出该轮的**主台词**（见 `scriptShortcutEntries`），
+        模拟的就是"小木那句话被听到了"，再经段号直达该轮。
+      */
+      if (!entry.text.trim() && !entry.roundNo) return;
+      pendingRef.current = entry;
       setAgent({ stateNote: `剧本快捷键：${entry.label}`, finalText: "", partial: "" });
       input.simulate(entry.text);
     });

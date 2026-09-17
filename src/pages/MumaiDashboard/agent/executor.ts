@@ -29,6 +29,8 @@ import {
   type MatchJudge,
 } from "./degrade";
 import { evaluateFacts, factToneOf, type FactContext, type FactRow, type LiveSnapshot } from "./facts";
+import { buildSyncBackupStream } from "./syncBackup";
+import { voicePackEntryCount } from "./voicePack";
 import {
   FALLBACK_TEXT,
   INTENT_BY_ID,
@@ -54,7 +56,7 @@ import {
   updateLastBot,
 } from "./store";
 import { resolveArgs, toolByName, TOOL_BY_NAME, type ToolDef } from "./tools";
-import { mainLineOf, type ScriptRound } from "./script";
+import { SCRIPT_ROUNDS, mainLineOf, type ScriptRound } from "./script";
 
 import { routeUtterance, type ScriptMatch } from "./scriptMatch";
 import type { AgentStep, BotTurn, EntityBag } from "./types";
@@ -297,15 +299,38 @@ function replyIntent(
  * 命中后在这里组装成一轮正常的 `BotTurn` 推入会话流，并交给 `runtime.speak` 播报 ——
  * 与意图回复走**同一套落库与播报机制**，界面上看不出两套。
  */
-function replyScript(round: ScriptRound, match: ScriptMatch, runtime: Runtime): BotTurn {
+function replyScript(
+  round: ScriptRound,
+  match: ScriptMatch,
+  runtime: Runtime,
+  /**
+   * 快捷键要求**只念这一句**（逐字）。
+   *
+   * ── 为什么需要它 ────────────────────────────────────────────────
+   * 一轮可能有多句戏（如 ⑮ 的主台词 + `audit` 审核播报、④ 的主台词 + 段15 同步备份）。
+   * 默认口径是"只念 main、备用句只写进 note"（防凭空把等待语当结论念出来），
+   * 于是**指向备用句的那条快捷键会念成主台词** —— 按的是段221、听到的是段229，
+   * 演示人当场就会发现"按键说的和它回答的不是一件事"。
+   *
+   * ⚠ 生效范围**只有按键直达这条路**（`ask()` 的 `target.lineOverride`），
+   *   语音命中一律不传它，保持"一轮只念 main"的原有约束不变。
+   *   而且覆写值必须**确实是该轮 lines 里的一句**（下面会核对），
+   *   不允许由按键传进任意文本 —— 否则快捷键就成了"随便让小木念任何话"的后门。
+   */
+  lineOverride?: string,
+): BotTurn {
   /*
     取哪一句：
       · 默认取 main
       · ⑮ 那种带"等待时选用"的备用播报，只有在该轮确实处于等待/审核未结束时才追加 ——
         现在没有真实审核状态可依据，所以**只播 main**，并把备用句写进 note 让排练者知道它存在。
         （排演约束明确要求"不按倒计时编造成功"，不能凭空把备用句也念出来。）
+      · 例外：快捷键明确指向某一句时（`lineOverride`），念那一句 —— 前提是它
+        **确实是本轮的台词**，否则忽略覆写、退回 main（宁可不换，也不能念稿外的文本）。
   */
-  const line = mainLineOf(round);
+  const requested =
+    lineOverride != null && round.lines.some((l) => l.text === lineOverride) ? lineOverride : null;
+  const line = requested ?? mainLineOf(round);
   const extras = round.lines.filter((l) => l.role !== "main");
 
   const turn = botTurnBase({
@@ -452,6 +477,42 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
     （`actionFor` 查不到就不渲染），所以这里不必再判一次。
   */
   window.dispatchEvent(new CustomEvent("mumai:demo-surface", { detail: { roundNo: round.roundNo } }));
+
+  /*
+    ── 同步备份小窗（用户口径 2026-09-16）──────────────────────────────
+    第④轮小木说完「收到，我来核对范围…」之后，弹出小窗列出**真实**的备份对象
+    （当前工单的附件清单 + 本地播报语音包段数），过一段时间自动收起。
+
+    ── 为什么必须**等播报结束**再弹（实测出来的坑）─────────────────────
+    第一版是立刻派发，小窗的自动收起到点即关。结果：小木这句要念约 7 秒，
+    而小窗的计时从派发那一刻就开始跑（8 行 × 620ms ≈ 5 秒），
+    于是**话还没念完，窗就关了** —— 现场观感就是"刚出来就没了"。
+    现在与 `startOrderDetailReveal` 用同一套办法：拿到播报 Promise 就等它 resolve
+    （`VoiceOutput.speak()` 本来就是 Promise，有看门狗兜底）；注入的是同步实现
+    （拿不到 Promise）时直接派发，退回"立刻显示"。
+
+    ── 为什么语音段数要 await ──────────────────────────────────────
+    这个数字要从语音包清单里数出来（真实 64 段），拿不到就传 0 ——
+    小窗会**不显示**那一行，而不是编一个数字。
+  */
+  if (round.roundNo === "④") {
+    const showSyncPanel = () => {
+      void voicePackEntryCount()
+        .catch(() => 0)
+        .then((segments) => {
+          window.dispatchEvent(
+            new CustomEvent("mumai:sync-backup", { detail: buildSyncBackupStream(segments) }),
+          );
+        });
+    };
+    if (spoken && typeof (spoken as Promise<void>).then === "function") {
+      void (spoken as Promise<void>)
+        .catch(() => { /* 播报失败也要把窗弹出来，不能因为没声音就少一个动作 */ })
+        .then(showSyncPanel);
+    } else {
+      showSyncPanel();
+    }
+  }
 }
 
 /**
@@ -893,7 +954,25 @@ async function runQuery(runtime: Runtime, intent: Intent, match: MatchResult, ge
  */
 installDegradeGuard();
 
-export async function ask(text: string, runtime: Runtime, via: "text" | "mic" | "example" = "text"): Promise<void> {
+/**
+ * 执行一次"用户说了这句话"。
+ *
+ * @param target 可选的**目标轮次提示**（`roundNo`，如 "⑤"）。
+ *   由剧本快捷键（`useScriptShortcut`）传入：按 `Ctrl+Q+N` 时，演示人期望的就是
+ *   **第 N 条戏**，而识别/说法本身可能落到相邻轮次（实测：「请各岗位报告出发前准备
+ *   情况。小木，请帮我做同步备份。」会命中第④轮而不是它自己的那一条）。
+ *   给了提示就以它为准；**语音与文本入口不传这个参数**，仍然走正常的模糊匹配 ——
+ *   演示现场按键要确定，说话要宽容，两者不能混。
+ * @param target.lineOverride 只要该轮里的**这一句**（逐字，必须是本轮 lines 里真实存在的）。
+ *   用于"一条快捷键指向备用句"的情形（段15、段205、段221），让按的键与念的话是同一句。
+ *   值不在本轮 lines 里时会被忽略、退回主台词 —— 不给按键留"念任意文本"的口子。
+ */
+export async function ask(
+  text: string,
+  runtime: Runtime,
+  via: "text" | "mic" | "example" = "text",
+  target?: { roundNo?: string; lineOverride?: string },
+): Promise<void> {
   const trimmed = text.trim();
   /**
    * 空文本 = 「未听清」（PRD FR-10 第 1 条）。
@@ -938,6 +1017,42 @@ export async function ask(text: string, runtime: Runtime, via: "text" | "mic" | 
    *   那在演示现场是最难堪的错。
    */
   const route = routeUtterance(trimmed);
+  /**
+   * 快捷键指定了目标轮次 → **以它为准**，不再靠说法去猜。
+   *
+   * ⚠ 只认剧本里真实存在的 `roundNo`：传进来的编号找不到轮次时**回落**到正常路由，
+   * 而不是硬造一轮 —— 否则现场会出现"按键后小木什么都不说"，
+   * 那比答错更难排查（现象与"没反应"一模一样）。
+   */
+  const pinned =
+    target?.roundNo != null
+      ? (SCRIPT_ROUNDS.find((item) => item.roundNo === target.roundNo) ?? null)
+      : null;
+  if (pinned) {
+    window.dispatchEvent(new CustomEvent("mumai:dismiss-overlays"));
+    setAgent({ agentState: "THINKING", stateNote: `剧本快捷键指定第 ${pinned.roundNo} 轮，思考中...` });
+    await sleep(thinkingDelayMs());
+    if (stale(gen)) return;
+    /**
+     * 造一个"确定命中"的判据给 `replyScript`。
+     *
+     * 为什么不传 `null`：`ScriptMatch` 是结构化字段（score / margin / hits / verdict），
+     * `replyScript` 会用它渲染气泡上的"判据"那行与置信度。快捷键这条路**本来就是确定命中**
+     * （演示人按了哪个键就是哪一轮），所以如实给 `score: 1 / verdict: "hit"`，
+     * 并把判定理由写成"快捷键指定"，让界面与日志都能看出这轮不是语音猜出来的。
+     */
+    const pinnedMatch: ScriptMatch = {
+      round: pinned,
+      score: 1,
+      runnerUp: null,
+      margin: 1,
+      hits: [],
+      verdict: "hit",
+      reason: "剧本快捷键（Ctrl+Q 序列）直接指定轮次，未经语音匹配",
+    };
+    replyScript(pinned, pinnedMatch, runtime, target?.lineOverride);
+    return;
+  }
   if (route.kind === "script") {
     /*
       ── 先把屏幕上残留的浮层收掉（现场实测出的穿帮）──────────────────

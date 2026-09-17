@@ -17,13 +17,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { advanceSequence, initialSequenceState } from "./scriptShortcutSequence.ts";
-import type { ScriptShortcutEntry } from "./useScriptShortcut.ts";
+import { askArgsFor, type ScriptShortcutEntry } from "./useScriptShortcut.ts";
 
-/** 与 Shell 里那份表同构的最小样例（键位 → 台词） */
+/** 与 Shell 里那份表同构的最小样例（键位 → 台词 + 段号） */
 const ENTRIES: ScriptShortcutEntry[] = [
-  { key: "1", text: "读取这份工单", label: "① 接单整理" },
-  { key: "2", text: "同步备份", label: "③ 启用同步备份" },
-  { key: "3", text: "近三个月天气", label: "④ 天气查询" },
+  { key: "1", text: "读取这份工单", label: "段9·史", roundNo: "①" },
+  { key: "2", text: "同步备份", label: "段15·沈", roundNo: "④" },
+  { key: "3", text: "近三个月天气", label: "段26·沈", roundNo: "②" },
 ];
 
 test("按 Ctrl+Q+数字 能对应到唯一一条（键位不重复、台词非空）", () => {
@@ -47,4 +47,26 @@ test("序列判定与条目表配合：Q+1/Q+2/Q+3 各自命中对应的键", ()
 test("同一条台词不会绑两个键（否则清单与音频都对不上）", () => {
   const texts = ENTRIES.map((e) => e.text);
   assert.deepEqual([...new Set(texts)].length, texts.length, `台词重复：${texts.join(" | ")}`);
+});
+
+test("条目带的段号必须传给理解链路（漏传就静默退回模糊匹配）", () => {
+  /*
+    ⚠ 这条是本组里最要紧的一条：漏传 `roundNo` **不会报错、不会崩**，
+    只会让按键走模糊匹配 —— 台上表现是"按了 5 号键却进了别的轮次"，
+    且因为 `ask()` 能兜底，连日志里都看不出异常。所以逐条钉住。
+  */
+  for (const entry of ENTRIES) {
+    const args = askArgsFor(entry);
+    assert.equal(args.text, entry.text, "要模拟的文本必须逐字不变");
+    assert.deepEqual(
+      args.target,
+      { roundNo: entry.roundNo },
+      `${entry.label} 的段号没有传下去，会退回模糊匹配`,
+    );
+  }
+});
+
+test("没有段号的条目不给 target（走正常路由，而不是硬造一轮）", () => {
+  const args = askArgsFor({ key: "z", text: "临时一句话", label: "临时" });
+  assert.equal(args.target, undefined);
 });
