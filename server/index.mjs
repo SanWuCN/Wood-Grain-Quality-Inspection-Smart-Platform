@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { openDatabase } from "./storage/db.mjs";
 import { createApi } from "./api/http.mjs";
 import { createHub } from "./services/hub.mjs";
+import { createVoiceProxy, probeVoiceProxy as voiceProxyProbe } from "./services/voice-proxy.mjs";
 import { createDeviceGateway, parseDeviceTokens } from "./services/device-gateway.mjs";
 import { createWorkOrderService } from "./services/work-orders.mjs";
 import { createUploadService } from "./services/uploads.mjs";
@@ -93,6 +94,8 @@ export function startService({
   const devices = createDeviceGateway({ db, sessionId, tokens: parseDeviceTokens(deviceTokenSpec()) });
   server.on("upgrade", (request, socket, head) => {
     if (devices.handleUpgrade(request, socket, head)) return;
+    /* 语音通道先于事件通道试：`/voice-*` 与 `/ws` 不是同一套协议端点 */
+    if (voiceProxy.handleUpgrade(request, socket, head)) return;
     if (hub.handleUpgrade(request, socket, head)) return;
     socket.destroy();
   });
@@ -126,6 +129,14 @@ export function startService({
     else hub.broadcastCart({ type: "link", payload: cart.snapshot() });
   };
   const unsubscribeCart = cart.subscribe(subscribeCart);
+  /*
+    语音通道代理（生产服务侧）—— `/voice-asr`、`/voice-wake`、`/voice-api`。
+    这三条原来只在 `vite.config.ts` 里配了代理，于是**只有从 5173 打开页面时语音才通**；
+    用生产服务（8000，`--static dist`）打开时，`/voice-wake` 的 upgrade 没人认、
+    socket 直接被销毁 —— 画面上「常驻唤醒」永远连不上，看起来就像"语音识别被剔除"。
+    详见 `services/voice-proxy.mjs` 的文件头说明。
+  */
+  const voiceProxy = createVoiceProxy({ logger: { warn: (...args) => log("[voice]", ...args) } });
   const handle = createApi({
     db,
     hub,
@@ -134,6 +145,7 @@ export function startService({
     workOrders,
     uploads,
     cart,
+    voiceProxy,
     staticRoot: staticDir ? resolve(staticDir) : null,
     knowledgeRunner,
   });
@@ -146,6 +158,18 @@ export function startService({
       log(`木脉智检 · 共享服务已启动`);
       log(`  HTTP      http://${host === "0.0.0.0" ? "localhost" : host}:${actualPort}/api`);
       log(`  WebSocket ws://${host === "0.0.0.0" ? "localhost" : host}:${actualPort}/ws`);
+      /*
+        语音通道状态：启动时如实报一次。
+        为什么要报：这三条通道以前只在 vite 里代理过，从 8000 打开时静默不可用 ——
+        现场表现是"语音识别好像被剔除了"。启动日志写明，就不必再去猜。
+      */
+      void voiceProxyProbe().then((v) => {
+        log(
+          v.http
+            ? `  语音通道  /voice-wake · /voice-asr · /voice-api → ${voiceProxy.targets.ws}（${v.detail}）`
+            : `  语音通道  ⚠ 本机语音桥不可用（${voiceProxy.targets.http}）—— 唤醒与语音输入用不了；快捷键与示例问句仍可用`,
+        );
+      });
       log(`  设备通道  ws://${host === "0.0.0.0" ? "localhost" : host}:${actualPort}/ws/devices/{deviceId}`);
       log(`  设备网关  令牌 ${devices.status().tokens} 组 · 已登记 ${devices.status().devices} 台 · 在线 ${devices.status().online} 台`);
       log(`  会话      ${sessionId}（共 ${listSessions(db).length} 场）`);

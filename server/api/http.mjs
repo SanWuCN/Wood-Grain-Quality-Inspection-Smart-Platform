@@ -137,7 +137,7 @@ function readRawBody(req, limit = 2 * 1024 * 1024) {
  * 路由
  * ------------------------------------------------------------------ */
 
-export function createApi({ db, hub, bridge, devices = null, workOrders = null, uploads = null, cart = null, staticRoot = null, knowledgeRunner = null, logger = console }) {
+export function createApi({ db, hub, bridge, devices = null, workOrders = null, uploads = null, cart = null, voiceProxy = null, staticRoot = null, knowledgeRunner = null, logger = console }) {
   ensureAssetsRoot();
   /*
     路由表是**每个 API 实例一份**，不是模块级。
@@ -1333,6 +1333,14 @@ export function createApi({ db, hub, bridge, devices = null, workOrders = null, 
   return async function handle(req, res) {
     const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
     const pathname = url.pathname;
+
+    /*
+      语音通道 `/voice-api/*`：**必须在静态兜底之前**转给本机语音桥接层。
+      放在静态之后的话，桥接层不可用时会被 SPA 兜底回一张 HTML ——
+      前端把 HTML 当 JSON 解析，报出 "Unexpected token <" 这种与真因无关的错
+      （`voice-proxy.mjs` 里如实回 502 + JSON 就是为了避免这个）。
+    */
+    if (voiceProxy && voiceProxy.handleHttp(req, res)) return;
 
     // 静态资源：生产构建后由本服务提供（开发阶段 staticRoot 为 null）
     if (!pathname.startsWith("/api/")) {
