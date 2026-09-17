@@ -39,6 +39,7 @@ import { Icon } from "../icons";
 import { useMumai } from "../context";
 import { CaptureTab } from "./CaptureRun";
 import { TriageTab } from "./TriageLog";
+import { DeviceAccessTab } from "./DeviceAccess";
 import { api } from "../api/client";
 import { useDeviceLink, useDevicePreview, type DeviceLink } from "../device/useDeviceLink";
 import { BATCH_STATE_LABEL, HANDHELD_DEVICE_ID, toScanBatch, type DeviceReport } from "../device/types";
@@ -60,6 +61,11 @@ const TABS = [
   { key: "capture", label: "采集作业", icon: "nav-capture" },
   { key: "triage", label: "异常排查", icon: "status-warning" },
   { key: "monitor", label: "硬件监看", icon: "identity-agent" },
+  /*
+    设备接入（用户 2026-09-22 给的「设备接入交接包」）：这一页回答的是
+    「为什么看不到小车 / 扫描仪」—— 把交接包自检脚本的 5 节判据搬进平台，现取既有服务的事实。
+  */
+  { key: "access", label: "设备接入", icon: "status-device-offline" },
 ] as const;
 
 const CHANNEL_TONE: Record<string, Tone> = {
@@ -978,12 +984,16 @@ export default function Hardware() {
                     : "归档回放"
                   : tab === "capture"
                     ? "归档采集记录"
-                    : "归档回放"
+                    : tab === "access"
+                      ? "自检结论"
+                      : "归档回放"
               }
             />
             <span>当前批次 {batch}</span>
             <span>
-              {tab === "capture" ? (
+              {tab === "access" ? (
+                "链路自检 · 三份本地配置的落盘状态"
+              ) : tab === "capture" ? (
                 "归档采集记录已加载"
               ) : tab === "monitor" ? (
                 <>
@@ -1004,7 +1014,8 @@ export default function Hardware() {
         ))}
       </Toolbar>
 
-      {frozen && tab !== "capture" ? (
+      {/* 冻结横幅讲的是「本批次的病害结论」，与设备接入的自检无关：那一屏不挂它 */}
+      {frozen && tab !== "capture" && tab !== "access" ? (
         <StateBlock
           kind="partial"
           title="该批次已冻结诊断输出"
@@ -1024,6 +1035,7 @@ export default function Hardware() {
         {tab === "monitor" ? (
           <MonitorTab link={link} deviceId={deviceId} batchId={batch} />
         ) : null}
+        {tab === "access" ? <DeviceAccessTab /> : null}
       </div>
     </div>
   );

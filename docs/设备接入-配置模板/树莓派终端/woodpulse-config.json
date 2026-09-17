@@ -1,0 +1,8 @@
+{
+  "platform": {
+    "platform_url": "http://192.168.31.196:8000",
+    "device_id": "handheld-02",
+    "device_token": "demo-token",
+    "demo_session_id": "demo-01"
+  }
+}

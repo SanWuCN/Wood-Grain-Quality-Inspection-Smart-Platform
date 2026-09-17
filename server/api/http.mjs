@@ -58,6 +58,7 @@ import { parseJson } from "../storage/db.mjs";
 import { proxyScreen, screenStatus } from "../services/capture-screen.mjs";
 import { CART_ACTIONS } from "../services/cart.mjs";
 import { createPhotoSet } from "../services/photo-set.mjs";
+import { createDeviceReadiness } from "../services/device-readiness.mjs";
 import { createSensorService } from "../services/sensortag.mjs";
 import { createPlatformResources } from "../services/platform-resources.service.mjs";
 import { registerUploadRoutes } from "../services/uploads.mjs";
@@ -155,6 +156,25 @@ export function createApi({ db, hub, bridge, devices = null, workOrders = null, 
     读接口只要登录态：内网任何账号都能看这批素材。
   */
   const photoSet = createPhotoSet();
+  /*
+    设备链路自检（用户 2026-09-22 给的「设备接入交接包」）：
+    把原包 `smoke-devices.sh` 的 5 节判据从**服务内部**算一遍 ——
+    判据全部取自既有服务（小车的 status/streamProbe、网关的 hardwareView、屏幕状态），
+    页面与自检脚本看到的是同一套结论，不另算一套。
+  */
+  const deviceReadiness = createDeviceReadiness({
+    staticRoot,
+    cart,
+    gateway: devices,
+    screen: { status: screenStatus },
+    health: () => ({
+      service: "mumai-shared",
+      version: "1.0.0",
+      sessions: listSessions(db).length,
+      clients: hub.clientCount(),
+      devices: devices ? devices.status() : null,
+    }),
+  });
   void platform.start().catch((error) => logger.warn?.("平台资源采集启动失败", error));
 
   const ROUTES = [];
@@ -1320,6 +1340,9 @@ export function createApi({ db, hub, bridge, devices = null, workOrders = null, 
   );
 
   /* ---- 健康与预检（PRD §11 预检清单） ---- */
+
+  /** 设备链路自检：5 节结论 + 三份本地配置的落盘状态（读接口只要登录态） */
+  route("GET", "/api/device-readiness", () => deviceReadiness.snapshot());
 
   route("GET", "/api/health", async () => {
     const packDir = join(ASSETS_ROOT, "demo-package");

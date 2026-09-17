@@ -1,0 +1,5 @@
+{
+  "_comment": "放到 <仓库>/server/data/cart.json。改完必须重启后端。平台读过 url / token 后忽略其它字段。token 可以不填（只读看画面），填了才有控制权。",
+  "url": "http://192.168.31.221:8765",
+  "token": "REPLACE_WITH_CART_CONTROL_TOKEN"
+}

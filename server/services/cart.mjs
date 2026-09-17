@@ -498,10 +498,44 @@ export function createCartService({ logger = console } = {}) {
     return null;
   }
 
+  /**
+   * 探一路 MJPEG：**只等响应头**，拿到结论就断开（不把流拉完）。
+   *
+   * 给「设备链路自检」用（交接包 `smoke-devices.sh` 的第 2 节就是这三条结论）：
+   * 未配置 → `503`、上游不出帧/不是 multipart → `502`、出帧 → `200 + multipart`。
+   * 语义与 `proxyStream` 完全一致 —— 页面看到的码和这里探到的必须是同一套解释。
+   */
+  function streamProbe(channel) {
+    const path = STREAM_PATHS[channel];
+    if (!path) return Promise.resolve({ channel, code: null, contentType: null, reason: "unknown-channel" });
+    if (!config.configured) return Promise.resolve({ channel, code: 503, contentType: null, reason: "unconfigured" });
+    const url = new URL(path, config.url);
+    const getter = url.protocol === "https:" ? httpsGet : httpGet;
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (result) => {
+        if (done) return;
+        done = true;
+        resolve({ channel, ...result });
+      };
+      const upstream = getter(url, { headers: baseHeaders(), timeout: 4000 });
+      upstream.on("timeout", () => {
+        upstream.destroy();
+        finish({ code: 502, contentType: null, reason: "timeout" });
+      });
+      upstream.on("response", (stream) => {
+        const contentType = String(stream.headers["content-type"] ?? "");
+        const ok = stream.statusCode === 200 && contentType.startsWith("multipart/x-mixed-replace");
+        stream.destroy();
+        finish({ code: ok ? 200 : 502, contentType, reason: ok ? "frames" : "not-multipart" });
+      });
+      upstream.on("error", (error) => finish({ code: 502, contentType: null, reason: error?.code ?? "unreachable" }));
+    });
+  }
+
   /* ---------------- 生命周期 ---------------- */
 
-  if (config.configured) {
-    connect();
+  if (config.configured) {    connect();
     void refreshInfo().catch(() => {
       /* 小车还没起来时静默：状态 WS 的重连会给出最终结论 */
     });
@@ -516,6 +550,7 @@ export function createCartService({ logger = console } = {}) {
     savedMapImage,
     control,
     proxyStream,
+    streamProbe,
     refreshInfo,
     status: () => ({
       configured: config.configured,

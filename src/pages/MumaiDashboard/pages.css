@@ -3774,6 +3774,173 @@
 }
 
 /* ------------------------------------------------------------------
+   设备接入（硬件详情 → 设备接入）· 交接包自检结论
+   口径条 / 五节结论 / 坑列表
+   ------------------------------------------------------------------ */
+.da-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.da-summary li {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.da-summary li.is-ok {
+  border-left-color: var(--success);
+}
+
+.da-summary li.is-warn {
+  border-left-color: var(--warning);
+}
+
+.da-summary li.is-fail {
+  border-left-color: var(--danger);
+}
+
+.da-summary small {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.da-summary b {
+  color: var(--text-primary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+}
+
+.da-summary span {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+/* 五节结论：一条一行，左右分别是结论色条与"改哪里" */
+.da-section {
+  margin-bottom: var(--space-3);
+}
+
+.da-section > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 30px;
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+}
+
+.da-section > header b {
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 500;
+}
+
+.da-section > ul {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--border-subtle);
+}
+
+.da-section li {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+  padding: 8px 10px;
+  background: var(--bg-page);
+}
+
+.da-section li.is-fail {
+  box-shadow: inset 2px 0 0 0 var(--danger);
+}
+
+.da-section li.is-warn {
+  box-shadow: inset 2px 0 0 0 var(--warning);
+}
+
+.da-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.da-copy b {
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 500;
+}
+
+.da-copy small {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+/* 修法那一行要能从一片灰字里跳出来（现场就是照着它改） */
+.da-copy .da-hints {
+  color: var(--text-secondary);
+  font-family: var(--font-data-mixed);
+}
+
+.da-alert {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--danger);
+  background: var(--bg-page);
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+}
+
+.da-pitfalls {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+}
+
+.da-pitfalls li {
+  margin-bottom: var(--space-2);
+}
+
+.da-pitfalls b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.da-pitfalls code,
+.da-alert code {
+  color: var(--text-primary);
+  font-family: var(--font-data-mixed);
+}
+
+@media (max-width: 1200px) {
+  .da-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .da-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .da-section li {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ------------------------------------------------------------------
    硬件详情 · 异常排查（/hardware?tab=triage）
    异常事件列表 + 详情弹窗 + 设备日志。
    原来的「四项检查与签名」已移出本页（改成采集作业里的设备启动检查），
