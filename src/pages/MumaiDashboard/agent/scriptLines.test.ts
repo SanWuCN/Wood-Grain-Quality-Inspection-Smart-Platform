@@ -176,6 +176,46 @@ test("⑩ 轮素材台词里的数字必须与冻结数据包逐字同源", () =
   assert.ok(!text.includes("xxx"), "⑩ 轮台词不得残留过程稿占位符");
 });
 
+/*
+  ── ⑤ 轮的天气数字必须与冻结数据包同源（用户口径 2026-09-17）────────────
+  用户原话：「第5个对话，天气那个，小木的回答带上较为真实的数据，与平台不穿帮」。
+
+  判据与上面 ⑩（素材）那一组同构：台词里讲到的每个数字都必须能在数据包里逐字找到。
+  为什么这条最要紧：⑤ 播报时屏幕右侧**同时**开着「平台环境档案」面板，
+  台词念 412、面板写别的数，就是当场穿帮 —— 那种错比"数字缺失"难解释得多。
+*/
+test("⑤ 轮天气台词里的数字必须与冻结数据包逐字同源", () => {
+  const text = lineOf("⑤");
+  const keys = [
+    "weather.rain.totalMm",
+    "weather.rain.rainyDays",
+    "weather.rain.peakDailyMm",
+    "weather.humidity.avgPct",
+    "weather.wind.maxGustMs",
+  ];
+  for (const key of keys) {
+    const value = scenarioValue(key);
+    assert.notEqual(value, undefined, `数据包里没有 ${key} —— ⑤ 轮台词不该引用它`);
+    assert.ok(
+      text.includes(String(value)),
+      `⑤ 轮台词里找不到数据包的 ${key}=${String(value)}：台词「${text.slice(0, 60)}…」`,
+    );
+  }
+  /* 台词建议检查的那几项风险，也必须是数据包里真实存在的风险项 */
+  const risks = [
+    ...((scenarioValue("weather.rain.risks") as string[] | undefined) ?? []),
+    ...((scenarioValue("weather.humidity.risks") as string[] | undefined) ?? []),
+    ...((scenarioValue("weather.wind.risks") as string[] | undefined) ?? []),
+  ];
+  assert.ok(risks.length > 0, "数据包里应当有天气风险项");
+  for (const item of ["柱脚积水返潮", "屋面排水", "漆层起翘", "迎风面连接"]) {
+    assert.ok(risks.includes(item), `「${item}」不在数据包的风险项里 —— 台词不能自己编检查项`);
+    assert.ok(text.includes(item), `⑤ 轮台词里缺少数据包已有的风险项「${item}」`);
+  }
+  /* 判据不是恒真：把数字换掉会被上面逐项抓到；这里再钉住文档原句必须原样打头（对稿用） */
+  assert.ok(text.startsWith("已按工单地点建立天气查询。"), "文档第 5 条的原句必须原样打头");
+});
+
 test("全剧本不得残留占位符（xxx / xxxx / 待补文案）", () => {
   for (const round of SCRIPT_ROUNDS) {
     const text = `${round.title}\n${mainLineOf(round)}\n${round.triggers.join("|")}`;

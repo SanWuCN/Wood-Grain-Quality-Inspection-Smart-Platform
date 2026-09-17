@@ -500,6 +500,67 @@ try {
     );
   }
   await shot(send, "5-气泡里的快捷键一览");
+
+  /* ---------- ⑧ 第⑤轮天气：台词里的数据必须与屏幕上的天气面板**同一份** ----------
+     用户口径 2026-09-17：「第5个对话，天气那个，小木的回答带上较为真实的数据，
+     与平台不穿帮，没音频去网站合成」。
+
+     这一条要证三件事，缺一不可：
+       · 小木念的那句话里带上了四个真实数字（412 / 37 / 52.6 / 78 / 17.8）；
+       · **同屏的「平台环境档案」面板上写的是同一组数字**（这才叫不穿帮）——
+         判据是"面板文本里也能找到这些数字"，任一侧改了口径都会红；
+       · 播的是刚合成的 web 录音（/voice/round-05.mp3），没有回退合成音。
+  */
+  await evaluate(`(() => { window.__audio = { played: [], synth: 0 }; return true; })()`);
+  await sleep(1500);
+  await dispatch("m");
+  await dispatch("5");
+
+  /* 先等气泡里的回答出现（文字先上屏），立刻核对数字 */
+  let weatherAnswer = "";
+  for (let i = 0; i < 120; i += 1) {
+    weatherAnswer = await evaluate(`(() => {
+      const el = document.querySelector('.xd__panel .xd__answer');
+      return el ? (el.textContent || '') : '';
+    })()`);
+    if (weatherAnswer.includes("天气查询")) break;
+    await sleep(250);
+  }
+  const NUMBERS = ["412", "37", "52.6", "78", "17.8"];
+  const missingInSpeech = NUMBERS.filter((n) => !weatherAnswer.includes(n));
+  check(
+    "第⑤轮台词带上了平台真实天气数据（412/37/52.6/78/17.8）",
+    missingInSpeech.length === 0,
+    missingInSpeech.length ? `缺 ${missingInSpeech.join(" / ")}：${weatherAnswer.slice(0, 60)}…` : weatherAnswer.slice(0, 70),
+  );
+
+  /* 等天气面板出现（它在播报收尾才派发），再比对同屏数字 */
+  let panelText = "";
+  for (let i = 0; i < 240; i += 1) {
+    panelText = await evaluate(`(() => {
+      const el = document.querySelector('.dsf');
+      return el ? (el.textContent || '') : '';
+    })()`);
+    const ready = NUMBERS.every((n) => panelText.includes(n));
+    if (ready) break;
+    await sleep(500);
+  }
+  const missingOnPanel = NUMBERS.filter((n) => !panelText.includes(n));
+  check(
+    "同屏「平台环境档案」面板上写的是同一组数字（不穿帮）",
+    missingOnPanel.length === 0 && panelText.length > 0,
+    missingOnPanel.length ? `面板缺 ${missingOnPanel.join(" / ")}` : `面板文本 ${panelText.length} 字，五个数字都在`,
+  );
+
+  const audio5 = await evaluate(`window.__audio`);
+  const played5 = (audio5?.played ?? []).filter(Boolean);
+  check(
+    "第⑤轮播的是重新合成的录音（/voice/round-05.mp3）",
+    played5.some((u) => String(u).includes("/voice/round-05.mp3")),
+    played5.length ? played5.map((u) => String(u).split("/").pop()).join(" / ") : "没有任何 Audio.play()",
+  );
+  check("第⑤轮没有回退到浏览器合成音", (audio5?.synth ?? 0) === 0, `speechSynthesis.speak 调用 ${audio5?.synth ?? 0} 次`);
+  await shot(send, "6-第⑤轮天气（台词与面板同一组数字）");
 } finally {
   chrome.kill();
 }
