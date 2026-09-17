@@ -43,6 +43,7 @@ import {
   Toolbar,
   WaveChart,
 } from "../ui";
+import { useSearchParams } from "react-router";
 import { useMumai } from "../context";
 import { fmtNum, fmtPct, runEvaluation } from "../lib";
 import {
@@ -61,6 +62,7 @@ import type {
   NodeMetric,
   TrainingConfigField,
 } from "../seed/types";
+import { SampleComparePanel } from "./SampleCompare";
 import { buildDistillScript, buildTrainScript } from "./terminalScripts";
 import { buildTrainingTracking, type TrainingTracking } from "./trainingTracking";
 
@@ -1274,6 +1276,7 @@ function ComparisonPanel({ experiment, dominant = false }: { experiment: Experim
   const regression = evaluation.acceptance.find((item) => item.key === "regression");
 
   return (
+    <>
     <Panel
       title="独立测试集对比"
       extra={
@@ -1431,6 +1434,9 @@ function ComparisonPanel({ experiment, dominant = false }: { experiment: Experim
         ))}
       </ul>
     </Panel>
+      {/* 「新旧对比」这一视图的第二块：现场照片批次的处理前 / 处理后对照（用户 2026-09-22 给的素材） */}
+      <SampleComparePanel />
+    </>
   );
 }
 
@@ -1451,6 +1457,16 @@ export function TrainingTab() {
    * 现在两种视图各自让一个面板横跨整行成为主角，日志默认折叠。
    */
   const [view, setView] = useState<"curve" | "compare" | "tracking">("curve");
+  /*
+    页内主视图可以由 URL 指定（?tab=training&view=compare）：⑲「对比新旧模型」就是
+    冲着一张结论来的，小木带过来时要直接落在「新旧对比」。只在**参数变化**时跟随，
+    用户自己点视图按钮不会被拽回去（训练跑完自动切对比的逻辑也不受影响）。
+  */
+  const [searchParams] = useSearchParams();
+  const viewParam = searchParams.get("view");
+  useEffect(() => {
+    if (viewParam === "curve" || viewParam === "compare" || viewParam === "tracking") setView(viewParam);
+  }, [viewParam]);
   /** 日志是否展开：运行中自动展开，跑完收回去 */
   const [logOpen, setLogOpen] = useState(false);
   /** 训练配置弹窗：参数与说明下沉到二级，一级页面只留摘要 */

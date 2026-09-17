@@ -57,6 +57,7 @@ import { readAssetDetail, readGraph, readOverview, searchKnowledge } from "../se
 import { parseJson } from "../storage/db.mjs";
 import { proxyScreen, screenStatus } from "../services/capture-screen.mjs";
 import { CART_ACTIONS } from "../services/cart.mjs";
+import { createPhotoSet } from "../services/photo-set.mjs";
 import { createSensorService } from "../services/sensortag.mjs";
 import { createPlatformResources } from "../services/platform-resources.service.mjs";
 import { registerUploadRoutes } from "../services/uploads.mjs";
@@ -147,6 +148,13 @@ export function createApi({ db, hub, bridge, devices = null, workOrders = null, 
   */
   /* 平台资源：采集 + 映射，进程内单例（所有浏览器共用一份快照） */
   const platform = createPlatformResources();
+  /*
+    照片处理批次的素材挂载（用户 2026-09-22 给的「处理」包）：
+    1,312 张处理后影像 + 27 张已标注原片留在工作区磁盘上，按 /photos/* 只读映射出去
+    —— 见 services/photo-set.mjs 的文件头（为什么不塞 public/）。
+    读接口只要登录态：内网任何账号都能看这批素材。
+  */
+  const photoSet = createPhotoSet();
   void platform.start().catch((error) => logger.warn?.("平台资源采集启动失败", error));
 
   const ROUTES = [];
@@ -201,6 +209,9 @@ export function createApi({ db, hub, bridge, devices = null, workOrders = null, 
   const cartFail = (error) => {
     throw new WorkflowError(error?.status ?? 502, error?.code ?? "CART_ERROR", error?.message ?? "小车操作失败");
   };
+
+  /** 照片素材可用性与计数：页面据此决定"贴图"还是"提示素材未挂载" */
+  route("GET", "/api/photo-set", () => photoSet.status());
 
   route("GET", "/api/cart/status", () => requireCart().snapshot());
   route("GET", "/api/cart/info", async () => ({ ok: true, info: await requireCart().refreshInfo(), status: requireCart().status() }));
@@ -1342,6 +1353,12 @@ export function createApi({ db, hub, bridge, devices = null, workOrders = null, 
     */
     if (voiceProxy && voiceProxy.handleHttp(req, res)) return;
 
+    /*
+      素材挂载要排在静态兜底**之前**：排在后面的话，素材缺失时会被 SPA 兜底
+      回一张 HTML，前端把 HTML 当图片解码，报出来的是"图挂了"而不是"文件不在"。
+    */
+    if (photoSet.serve(req, res, pathname)) return;
+
     // 静态资源：生产构建后由本服务提供（开发阶段 staticRoot 为 null）
     if (!pathname.startsWith("/api/")) {
       if (staticRoot && (await serveStatic(req, res, staticRoot, pathname))) return;
@@ -1431,6 +1448,8 @@ const STATIC_TYPES = {
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".csv": "text/csv; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".jpg": "image/jpeg",

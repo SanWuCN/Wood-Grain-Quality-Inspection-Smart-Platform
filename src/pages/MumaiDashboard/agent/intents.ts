@@ -341,7 +341,8 @@ export const INTENTS: Intent[] = [
       ],
       facts: ["experimentTitle", "metrics", "acceptance"],
     },
-    action: { tool: "navigate_page", params: { route: "/firmware", tab: "training" } },
+    /* view=compare：这一条问的就是新旧对比，直接落在「新旧对比」主视图（含样本处理批次对照） */
+    action: { tool: "navigate_page", params: { route: "/firmware", tab: "training", view: "compare" } },
   },
   {
     id: "deployment_check",

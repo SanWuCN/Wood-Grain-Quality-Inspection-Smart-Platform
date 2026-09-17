@@ -125,7 +125,7 @@ export function resolveArgs(
   return out;
 }
 
-/** 拼接查询串（navigate_page 支持 route + tab / batch / component / order） */
+/** 拼接查询串（navigate_page 支持 route + tab / batch / component / view） */
 function withQuery(route: string, args: Record<string, string>, keys: string[]): string {
   const params = new URLSearchParams();
   keys.forEach((key) => {
@@ -158,13 +158,14 @@ export const TOOLS: ToolDef[] = [
         tab: { type: "string", description: "页签 key，例如 dataset（/hardware 与 /firmware 使用）" },
         batch: { type: "string", description: "批次号，用于采集页" },
         component: { type: "string", description: "构件编号，用于数字孪生页" },
+        view: { type: "string", description: "页内主视图 key，例如 training 页的 compare（新旧对比）" },
       },
       required: ["route"],
     },
     risk: 1,
     requireConfirmation: false,
     run: (args, ctx) => {
-      const route = withQuery(args.route || "/", args, ["tab", "batch", "component"]);
+      const route = withQuery(args.route || "/", args, ["tab", "batch", "component", "view"]);
       if (!ctx.navigate) return { ok: false, summary: "当前不在路由上下文内，无法跳转" };
       ctx.navigate(route);
       ctx.log(`路由跳转到 ${route}`);

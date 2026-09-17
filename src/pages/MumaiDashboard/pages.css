@@ -3564,6 +3564,234 @@
 }
 
 /* ------------------------------------------------------------------
+   样本新旧对比（训练验证 → 新旧对比）· 用户 2026-09-22 给的照片处理批次
+   概览条 / 四宫格拼回原构图 / 编号对照 / 已标注原片墙 / 大图弹窗
+   ------------------------------------------------------------------ */
+/* 量原图规格用的隐藏探针：不进版面，只为了让数字是"量出来的" */
+.sc-probe {
+  display: none;
+}
+
+.sc-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.sc-overview li {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.sc-overview li.is-wait {
+  border-left-color: var(--border-subtle);
+}
+
+.sc-overview small {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.sc-overview b {
+  color: var(--text-primary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+}
+
+.sc-overview span {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+/* 素材缺失 / 对照表读不到：如实说清楚，不贴碎图 */
+.sc-alert {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--warning);
+  background: var(--bg-page);
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+}
+
+.sc-alert code {
+  color: var(--text-primary);
+  font-family: var(--font-data-mixed);
+}
+
+.sc-block {
+  margin-bottom: var(--space-4);
+}
+
+.sc-block > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 34px;
+  margin-bottom: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+}
+
+.sc-block > header b {
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 500;
+}
+
+.sc-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sc-picker select,
+.sc-picker input[type="search"] {
+  min-width: 180px;
+  max-width: 260px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-aux);
+}
+
+/* 四宫格 + 这张原片的四块对照表（宽面板上左右分栏，不留大片空） */
+.sc-quad {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.sc-quad__side {
+  flex: 1 1 320px;
+  min-width: 280px;
+}
+
+.sc-quad__side > p {
+  margin: var(--space-2) 0 0;
+}
+
+/* 四宫格：位号 1 左上 / 2 右上 / 3 左下 / 4 右下 —— 顺序就是 grid 的自然顺序 */
+.sc-grid {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  width: 100%;
+  max-width: 460px;
+  background: var(--border-subtle);
+}
+
+.sc-cell {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 6px;
+  background: var(--bg-page);
+}
+
+.sc-cell__img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  background: var(--fill-weak);
+  cursor: zoom-in;
+}
+
+.sc-cell figcaption {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.sc-cell figcaption b {
+  color: var(--text-primary);
+  font-size: var(--fs-aux);
+  font-weight: 500;
+}
+
+.sc-cell figcaption span,
+.sc-cell figcaption code {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-aux);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-cell figcaption code {
+  color: var(--text-secondary);
+}
+
+/* 已标注原片：一排小图，点开看原尺寸 */
+.sc-wall {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sc-wall li {
+  display: grid;
+  gap: 2px;
+}
+
+.sc-wall__img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-left: 2px solid var(--border-subtle);
+  background: var(--fill-weak);
+  cursor: zoom-in;
+}
+
+.sc-wall li span {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-aux);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-lightbox__img {
+  display: block;
+  width: 100%;
+  max-height: 68vh;
+  object-fit: contain;
+  background: var(--fill-weak);
+}
+
+@media (max-width: 1200px) {
+  .sc-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .sc-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .sc-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ------------------------------------------------------------------
    硬件详情 · 异常排查（/hardware?tab=triage）
    异常事件列表 + 详情弹窗 + 设备日志。
    原来的「四项检查与签名」已移出本页（改成采集作业里的设备启动检查），
