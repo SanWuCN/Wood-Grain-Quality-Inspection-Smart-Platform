@@ -304,6 +304,71 @@ try {
     `${failedCase?.warn} · ${(failedCase?.note ?? "").slice(0, 90)}`,
   );
   await shot("训练曲线-失败案例");
+
+  /* ---------- 投屏页：同一份曲线（原来那张手画 SVG 连刻度都没有） ---------- */
+  await evaluate(`location.hash = '#/firmware?tab=training&view=curve'`);
+  await sleep(600);
+  /* 投屏显示什么由**服务端焦点**决定（不是 URL），所以先写焦点再开大屏 */
+  const focused = await evaluate(`(async () => {
+    const token = window.localStorage.getItem('mumai.token');
+    const response = await fetch('/api/projection', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
+      body: JSON.stringify({ sessionId: 'demo-01', viewType: 'training', focusIds: [], hold: true }),
+    });
+    return response.ok;
+  })()`);
+  check("把投屏焦点切到「训练验证」（投屏显示什么由服务端焦点决定）", focused === true, focused ? "已写入" : "写入失败");
+
+  await evaluate(`location.hash = '#/present'`);
+  let presentReady = false;
+  for (let i = 0; i < 80; i += 1) {
+    presentReady = await evaluate(`Boolean(document.querySelector('.present__loss canvas'))`);
+    if (presentReady) break;
+    await sleep(250);
+  }
+  check("投屏页的训练验证视图渲染出同一套 ECharts 曲线（不再是手画 SVG）", presentReady, presentReady ? "canvas 就位" : "没等到 .present__loss canvas");
+
+  if (presentReady) {
+    await sleep(600);
+    await evaluate(`document.querySelector('.present__loss')?.scrollIntoView({ block: 'center' })`);
+    await sleep(400);
+    const pBox = await evaluate(`(() => { const b = document.querySelector('.present__loss canvas').getBoundingClientRect();
+      return { x: b.left, y: b.top, w: b.width, h: b.height }; })()`);
+    const pCanvas = await evaluate(`(() => {
+      const el = document.querySelector('.present__loss canvas');
+      const ctx = el.getContext('2d');
+      const data = ctx.getImageData(0, 0, el.width, el.height).data;
+      let painted = 0;
+      for (let i = 3; i < data.length; i += 4 * 37) if (data[i] > 0) painted += 1;
+      return { w: Math.round(el.getBoundingClientRect().width), h: Math.round(el.getBoundingClientRect().height), painted };
+    })()`);
+    check("投屏曲线真的画上了内容", pCanvas.w > 400 && pCanvas.h > 200 && pCanvas.painted > 0, `${pCanvas.w}×${pCanvas.h}，采样到 ${pCanvas.painted} 个不透明像素`);
+
+    let pTip = null;
+    for (const ratio of [0.5, 0.7, 0.3]) {
+      await evaluate(`(() => {
+        const canvas = document.querySelector('.present__loss canvas');
+        const r = canvas.getBoundingClientRect();
+        canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: r.left + r.width * ${ratio}, clientY: r.top + r.height * 0.5, bubbles: true }));
+        return true;
+      })()`);
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: Math.round(pBox.x + pBox.w * ratio), y: Math.round(pBox.y + pBox.h * 0.5), buttons: 0 });
+      for (let i = 0; i < 8; i += 1) {
+        pTip = await evaluate(`(() => { const el = document.querySelector('.present__loss ~ * .tw-chart__tip, .present__curves .tw-chart__tip');
+          return el ? el.textContent.replace(/\\s+/g, ' ').trim() : null; })()`);
+        if (pTip) break;
+        await sleep(200);
+      }
+      if (pTip) break;
+    }
+    check(
+      "投屏图上也能读出读数：第几轮 + 新旧两条线的值",
+      Boolean(pTip) && /第 \d+ 轮/.test(pTip) && /DEMO-M02/.test(pTip),
+      pTip ?? "没有 Tooltip",
+    );
+    await shot("训练曲线-投屏");
+  }
 } catch (error) {
   console.error(`  ✗ 工装自身出错：${error?.message ?? error}`);
   failed += 1;

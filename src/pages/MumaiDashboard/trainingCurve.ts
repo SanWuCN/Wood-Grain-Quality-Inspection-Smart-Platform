@@ -140,34 +140,39 @@ export function lossTooltipText(params: TipParam | TipParam[]): string {
 }
 
 /**
- * 组装损失曲线的 ECharts option。
+ * 组装损失曲线的 ECharts option（训练页与投屏页**共用这一份**）。
  *
  * 与总览页共用 `CHART_BASE`（配色 / Tooltip 外观 / 字体统一注入），
- * 这里只给坐标轴、图例、系列与两条标记线。
+ * 这里只给坐标轴、图例、系列与可选的标记线。
  *
- * `drawn` 是当前回放到第几轮：候选两条曲线按它截断（从左往右长），
- * 基线整条铺满 —— 基线是上一版跑完的历史记录，留着它才有对照物。
+ * `drawn` 是当前回放到第几轮：**需要跟着回放长的曲线**由调用方在 `grow: true` 里点名
+ * （训练页的候选两条），其余整条铺满 —— 基线是上一版跑完的历史记录，留着它才有对照物。
  * 标记线也跟着 `drawn` 走：回放还没到最优轮次时**不提前剧透**。
  */
 export function buildLossOption({
-  train,
-  val,
-  baseline,
+  series,
   drawn,
   epochCount,
-  bestEpoch,
-  stopEpoch,
+  grow = [],
+  markLine,
   threshold,
+  yName = "损失",
 }: {
-  train: LossSeries;
-  val: LossSeries;
-  baseline: LossSeries;
+  /** 要画的曲线（顺序即图例顺序）；颜色由各自的 `color` 给 */
+  series: LossSeries[];
   drawn: number;
   epochCount: number;
-  bestEpoch: number;
-  stopEpoch: number;
+  /**
+   * 哪几条跟着回放长（给名字）。没点名的整条铺满 ——
+   * 基线是历史记录，截断它反而看不出候选有没有降到基线下面。
+   */
+  grow?: string[];
+  /** 标记线画在哪条曲线上（训练页画在验证损失上：最优轮次 / 停止轮次） */
+  markLine?: { seriesName: string; bestEpoch: number; stopEpoch: number };
   /** 判定阈值（可选）：画一条水平参考线 */
   threshold?: number;
+  /** 纵轴名（默认「损失」） */
+  yName?: string;
 }): echarts.EChartsCoreOption {
   const slice = (points: CurvePoint[]) => points.slice(0, Math.max(1, Math.min(drawn, points.length)));
   const growing = drawn < epochCount;
@@ -175,34 +180,34 @@ export function buildLossOption({
     name: series.name,
     type: "line" as const,
     /* 边跑边画时点太密会糊成一条带子：回放前期露点，跑满后只看线 */
-    showSymbol: growing,
+    showSymbol: grow.includes(series.name) && growing,
     symbolSize: 4,
     lineStyle: { width: 2 },
     itemStyle: { color: series.color },
     emphasis: { focus: "series" as const },
     data: points.map((point) => [point.x, point.y]),
-    ...(series === val
+    ...(markLine && markLine.seriesName === series.name
       ? {
           markLine: {
             silent: true,
             symbol: "none",
             label: { color: CHART.axisText, fontSize: 12, position: "insideEndTop" as const },
             data: [
-              ...(drawn >= bestEpoch
+              ...(drawn >= markLine.bestEpoch
                 ? [
                     {
-                      xAxis: bestEpoch,
+                      xAxis: markLine.bestEpoch,
                       lineStyle: { color: CHART.palette[2], type: "dashed" as const, width: 1 },
-                      label: { formatter: `最优轮次 ${bestEpoch}` },
+                      label: { formatter: `最优轮次 ${markLine.bestEpoch}` },
                     },
                   ]
                 : []),
-              ...(drawn >= stopEpoch
+              ...(drawn >= markLine.stopEpoch
                 ? [
                     {
-                      xAxis: stopEpoch,
+                      xAxis: markLine.stopEpoch,
                       lineStyle: { color: CHART.axisText, type: "dotted" as const, width: 1 },
-                      label: { formatter: `第 ${stopEpoch} 轮停止` },
+                      label: { formatter: `第 ${markLine.stopEpoch} 轮停止` },
                     },
                   ]
                 : []),
@@ -251,7 +256,7 @@ export function buildLossOption({
     },
     yAxis: {
       type: "value",
-      name: "损失",
+      name: yName,
       nameTextStyle: { color: CHART.axisText, fontSize: 12 },
       /* scale：不满轴从 0 起 —— 损失在 0.2–1.2 之间，从 0 起会把差异压平 */
       scale: true,
@@ -260,9 +265,7 @@ export function buildLossOption({
       splitLine: { show: true, lineStyle: { color: CHART.grid } },
     },
     series: [
-      line(train, slice(train.points)),
-      line(val, slice(val.points)),
-      line(baseline, baseline.points),
+      ...series.map((item) => line(item, grow.includes(item.name) ? slice(item.points) : item.points)),
       ...(threshold !== undefined
         ? [
             {

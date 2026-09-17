@@ -28,6 +28,8 @@ import { Icon } from "../icons";
 import { StatusChip, WaveChart } from "../ui";
 import { useMumai } from "../context";
 import { holderLabel, usePresentFocus, usePresentOnline, VIEW_LABEL } from "../focus";
+import { buildLossOption } from "../trainingCurve";
+import EChart from "./OverviewCharts";
 import {
   COMPONENTS,
   CURRENT_RISKS,
@@ -185,33 +187,24 @@ function TrainingView() {
   const baseline = EXPERIMENT.curveOld;
   const candidate = EXPERIMENT.curveNew;
 
-  /**
-   * 两条曲线必须共用一套坐标范围。
-   *
-   * 一开始让每条各自按自己的 min/max 铺满画框，结果是两条形状不同的曲线
-   * 在屏幕上长得一模一样 —— 投屏上的「新旧对比」反而成了误导。
-   * 这与文档反复强调的口径是同一条：比较必须在同一量纲下做。
-   */
-  const toPath = useMemo(() => {
-    const all = [...baseline.points, ...candidate.points];
-    if (!all.length) return () => "";
-    const xs = all.map((p) => p.x);
-    const ys = all.map((p) => p.y);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    const spanX = maxX - minX || 1;
-    const spanY = maxY - minY || 1;
-    return (points: { x: number; y: number }[]) =>
-      points
-        .map((p, i) => {
-          const x = ((p.x - minX) / spanX) * 1000;
-          const y = 300 - ((p.y - minY) / spanY) * 270;
-          return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-        })
-        .join(" ");
-  }, [baseline.points, candidate.points]);
+  /*
+    投屏这张曲线原来是**另一段手画 SVG**：没有刻度、没有坐标轴名、鼠标放上去读不到值 ——
+    大屏上给评委看的图比页面里的还简陋。现在与训练页共用同一份 option（`buildLossOption`），
+    两条曲线画在同一个纵轴上（同一量纲才可比，这条口径原来只写在注释里）。
+  */
+  const option = useMemo(
+    () =>
+      buildLossOption({
+        series: [
+          { name: baseline.label, color: baseline.color, points: baseline.points },
+          { name: candidate.label, color: candidate.color, points: candidate.points },
+        ],
+        drawn: baseline.points.length,
+        epochCount: baseline.points.length,
+        yName: "损失",
+      }),
+    [baseline, candidate],
+  );
 
   const passed = EXPERIMENT.acceptance.filter((item) => item.pass).length;
 
@@ -220,20 +213,17 @@ function TrainingView() {
       <h2>训练验证 · 新旧模型对比</h2>
       <div className="present__training">
         <div className="present__curves">
-          <svg viewBox="0 0 1000 320" preserveAspectRatio="none" aria-label="新旧模型损失曲线">
-            <path d={toPath(baseline.points)} fill="none" stroke="var(--text-muted)" strokeWidth="2.5" />
-            <path d={toPath(candidate.points)} fill="none" stroke="var(--primary)" strokeWidth="3" />
-          </svg>
+          <EChart
+            className="tw-chart present__loss"
+            option={option}
+            ariaLabel={`新旧模型损失曲线：${baseline.label} 与 ${candidate.label}（同一纵轴，同一测试集）`}
+            /* 投屏是静态结论，不需要入场动画 */
+            animate={false}
+          />
           <div className="present__curves-legend">
-            <span>
-              <i style={{ background: "var(--text-muted)" }} />
-              {baseline.label}
-            </span>
-            <span>
-              <i style={{ background: "var(--primary)" }} />
-              {candidate.label}
-            </span>
-            <em>测试集 {EXPERIMENT.datasetVersion}（同一测试集 · 共用量纲）</em>
+            <em>
+              测试集 {EXPERIMENT.datasetVersion}（同一测试集 · 同一纵轴 · 共用量纲）
+            </em>
           </div>
         </div>
         <ul className="present__evidence">

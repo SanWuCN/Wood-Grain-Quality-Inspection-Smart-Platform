@@ -814,13 +814,16 @@ function LossPanel({ experiment, drawn, dominant = false }: { experiment: Experi
   const option = useMemo(
     () =>
       buildLossOption({
-        train: { name: experiment.curveTrain.label, color: experiment.curveTrain.color, points: experiment.curveTrain.points },
-        val: { name: experiment.curveVal.label, color: experiment.curveVal.color, points: experiment.curveVal.points },
-        baseline: { name: experiment.curveOld.label, color: experiment.curveOld.color, points: experiment.curveOld.points },
+        /* 顺序即图例顺序：候选两条（跟着回放长）+ 基线（整条铺满当对照物） */
+        series: [
+          { name: experiment.curveTrain.label, color: experiment.curveTrain.color, points: experiment.curveTrain.points },
+          { name: experiment.curveVal.label, color: experiment.curveVal.color, points: experiment.curveVal.points },
+          { name: experiment.curveOld.label, color: experiment.curveOld.color, points: experiment.curveOld.points },
+        ],
+        grow: [experiment.curveTrain.label, experiment.curveVal.label],
         drawn: upto,
         epochCount: total,
-        bestEpoch: stop.bestEpoch,
-        stopEpoch: stop.stopEpoch,
+        markLine: { seriesName: experiment.curveVal.label, bestEpoch: stop.bestEpoch, stopEpoch: stop.stopEpoch },
       }),
     [experiment, upto, total, stop.bestEpoch, stop.stopEpoch],
   );

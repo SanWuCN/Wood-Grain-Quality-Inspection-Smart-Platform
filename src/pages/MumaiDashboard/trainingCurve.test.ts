@@ -5,6 +5,13 @@ import type { EChartsCoreOption } from "echarts/core";
 import { EXPERIMENT, FAILED_EXPERIMENT, EARLY_STOP_PATIENCE, TRAIN_BEST_EPOCH, TRAIN_EPOCHS } from "./seed/scenario.ts";
 import { buildLossOption, curveStats, detectOverfit, earlyStopOf, lossTooltipText, patienceOf } from "./trainingCurve.ts";
 
+/** 训练页那三条曲线（顺序即图例顺序） */
+const seriesOf = (experiment = EXPERIMENT) => [
+  { name: experiment.curveTrain.label, color: experiment.curveTrain.color, points: experiment.curveTrain.points },
+  { name: experiment.curveVal.label, color: experiment.curveVal.color, points: experiment.curveVal.points },
+  { name: experiment.curveOld.label, color: experiment.curveOld.color, points: experiment.curveOld.points },
+];
+
 /**
  * 断言要看 option 的内部结构，而 `EChartsCoreOption` 是宽泛的联合类型。
  * 这里显式声明"本测试用到的那些字段"，比到处 `any` 更能说明在验什么。
@@ -91,13 +98,11 @@ test("统计量只算已回放范围：回放没走到，就不该出现后面�
 
 test("option 里有真实坐标轴、图例、Tooltip 与两条标记线（可读，不是一张哑图）", () => {
   const option = buildLossOption({
-    train: { name: EXPERIMENT.curveTrain.label, color: EXPERIMENT.curveTrain.color, points: EXPERIMENT.curveTrain.points },
-    val: { name: EXPERIMENT.curveVal.label, color: EXPERIMENT.curveVal.color, points: EXPERIMENT.curveVal.points },
-    baseline: { name: EXPERIMENT.curveOld.label, color: EXPERIMENT.curveOld.color, points: EXPERIMENT.curveOld.points },
+    series: seriesOf(),
+    grow: [EXPERIMENT.curveTrain.label, EXPERIMENT.curveVal.label],
     drawn: TRAIN_EPOCHS,
     epochCount: TRAIN_EPOCHS,
-    bestEpoch: TRAIN_BEST_EPOCH,
-    stopEpoch: TRAIN_EPOCHS,
+    markLine: { seriesName: EXPERIMENT.curveVal.label, bestEpoch: TRAIN_BEST_EPOCH, stopEpoch: TRAIN_EPOCHS },
   });
   const anyOption = view(option);
 
@@ -138,13 +143,9 @@ test("Tooltip 文案读得懂：第几轮 + 每一条线的值（不是一串裸
 test("option 里带上了读懂 Tooltip 的两个 formatter（轴指针写轮次、内容写值）", () => {
   const option = view(
     buildLossOption({
-      train: { name: "t", color: "#4ea8ff", points: EXPERIMENT.curveTrain.points },
-      val: { name: "v", color: "#5fd4c4", points: EXPERIMENT.curveVal.points },
-      baseline: { name: "b", color: "#789EFF", points: EXPERIMENT.curveOld.points },
+      series: seriesOf(),
       drawn: TRAIN_EPOCHS,
       epochCount: TRAIN_EPOCHS,
-      bestEpoch: TRAIN_BEST_EPOCH,
-      stopEpoch: TRAIN_EPOCHS,
     }),
   ) as unknown as {
     tooltip: {
@@ -157,13 +158,32 @@ test("option 里带上了读懂 Tooltip 的两个 formatter（轴指针写轮次
   assert.equal(option.tooltip.axisPointer.label.formatter({ value: 24.0001 }), "第 24 轮");
 });
 
+test("投屏页那张图与训练页同源：两条曲线画在同一纵轴上，且没有回放标记", () => {
+  const option = view(
+    buildLossOption({
+      series: [
+        { name: EXPERIMENT.curveOld.label, color: EXPERIMENT.curveOld.color, points: EXPERIMENT.curveOld.points },
+        { name: EXPERIMENT.curveNew.label, color: EXPERIMENT.curveNew.color, points: EXPERIMENT.curveNew.points },
+      ],
+      drawn: EXPERIMENT.curveOld.points.length,
+      epochCount: EXPERIMENT.curveOld.points.length,
+    }),
+  );
+
+  assert.equal(option.series.length, 2, "投屏只讲新旧两条");
+  /* 同一个 yAxis（不是双轴）：两条曲线在同一量纲下才比得出谁好 */
+  assert.equal(Array.isArray(option.yAxis), false);
+  assert.equal(option.series[0].data.length, TRAIN_EPOCHS, "静态结论：整条铺满");
+  assert.equal(option.series[1].data.length, TRAIN_EPOCHS);
+  assert.equal(option.series[0].markLine, undefined, "投屏不画回放标记线");
+  assert.ok(option.legend, "图例要有：大屏上必须认得出哪条是新、哪条是旧");
+});
+
 test("回放没走到最优轮次时，标记线不出现（曲线也按已回放长度截断）", () => {  const base = {
-    train: { name: "t", color: "#4ea8ff", points: EXPERIMENT.curveTrain.points },
-    val: { name: "v", color: "#5fd4c4", points: EXPERIMENT.curveVal.points },
-    baseline: { name: "b", color: "#789EFF", points: EXPERIMENT.curveOld.points },
+    series: seriesOf(),
+    grow: [EXPERIMENT.curveTrain.label, EXPERIMENT.curveVal.label],
     epochCount: TRAIN_EPOCHS,
-    bestEpoch: TRAIN_BEST_EPOCH,
-    stopEpoch: TRAIN_EPOCHS,
+    markLine: { seriesName: EXPERIMENT.curveVal.label, bestEpoch: TRAIN_BEST_EPOCH, stopEpoch: TRAIN_EPOCHS },
   };
   const early = view(buildLossOption({ ...base, drawn: 6 }));
 
