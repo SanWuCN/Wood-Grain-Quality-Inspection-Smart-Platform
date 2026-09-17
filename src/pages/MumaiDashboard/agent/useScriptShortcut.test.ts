@@ -19,12 +19,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { SCRIPT_ROUNDS, mainLineOf } from "./script.ts";
+import { SCRIPT_SHORTCUT_ENTRIES } from "./scriptShortcutEntries.ts";
 import {
   SCRIPT_SEQUENCE_PREFIX_KEY,
   advanceSequence,
   initialSequenceState,
 } from "./scriptShortcutSequence.ts";
-import { askArgsFor, type ScriptShortcutEntry } from "./useScriptShortcut.ts";
+import { askArgsFor, planFor, type ScriptShortcutEntry } from "./useScriptShortcut.ts";
 
 /** 与 Shell 里那份表同构的最小样例（键位 → 台词 + 圈号），键位照键盘行序 */
 const ENTRIES: ScriptShortcutEntry[] = [
@@ -80,4 +82,66 @@ test("条目带的段号必须传给理解链路（漏传就静默退回模糊�
 test("没有段号的条目不给 target（走正常路由，而不是硬造一轮）", () => {
   const args = askArgsFor({ key: "z", text: "临时一句话", label: "临时" });
   assert.equal(args.target, undefined);
+});
+
+/* ------------------------------------------------------------------ *
+ * 「主动触发」的条目**不许模拟收到消息**（用户口径 2026-09-17）
+ *
+ * 用户原话：「部分主动触发的对话，其也会模拟接受消息，这是不对的，
+ * 应该在我按按钮后小木思考一小会儿后主动说话」。
+ *
+ * 判定交给纯函数 `planFor`，因为这条错**不会崩、不会报错**：
+ * 只会让屏幕上先逐字"收到"一遍小木自己的台词，然后小木再把同一句念一遍。
+ * ------------------------------------------------------------------ */
+
+test("真实条目表：主动发起的条目必须走 proactive 计划（不产生'听到的文本'）", () => {
+  const proactive = SCRIPT_SHORTCUT_ENTRIES.filter((e) => e.proactive);
+  assert.ok(proactive.length >= 1, "至少应有一条主动发起的条目（文档里「按钮触发。」那几条）");
+
+  for (const entry of SCRIPT_SHORTCUT_ENTRIES) {
+    const plan = planFor(entry);
+    assert.ok(plan, `${entry.label} 按下去什么都不做`);
+    assert.equal(
+      plan.kind,
+      entry.proactive ? "proactive" : "speech",
+      `${entry.label} 的 plan 类型与 proactive 标记不一致`,
+    );
+    if (plan.kind === "proactive") {
+      assert.equal(plan.roundNo, entry.roundNo, `${entry.label} 的 proactive 计划丢了轮次`);
+      assert.ok(
+        !("text" in plan),
+        `${entry.label} 的 proactive 计划里不该有 text —— 有 text 就意味着会被当成"听到的话"`,
+      );
+    }
+  }
+});
+
+test("主动发起的条目：text 就是该轮小木的台词（没人说过这句话）", () => {
+  for (const entry of SCRIPT_SHORTCUT_ENTRIES.filter((e) => e.proactive)) {
+    const round = SCRIPT_ROUNDS.find((r) => r.roundNo === entry.roundNo);
+    assert.ok(round, `${entry.label} 指向的轮次不存在`);
+    assert.equal(
+      entry.text,
+      mainLineOf(round),
+      `${entry.label} 的 text 不是该轮主台词 —— 主动发起的条目里 text 只作展示，必须与小木要说的话一致`,
+    );
+  }
+});
+
+test("被动应答的条目：text 不许等于该轮主台词（否则就是把小木的话当用户的话）", () => {
+  /*
+    反向锁：非 proactive 的条目 text 是**用户说的那半句**。一旦有人图省事
+    把它改成小木的台词，现场就会"自己听到自己说的话" —— 正是这次要修的行为。
+  */
+  const offenders = [];
+  for (const entry of SCRIPT_SHORTCUT_ENTRIES.filter((e) => !e.proactive)) {
+    const round = SCRIPT_ROUNDS.find((r) => r.roundNo === entry.roundNo);
+    if (!round) continue;
+    if (entry.text === mainLineOf(round)) offenders.push(`${entry.label}`);
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `这些条目的 text 与小木台词逐字相同，会被当成"用户说了这句话"：${offenders.join("；")}`,
+  );
 });

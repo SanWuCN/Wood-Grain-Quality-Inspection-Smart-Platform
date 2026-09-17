@@ -3,15 +3,19 @@
  *
  * ── 它在链路里的位置 ──────────────────────────────────────────────
  *   按键序列（`scriptShortcutSequence.ts` 判定）
- *     → `VoiceInput.simulate()` 逐字吐出这句话（每字 100–300ms 随机，模拟流式 ASR）
- *     → 与语音控制台**同一条** `ask()` 理解链路（executor：剧本路由 → 意图兜底 → 播报）
- *     → 并带上条目里的 `roundNo`，走 `ask()` 的**指定轮次直达**分支
+ *     → `planFor(entry)` 决定这一条**该怎么演**（见下）
+ *     → 被动应答：`VoiceInput.simulate()` 逐字吐出这句话（每字 100–300ms 随机，
+ *       模拟流式 ASR）→ 与语音控制台**同一条** `ask()` 理解链路
+ *       （executor：剧本路由 → 意图兜底 → 播报），并带上条目里的 `roundNo`
+ *       走 `ask()` 的**指定轮次直达**分支
+ *     → 主动发起（`proactive`）：**不模拟识别**，交给 `executor.speakProactive()` ——
+ *       思考 2.5–4 秒 → 小木自己开口（用户 2026-09-17 口径，见 `planFor` 的说明）
  *
  * ── 为什么要带段号（2026-09-17 修）────────────────────────────────
  * 演示人按了哪个键就是确定要看哪一轮，不该让模糊匹配去猜。旧实现只把触发语丢给
- * 匹配器，于是：段203/段205 两条条目的触发语**逐字相同**（同是「小木，启动数据清洗…」），
- * 按键命中哪一轮全看匹配器；⑪ 轮那条触发语为空，`onFinal` 又把空文本丢掉，
- * 结果 `Ctrl+Q+B` 按了毫无反应。现在两条问题一起消掉。
+ * 匹配器，于是：两条条目的触发语**逐字相同**（同是「小木，启动数据清洗…」），
+ * 按键命中哪一轮全看匹配器；那条没有触发语的轮次，`onFinal` 又把空文本丢掉，
+ * 结果按了毫无反应。现在两条问题一起消掉。
  *
  * ── 为什么不用控制台那个 VoiceInput 实例 ──────────────────────────
  * 控制台是**可选打开**的面板（`AgentHost` 按需挂载），而快捷键要在任何页面都能用；
@@ -32,7 +36,7 @@
 import { useCallback, useEffect, useRef } from "react";
 
 import { VoiceInput } from "./asr";
-import { ask, type Runtime } from "./executor";
+import { ask, speakProactive, type Runtime } from "./executor";
 import { setAgent } from "./store";
 import {
   advanceSequence,
@@ -64,11 +68,25 @@ export type ScriptShortcutEntry = {
   /**
    * 这一条要念的是该轮里的**哪一句**（逐字，必须是该轮 lines 里真实存在的）。
    *
-   * 一轮可能有多句戏（⑮ 主台词 + `audit` 审核播报；④ 主台词 + 段15 同步备份）。
-   * 不带这个字段时只念主台词 —— 于是"指向备用句的那条快捷键"会念成主台词，
-   * 按的是段221、听到的却是段229。带上它，按的键与念的话才是同一句。
+   * 一轮可能有多句戏（⑰ 主台词 + `audit` 审核播报）。不带这个字段时只念主台词。
    */
   lineOverride?: string;
+  /**
+   * **小木主动发起**的一轮：按键后**不模拟识别**，小木思考一小会儿自己说。
+   *
+   * ── 为什么要有这个字段（用户口径 2026-09-17）──────────────────────
+   * 用户原话：「部分主动触发的对话，其也会模拟接受消息，这是不对的，
+   * 应该在我按按钮后小木思考一小会儿后主动说话」。
+   *
+   * 文档第 6/13/20 条原文写的是「按钮触发。」—— 现场是**按按钮**，不是说话。
+   * 之前这三条被当成"没有触发语"处理：拿该轮台词当"听到的话"喂给识别链路，
+   * 屏幕上就先逐字"收到"一遍小木自己的台词，然后小木再把同一句念一遍。
+   * 同一句话说两遍、而且第二遍假装是听来的 —— 那是把主动播报演成了被动应答。
+   *
+   * 标了 `proactive` 的条目：`text` 此时 = **本轮小木要说的那句话**（逐字），
+   * 只作展示与自检用，**不会**被投进识别链路；链路走 `executor.speakProactive()`。
+   */
+  proactive?: boolean;
 };
 
 export type UseScriptShortcutOptions = {
@@ -80,6 +98,11 @@ export type UseScriptShortcutOptions = {
     runtime: Runtime,
     entry: ScriptShortcutEntry,
   ) => void | Promise<void>;
+  /**
+   * 「小木主动发起」的条目按下去之后交出去（默认走 `speakProactive()`）。
+   * 与 `onSubmit` 分开，是因为两者语义不同：一个"听到了话"，一个"没人说话"。
+   */
+  onProactive?: (roundNo: string, runtime: Runtime, entry: ScriptShortcutEntry) => void | Promise<void>;
   /** 是否启用（默认启用） */
   enabled?: boolean;
 };
@@ -106,10 +129,38 @@ export function askArgsFor(entry: ScriptShortcutEntry): {
   };
 }
 
+/**
+ * 一条条目按下键之后**该怎么演**。
+ *
+ * ── 为什么把这个判断抽成纯函数（除了 `askArgsFor` 之外再来一个）────────
+ * "这一条要不要模拟'听到'"是**最不能写错**的一处分叉，而它恰恰是钩子里的分支：
+ * 写错了不会崩、不会报错，只会让屏幕先逐字"收到"一遍小木自己的台词
+ * （用户 2026-09-17 实测报的就是这个）。钩子在 `node --test` 里挂不起来，
+ * 所以把判断抽出来，测试直接喂条目、断言"这条到底会不会被当成一句话听到"。
+ *
+ * @returns null = 这一条什么都不该做（既没有主动发起的轮次，也没有可模拟的文本）
+ */
+export type ShortcutPlan =
+  /** 小木主动发起：不模拟识别，思考一小会儿自己说该轮台词 */
+  | { kind: "proactive"; roundNo: string }
+  /** 模拟"听到了这句话"，再走理解链路直达 target.roundNo */
+  | { kind: "speech"; text: string; target: { roundNo?: string; lineOverride?: string } | undefined };
+
+export function planFor(entry: ScriptShortcutEntry): ShortcutPlan | null {
+  if (entry.proactive) {
+    /* 主动发起必须有轮次：没有轮次就没有"该说哪一句"，按键只能是空响 */
+    return entry.roundNo ? { kind: "proactive", roundNo: entry.roundNo } : null;
+  }
+  if (!entry.text.trim() && !entry.roundNo) return null;
+  const { text, target } = askArgsFor(entry);
+  return { kind: "speech", text, target };
+}
+
 export function useScriptShortcut({
   entries,
   runtime,
   onSubmit,
+  onProactive,
   enabled = true,
 }: UseScriptShortcutOptions) {
   const runtimeRef = useRef(runtime);
@@ -189,24 +240,44 @@ export function useScriptShortcut({
     };
   }, [onSubmit]);
 
-  const trigger = useCallback((entry: ScriptShortcutEntry) => {
-    queue.current = queue.current.then(async () => {
-      const input = simulateRef.current;
-      if (!input) return;
-      /*
-        ⚠ 空文本也要能触发。
-        ⑬ 轮（段155，重排前的 ⑪）在剧本里**没有触发语**（它是本地事件/旁白起头），
-        早期实现直接 `simulate("")`，而 `onFinal` 会把空文本丢掉 ——
-        现场表现就是"按了键什么都没发生"，且与"键没生效"无法区分。
-        现在这一条由条目表给出该轮的**主台词**（见 `scriptShortcutEntries`），
-        模拟的就是"小木那句话被听到了"，再经段号直达该轮。
-      */
-      if (!entry.text.trim() && !entry.roundNo) return;
-      pendingRef.current = entry;
-      setAgent({ stateNote: `剧本快捷键：${entry.label}`, finalText: "", partial: "" });
-      input.simulate(entry.text);
-    });
-  }, []);
+  const trigger = useCallback(
+    (entry: ScriptShortcutEntry) => {
+      queue.current = queue.current.then(async () => {
+        /*
+          ⚠ 空文本也要能触发（历史坑）。
+          ⑬ 轮（段155，重排前的 ⑪）在剧本里**没有触发语**（它是本地事件/旁白起头），
+          早期实现直接 `simulate("")`，而 `onFinal` 会把空文本丢掉 ——
+          现场表现就是"按了键什么都没发生"，且与"键没生效"无法区分。
+          现在它走下面的 proactive 分支，根本不需要"听到的话"。
+        */
+        const plan = planFor(entry);
+        if (!plan) return;
+
+        /*
+          ── 小木主动发起：**不模拟识别**（用户 2026-09-17 口径）──────────
+          文档第 6/13/20 条是「按钮触发。」—— 现场按的是按钮，没人说话。
+          所以这里既不 `simulate()`（否则气泡里会先逐字"收到"一遍小木自己的台词），
+          也不进 `ask()`（那会往对话里 push 一条"用户说"的记录）。
+          直接交给 `speakProactive()`：思考一小会儿 → 小木自己开口。
+        */
+        if (plan.kind === "proactive") {
+          pendingRef.current = null;
+          setAgent({ open: true, stateNote: `剧本快捷键：${entry.label}`, finalText: "", partial: "" });
+          const run =
+            onProactive ?? ((roundNo: string, rt: Runtime) => speakProactive(roundNo, rt));
+          await run(plan.roundNo, runtimeRef.current, entry);
+          return;
+        }
+
+        const input = simulateRef.current;
+        if (!input) return;
+        pendingRef.current = entry;
+        setAgent({ stateNote: `剧本快捷键：${entry.label}`, finalText: "", partial: "" });
+        input.simulate(plan.text);
+      });
+    },
+    [onProactive],
+  );
 
   /* ---------- 按键序列 ---------- */
   useEffect(() => {

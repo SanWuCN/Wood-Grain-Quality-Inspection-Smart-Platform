@@ -963,6 +963,66 @@ async function runQuery(runtime: Runtime, intent: Intent, match: MatchResult, ge
 installDegradeGuard();
 
 /**
+ * 造一个"确定命中"的判据给 `replyScript`。
+ *
+ * 为什么不传 `null`：`ScriptMatch` 是结构化字段（score / margin / hits / verdict），
+ * `replyScript` 会用它渲染气泡上的"判据"那行与置信度。快捷键与"小木主动发起"
+ * 这两条路**本来就是确定命中**（前者是人按的键，后者压根没有用户指令），
+ * 所以如实给 `score: 1 / verdict: "hit"`，并把判定理由写清楚，
+ * 让界面与日志都能看出这一轮不是语音猜出来的。
+ */
+function certainMatch(round: ScriptRound, reason: string): ScriptMatch {
+  return { round, score: 1, runnerUp: null, margin: 1, hits: [], verdict: "hit", reason };
+}
+
+/**
+ * 「直达某一轮」的公共前半段：收掉残留浮层 → 置思考态 → 等一小会儿。
+ *
+ * 三种入口共用：快捷键直达（`ask` 的 pinned 分支）、语音命中剧本（`ask` 的
+ * script 分支）、**小木主动发起**（`speakProactive`）。三处原来各写一遍，
+ * 表现不一致的风险很实在 —— 少一处 `dismiss-overlays` 就会"上一张浮层还压着"。
+ *
+ * @returns false = 这一轮已经被后来的指令作废（调用方直接返回，别接着播）
+ */
+async function enterThinking(gen: number, note: string): Promise<boolean> {
+  window.dispatchEvent(new CustomEvent("mumai:dismiss-overlays"));
+  setAgent({ agentState: "THINKING", stateNote: note });
+  await sleep(thinkingDelayMs());
+  return !stale(gen);
+}
+
+/**
+ * **小木主动发起**地说一轮 —— 没有用户指令，也不模拟"听到"。
+ *
+ * ── 为什么必须与 `ask()` 分开（用户口径 2026-09-17）──────────────────
+ * 用户原话：「部分主动触发的对话，其也会模拟接受消息，这是不对的，
+ * 应该在我按按钮后小木思考一小会儿后主动说话」。
+ *
+ * 之前"按钮触发"的那几条（文档第 6/13/20 条）走的是 `ask()` + 该轮台词兜底：
+ * 于是屏幕上先**逐字"收到"**一遍小木自己的台词（像用户说了这句话），
+ * 然后小木再把同一句话念一遍 —— 同一句话说两遍，而且第二遍还假装是听来的。
+ * 那是把"主动播报"演成了"被动应答"。
+ *
+ * 现在这条路：不 push 用户轮次、不跑识别与匹配、不写 `finalText`，
+ * 只清浮层 → 思考（2.5–4 秒，与其它轮同一套延时）→ 播这一轮的台词与页面动作。
+ */
+export async function speakProactive(roundNo: string, runtime: Runtime): Promise<void> {
+  const round = SCRIPT_ROUNDS.find((item) => item.roundNo === roundNo) ?? null;
+  if (!round) {
+    /* 与 `ask()` 的 pinned 分支同一口径：认不出编号就什么都不做，不硬造一轮 */
+    console.warn(`[script] 主动发起：剧本里没有第 ${roundNo} 轮 —— 不播报、不改状态`);
+    return;
+  }
+  const gen = ++runGeneration;
+  /* 主动发起没有"听到的那句话"：先把上一轮残留的识别文本清掉，
+     否则气泡里会挂着上一轮的字，看起来又像"收到了什么" */
+  setAgent({ open: true, partial: "", finalText: "" });
+  if (!(await enterThinking(gen, `小木主动发起第 ${round.roundNo} 轮，思考中...`))) return;
+  replyScript(round, certainMatch(round, "小木主动发起（按钮 / 本地事件），没有用户指令"), runtime);
+  setAgent({ agentState: "FINISHED", stateNote: "" });
+}
+
+/**
  * 执行一次"用户说了这句话"。
  *
  * @param target 可选的**目标轮次提示**（`roundNo`，如 "⑤"）。
@@ -972,8 +1032,10 @@ installDegradeGuard();
  *   给了提示就以它为准；**语音与文本入口不传这个参数**，仍然走正常的模糊匹配 ——
  *   演示现场按键要确定，说话要宽容，两者不能混。
  * @param target.lineOverride 只要该轮里的**这一句**（逐字，必须是本轮 lines 里真实存在的）。
- *   用于"一条快捷键指向备用句"的情形（段15、段205、段221），让按的键与念的话是同一句。
  *   值不在本轮 lines 里时会被忽略、退回主台词 —— 不给按键留"念任意文本"的口子。
+ *
+ * ⚠ 「小木主动发起」的那几轮**不走这里**，走 `speakProactive()` ——
+ *   它们没有用户指令，不该在对话里留下一条"用户说"的记录。
  */
 export async function ask(
   text: string,
@@ -1037,28 +1099,13 @@ export async function ask(
       ? (SCRIPT_ROUNDS.find((item) => item.roundNo === target.roundNo) ?? null)
       : null;
   if (pinned) {
-    window.dispatchEvent(new CustomEvent("mumai:dismiss-overlays"));
-    setAgent({ agentState: "THINKING", stateNote: `剧本快捷键指定第 ${pinned.roundNo} 轮，思考中...` });
-    await sleep(thinkingDelayMs());
-    if (stale(gen)) return;
-    /**
-     * 造一个"确定命中"的判据给 `replyScript`。
-     *
-     * 为什么不传 `null`：`ScriptMatch` 是结构化字段（score / margin / hits / verdict），
-     * `replyScript` 会用它渲染气泡上的"判据"那行与置信度。快捷键这条路**本来就是确定命中**
-     * （演示人按了哪个键就是哪一轮），所以如实给 `score: 1 / verdict: "hit"`，
-     * 并把判定理由写成"快捷键指定"，让界面与日志都能看出这轮不是语音猜出来的。
-     */
-    const pinnedMatch: ScriptMatch = {
-      round: pinned,
-      score: 1,
-      runnerUp: null,
-      margin: 1,
-      hits: [],
-      verdict: "hit",
-      reason: "剧本快捷键（Ctrl+Q 序列）直接指定轮次，未经语音匹配",
-    };
-    replyScript(pinned, pinnedMatch, runtime, target?.lineOverride);
+    if (!(await enterThinking(gen, `剧本快捷键指定第 ${pinned.roundNo} 轮，思考中...`))) return;
+    replyScript(
+      pinned,
+      certainMatch(pinned, "剧本快捷键（Ctrl+M 序列）直接指定轮次，未经语音匹配"),
+      runtime,
+      target?.lineOverride,
+    );
     return;
   }
   if (route.kind === "script") {
@@ -1072,14 +1119,12 @@ export async function ask(
       时机放在这里（理解完成、还没进思考延时）而不是导航之后：
       关窗要发生在用户"说完话"的瞬间，不能拖到播报开始。
     */
-    window.dispatchEvent(new CustomEvent("mumai:dismiss-overlays"));
-    setAgent({ agentState: "THINKING", stateNote: `剧本命中 ${route.round.roundNo}，思考中...` });
-    await sleep(thinkingDelayMs());
-    if (stale(gen)) return;
+    if (!(await enterThinking(gen, `剧本命中 ${route.round.roundNo}，思考中...`))) return;
     replyScript(route.round, route.match, runtime);
     setAgent({ agentState: "FINISHED", stateNote: "" });
     return;
   }
+
 
   if (!match.intent) {
     replyFallbackFromMatch(match, runtime);

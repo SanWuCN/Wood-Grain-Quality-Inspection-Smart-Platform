@@ -334,10 +334,17 @@ try {
   );
   check("第④轮没有回退到浏览器合成音", (audio4?.synth ?? 0) === 0, `speechSynthesis.speak 调用 ${audio4?.synth ?? 0} 次`);
 
-  /* ---------- ⑥ 第⑬轮「适用性预警」：要弹出**预警窗**，并且带确认按钮 ----------
-     用户口径 2026-09-17：「⑬ 这个触发时，会弹出预警窗口，然后带个确认按钮」。
+  /* ---------- ⑥ 第⑬轮「适用性预警」：小木**主动发起**，而且要弹预警窗 ----------
+     两件事一起验（都是用户 2026-09-17 的口径）：
+       甲「部分主动触发的对话，其也会模拟接受消息，这是不对的，应该在我按按钮后
+          小木思考一小会儿后主动说话」—— 所以按键后气泡里**不许**出现"逐字收到"的文字，
+          只该看到"思考中"；
+       乙「⑬ 这个触发时，会弹出预警窗口，然后带个确认按钮」—— 预警样式 + 确认按钮。
+
      判据全部可证伪：
-       · 出现的是 `.dsf--alert`（预警样式），不是普通数据面板；
+       · 按键后 2 秒内 `.xd__user` 里的文字长度**始终为 0**（老实现会逐字涨上去）；
+       · 同一窗口里状态出现过「思考」；
+       · 出现 `.dsf--alert`（预警样式），不是普通数据面板；
        · 窗里有一个按钮，文案就是确认按钮；
        · 窗里的数据行**没有一行是缺失态**（证明挂的数据键在构建产物里真的取得到值）；
        · 点下去之后按钮禁用 + 说明变成"已更新平台状态，未向设备发送指令"（只改本地状态）。
@@ -360,8 +367,46 @@ try {
     return true;
   })()`);
   await sleep(1500);
+  /*
+    ⚠ 判据要按"**有没有新的**用户文本"来写，不能按"气泡里有没有用户文本"：
+    面板是**对话历史**，上一轮（Ctrl+M+4）的「小木，请帮我做同步备份。」还挂在上面，
+    按"非空即失败"会把它误判成这一轮收到了消息（第一版就是这么假红的）。
+    所以先记下按键前的基线，再看这 2 秒里有没有**新增**。
+  */
+  const baselineProbe = await evaluate(`window.__probe()`);
+  const baselineTexts = new Set(baselineProbe?.userTexts ?? []);
+  const alertT0 = Date.now();
   await dispatch("m");
   await dispatch("e");
+
+  /* 甲：按键后 2 秒内不许出现**新的**用户文本，尤其不许出现第⑬轮那句（老实现会逐字涨上去） */
+  const newUserTexts = [];
+  const seenStates = new Set();
+  while (Date.now() - alertT0 < 2000) {
+    const p = await evaluate(`window.__probe()`);
+    if (p) {
+      for (const t of p.userTexts ?? []) {
+        if (t && !baselineTexts.has(t)) newUserTexts.push(t);
+      }
+      if (p.state) seenStates.add(p.state);
+    }
+    await sleep(80);
+  }
+  check(
+    "主动发起不模拟「收到消息」（按键后没有出现新的用户文本）",
+    newUserTexts.length === 0,
+    newUserTexts.length ? `新增了「${newUserTexts.slice(0, 3).join(" / ")}…」` : `基线 ${baselineTexts.size} 条，2 秒内无新增`,
+  );
+  check(
+    "第⑬轮那句没有被当成「听到的话」显示出来",
+    !newUserTexts.some((t) => t.includes("适用性预警")),
+    newUserTexts.some((t) => t.includes("适用性预警")) ? "被当成用户消息逐字显示了" : "没有出现",
+  );
+  check(
+    "按键后进入思考态（小木思考一小会儿再开口）",
+    [...seenStates].some((s) => s.includes("思考")),
+    `出现过的状态：${[...seenStates].join(" / ") || "（无）"}`,
+  );
 
   let alertWin = { shown: false };
   for (let i = 0; i < 240; i += 1) {
