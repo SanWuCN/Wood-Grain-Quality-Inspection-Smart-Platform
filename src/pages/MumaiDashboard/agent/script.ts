@@ -465,45 +465,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
   },
   {
     roundNo: "⑩",
-    paragraph: "§210–212",
-    act: "第二幕 · 建图重建与风险初筛",
-    title: "巡检任务预检",
-    /* 触发来源：唤醒词 + 说法 */
-    triggerSource: "voice",
-    triggers: ["检查巡检任务配置", "任务预览"],
-    lines: [
-      {
-        role: "main",
-        /* 台词逐字冻结：工作清单 v1.0 §8「小木固定回答摘要」（数据取自 §6，措辞按 §7） */
-        text: "任务MSN-2026-0911-02已核对，6个航点、24.6米路线，预览已打开，尚未真实下发。",
-      },
-    ],
-    next: "史：已选中目标小车、地图版本和巡检点位，显示任务预览后执行下发。",
-    /*
-     * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
-     * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
-     */
-    reveal: {
-      target: "order-detail",
-      sections: ["order", "scope", "pending"],
-      /* 三段节拍：摘要 → 任务范围 → 后续执行模块（与 `ordersReveal.ts` 的组名对齐） */
-      beats: [["order"], ["scope"], ["pending"]],
-    },
-    nav: { route: "order", order: "current" },
-    voicePack: null,
-    intentId: "start_patrol",
-  },
-
-  /* ---------------- 第三幕 异常拒判与模型更新 ---------------- */
-  {
-    roundNo: "⑪",
     paragraph: "§230",
     act: "第三幕 · 异常拒判与模型更新",
     title: "巡检前检查（小木主动发起）",
     /* 触发来源：本地任务事件（语音不得抢触发） */
     triggerSource: "local-event",
-    triggers: [],
-    lines: [
+    triggers: [],    lines: [
       {
         role: "main",
         /* 台词逐字冻结：工作清单 v1.0 §8「小木固定回答摘要」（数据取自 §6，措辞按 §7） */
@@ -519,7 +486,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
       "不靠语音唤醒进入；`triggerSource: \"local-event\"` 与空 `triggers` 一起把这条约束写成数据。",
   },
   {
-    roundNo: "⑫",
+    roundNo: "⑪",
     paragraph: "§247–249",
     act: "第三幕 · 异常拒判与模型更新",
     title: "异常证据汇总",
@@ -538,7 +505,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     intentId: "anomaly_summary",
   },
   {
-    roundNo: "⑬",
+    roundNo: "⑫",
     paragraph: "§250–252",
     act: "第三幕 · 异常拒判与模型更新",
     title: "任务卡拆分",
@@ -557,7 +524,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     intentId: null,
   },
   {
-    roundNo: "⑭",
+    roundNo: "⑬",
     paragraph: "§276–277",
     act: "第三幕 · 异常拒判与模型更新",
     title: "采样计划与接收清单核对",
@@ -577,7 +544,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     intentId: null,
   },
   {
-    roundNo: "⑮",
+    roundNo: "⑭",
     paragraph: "§299–303",
     act: "第三幕 · 异常拒判与模型更新",
     title: "数据清洗与人工审核",
@@ -602,6 +569,25 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     precondition: "第 2 句是人工审核未结束时的备用播报，只在审核未完成时播",
   },
   {
+    roundNo: "⑮",
+    paragraph: "§344–346",
+    act: "第三幕 · 异常拒判与模型更新",
+    title: "归档验证摘要",
+    /* 触发来源：唤醒词 + 说法 */
+    triggerSource: "voice",
+    triggers: ["跟踪现场任务状态", "归档版本的验证摘要", "两项记录"],
+    lines: [
+      {
+        role: "main",
+        text: "两项记录已分开显示。现场任务按实际进度更新，当前讲解使用归档验证记录；任务状态变化后我再提示。",
+      },
+    ],
+    next: "史：本次部署使用屏幕上的归档版本，准备执行量化与封装。",
+    voicePack: "AI语音6",
+    intentId: null,
+    precondition: "现场任务仍在进行，讲解走归档验证记录，不把归档说成现场已完成",
+  },
+  {
     roundNo: "⑯",
     paragraph: "§344–346",
     act: "第三幕 · 异常拒判与模型更新",
@@ -614,19 +600,6 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
         role: "main",
         /* 台词逐字冻结：工作清单 v1.0 §8「小木固定回答摘要」（数据取自 §6，措辞按 §7） */
         text: "验证对照已打开。该归档版本通过离线验证，可以进入设备部署检查。",
-      },
-      {
-        /*
-          段221（逐字）：「两项记录已分开显示。现场任务按实际进度更新，当前讲解使用归档验证记录；
-          任务状态变化后我再提示。」
-          ⚠ 戏份归属：它的搭档原话是段220（史：「小木，跟踪现场任务状态，同时打开归档版本的验证摘要。」），
-          而本轮的 next 正是"本次部署使用屏幕上的归档版本" —— 两句在同一段流程里，
-          且快捷键表里 `Ctrl+Q+H`（段221）本来就指着这条。
-          稿子把段221 标成「等待时选用」：现场任务还在跑，讲解走归档记录，所以不能拿它当主台词
-          （否则会把"归档"说成"现场已完成"）。故按备用行存档，播报约束同段15。
-        */
-        role: "waiting",
-        text: "两项记录已分开显示。现场任务按实际进度更新，当前讲解使用归档验证记录；任务状态变化后我再提示。",
       },
     ],
     next: "史：本次部署使用屏幕上的归档版本，准备执行量化与封装。",
@@ -794,6 +767,31 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     nav: { route: "order", order: "current" },
     voicePack: null,
     intentId: "unresolved_followup",
+  },
+  {
+    roundNo: "㉓",
+    paragraph: "（新增·用户 2026-09-17 追加）",
+    act: "第四幕 · 复扫融合与任务交付",
+    title: "三个月巡检与风险统计",
+    /* 触发来源：唤醒词 + 说法（快捷键 Ctrl+Q+Z） */
+    triggerSource: "voice",
+    triggers: ["到过多少个地方巡检", "发现了多少个风险点", "已修复的有多少", "过去三个月统计"],
+    lines: [
+      {
+        role: "main",
+        /*
+          ⚠ 这一轮是用户追加的**独立对话**（快捷键 `Ctrl+Q+Z`）。
+          台词里的统计数字（4 处 / 14 个风险点 / 2 处高风险 / 7 处已修复 / 2 处施工中 / 5 处已受理）
+          **在平台的冻结数据包里没有出处** —— 已按全仓扫描确认（material / anomaly / 工单表都没有这组数）。
+          它属"知识库检索"口径的演示内容，暂按用户给定原文入档；
+          若后续要"台词与屏幕一致"，需把这组数补进 seed 并让页面出对应卡片。
+        */
+        text: "好的，我正在检索RAG知识库，并核对近期巡检工单、风险记录和施工反馈，请稍候，查询完成。过去三个月共巡检4处地点，发现14个风险点，其中高风险点2处。目前已有7处完成修复，2处正在安排施工，其余5处已受理，正在等待后续处置。",
+      },
+    ],
+    next: "（此轮为追加的统计问答，不接其他岗位台词）",
+    voicePack: null,
+    intentId: null,
   },
 ];
 

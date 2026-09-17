@@ -30,7 +30,7 @@ test("22 轮每一轮都登记了动作（没有'播完什么都不发生'的轮
     const action = actionFor(round.roundNo);
     assert.ok(action, `第 ${round.roundNo} 轮没有登记动作 —— 播完台词页面不会有任何变化`);
   }
-  assert.equal(DEMO_ACTIONS.length, 22, "动作表应恰好覆盖 22 轮");
+  assert.equal(DEMO_ACTIONS.length, 23, "动作表应恰好覆盖 23 轮");
 });
 
 test("每个动作的表面类型都在已知清单内", () => {

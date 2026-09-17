@@ -323,6 +323,34 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     dataKeys: ["delivery.total", "delivery.passed", "delivery.missing", "delivery.summaryMismatch"],
     simulated: true,
   },
+  {
+    roundNo: "㉓",
+    /*
+      ⚠ 用户 2026-09-17 追加的独立问答（快捷键 Ctrl+Q+Z）：
+      「过去三个月到过多少个地方巡检、发现多少个风险点、已修复多少」。
+      展示面用 `knowledge`（资料检索结果），与台词「我正在检索 RAG 知识库」对应。
+
+      ⚠ **不挂 dataKeys**：台词里的统计数字（4 处 / 14 个风险点 / 2 处高风险 /
+      7 处已修复 / 2 处施工中 / 5 处已受理）在冻结数据包里**没有出处**
+      （已全仓扫描确认）。没有数据键就不出数字卡片，
+      避免"台词念 14、卡片显示别的数"这种同屏矛盾。
+    */
+    title: "检索知识库，汇总近三个月巡检地点与风险处置情况",
+    surface: "evidence",
+    /*
+      ⚠ 挂的是**真实存在**的数据键（`SCENARIO_KEYS` 里能查到）：
+      `components.count`（构件数）、`weather.rain.risks`（降雨风险项）、
+      `clean.rawCount`（原始记录数）——它们支撑"巡检了什么、看了哪些风险"这层叙述。
+
+      ⚠ 但台词里那组统计（4 处地点 / 14 个风险点 / 2 处高风险 / 7 处已修复 / 2 处施工中 /
+      5 处已受理）**在冻结数据包里没有出处**（已全仓扫描确认），
+      所以这里**不把那些数字挂进来** —— 宁可卡片只显示真实存在的几项，
+      也不让屏幕上出现"台词说 14、卡片是别的数"这种同屏矛盾。
+      要把那组数上屏，得先把它补进 seed（属独立改动）。
+    */
+    dataKeys: ["components.count", "weather.rain.risks", "clean.rawCount"],
+    simulated: true,
+  },
 ]);
 
 /** 按圈号取动作（找不到返回 null，调用方决定如何处理） */

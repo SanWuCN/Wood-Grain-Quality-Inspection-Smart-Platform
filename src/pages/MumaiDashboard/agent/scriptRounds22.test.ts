@@ -198,7 +198,7 @@ test("⑪ 不接受语音抢触发，来源只能是本地任务事件（§8 明
 });
 
 test("剧本仍为 22 轮，且每轮都声明了触发来源", () => {
-  assert.equal(SCRIPT_ROUNDS.length, 22);
+  assert.equal(SCRIPT_ROUNDS.length, 23, "剧本 23 轮（用户 2026-09-17 定稿）");
   for (const round of SCRIPT_ROUNDS) {
     assert.ok(round.triggerSource, `第 ${round.roundNo} 轮必须声明 triggerSource`);
     if (round.triggerSource === "voice") {

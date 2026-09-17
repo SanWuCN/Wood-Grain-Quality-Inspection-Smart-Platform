@@ -38,7 +38,7 @@ test("剧本共 22 轮，圈号唯一", () => {
     差异来自口径：稿子把"⑧⑨ 连续两轮共享同一条下一句"和"⑮ 一轮含 2 句"分别合并计数。
     实现按**圈号**走（对稿、对台词都以圈号为准），所以这里是 22。
   */
-  assert.equal(SCRIPT_ROUND_COUNT, 22);
+  assert.equal(SCRIPT_ROUND_COUNT, 23, "剧本改为 23 轮（用户 2026-09-17 定稿：删巡检任务预检、拆归档验证摘要、追加统计问答）");
   const nos = SCRIPT_ROUNDS.map((r) => r.roundNo);
   assert.equal(new Set(nos).size, nos.length, "圈号有重复");
 });
