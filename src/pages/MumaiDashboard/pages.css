@@ -2660,6 +2660,89 @@
   gap: var(--space-3);
 }
 
+/*
+  数字孪生 · 机位关键帧（用户 2026-09-17：把镜头拉近木柱，打一帧，之后能点回来）
+  ── 三块：机位读数（画面左上）、帧列表（侧栏）、帧行内的两个动作按钮 ──
+*/
+
+/* 当前机位读数：压在画面左上角，别和右下角既有的 .twin-readout 抢位置 */
+.splat-stage__pose {
+  position: absolute;
+  left: var(--space-3);
+  top: var(--space-3);
+  z-index: 5;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  background: var(--panel-surface);
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.splat-stage__pose b {
+  color: var(--text-secondary);
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.keyframe-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.keyframe-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--panel-surface-2);
+}
+
+/* 点这一行 = 镜头飞回那一帧，所以整行做成按钮（可点区域大，演示时好点） */
+.keyframe-list__main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.keyframe-list__main:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.keyframe-list__id {
+  color: var(--text-accent, #70c4ff);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+}
+
+.keyframe-list__meta {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.keyframe-list__pose {
+  color: var(--text-tertiary);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+  font-variant-numeric: tabular-nums;
+}
+
 .scene-list {
   margin: 0 0 8px;
   padding: 0;

@@ -121,6 +121,20 @@ export type SceneEntity = {
   format: string;
   componentAnchors: { componentId: string; zoneId: string; position: unknown }[];
   bookmarkIds: string[];
+  /**
+   * 机位关键帧（数字孪生页「打关键帧」写进来的，服务端 `scene.keyframe.add`）。
+   *
+   * 与 `bookmarkIds` 的关系：打一帧会把帧号并进 `bookmarkIds`（同一个东西的两种叫法），
+   * 场景检查的「视角书签已建立」读的就是那份并集。
+   */
+  keyframes?: {
+    id: string;
+    componentId: string | null;
+    label: string;
+    pose: { azimuth: number; polar: number; distance: number; focus: { x: number; y: number; z: number } };
+    addedBy: string;
+    addedAt: string;
+  }[];
   checkResult: { checks: { key: string; label: string; pass: boolean; detail: string }[]; pass: boolean; checkedBy: string; checkedAt: string } | null;
   state: string;
   submittedBy: string;

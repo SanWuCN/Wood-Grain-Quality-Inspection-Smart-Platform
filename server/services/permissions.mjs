@@ -33,6 +33,17 @@ export const ACTION_PERMISSION = {
   "scene.submit": "scene:submit",
   "scene.check": "scene:publish",
   "scene.publish": "scene:publish",
+  /*
+   * 数字孪生页的「机位关键帧」（打帧 / 删帧）。
+   *
+   * 用 "*"（任意已登录账号）而不是新立一条权限，依据是用户 2026-09-18 的口径：
+   * 「所有服务都要让别人也能用，除了本地语音识别」—— 内网四个账号谁上来都能标机位，
+   * 帧本身记着是谁、什么时候打的（`addedBy` / `addedAt`），出问题查得到人。
+   * ⚠ 别改成一条新权限：`ALL` 会把新权限自动发给沈/史，而饶、马会突然不能打帧，
+   *   与"别人也能用"正好相反。
+   */
+  "scene.keyframe.add": "*",
+  "scene.keyframe.remove": "*",
 
   "artifact.build": "package:deliver",
   "artifact.publish": "package:deliver",

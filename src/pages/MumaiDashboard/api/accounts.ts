@@ -19,3 +19,13 @@ export function actorName(accountId: string | null | undefined): string {
   if (!accountId) return "—";
   return ACCOUNT_NAME[accountId] ?? accountId;
 }
+
+/**
+ * 只要姓名，不带岗位（`史` 而不是 `史 · 人工智能架构师`）。
+ *
+ * 给"一行里还要塞帧号、构件、时间"的列表用（数字孪生的机位关键帧列表就是）；
+ * 正文与播报仍走 `actorName()`，岗位信息在那里有用。
+ */
+export function actorShortName(accountId: string | null | undefined): string {
+  return actorName(accountId).split(" · ")[0];
+}

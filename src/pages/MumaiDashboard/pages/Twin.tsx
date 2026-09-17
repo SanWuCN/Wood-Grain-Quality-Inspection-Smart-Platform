@@ -13,16 +13,26 @@
  *     不把手绘虫道、深度或承载能力当成扫描测量
  */
 
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useMumai } from "../context";
 import { Icon } from "../icons";
 import NumberAnimation from "@/components/numberAnimation";
 import { api, isApiError } from "../api/client";
+import { actorShortName } from "../api/accounts";
 import { isOnline, scenes as scenesOf, useSharedStore } from "../store/shared";
 import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
-import { Btn, Modal, PermNote, StateBlock, StatusChip, Toolbar, WaveChart } from "../ui";import {
+import { Btn, Modal, PermNote, StateBlock, StatusChip, Toolbar, WaveChart } from "../ui";
+import {
+  keyframeTimeText,
+  poseReadout,
+  poseToCamera,
+  readKeyframes,
+  type SplatPose,
+  type TwinKeyframe,
+} from "./splatPose";
+import {
   CURRENT_RISKS,
   HISTORIC_ORDERS,
   HISTORY_RISKS,
@@ -243,6 +253,74 @@ export default function Twin() {
   );
   const [sideBySide, setSideBySide] = useState(true);
 
+  /* ---- 机位关键帧：把镜头拉近木柱 → 打一帧 → 谁都能点回来（用户 2026-09-17 口径）----
+     数据存在**服务端**（`scene.keyframes`）：用户明确「所有服务都要让别人也能用」，
+     所以内网任何一台机器、任何一个账号看到的是同一份，不是各存各的。
+     换算与容错都在 `splatPose.ts`（纯函数 + 单测），这里只管交互。 */
+  const poseRef = useRef<SplatPose | null>(null);
+  const [stageReady, setStageReady] = useState(false);
+  const [keyframeBusy, setKeyframeBusy] = useState<string | null>(null);
+  const [flyTo, setFlyTo] = useState<{ pose: SplatPose; nonce: number } | null>(null);
+  const [flying, setFlying] = useState<string | null>(null);
+  const keyframes = useMemo(() => readKeyframes(currentSceneEntity?.data), [currentSceneEntity]);
+
+  const addKeyframe = useCallback(async () => {
+    const entity = currentSceneEntity;
+    const pose = poseRef.current;
+    if (!entity) return;
+    if (!pose) {
+      toast("还没读到当前机位：等模型加载完、镜头动一下再打帧", "warn");
+      return;
+    }
+    setKeyframeBusy("add");
+    try {
+      const result = await useSharedStore.getState().send({
+        action: "scene.keyframe.add",
+        entityId: entity.id,
+        expectedRevision: entity.revision,
+        payload: { componentId: selected, pose },
+      });
+      const id = String(result.result.keyframeId ?? "");
+      toast(`已记录机位关键帧 ${id}（${selected}）`, "ok");
+      pushEvent(`打关键帧 ${id}：${selected} · ${poseReadout(pose)}`, "ok");
+    } catch (error) {
+      toast(isApiError(error) ? error.message : "打关键帧失败", "danger");
+    } finally {
+      setKeyframeBusy(null);
+    }
+  }, [currentSceneEntity, pushEvent, selected, toast]);
+
+  const flyToKeyframe = useCallback((frame: TwinKeyframe) => {
+    /* nonce 每次都变：同一个机位连点两次也要重新飞一遍（相机字段没变，靠它触发动画） */
+    setFlyTo({ pose: frame.pose, nonce: Date.now() });
+    setFlying(frame.id);
+    pushEvent(`镜头回到机位关键帧 ${frame.id}（${frame.componentId ?? "场景"}）`, "info");
+  }, [pushEvent]);
+
+  const removeKeyframe = useCallback(
+    async (frame: TwinKeyframe) => {
+      const entity = currentSceneEntity;
+      if (!entity) return;
+      setKeyframeBusy(frame.id);
+      try {
+        await useSharedStore.getState().send({
+          action: "scene.keyframe.remove",
+          entityId: entity.id,
+          expectedRevision: entity.revision,
+          payload: { keyframeId: frame.id },
+        });
+        toast(`已删除机位关键帧 ${frame.id}`, "ok");
+        pushEvent(`删除关键帧 ${frame.id}`, "warn");
+        setFlying((current) => (current === frame.id ? null : current));
+      } catch (error) {
+        toast(isApiError(error) ? error.message : "删除关键帧失败", "danger");
+      } finally {
+        setKeyframeBusy(null);
+      }
+    },
+    [currentSceneEntity, pushEvent, toast],
+  );
+
   return (
     <div className="page page--twin">
       <Toolbar
@@ -267,6 +345,25 @@ export default function Twin() {
         <Btn disabled={!hasModel} onClick={() => setFitNonce((value) => value + 1)} title="把镜头重新对准模型">
           适应视图
         </Btn>
+        {/*
+          打关键帧这个操作点：把当前机位连同「当前选中的构件」记一帧。
+          置灰条件是**说得出原因**的：没有模型 / 模型还没就绪 / 正忙。
+        */}
+        <Btn
+          tone="primary"
+          disabled={!hasModel || !stageReady || !currentSceneEntity || keyframeBusy !== null}
+          title={
+            !hasModel
+              ? "该工单还没有模型文件，先上传"
+              : !currentSceneEntity
+                ? "该工单还没有场景版本，先上传模型"
+                : !stageReady
+                  ? "模型还在加载，加载完就能打帧"
+                  : `把当前机位记成一帧（构件 ${selected}），内网所有人都能看到`
+          }
+          onClick={() => void addKeyframe()}>
+          {keyframeBusy === "add" ? "记录中…" : "打关键帧"}
+        </Btn>
         {canUpload ? (
           <Btn tone="primary" onClick={() => setUploadOpen(true)}>
             {hasModel ? "替换模型文件" : "上传模型文件"}
@@ -288,9 +385,16 @@ export default function Twin() {
                 <SplatStage
                   url={orderScene?.assetFileId ? api.modelUrl(orderScene.assetFileId, orderScene.assetName) : ""}
                   active={!splatError}
-                  camera={null}
+                  /* 回放：点某一帧就把它的机位喂回来，`cameraNonce` 保证同一帧再点也重飞 */
+                  camera={flyTo ? poseToCamera(flyTo.pose) : null}
+                  cameraNonce={flyTo?.nonce ?? 0}
+                  poseRef={poseRef}
                   fitNonce={fitNonce}
-                  onError={(message) => setSplatError(message)}
+                  onLoaded={() => setStageReady(true)}
+                  onError={(message) => {
+                    setStageReady(false);
+                    setSplatError(message);
+                  }}
                 />
               </Suspense>
             ) : null}
@@ -336,6 +440,58 @@ export default function Twin() {
 
         {/* 侧栏：操作说明 + 场景版本 + 热点详情 */}
         <div className="twin-side">
+          {/*
+            机位关键帧（用户 2026-09-17：「把视角拉近木柱，然后可以打上关键帧」）。
+            放在操作说明上面：它是**现场要点的东西**，不是说明书。
+            实现要点：帧存服务端（内网共享）、点一行飞回该机位、按构件各自编号。
+          */}
+          <Panel
+            title="机位关键帧"
+            extra={
+              <span className="muted">
+                {keyframes.length ? `${keyframes.length} 帧 · 本工单所有人共享` : "还没打帧"}
+              </span>
+            }>
+            {keyframes.length ? (
+              <ul className="keyframe-list">
+                {keyframes.map((frame) => (
+                  <li key={frame.id}>
+                    <button
+                      type="button"
+                      className="keyframe-list__main"
+                      disabled={!hasModel}
+                      title={hasModel ? `镜头回到 ${frame.id}` : "该工单没有模型文件，回放不了"}
+                      onClick={() => flyToKeyframe(frame)}>
+                      <span className="keyframe-list__id">
+                        {frame.id}
+                        {flying === frame.id ? " · 已回到该机位" : ""}
+                      </span>
+                      <span className="keyframe-list__meta">
+                        {frame.label} · {actorShortName(frame.addedBy)} · {keyframeTimeText(frame.addedAt)}
+                      </span>
+                      <span className="keyframe-list__pose">{poseReadout(frame.pose)}</span>
+                    </button>
+                    <Btn
+                      disabled={keyframeBusy !== null}
+                      title="删掉这一帧（所有人都不再看到）"
+                      onClick={() => void removeKeyframe(frame)}>
+                      {keyframeBusy === frame.id ? "删除中…" : "删除"}
+                    </Btn>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <StateBlock
+                kind="empty"
+                title="还没有机位关键帧"
+                hint="把镜头拉近要讲的构件（Z01–Z04），点工具条上的「打关键帧」。帧存在平台上，内网其他人打开这一页也能点回同一个机位。"
+              />
+            )}
+            {!hasModel ? (
+              <p className="muted">该工单还没有模型文件：打帧与回放都要先有重建产物。</p>
+            ) : null}
+          </Panel>
+
           <Panel title="操作说明">
             <ul className="twin-keys">
               {CONTROLS.map((row) => (

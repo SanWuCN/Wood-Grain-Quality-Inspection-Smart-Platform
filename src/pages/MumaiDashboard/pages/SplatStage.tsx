@@ -17,20 +17,38 @@
  *   3. 238 万点的排序开销不能每帧全量重来，靠 Spark 的 LoD（`lod`）压住。
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
 import { Box3, Euler, MathUtils, Vector3 } from "three";
 import { useFrame } from "@react-three/fiber";
 import NumberAnimation from "@/components/numberAnimation";
 import { SPLAT_BOUNDS, SPLAT_TRANSFORM, type SplatCamera, type SplatTransform } from "./splat";
+import { poseFromView, posePositionText, poseReadout, lookAheadFor, type SplatPose } from "./splatPose";
 
-function SplatCameraRig({ target }: { target: SplatCamera | null }) {
+function SplatCameraRig({
+  target,
+  nonce = 0,
+  onArrived,
+}: {
+  target: SplatCamera | null;
+  /** 同一机位再点一次也要重新飞（`target` 的字段没变时靠它触发） */
+  nonce?: number;
+  onArrived?: () => void;
+}) {
   if (!target) return null;
-  return <SplatCameraRigInner target={target} />;
+  return <SplatCameraRigInner target={target} nonce={nonce} onArrived={onArrived} />;
 }
 
-function SplatCameraRigInner({ target }: { target: SplatCamera }) {
+function SplatCameraRigInner({
+  target,
+  nonce = 0,
+  onArrived,
+}: {
+  target: SplatCamera;
+  nonce?: number;
+  onArrived?: () => void;
+}) {
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as
     | { target: Vector3; update: () => void }
@@ -62,7 +80,7 @@ function SplatCameraRigInner({ target }: { target: SplatCamera }) {
       t: 0,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target.azimuth, target.polar, target.focus?.x, target.focus?.y, target.focus?.z]);
+  }, [target.azimuth, target.polar, target.focus?.x, target.focus?.y, target.focus?.z, nonce]);
 
   useFrame((_, delta) => {
     const current = anim.current;
@@ -74,7 +92,69 @@ function SplatCameraRigInner({ target }: { target: SplatCamera }) {
       controls.target.lerpVectors(current.fromTarget, current.toTarget, k);
       controls.update();
     }
-    if (current.t >= 1) anim.current = null;
+    if (current.t >= 1) {
+      anim.current = null;
+      /*
+       * 飞到位之后**必须**通知外面：`FirstPersonControls` 自己维护 yaw/pitch，
+       * 外部动过相机不同步的话，用户下一次拖动的瞬间画面会跳回旧朝向
+       * （现象是"一转视角就不知道飘到哪了"，见 FirstPersonControls 的注释）。
+       * 「适应视图」是瞬时的所以当场同步；回放是动画，得等落地再同步。
+       */
+      onArrived?.();
+    }
+  });
+
+  return null;
+}
+
+/**
+ * 当前机位读表（数字孪生「打关键帧」要用）。
+ *
+ * ── 为什么放在 Canvas 里读 ────────────────────────────────────────
+ * 相机是 Canvas 里的 three.js 对象，页面侧拿不到。这里每帧把相机**读成**
+ * 声明式机位（`poseFromView`），写到外面给的 ref 上。
+ *
+ * ── 为什么读数直接写 DOM，而不是 setState ──────────────────────────
+ * 每帧 setState 会让整个孪生页每秒重渲染 60 次（拖镜头直接卡）；
+ * 而"节流 + setState"的写法实测踩了坑：第一版限流 400ms 一次，
+ * 结果**推拉镜头之后读数不刷新**（画面对了、数字停在原处），
+ * 现场就是"我明明动了镜头，读数还是老机位"。所以改成：
+ *   机位走 ref（零重渲染），读数**直接改那一个文本节点**（只在文字变了才写）。
+ * 这样读数永远是最新的，也不会让页面重渲染。
+ */
+function SplatPoseTracker({
+  poseRef,
+  lookAhead,
+  textRef,
+}: {
+  poseRef: MutableRefObject<SplatPose | null> | undefined;
+  lookAhead: number;
+  textRef?: MutableRefObject<HTMLElement | null>;
+}) {
+  const camera = useThree((state) => state.camera);
+  const forward = useRef(new Vector3());
+
+  useFrame(() => {
+    camera.getWorldDirection(forward.current);
+    let pose: SplatPose;
+    try {
+      pose = poseFromView(
+        {
+          position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+          forward: { x: forward.current.x, y: forward.current.y, z: forward.current.z },
+        },
+        lookAhead,
+      );
+    } catch {
+      /* 位置算出 NaN（画布尺寸为 0 之类）时这一帧不读数，别让异常打断渲染循环 */
+      return;
+    }
+    if (poseRef) poseRef.current = pose;
+    const node = textRef?.current;
+    if (!node) return;
+    const text = `${poseReadout(pose)} · ${posePositionText(pose)}`;
+    /* 只在变了才写：每帧写 DOM 虽然便宜，但会让开发者工具里的 DOM 断点没法用 */
+    if (node.textContent !== text) node.textContent = text;
   });
 
   return null;
@@ -251,8 +331,19 @@ function SplatFitter({
     | null;
 
   useEffect(() => {
-    const current = box.current ?? declaredBounds();
-    if (!current) return;
+    /*
+     * 用哪一份包围盒取景：**量出来的那份为空就退回模型声明的**。
+     *
+     * ── 为什么要这一步（2026-09-17 用真实浏览器验出来的老 bug）──────────
+     * 原来写的是 `box.current ?? declaredBounds()`：只在"还没有 Box3 对象"时兜底。
+     * 但实测发现 Spark 交回来的那个 Box3 **存在却是空的**（`isEmpty() === true`）——
+     * 于是 `fitToBox` 在 `if (box.isEmpty()) return;` 那里直接返回，
+     * 表现就是**「适应视图」点了没反应**（画面只是 near/far 重算导致的一点点变化），
+     * 而刚进页面时的机位其实来自 `declaredBounds()`（挂载那一刻 box.current 还是 null）。
+     * 判定"能不能用"要看**空不空**，不是"有没有对象"。
+     */
+    const measured = box.current;
+    const current = measured && !measured.isEmpty() ? measured : declaredBounds();
     fitToBox(
       camera as unknown as {
         position: Vector3;
@@ -266,7 +357,7 @@ function SplatFitter({
     );
     // camera / controls 是稳定引用，不进依赖数组
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nonce, box.current]);
+  }, [nonce, box.current?.isEmpty()]);
 
   return null;
 }
@@ -427,6 +518,8 @@ export function SplatStage({
   onLoaded,
   onError,
   fitNonce,
+  poseRef,
+  cameraNonce,
   active = true,
 }: {
   url: string;
@@ -437,6 +530,15 @@ export function SplatStage({
   onError?: (message: string) => void;
   /** 变化即重新取景到重建产物（「适应视图」按钮） */
   fitNonce?: number;
+  /**
+   * 当前机位的出口（数字孪生「打关键帧」读它）。
+   * 走 ref 不走 state：见 `SplatPoseTracker` 的说明。
+   */
+  poseRef?: MutableRefObject<SplatPose | null>;
+  /**
+   * 同一个机位再点一次也要重新飞：`camera` 的字段没变时靠这个 nonce 触发动画。
+   */
+  cameraNonce?: number;
   /**
    * 是否正在显示。切到低模示意时传 false：
    * Canvas 必须**保持挂载**（只停渲染），原因见文件末尾关于卸载异常的说明。
@@ -454,6 +556,18 @@ export function SplatStage({
   const boxRef = useRef<Box3 | null>(null);
   const [boxNonce, setBoxNonce] = useState(0);
   const [flyScale, setFlyScale] = useState(6);
+  /*
+   * 当前机位读数那一格：由 `SplatPoseTracker` 每帧**直接写文本**（不走 state），
+   * 所以这里只需要一个 DOM 引用。见 SplatPoseTracker 的说明。
+   */
+  const poseTextRef = useRef<HTMLElement | null>(null);
+  /*
+   * 回放落地后要让 `FirstPersonControls` 重新同步朝向。它与「适应视图」共用
+   * `syncNonce`，所以这里也给它一个独立的计数：`boxNonce`/`fitNonce` 的倍率
+   * 是既有写法（`* 1000`），回放计数用它下面那一档，互不覆盖。
+   */
+  const [flyArrived, setFlyArrived] = useState(0);
+  const syncNonce = boxNonce + (fitNonce ?? 0) * 1000 + flyArrived;
 
   return (
     <div className="splat-stage">
@@ -492,10 +606,18 @@ export function SplatStage({
         />
         <SplatFitter box={boxRef} nonce={boxNonce + (fitNonce ?? 0) * 1000} fov={50} />
         {/* 第一人称操作：鼠标转视角、WASD 沿朝向走，见 FirstPersonControls 的说明 */}
-        <FirstPersonControls scale={flyScale} syncNonce={boxNonce + (fitNonce ?? 0) * 1000} />
-        <SplatCameraRig target={camera} />
+        <FirstPersonControls scale={flyScale} syncNonce={syncNonce} />
+        <SplatCameraRig target={camera} nonce={cameraNonce} onArrived={() => setFlyArrived((value) => value + 1)} />
+        {/* 当前机位读数（打关键帧要用，也让讲解人知道自己站在哪） */}
+        <SplatPoseTracker poseRef={poseRef} lookAhead={lookAheadFor(flyScale)} textRef={poseTextRef} />
       </Canvas>
 
+      {loaded ? (
+        <div className="splat-stage__pose" aria-live="off">
+          <span>当前机位</span>
+          <b ref={poseTextRef}>—</b>
+        </div>
+      ) : null}
       {!loaded ? (
         <div className="splat-stage__load">
           <b>正在加载重建产物</b>

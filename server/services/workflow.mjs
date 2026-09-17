@@ -187,6 +187,90 @@ export class WorkflowError extends Error {
 }
 
 /* ------------------------------------------------------------------ *
+ * 场景「机位关键帧」（用户 2026-09-17 口径）
+ *
+ * 用户原话：「数字孪生那要加个操作点，添加打关键帧的功能，我把视角拉近木柱，
+ * 然后可以打上关键帧」；并明确「所有服务都要让别人也能用」—— 所以帧存在**服务端**，
+ * 内网任何一台机器、任何一个账号看到的是同一份，不是各存各的。
+ *
+ * 三条口径，改之前先看：
+ *   1. **不改发布状态**：关键帧是给场景加"视角标注"，不是新版本。打一帧就把 `state`
+ *      打回「待检查」的话，演示里刚发布的场景会因为讲解人随手标个机位而失效；
+ *   2. **同步进 `bookmarkIds`**：`scene.check` 的「视角书签已建立」看的就是它 ——
+ *      不同步会出现"页面里明明打了帧，检查还说没有书签"；
+ *   3. **可追溯**：记谁打的、什么时候打的；删帧也一样，事件流留痕。
+ * ------------------------------------------------------------------ */
+
+/** 机位需要落库的四个量：水平角 / 极角 / 距离 / 看向的点 */
+const KEYFRAME_POSE_FIELDS = ["azimuth", "polar", "distance"];
+
+/**
+ * 严格取数：**只有真正是数字**（或非空数字字符串）才算数。
+ *
+ * ⚠ 不能直接 `Number(value)`：`Number(null)` 是 **0**，`Number("")` 也是 0 ——
+ * 前端漏传一个字段（JSON 里就是 `null`）会被悄悄当成"方位角 0°"存下来，
+ * 别人打开场景时镜头停在一个"看起来正常但根本不是他标的机位"上。所以 null / 空串 / 布尔
+ * 一律按"没给"处理，由调用方拒收。
+ */
+function poseNumber(value) {
+  if (value === null || value === undefined || typeof value === "boolean") return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * 校验并规范化一个机位。
+ *
+ * 相机姿态是**渲染层读出来的浮点数**，可能带 NaN/Infinity（画布尺寸为 0、
+ * 模型还没 fit 完就按了按钮）。这些东西一旦写进实体，别人打开这个场景时
+ * 镜头会飞到"不存在的位置"，而页面不会报错 —— 所以这里当场拒掉，宁可 422。
+ */
+export function normalizeKeyframePose(input) {
+  const pose = input && typeof input === "object" ? input : {};
+  const out = {};
+  for (const field of KEYFRAME_POSE_FIELDS) {
+    const value = poseNumber(pose[field]);
+    if (value === null) {
+      throw new WorkflowError(422, "BAD_POSE", `机位的 ${field} 不是有限数字（收到 ${String(pose[field])}）`);
+    }
+    out[field] = Number(value.toFixed(4));
+  }
+  /* 距离必须为正：0 或负数会让相机落在模型里（画面全黑，看起来像坏了） */
+  if (out.distance <= 0) {
+    throw new WorkflowError(422, "BAD_POSE", `机位距离必须大于 0（收到 ${out.distance}）`);
+  }
+  const focus = pose.focus && typeof pose.focus === "object" ? pose.focus : null;
+  if (!focus || !["x", "y", "z"].every((axis) => poseNumber(focus[axis]) !== null)) {
+    throw new WorkflowError(422, "BAD_POSE", "机位缺少看向的点（focus.x/y/z 必须是有限数字）");
+  }
+  out.focus = {
+    x: Number(poseNumber(focus.x).toFixed(4)),
+    y: Number(poseNumber(focus.y).toFixed(4)),
+    z: Number(poseNumber(focus.z).toFixed(4)),
+  };
+  return out;
+}
+
+/**
+ * 下一个帧号：`KF-<构件>-NN`，**按构件各自编号**（Z04 的第 1 帧是 `KF-Z04-01`）。
+ *
+ * 为什么按构件分：现场说的就是"Z04 柱脚这个机位"，讲解与对照表都按构件找；
+ * 全局流水号（KF-07）在台上没法一眼对上柱子。
+ */
+export function nextKeyframeId(frames, componentId) {
+  const scope = (componentId ?? "SCENE").toUpperCase();
+  const prefix = `KF-${scope}-`;
+  const used = frames
+    .map((item) => String(item.id ?? ""))
+    .filter((id) => id.startsWith(prefix))
+    .map((id) => Number.parseInt(id.slice(prefix.length), 10))
+    .filter((n) => Number.isInteger(n));
+  const next = (used.length ? Math.max(...used) : 0) + 1;
+  return `${prefix}${String(next).padStart(2, "0")}`;
+}
+
+/* ------------------------------------------------------------------ *
  * 各动作的处理器
  * ------------------------------------------------------------------ */
 
@@ -355,12 +439,26 @@ const HANDLERS = {
     if (target.data.state === "已发布") {
       throw new WorkflowError(409, "ALREADY_PUBLISHED", `场景 ${target.id} 已发布，不能重新检查`);
     }
-    // 检查项：锚点、书签、资源三者齐全才算通过
+    /*
+     * 检查项：锚点、书签、资源三者齐全才算通过。
+     *
+     * ⚠ 书签这一项读的是「机位关键帧 ∪ bookmarkIds」的**并集**：页面里"打关键帧"写的
+     * 是 `keyframes`，同时会把帧号并进 `bookmarkIds`（见 scene.keyframe.add）。
+     * 取并集是为了兼容两种历史数据 —— 老库里只有 seed 的书签号，
+     * 而新打的帧可能因为手工改库、旧版本写入等原因只落在一边。
+     */
     const anchors = target.data.componentAnchors ?? [];
+    const keyframes = target.data.keyframes ?? [];
+    const bookmarks = new Set([...(target.data.bookmarkIds ?? []), ...keyframes.map((item) => item.id)]);
     const checks = [
       { key: "asset", label: "重建资源已登记", pass: Boolean(target.data.assetId), detail: target.data.assetId ?? "未登记" },
       { key: "anchors", label: "构件锚点已标定", pass: anchors.length > 0, detail: `${anchors.length} 个锚点` },
-      { key: "bookmarks", label: "视角书签已建立", pass: (target.data.bookmarkIds ?? []).length > 0, detail: `${(target.data.bookmarkIds ?? []).length} 个书签` },
+      {
+        key: "bookmarks",
+        label: "视角书签已建立",
+        pass: bookmarks.size > 0,
+        detail: `${bookmarks.size} 个书签${keyframes.length ? `（含 ${keyframes.length} 个机位关键帧）` : ""}`,
+      },
     ];
     const pass = checks.every((item) => item.pass);
     const entity = writeEntity(ctx.db, ctx.sessionId, "scene", target.id, {
@@ -395,6 +493,65 @@ const HANDLERS = {
       entity,
       result: { sceneId: target.id, state: "已发布" },
       events: [{ type: "scene.published", payload: { sceneId: target.id, assetId: target.data.assetId } }],
+    };
+  },
+
+  /*
+   * 机位关键帧：数字孪生页里"把镜头拉近木柱 → 打一帧"。
+   * 口径与理由见文件上方「场景机位关键帧」那段注释（不改发布状态 / 同步 bookmarkIds / 可追溯）。
+   * 权限是 "*"（任意已登录账号）：用户口径「所有服务都要让别人也能用」。
+   */
+  "scene.keyframe.add": (ctx, payload) => {
+    const target = requireEntity(ctx, "scene");
+    const pose = normalizeKeyframePose(payload.pose);
+    const componentId = String(payload.componentId ?? "").trim() || null;
+    const frames = [...(target.data.keyframes ?? [])];
+    const id = nextKeyframeId(frames, componentId);
+    const frame = {
+      id,
+      componentId,
+      label:
+        String(payload.label ?? "").trim() ||
+        `${componentId ?? "场景"} · 机位 ${frames.filter((item) => item.componentId === componentId).length + 1}`,
+      pose,
+      addedBy: ctx.actorId,
+      addedAt: nowIso(),
+    };
+    frames.push(frame);
+    const entity = writeEntity(ctx.db, ctx.sessionId, "scene", target.id, {
+      ...target.data,
+      keyframes: frames,
+      /* 书签与关键帧是同一件事的两种叫法：检查项读 bookmarkIds，这里保持同步（去重） */
+      bookmarkIds: [...new Set([...(target.data.bookmarkIds ?? []), id])],
+    });
+    return {
+      entityKind: "scene",
+      entity,
+      result: { sceneId: target.id, keyframeId: id, count: frames.length },
+      events: [
+        { type: "scene.keyframe.added", payload: { sceneId: target.id, keyframeId: id, componentId } },
+      ],
+    };
+  },
+
+  "scene.keyframe.remove": (ctx, payload) => {
+    const target = requireEntity(ctx, "scene");
+    const keyframeId = String(payload.keyframeId ?? "").trim();
+    const frames = target.data.keyframes ?? [];
+    if (!frames.some((item) => item.id === keyframeId)) {
+      throw new WorkflowError(404, "NO_KEYFRAME", `场景 ${target.id} 上没有机位关键帧 ${keyframeId}`);
+    }
+    const rest = frames.filter((item) => item.id !== keyframeId);
+    const entity = writeEntity(ctx.db, ctx.sessionId, "scene", target.id, {
+      ...target.data,
+      keyframes: rest,
+      bookmarkIds: (target.data.bookmarkIds ?? []).filter((id) => id !== keyframeId),
+    });
+    return {
+      entityKind: "scene",
+      entity,
+      result: { sceneId: target.id, keyframeId, count: rest.length },
+      events: [{ type: "scene.keyframe.removed", payload: { sceneId: target.id, keyframeId } }],
     };
   },
 
