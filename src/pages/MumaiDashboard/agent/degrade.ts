@@ -308,6 +308,42 @@ export function errorSignatureOf(note: string): string {
 }
 
 /**
+ * 唤醒通道出错时，**给人看的那一句**（原因 + 怎么办）。
+ *
+ * ── 为什么需要它（用户 2026-09-17 实测报的）──────────────────────────
+ * 用户原话：「为什么我点击开启常驻唤醒就报错」。
+ *
+ * 实测复现：浏览器没给麦克风权限时，点「开启常驻唤醒」→ 小木徽标变成「出错了」，
+ * 而界面上**只有一句与原因无关的**「音频链路当前不在线…重连：按 Alt+W…」——
+ * 真正的原因（「麦克风权限被拒绝，唤醒不可用」）只打在控制台里，
+ * 用户看不到，于是只能来问"为什么报错"。
+ *
+ * 这个函数把 `wakeChannel` 记下的原因翻成一句可操作的话：说清是哪一类问题、
+ * 当场该怎么绕过去（绝大多数情况就是改用快捷键）。三类原因分开写，
+ * 因为它们要用户做的事完全不同：改权限 / 换地址 / 起服务。
+ *
+ * ⚠ 判据按**关键词**匹配而不是等值比较：`wakeChannel` 的原文会带上浏览器给的
+ *   `error.name`（`NotAllowedError` / `NotFoundError` / …），逐字比较会漏。
+ */
+export function wakeErrorHint(note: string): string {
+  const text = String(note ?? "");
+  if (text.includes("权限被拒绝") || /NotAllowedError/i.test(text)) {
+    return "浏览器拒绝了麦克风（权限被拒）。点地址栏左边的图标，把「麦克风」改成「允许」，再按 Alt+W 重开；这期间可以直接用下面「快捷键一览」里的键按轮次播放。";
+  }
+  if (text.includes("不支持") || text.includes("不可用")) {
+    /*
+      ⚠ 措辞避开「演示」二字：`visibleCopy.test.ts` 明令运行时展示文案里不许出现
+      「演示 / 非实 / 虚构样例」，那是给观众看的界面，不能自我拆台。
+    */
+    return "本机浏览器不给麦克风（内网 http 不是安全上下文 —— 浏览器只在 localhost 或 https 下开麦）。开服务的那台用 http://localhost:8000 打开就能用语音；其它机器请用下面「快捷键一览」里的键。";
+  }
+  if (text.includes("连接") || text.includes("服务") || text.includes("重连")) {
+    return "本机语音服务不可达（识别服务 8770 / 语音桥 8780 没起或刚重启）。看启动窗口里那一行「语音通道 …」是否 ready；期间可用下面「快捷键一览」里的键。";
+  }
+  return `${text || "唤醒通道出错"}。期间可用下面「快捷键一览」里的键按轮次播放。`;
+}
+
+/**
  * 去掉重连参数，只留「断开原因」。
  *
  * `wakeChannel.scheduleReconnect` 写的 note 里带退避参数

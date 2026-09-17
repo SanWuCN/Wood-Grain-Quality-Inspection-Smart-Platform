@@ -499,6 +499,35 @@ try {
       sheet?.note ? `提示「${sheet.note.slice(0, 40)}…」` : "没有任何提示",
     );
   }
+
+  /* ---------- ⑦b 「开启常驻唤醒」按钮：不能开的机器上直接置灰 ----------
+     用户 2026-09-17：「为什么我点击开启常驻唤醒就报错」——
+     浏览器不给麦克风时，"点了才报错"不如"一开始就不能点 + 说清原因"。
+     本机（localhost）反过来必须可点，否则就成了"能用却不让用"。
+  */
+  const wakeBtn = await evaluate(`(() => {
+    const btn = [...document.querySelectorAll('.xd__btn')].find((b) => /常驻唤醒|不能开麦/.test(b.textContent || ''));
+    return btn ? { text: (btn.textContent || '').trim(), disabled: btn.disabled, title: btn.title } : null;
+  })()`);
+  check("气泡底部有常驻唤醒按钮", Boolean(wakeBtn), wakeBtn ? `文案=「${wakeBtn.text}」` : "没找到");
+  if (isLoopback) {
+    check(
+      "本机（localhost）常驻唤醒按钮可点（能用就不该灰）",
+      wakeBtn?.disabled === false,
+      `disabled=${wakeBtn?.disabled}`,
+    );
+  } else {
+    check(
+      "内网 http 上常驻唤醒按钮置灰（不再点了才报错）",
+      wakeBtn?.disabled === true,
+      `disabled=${wakeBtn?.disabled}　文案=「${wakeBtn?.text ?? ""}」`,
+    );
+    check(
+      "置灰时 title 说明了原因与替代办法",
+      /不给麦克风|安全上下文|快捷键/.test(String(wakeBtn?.title ?? "")),
+      `title=「${String(wakeBtn?.title ?? "").slice(0, 50)}…」`,
+    );
+  }
   await shot(send, "5-气泡里的快捷键一览");
 
   /* ---------- ⑧ 第⑤轮天气：台词里的数据必须与屏幕上的天气面板**同一份** ----------

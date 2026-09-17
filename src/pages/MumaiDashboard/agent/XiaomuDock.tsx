@@ -26,7 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import XiaomuFace from "./XiaomuFace";
 import { ask, type Runtime } from "./executor";
 import { closeAgent, hasForeignModal, nextInteractionId } from "./api";
-import { stableNote, WAKE_REPLY_TEXT } from "./degrade";
+import { stableNote, wakeErrorHint, WAKE_REPLY_TEXT } from "./degrade";
 import { useAgentNavigate, useAgentSession } from "./agentSession";
 import { getAgentState, resolveConfirm, setAgent, subscribeAgent } from "./store";
 import { microphoneSupported } from "./asr";
@@ -872,14 +872,26 @@ export default function XiaomuDock() {
             <button
               type="button"
               className={`xd__btn xd__btn--wake${listening ? " is-live" : ""}`}
+              /*
+                ⚠ 浏览器根本不给麦克风时（内网 http 不是安全上下文）**直接置灰**：
+                用户口径 2026-09-17「为什么我点击开启常驻唤醒就报错」—— 点了才报错，
+                不如一开始就不能点，并把原因写在 title 与下面那行说明里。
+                注意"权限被拒"是**另一种**情况（`mediaDevices` 在、只是没授权）：
+                那种仍然让点，点完由 `wakeErrorHint` 告诉用户去哪把权限改回来。
+              */
+              disabled={!micOk}
               onClick={() => {
                 const channel = wakeChannel();
                 if (channel.currentState === "live") channel.stop();
                 else void channel.start();
               }}
-              title="常驻唤醒：说两遍「小木小木」即可唤起（Alt+W 开关）。关掉气泡不会关掉它。"
+              title={
+                micOk
+                  ? "常驻唤醒：说两遍「小木小木」即可唤起（Alt+W 开关）。关掉气泡不会关掉它。"
+                  : "这台机器的浏览器不给麦克风（内网 http 不是安全上下文）—— 唤醒用不了，请用下面「快捷键一览」里的键"
+              }
             >
-              {listening ? "常驻唤醒：已开" : "开启常驻唤醒"}
+              {listening ? "常驻唤醒：已开" : micOk ? "开启常驻唤醒" : "这台机器不能开麦"}
             </button>
             <span className="xd__hint">两遍「小木小木」 → 停一下 → 说命令</span>
           </footer>
@@ -904,6 +916,17 @@ export default function XiaomuDock() {
             >
               快捷键一览 · {sheetRows.length} 条（Ctrl+B/N/M）{keysOpen ? "▾" : "▸"}
             </button>
+            {wake.state === "error" ? (
+              /*
+                ── 唤醒出错时，把**原因和怎么办**写在气泡里 ──────────────────
+                用户 2026-09-17 实测报的：「为什么我点击开启常驻唤醒就报错」。
+                实测复现：没给麦克风权限时徽标变成「出错了」，而界面上只有一句
+                与原因无关的「音频链路当前不在线…」—— 真正的原因只打在控制台里。
+                这里把 `wakeChannel` 记的原因翻成一句可操作的话（见 `wakeErrorHint`），
+                放在快捷键一览的正上方：出错了先看这里，看不行就照着下面按。
+              */
+              <p className="xd__note xd__note--wake-error">{wakeErrorHint(wake.note ?? "")}</p>
+            ) : null}
             {!micOk ? (
               <p className="xd__note">
                 本机浏览器不允许用麦克风（内网 http 的安全限制，只有本机 localhost 或 https 才行）——
