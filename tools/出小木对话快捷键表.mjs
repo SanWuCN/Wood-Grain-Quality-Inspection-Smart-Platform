@@ -1,5 +1,5 @@
 /**
- * 生成《小木对话 · 快捷键对应表 v3.1》—— 给演示人照读的那张纸。
+ * 生成《小木对话 · 快捷键对应表 v3.2》—— 给演示人照读的那张纸。
  *
  * ── 三条来源，一条都不手抄 ────────────────────────────────────────
  *   1. **键位与"照着说什么"** ← `scriptShortcutEntries.ts`
@@ -16,7 +16,7 @@ import { pathToFileURL } from "node:url";
 
 const ROOT =
   "D:/平台/Wood-Grain-Quality-Inspection-Smart-Platform-RAO/Wood-Grain-Quality-Inspection-Smart-Platform-RAO";
-const OUT = "D:\\平台\\小木对话-快捷键对应表-v3.1.md";
+const OUT = "D:\\平台\\小木对话-快捷键对应表-v3.2.md";
 const load = (rel) => import(pathToFileURL(`${ROOT}/src/pages/MumaiDashboard/${rel}`).href);
 
 const { SCRIPT_ROUNDS, mainLineOf } = await load("agent/script.ts");
@@ -54,16 +54,16 @@ const noAudio = rows.filter((r) => !r.audio);
 const L = [];
 const w = (s = "") => L.push(s);
 
-w("# 小木对话 · 快捷键对应表 v3.1");
+w("# 小木对话 · 快捷键对应表 v3.2");
 w();
 w("> **顺序 = 您给的《小木对话总文案.txt》25 条的顺序 = 剧本 25 轮的顺序**。");
 w("> 演示时**照着序号往下按**就行：按键 → 气泡里逐字「听到」这句话 → 小木按剧本回答 + 页面动起来。");
 w();
 w("> 键位规则（按 10 条一段换前缀，段内都是数字键）：");
 w("> · 第 **1–10** 条 → **`Ctrl+B+1`** … **`Ctrl+B+0`**（B 段）");
-w("> · 第 **11–20** 条 → **`Ctrl+J+1`** … **`Ctrl+J+0`**（J 段）");
+w("> · 第 **11–20** 条 → **`Ctrl+Y+1`** … **`Ctrl+Y+0`**（Y 段）");
 w("> · 第 **21–25** 条 → **`Ctrl+M+1`** … **`Ctrl+M+5`**（M 段）");
-w(`> 两次按键之间要在 **${SCRIPT_SEQUENCE_WINDOW_MS / 1000} 秒**内完成（先按住 Ctrl 按段前缀 B/J/M，再按数字）。`);
+w(`> 两次按键之间要在 **${SCRIPT_SEQUENCE_WINDOW_MS / 1000} 秒**内完成（先按住 Ctrl 按段前缀 B/Y/M，再按数字）。`);
 w(">");
 w("> ⚠ `Ctrl+Q+L`（建工单）是**另一条**序列，与本表不冲突。");
 w(`> 生成时间：${new Date().toLocaleString("zh-CN", { hour12: false })}`);
@@ -114,7 +114,7 @@ for (const r of rows) {
   w(`- \`${r.label}\`　${r.round.roundNo} ${r.round.title} → ${tag}：${a.title}${btn}`);
 }
 w();
-w("> ⑬（`Ctrl+J+3`）是**唯一**小木自己起头的一轮：它会弹出**预警窗**（红色描边 +");
+w("> ⑬（`Ctrl+Y+3`）是**唯一**小木自己起头的一轮：它会弹出**预警窗**（红色描边 +");
 w("> 「预警」角标 + 确认按钮）。按钮点下去只把平台状态标成「已确认」，**不向设备发送任何指令**。");
 w();
 w("## 四、25 条纯文本（供校对 / 重新合成音频，逐字复制）");

@@ -1,23 +1,26 @@
 /**
  * 剧本快捷键序列判定的单测
  * ── 这一组在防什么 ──────────────────────────────────────────────
- * `Ctrl+B/J/M + 数字` 是两段式序列，判定里全是时间窗与修饰键条件。写错的后果分两种，
+ * `Ctrl+B/Y/M + 数字` 是两段式序列，判定里全是时间窗与修饰键条件。写错的后果分两种，
  * 都很隐蔽：
  *   · 太宽 → 用户按 Ctrl+B 想干别的（加粗、或输入法选词）时**凭空触发一轮对话**；
  *   · 太严 → 现场按键没反应，讲解人以为功能坏了。
  * 所以每条口径都单独钉一个用例。
  *
- * ── 2026-09-17 键位改成三段（用户口径）──────────────────────────
- * 「1到10对话是 Ctrl+B+1到0，11到20是 Ctrl+N+1到0，21到25则是 Ctrl+M+1到5」。
- * 随后又改了一次：「ctrl加n换成加j的，ctrl加n有功能冲突了」—— Ctrl+N 是浏览器「新建窗口」，
- * 所以第二段的段前缀是 **J**，不是 N。
+ * ── 2026-09-17 键位改成三段（用户口径，前后改了三次）──────────────
+ * 「1到10对话是 Ctrl+B+1到0，11到20是 Ctrl+N+1到0，21到25则是 Ctrl+M+1到5」；
+ * 随后「ctrl加n换成加j的，ctrl加n有功能冲突了」（Ctrl+N = 新建窗口，**拦不住**）；
+ * 再随后「找个没冲突的替代j」（Ctrl+J = 下载页）。最终第二段的段前缀是 **Y**
+ * （浏览器里没有默认动作，理由与备选取舍见实现里的 `BROWSER_OWNED_CTRL_KEYS`）。
  * 于是**同一个数字键在三段里含义不同**：这里凡是查键位的地方都用复合 id
- * （`"b:1"` / `"j:0"` / `"m:5"`，见 `shortcutId`），并专门钉住"跨段不许串"。
+ * （`"b:1"` / `"y:0"` / `"m:5"`，见 `shortcutId`），并专门钉住"跨段不许串"。
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  BROWSER_OWNED_CTRL_KEYS,
+  BROWSER_RESERVED_CTRL_KEYS,
   RESERVED_SHORTCUT_KEYS,
   SCRIPT_SEQUENCE_PREFIX_KEYS,
   SCRIPT_SEQUENCE_WINDOW_MS,
@@ -58,8 +61,8 @@ test("三段前缀各自命中自己的复合 id（同一个数字键含义不�
   const cases: [string, string, string][] = [
     ["b", "1", "b:1"],
     ["b", "0", "b:0"],
-    ["j", "1", "j:1"],
-    ["j", "0", "j:0"],
+    ["y", "1", "y:1"],
+    ["y", "0", "y:0"],
     ["m", "1", "m:1"],
     ["m", "5", "m:5"],
   ];
@@ -73,13 +76,13 @@ test("三段前缀各自命中自己的复合 id（同一个数字键含义不�
 test("跨段不许串：段外的数字不命中，且不清掉半截序列以外的行为要一致", () => {
   /* Ctrl+M 这一段只有 1..5 —— 按 6 不该命中（第 26 条不存在） */
   assert.equal(advanceSequence(key("6"), arm("m"), 300).kind, "ignore");
-  /* Ctrl+B / Ctrl+J 两段各有 1..0，0 有效；字母不是任何段的目标键 */
+  /* Ctrl+B / Ctrl+Y 两段各有 1..0，0 有效；字母不是任何段的目标键 */
   assert.equal(advanceSequence(key("q"), arm("b"), 300).kind, "ignore");
-  assert.equal(advanceSequence(key("a"), arm("j"), 300).kind, "ignore");
+  assert.equal(advanceSequence(key("a"), arm("y"), 300).kind, "ignore");
 });
 
 test("超出 1.5 秒窗口 → 不命中，且半截序列被清掉", () => {
-  const state = arm("j", 0);
+  const state = arm("y", 0);
   const late = advanceSequence(key("2"), state, SCRIPT_SEQUENCE_WINDOW_MS + 1);
   assert.equal(late.kind, "ignore");
   assert.equal(late.state.armedPrefix, null, "过期后必须清状态，否则下一次按键会被当成序列后半截");
@@ -135,26 +138,26 @@ test("输入框 / 文本域 / 可编辑区域里不触发", () => {
   assert.equal(advanceSequence(key("1", { target: { tagName: "DIV" } }), current, 50).kind, "fire");
 });
 
-test("键表 = 用户口径的三段（B:1..0 / J:1..0 / M:1..5），共 25 个位置", () => {
+test("键表 = 用户口径的三段（B:1..0 / Y:1..0 / M:1..5），共 25 个位置", () => {
   /* 键表顺序 = 用户《小木对话总文案.txt》25 条的顺序；错一位就会"按了第 7 个键、
      小木念第 8 条"。 */
   assert.deepEqual(
     [...SCRIPT_SHORTCUT_KEYS],
     [
       ...["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((k) => `b:${k}`),
-      ...["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((k) => `j:${k}`),
+      ...["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((k) => `y:${k}`),
       ...["1", "2", "3", "4", "5"].map((k) => `m:${k}`),
     ],
-    "必须是 Ctrl+B+1..0、Ctrl+J+1..0、Ctrl+M+1..5",
+    "必须是 Ctrl+B+1..0、Ctrl+Y+1..0、Ctrl+M+1..5",
   );
   assert.equal(SCRIPT_SHORTCUT_KEYS.length, 25, "25 个键对应文档 25 条对话");
   assert.equal(new Set(SCRIPT_SHORTCUT_KEYS).size, 25, "复合 id 必须互不相同");
   assert.deepEqual(
     SCRIPT_SHORTCUT_GROUPS.map((g) => g.prefix),
-    ["b", "j", "m"],
+    ["b", "y", "m"],
     "前缀顺序 = 段落顺序（1–10、11–20、21–25）",
   );
-  assert.deepEqual([...SCRIPT_SEQUENCE_PREFIX_KEYS], ["b", "j", "m"]);
+  assert.deepEqual([...SCRIPT_SEQUENCE_PREFIX_KEYS], ["b", "y", "m"]);
   /* 每段的键数要能覆盖对应条数：10 + 10 + 5 */
   assert.deepEqual(
     SCRIPT_SHORTCUT_GROUPS.map((g) => g.keys.length),
@@ -162,11 +165,56 @@ test("键表 = 用户口径的三段（B:1..0 / J:1..0 / M:1..5），共 25 个�
   );
 });
 
+test("段前缀不许撞浏览器自己的 Ctrl 组合（用户为这件事换过两次键位）", () => {
+  /*
+    用户原话两次：
+      「ctrl加n换成加j的，ctrl加n有功能冲突了」—— Ctrl+N = 新建窗口，**保留键，拦不住**；
+      「找个没冲突的替代j」—— Ctrl+J = 下载页。
+    所以"键位不许和浏览器撞"必须是**能跑的判据**，而不是一句记住的话：
+    以后有人把段前缀改成 H（历史）、D（收藏）、S（另存为）这类键，这条用例当场红。
+  */
+  const allowlisted = new Set(["b"]); // 唯一豁免：1–10 段在用 Ctrl+B（只切书签栏，拦得住）
+  for (const prefix of SCRIPT_SEQUENCE_PREFIX_KEYS) {
+    assert.equal(
+      BROWSER_RESERVED_CTRL_KEYS.includes(prefix),
+      false,
+      `Ctrl+${prefix.toUpperCase()} 是浏览器保留键，页面 preventDefault 也拦不住，绝不许当段前缀`,
+    );
+    if (allowlisted.has(prefix)) continue;
+    assert.equal(
+      BROWSER_OWNED_CTRL_KEYS.includes(prefix),
+      false,
+      `Ctrl+${prefix.toUpperCase()} 浏览器自己有动作（名单见 BROWSER_OWNED_CTRL_KEYS）`,
+    );
+  }
+  /* 名单自己也要守住硬禁区：别有人把 N/T/W 从"浏览器占用"里删掉 */
+  for (const reserved of BROWSER_RESERVED_CTRL_KEYS) {
+    assert.equal(
+      BROWSER_OWNED_CTRL_KEYS.includes(reserved),
+      true,
+      `${reserved} 是保留键，必须留在 BROWSER_OWNED_CTRL_KEYS 里`,
+    );
+  }
+  /* 三段前缀互不相同；也不许撞建单序列的 Q 与被占用的 L */
+  assert.equal(
+    new Set(SCRIPT_SEQUENCE_PREFIX_KEYS).size,
+    SCRIPT_SHORTCUT_GROUPS.length,
+    "三段前缀必须互不相同，否则段内数字会指向两个条目",
+  );
+  for (const taken of ["q", ...RESERVED_SHORTCUT_KEYS]) {
+    assert.equal(
+      SCRIPT_SEQUENCE_PREFIX_KEYS.includes(taken),
+      false,
+      `Ctrl+${taken.toUpperCase()} 已被别的功能占用（建单 Ctrl+Q+L / 保留键 L）`,
+    );
+  }
+});
+
 test("键位文本：复合 id → Ctrl+B+1 这样的写法（唯一一处实现）", () => {
   assert.equal(shortcutLabel("b:1"), "Ctrl+B+1");
-  assert.equal(shortcutLabel("j:0"), "Ctrl+J+0");
+  assert.equal(shortcutLabel("y:0"), "Ctrl+Y+0");
   assert.equal(shortcutLabel("m:5"), "Ctrl+M+5");
-  assert.deepEqual(parseShortcutId("j:0"), { prefix: "j", key: "0" });
+  assert.deepEqual(parseShortcutId("y:0"), { prefix: "y", key: "0" });
   assert.equal(parseShortcutId("nonsense"), null, "形状不对要返回 null，而不是硬猜");
   assert.equal(shortcutId("M", "5"), "m:5", "大小写归一");
 });

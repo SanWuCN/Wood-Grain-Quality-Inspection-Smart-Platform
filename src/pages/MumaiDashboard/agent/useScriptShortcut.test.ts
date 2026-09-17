@@ -14,7 +14,7 @@
  * 钩子本体（`useScriptShortcut`）的接线由 `tsc` 与浏览器端验收覆盖。
  *
  * 2026-09-17 口径更新：键位改成三段 —— 第 1–10 条 `Ctrl+B+1..0`、
- * 第 11–20 条 `Ctrl+J+1..0`、第 21–25 条 `Ctrl+M+1..5`；条目表的 `key`
+ * 第 11–20 条 `Ctrl+Y+1..0`、第 21–25 条 `Ctrl+M+1..5`；条目表的 `key`
  * 因此是复合 id（`"b:1"` / `"m:5"`），下面的样例表按新键位写。
  */
 import { test } from "node:test";
@@ -35,11 +35,11 @@ import { askArgsFor, planFor, type ScriptShortcutEntry } from "./useScriptShortc
 const ENTRIES: ScriptShortcutEntry[] = [
   { key: "b:1", text: "小木小木，查过去三个月我们一共到过多少个地方巡检，发现了多少个风险点，目前已修复的有多少？", label: "第1条 · ① 三个月巡检与风险统计", roundNo: "①" },
   { key: "b:2", text: "小木读取当前工单与附件索引，生成任务卡和装备核对清单，未填字段标为待补。", label: "第2条 · ② 接单整理", roundNo: "②" },
-  { key: "j:1", text: "小木，分析比较这四组标记的木构件，进行风险评估。", label: "第11条 · ⑪ 四柱风险初筛", roundNo: "⑪" },
+  { key: "y:1", text: "小木，分析比较这四组标记的木构件，进行风险评估。", label: "第11条 · ⑪ 四柱风险初筛", roundNo: "⑪" },
   { key: "m:1", text: "小木，调用本批次分析流程，完成图像标注和雷达分析，再按测区融合结果。", label: "第21条 · ㉑ 本批次分析流程", roundNo: "㉑" },
 ];
 
-test("按 Ctrl+B/J/M + 数字 能对应到唯一一条（键位不重复、台词非空）", () => {
+test("按 Ctrl+B/Y/M + 数字 能对应到唯一一条（键位不重复、台词非空）", () => {
   const keys = ENTRIES.map((e) => e.key);
   assert.deepEqual([...new Set(keys)].length, keys.length, `键位重复：${keys.join(",")}`);
   for (const e of ENTRIES) {

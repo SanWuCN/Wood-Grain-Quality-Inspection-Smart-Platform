@@ -461,7 +461,7 @@ export default function XiaomuDock() {
     }
     if (agent.agentState === "RECOGNIZING") return "recognizing";
     /*
-      ⚠ `LISTENING` 原来没被映射，于是**脚本化模拟**（剧本快捷键 Ctrl+B/J/M+数字、示例问句）
+      ⚠ `LISTENING` 原来没被映射，于是**脚本化模拟**（剧本快捷键 Ctrl+B/Y/M+数字、示例问句）
       期间徽标一直写「待机」—— 逐字字幕已经出来了，状态却像什么都没发生。
       `wake.state === "live"` 那条只覆盖**真实唤醒**（那时才有通道），脚本化输入没有通道，
       所以必须在这里按 `agentState` 补上。放在 `RECOGNIZING` 之后，
@@ -751,7 +751,7 @@ export default function XiaomuDock() {
             ⚠ 三个来源的优先级不能少任何一个（2026-09-17 用户实测报的 bug）：
               1. `wake.partial` —— **真实唤醒**的流式字幕，来自唤醒通道；
               2. `query`        —— 已入库的整句（`agent.turns` 里的用户轮次）；
-              3. `agent.partial`—— **脚本化模拟**的流式字幕（剧本快捷键 Ctrl+B/J/M+数字、
+              3. `agent.partial`—— **脚本化模拟**的流式字幕（剧本快捷键 Ctrl+B/Y/M+数字、
                                    「示例问句」都走 `VoiceInput.simulate()`，写的是这里）。
 
             缺了第 3 条会怎样：`simulate()` 每个字都在跑（实测 onPartial len=1..17 连续），
@@ -914,7 +914,7 @@ export default function XiaomuDock() {
               aria-expanded={keysOpen}
               onClick={() => setKeysOpen((value) => !value)}
             >
-              快捷键一览 · {sheetRows.length} 条（Ctrl+B/J/M）{keysOpen ? "▾" : "▸"}
+              快捷键一览 · {sheetRows.length} 条（Ctrl+B/Y/M）{keysOpen ? "▾" : "▸"}
             </button>
             {wake.state === "error" ? (
               /*

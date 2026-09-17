@@ -25,7 +25,7 @@ import { shortcutLabel } from "./scriptShortcutSequence";
 export type ShortcutSheetRow = {
   /** 序号，1 起 */
   index: number;
-  /** 显示用的键位，如 `Ctrl+B+1` / `Ctrl+J+0` / `Ctrl+M+5` */
+  /** 显示用的键位，如 `Ctrl+B+1` / `Ctrl+Y+0` / `Ctrl+M+5` */
   keys: string;
   /** 圈号与轮次标题，如 `① 三个月巡检与风险统计` */
   round: string;
@@ -37,7 +37,7 @@ export type ShortcutSheetRow = {
 
 /**
  * 键位文本的**唯一实现**在 `scriptShortcutSequence.shortcutLabel`：
- * 2026-09-17 起三段前缀各不同（B/J/M），前缀不能再当成一个常量导出。
+ * 2026-09-17 起三段前缀各不同（B/Y/M），前缀不能再当成一个常量导出。
  * 这里保留一个同名转发，方便页面侧少 import 一个模块。
  */
 export function keyLabel(id: string): string {

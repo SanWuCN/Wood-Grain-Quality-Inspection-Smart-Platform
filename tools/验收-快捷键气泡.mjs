@@ -88,9 +88,10 @@ async function waitForTarget(timeoutMs = 30000) {
 /**
  * 浏览器里现有的 page 目标（`id url`）。
  *
- * 用来查「按 Ctrl+J 有没有被浏览器抢走」：Chrome 的 Ctrl+J 是下载页、Ctrl+N 是新建窗口。
- * 页面能不能拦下这类默认行为，是用户要求把第二段前缀从 N 换成 J 的**原因**，
- * 所以这里得有一条断言钉住它（用户口径 2026-09-17：「ctrl加n有功能冲突了」）。
+ * 用来查「按段前缀有没有被浏览器抢走」：Chrome 的 Ctrl+N 是新建窗口（**保留键，拦不住**）、
+ * `Ctrl+J` 是下载页；用户为这两次冲突先后换过键位，最后落在**没有默认动作**的 `Ctrl+Y`。
+ * 所以这里得有一条断言钉住"按键没把页面/浏览器带走"（用户口径 2026-09-17：
+ * 「ctrl加n换成加j的，ctrl加n有功能冲突了」→「找个没冲突的替代j」）。
  */
 async function pageTargets() {
   try {
@@ -391,11 +392,11 @@ try {
   */
   const baselineProbe = await evaluate(`window.__probe()`);
   const baselineTexts = new Set(baselineProbe?.userTexts ?? []);
-  /* 记下按键前的浏览器页面清单与地址：按完要核对"浏览器有没有被 Ctrl+J 带走" */
+  /* 记下按键前的浏览器页面清单与地址：按完要核对"浏览器有没有被 Ctrl+Y 带走" */
   const pageTargetsBefore = new Set(await pageTargets());
   const urlBefore = await evaluate(`location.href`);
   const alertT0 = Date.now();
-  await dispatch("j");
+  await dispatch("y");
   await dispatch("3");
 
   /* 甲：按键后 2 秒内不许出现**新的**用户文本，尤其不许出现第⑬轮那句（老实现会逐字涨上去） */
@@ -432,7 +433,7 @@ try {
   const freshPageTargets = (await pageTargets()).filter((t) => !pageTargetsBefore.has(t));
   const urlAfter = await evaluate(`location.href`);
   check(
-    "Ctrl+J 没把浏览器带走（没弹下载页、没开新标签，页面还在原地址）",
+    "Ctrl+Y 没把浏览器带走（没弹下载页、没开新标签，页面还在原地址）",
     freshPageTargets.length === 0 && String(urlAfter) === String(urlBefore),
     freshPageTargets.length
       ? `新开了 ${freshPageTargets.length} 个页面：${freshPageTargets.join(" / ").slice(0, 140)}`
@@ -445,7 +446,7 @@ try {
     if (alertWin?.shown) break;
     await sleep(250);
   }
-  check("Ctrl+J+3 之后弹出预警窗（.dsf--alert）", Boolean(alertWin?.shown), alertWin?.title || "始终没出现");
+  check("Ctrl+Y+3 之后弹出预警窗（.dsf--alert）", Boolean(alertWin?.shown), alertWin?.title || "始终没出现");
   await shot(send, "2-第⑬轮预警窗");
   check("预警窗带「预警」角标", alertWin?.chip === "预警", `角标=「${alertWin?.chip ?? ""}」`);
   check("预警窗里有确认按钮", Boolean(alertWin?.btnText), `按钮=「${alertWin?.btnText ?? ""}」`);
