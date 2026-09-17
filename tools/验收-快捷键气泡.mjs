@@ -407,6 +407,8 @@ try {
     [...seenStates].some((s) => s.includes("思考")),
     `出现过的状态：${[...seenStates].join(" / ") || "（无）"}`,
   );
+  /* 这张图就是这次修的那件事：气泡里是"思考中"，**没有**逐字收到的用户文本 */
+  await shot(send, "4-主动发起-思考中（没有收到消息）");
 
   let alertWin = { shown: false };
   for (let i = 0; i < 240; i += 1) {
