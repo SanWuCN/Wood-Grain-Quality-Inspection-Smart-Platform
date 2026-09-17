@@ -411,7 +411,7 @@ export function LineChart({
 }
 
 /* ------------------------------------------------------------------ *
- * 波形（频谱按数据绘制；横轴为频点索引，不写作深度）
+ * 波形（回波 / 频谱按数据绘制；横轴真实单位由 xTicks 给，不写作深度）
  * ------------------------------------------------------------------ */
 
 export function WaveChart({
@@ -421,6 +421,9 @@ export function WaveChart({
   axisLabel,
   markers = [],
   highlight,
+  bipolar = false,
+  xTicks = [],
+  paramLine,
 }: {
   points: { x: number; y: number }[];
   height?: number;
@@ -428,18 +431,41 @@ export function WaveChart({
   axisLabel?: string;
   markers?: { x: number; label: string; tone: "red" | "amber" | "cyan" }[];
   highlight?: [number, number] | null;
+  /**
+   * 双极性（时域回波有正有负）：纵轴按数据的 min–max 铺满并画出零轴，**不填面积**
+   * ——填面积会把负半周盖掉，看起来像单极性的包络。
+   */
+  bipolar?: boolean;
+  /** 横轴真实刻度（`at` 仍是 0–1 占比，`label` 写 ns / MHz 这类真实值） */
+  xTicks?: { at: number; label: string }[];
+  /** 图下那行参数小字（天线/采样/时窗），来自种子的 `RADAR_PARAM_LINE` */
+  paramLine?: string;
 }) {
   const width = 460;
   if (points.length === 0) return <StateBlock kind="empty" title="暂无波形数据" hint="采集完成并落盘后可按批次绘制。" />;
   const pad = { left: 8, right: 8, top: 10, bottom: 16 };
   const sx = (x: number) => pad.left + x * (width - pad.left - pad.right);
-  const sy = (y: number) => pad.top + (1 - y) * (height - pad.top - pad.bottom);
+  /*
+   * 纵轴一律按**数据的 min–max** 铺满。
+   *
+   * ⚠ 不能像原来那样写死 0–1：频域那条谱的单位是 **dB**，值域是 −55…0 ——
+   * 按 0–1 归一化后整条曲线会被画到画布**下面**（实测路径 y≈6000，画布高只有 168），
+   * 页面上就是"频谱图一片空白"。时域回波有正有负，同理必须按实际值域画。
+   * 对老数据（0–1 的归一化幅值）这个映射与原来等价，所以其它调用方不受影响。
+   */
+  const ys = points.map((point) => point.y);
+  const yMin = Math.min(...ys);
+  const yMax = Math.max(...ys);
+  const span = yMax - yMin || 1;
+  const sy = (y: number) => pad.top + ((yMax - y) / span) * (height - pad.top - pad.bottom);
   const path = points.map((point, index) => `${index === 0 ? "M" : "L"}${sx(point.x).toFixed(1)} ${sy(point.y).toFixed(1)}`).join(" ");
   const area = `${path} L${sx(points[points.length - 1].x).toFixed(1)} ${height - pad.bottom} L${sx(points[0].x).toFixed(1)} ${height - pad.bottom} Z`;
   const toneColor: Record<string, string> = { red: COLORS.danger, amber: COLORS.warn, cyan: COLORS.glow };
+  /* 数据跨零就画一条零轴（不只看 bipolar 声明：谱跨零时也该有基准线） */
+  const zeroLine = yMin < 0 && yMax > 0;
   return (
     <div className="wavechart">
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="雷达回波频谱">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={axisLabel ? `回波曲线（${axisLabel}）` : "雷达回波曲线"}>
         <defs>
           <linearGradient id="waveFill" x1="0" y1="0" x2="0" y2="1">
             {/* 默认数据主系列 = BLUE（§5.1），青色只留给扫描 / 科技强调 */}
@@ -447,7 +473,18 @@ export function WaveChart({
             <stop offset="1" stopColor={COLORS.primary} stopOpacity="0" />
           </linearGradient>
         </defs>
-        <path d={area} fill="url(#waveFill)" />
+        {bipolar ? null : <path d={area} fill="url(#waveFill)" />}
+        {/* 跨零的数据画零轴：正负半周（时域）看得很清楚，谱的 0 dB 也有了基准 */}
+        {zeroLine ? (
+          <line
+            x1={pad.left}
+            x2={width - pad.right}
+            y1={sy(0)}
+            y2={sy(0)}
+            stroke={CHART.axisLine}
+            strokeDasharray="2 3"
+          />
+        ) : null}
         <path d={path} fill="none" stroke={COLORS.primary} strokeWidth="1.6" />
         {highlight ? (
           <rect
@@ -466,9 +503,17 @@ export function WaveChart({
           </g>
         ))}
         <line x1={pad.left} x2={width - pad.right} y1={height - pad.bottom} y2={height - pad.bottom} stroke={CHART.axisLine} />
-        {axisLabel ? <text x={pad.left} y={height - 3} className="axis">{axisLabel}</text> : null}
+        {/* 真实刻度：位置在 0–1 占比上，文本是 ns / MHz */}
+        {xTicks.map((tick) => (
+          <g key={`${tick.at}-${tick.label}`}>
+            <line x1={sx(tick.at)} x2={sx(tick.at)} y1={height - pad.bottom} y2={height - pad.bottom + 3} stroke={CHART.axisLine} />
+            <text x={sx(tick.at)} y={height - 4} className="axis" textAnchor="middle">{tick.label}</text>
+          </g>
+        ))}
+        {axisLabel && xTicks.length === 0 ? <text x={pad.left} y={height - 3} className="axis">{axisLabel}</text> : null}
         {unit ? <text x={width - pad.right} y={pad.top + 8} className="axis" textAnchor="end">{unit}</text> : null}
       </svg>
+      {paramLine ? <p className="wavechart__param">{paramLine}</p> : null}
     </div>
   );
 }

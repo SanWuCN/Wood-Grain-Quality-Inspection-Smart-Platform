@@ -333,11 +333,35 @@ export type WaveSample = { x: number; y: number };
 export type Waveform = {
   id: string;
   batchId: string;
-  /** 横轴口径：频谱已是频谱，不再做 FFT */
+  /**
+   * 这一条是什么域：
+   *   · `echo` 时域回波（A-scan，双极性，mV / 双程走时 ns）
+   *   · `spectrum` 频域频谱（对同一条回波做 FFT，dB / MHz）
+   * 缺省按频谱（老数据只有频谱）。
+   */
+  kind?: "echo" | "spectrum";
+  /** 横轴口径：写进图下方与台词，**不写深度** */
   axisLabel: string;
+  /** 纵轴单位：`mV`（时域）/ `dB`（频域） */
   unit: string;
+  /**
+   * `points[].x` 一律是 **0–1 的占比**（图表、"人工标记"、事实表都按这个口径走），
+   * 真实量程由 `xMax` + `xUnit` 交代，刻度文本由 `xTicks` 给。
+   */
+  xMax?: number;
+  xUnit?: string;
+  xTicks?: { at: number; label: string }[];
   points: WaveSample[];
   markers: { x: number; label: string; tone: "red" | "amber" | "cyan" }[];
+  /** 双极性（有正有负）：图表画零轴、不填面积 */
+  bipolar?: boolean;
+  /** 面板上那行参数小字（天线/采样/时窗），来自 `RADAR_PARAM_LINE` */
+  paramLine?: string;
+  /**
+   * 频域派生量（由 `buildSpectrum` 算出，**只此一处**）：
+   * 主频、−6 dB 带宽、本底噪声。事实表与小木台词都从这里取，不再各自从曲线里抠。
+   */
+  stats?: { dominantMhz: number; bandwidthMhz: number; floorDb: number };
 };
 
 /**

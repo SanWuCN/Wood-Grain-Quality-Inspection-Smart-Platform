@@ -247,10 +247,11 @@ export default function Twin() {
     () => batches.find((batch) => batch.batchId === waveBatchId) ?? batches[batches.length - 1] ?? null,
     [batches, waveBatchId],
   );
-  const waveform = useMemo(
-    () => WAVEFORMS.find((item) => item.batchId === waveBatch?.batchId) ?? null,
-    [waveBatch?.batchId],
-  );
+  /** 这一批次的**全部**曲线（时域回波 + 它的频谱），按 kind 排序：先时域后频域 */
+  const waveforms = useMemo(() => {
+    const list = WAVEFORMS.filter((item) => item.batchId === waveBatch?.batchId);
+    return [...list].sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "echo" ? -1 : 1));
+  }, [waveBatch?.batchId]);
   const [sideBySide, setSideBySide] = useState(true);
 
   /* ---- 机位关键帧：把镜头拉近木柱 → 打一帧 → 谁都能点回来（用户 2026-09-17 口径）----
@@ -710,13 +711,31 @@ export default function Twin() {
                 ))}
               </div>
             ) : null}
-            {waveform ? (
-              <WaveChart
-                points={waveform.points}
-                unit={waveform.unit}
-                axisLabel={waveform.axisLabel}
-                markers={waveform.markers}
-              />
+            {/*
+              两块一起给：**时域回波**（双极性 A-scan，mV / 双程走时 ns）
+              与**它的频谱**（对上面那条回波做 FFT，dB / MHz）。
+              用户口径 2026-09-18：「数字孪生的雷达回波频谱真实些」——
+              频谱必须有出处，所以两条曲线由同一份回波生成（见 `seed/radarEcho.ts`），
+              讲解时"时域这里一个反射、频域对应这个带"能对得上。
+            */}
+            {waveforms.length ? (
+              waveforms.map((item) => (
+                <div className="twin-wave" key={item.id}>
+                  <p className="twin-wave__cap">
+                    {item.kind === "echo" ? "回波（时域 · 双极性）" : "频谱（频域 · 对回波做 FFT）"}
+                    <span className="muted">（{item.axisLabel} · {item.unit}）</span>
+                  </p>
+                  <WaveChart
+                    points={item.points}
+                    unit={item.unit}
+                    axisLabel={item.axisLabel}
+                    markers={item.markers}
+                    bipolar={item.bipolar}
+                    xTicks={item.xTicks}
+                    paramLine={item.paramLine}
+                  />
+                </div>
+              ))
             ) : (
               <StateBlock kind="empty" title="该构件未采集回波" />
             )}

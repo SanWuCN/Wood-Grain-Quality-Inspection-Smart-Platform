@@ -133,8 +133,16 @@ function batchOf(batchId: string | undefined) {
   return SCAN_BATCHES.find((item) => item.batchId === batchId) ?? SCAN_BATCHES[0];
 }
 
+/**
+ * 取某批次要拿来"讲"的那条曲线：**优先频谱**。
+ *
+ * 同一个批次现在有两条（时域回波 + 频域频谱，见 `seed/radarEcho.ts`）。
+ * 台词讲"主频 / 带宽 / 本底"最自然，所以这里固定取频谱；
+ * 时域那条由孪生页并排画出来给现场看形状。
+ */
 function waveformOf(batchId: string) {
-  return WAVEFORMS.find((item) => item.batchId === batchId) ?? WAVEFORMS[0];
+  const list = WAVEFORMS.filter((item) => item.batchId === batchId);
+  return list.find((item) => item.kind === "spectrum") ?? list[0] ?? WAVEFORMS[0];
 }
 
 function receiveText(item: { received: number; expected: number; state: string }) {
@@ -235,21 +243,30 @@ export function evaluateFacts(intent: Intent, ctx: FactContext): FactSet {
   table.evidenceImages = focus.evidence.filter((item) => item.startsWith("img-")).join(" / ") || NOT_MEASURED;
   table.evidenceEcho = focus.evidence.filter((item) => item.startsWith("echo-")).join(" / ") || NOT_MEASURED;
   table.echoPeak = num(focus.score);
-  table.echoNote = "横轴为频点索引，未标定距离轴，不写作深度";
+  /* 口径：横轴是频率，距离轴仍未标定 —— 这一句不许改成任何形式的深度 */
+  table.echoNote = "横轴为频率，距离轴未标定，不写作深度";
   table.historyNote = `历史关联：${HISTORY_RISKS.filter((item) => item.title.startsWith(focus.componentId))
     .map((item) => `${item.id} ${item.title}（${item.status}）`)
     .join("；")}`;
 
-  /* ---- 回波曲线 ---- */
+  /* ---- 回波曲线 ----
+     `waveformOf` 给的这一条是**频谱**（同批次还有时域回波，见 seed 的 WAVEFORMS）：
+     台词讲"主频 / 带宽 / 本底"最自然，也最经得起现场追问。 */
   const wave = waveformOf(batchOf(undefined).batchId);
   const peak = wave.points.reduce((best, point) => (point.y > best.y ? point : best), wave.points[0]);
+  const waveMax = wave.xMax ?? 1;
   table.waveBatch = wave.batchId;
   table.waveAxis = wave.axisLabel;
   table.waveUnit = wave.unit;
   table.echoPeakIndex = num(peak?.x ?? 0, 4);
   table.echoAmplitude = num(peak?.y ?? 0, 3);
+  /* 真实单位下的读数：主频 / −6 dB 带宽 / 本底，都由 `buildSpectrum` 算好存在 `stats` 里 */
+  table.echoPeakMhz = String(Math.round((peak?.x ?? 0) * waveMax));
+  table.echoBandwidthMhz = String(wave.stats?.bandwidthMhz ?? 0);
+  table.echoFloorDb = String(wave.stats?.floorDb ?? 0);
+  table.echoPeakLabel = `${table.echoPeakMhz} MHz（−6 dB 带宽约 ${table.echoBandwidthMhz} MHz）`;
   table.waveMarkers = wave.markers.length
-    ? wave.markers.map((item) => `${item.label}（频点 ${num(item.x, 4)}）`).join("、")
+    ? wave.markers.map((item) => `${item.label}（${Math.round(item.x * waveMax)} MHz）`).join("、")
     : "本批次无标记点";
 
   /* ---- 异常排查 ---- */

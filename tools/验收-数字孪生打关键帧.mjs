@@ -1,5 +1,11 @@
 /**
- * 数字孪生 · 机位关键帧 端到端验收（真浏览器、真服务端）
+ * 数字孪生 · 机位关键帧 + 雷达回波频谱 端到端验收（真浏览器、真服务端）
+ *
+ * 覆盖两条线：
+ *   A. 机位关键帧（用户 2026-09-17：「我把视角拉近木柱，然后可以打上关键帧」）；
+ *   B. 波形面板（用户 2026-09-18：「数字孪生的雷达回波频谱真实些」）——
+ *      同一批次要给**时域回波 + 它的频谱**两块、横轴是真实单位（ns / MHz）、
+ *      图下有天线参数小字，且**不许出现深度/mm**（平台口径：不预画深度）。
  *
  * ── 用户口径（2026-09-17）────────────────────────────────────────
  * 「数字孪生那要加个操作点，添加打关键帧的功能，我把视角拉近木柱，然后可以打上关键帧」，
@@ -421,6 +427,194 @@ try {
   );
 
   const frameId = String(recorded?.id ?? "");
+
+  /* ---------- 雷达回波频谱：时域 + 频域两块，量纲是真的，且不写深度 ----------
+     用户口径 2026-09-18：「数字孪生的雷达回波频谱真实些」。
+     判据（都能证伪）：
+       · 面板上同一批次有**两条**曲线：一条时域回波、一条它的频谱；
+       · 时域那条是**双极性**（图里有零轴虚线），频谱那条没有零轴；
+       · 横轴刻度出现真实单位（ns / MHz），图下那行参数小字写着天线与采样；
+       · 全平台口径：这里**不许**出现深度/mm 之类的距离读数。
+  */
+  /*
+    波形面板在「热点详情」里（页面侧栏只放摘要）。先把它打开 ——
+    顺带也就验了"从页面点得开详情"这条路。
+  */
+  const detailOpened = await evaluate(`(() => {
+    /*
+      ⚠ 按文案找按钮要按**确切的那一个**：页面上不止一处带"详情"字样的东西，
+      按 /详情/ 取第一个会点到别的控件（实测点了没反应、弹窗不出现）。
+      侧栏那个按钮的文案是「查看完整证据」，按它找最稳。
+    */
+    const all = [...document.querySelectorAll('button')].filter((el) => (el.textContent || '').trim() === '查看完整证据');
+    const btn = all[0] ?? null;
+    if (!btn) return { found: false };
+    const wasDisabled = btn.disabled;
+    btn.click();
+    return { found: true, wasDisabled, count: all.length };
+  })()`);
+  for (let i = 0; i < 40; i += 1) {
+    if (await evaluate(`Boolean(document.querySelector('.twin-wave'))`)) break;
+    await sleep(250);
+  }
+  /* 诊断：详情没开出来时，要能一眼看出是"按钮禁用了"还是"弹窗里没有波形" */
+  const detailDiag = await evaluate(`(() => ({
+    waves: document.querySelectorAll('.twin-wave').length,
+    charts: document.querySelectorAll('.wavechart').length,
+    dialog: Boolean(document.querySelector('[role="dialog"]')),
+    bodyTail: (document.body.textContent || '').replace(/\\s+/g, ' ').slice(-160),
+  }))()`);
+  const wavePanel = await evaluate(`(() => {
+    const blocks = [...document.querySelectorAll('.twin-wave')];
+    return blocks.map((block) => {
+      const svg = block.querySelector('svg');
+      const d = svg?.querySelector('path[stroke]')?.getAttribute('d') || '';
+      const ys = d
+        .split(/[ML]/)
+        .slice(1)
+        .map((pair) => Number(pair.trim().split(/\\s+/)[1]))
+        .filter((n) => Number.isFinite(n));
+      return {
+        cap: (block.querySelector('.twin-wave__cap')?.textContent || '').trim(),
+        ticks: [...block.querySelectorAll('svg text')].map((el) => (el.textContent || '').trim()),
+        zeroAxis: Boolean(svg?.querySelector('line[stroke-dasharray="2 3"]')),
+        param: (block.querySelector('.wavechart__param')?.textContent || '').trim(),
+        /* 路径的 y 范围：落在画布外说明曲线被画到图外面去了（频谱按 0–1 画就是这个症状） */
+        minY: ys.length ? Math.min(...ys) : null,
+        maxY: ys.length ? Math.max(...ys) : null,
+        height: Number((svg?.getAttribute('viewBox') || '').split(/\\s+/)[3] || 0),
+      };
+    });
+  })()`);
+  const echoBlock = (wavePanel ?? []).find((block) => block.cap.includes("回波（时域"));
+  const spectrumBlock = (wavePanel ?? []).find((block) => block.cap.includes("频谱（频域"));
+  check(
+    "波形面板同时给出时域回波与它的频谱（两块）",
+    detailOpened?.found === true && Boolean(echoBlock) && Boolean(spectrumBlock),
+    `详情按钮 命中=${detailOpened?.found} 禁用=${detailOpened?.wasDisabled} 弹窗=${detailDiag?.dialog} 波形块=${detailDiag?.waves} 图表=${detailDiag?.charts}；` +
+      ((wavePanel ?? []).map((block) => block.cap.slice(0, 14)).join(" / ") || `页尾=「${detailDiag?.bodyTail}」`),
+  );
+  check(
+    "时域回波画的是双极性（有零轴、正负都在画布内），频谱画的是 dB（0 在上、负值在下）",
+    Boolean(echoBlock?.zeroAxis) &&
+      echoBlock?.minY !== null &&
+      echoBlock.minY >= -1 &&
+      echoBlock.maxY <= echoBlock.height + 1 &&
+      spectrumBlock?.maxY !== null &&
+      spectrumBlock.maxY <= spectrumBlock.height + 1 &&
+      spectrumBlock.minY >= -1,
+    `回波 零轴=${echoBlock?.zeroAxis} y∈[${echoBlock?.minY?.toFixed(1)}, ${echoBlock?.maxY?.toFixed(1)}]/${echoBlock?.height}；` +
+      `频谱 零轴=${spectrumBlock?.zeroAxis} y∈[${spectrumBlock?.minY?.toFixed(1)}, ${spectrumBlock?.maxY?.toFixed(1)}]/${spectrumBlock?.height}`,
+  );
+  check(
+    "横轴刻度是真实单位（回波 ns、频谱 MHz）",
+    (echoBlock?.ticks ?? []).some((text) => text.includes("ns")) &&
+      (spectrumBlock?.ticks ?? []).some((text) => text.includes("MHz")),
+    `回波刻度 ${(echoBlock?.ticks ?? []).slice(-3).join(" ")}　频谱刻度 ${(spectrumBlock?.ticks ?? []).slice(-3).join(" ")}`,
+  );
+  check(
+    "图下那行参数小字写了天线/采样/时窗，并声明未标定距离轴",
+    /中心频率 \d+ MHz/.test(echoBlock?.param ?? "") &&
+      /GS\/s/.test(echoBlock?.param ?? "") &&
+      /不写作深度/.test(echoBlock?.param ?? ""),
+    `参数行=「${echoBlock?.param ?? "（没有）"}」`,
+  );
+  const panelText = (wavePanel ?? []).map((block) => `${block.cap} ${block.ticks.join(" ")} ${block.param}`).join(" ");
+  check(
+    "波形面板里不出现任何深度/mm 读数（平台口径：不预画深度）",
+    !/深度\s*[:：]?\s*\d/.test(panelText) && !/\d+\s*(mm|cm|厘米|毫米)/.test(panelText),
+    panelText.length > 200 ? `${panelText.slice(0, 120)}…` : panelText,
+  );
+
+  /* ---------- 波形改造的连带面：另外两个用到同一张图的页面也要画得出来 ----------
+     时域回波**有正有负**：如果哪个页面还按老的 0–1 口径画，负半周会被画到坐标轴下面
+     （路径的 y 超出画布），页面上看着就是"波形贴着底边"。这里按路径坐标判它没越界。
+  */
+  const readChart = `(() => {
+    const all = [...document.querySelectorAll('.wavechart svg')];
+    const svg = all[0];
+    if (!svg) return null;
+    const d = svg.querySelector('path[stroke]')?.getAttribute('d') || '';
+    const ys = d
+      .split(/[ML]/)
+      .slice(1)
+      .map((pair) => Number(pair.trim().split(/\\s+/)[1]))
+      .filter((n) => Number.isFinite(n));
+    return {
+      charts: all.length,
+      ticks: [...svg.querySelectorAll('text')].map((el) => (el.textContent || '').trim()),
+      minY: ys.length ? Math.min(...ys) : null,
+      maxY: ys.length ? Math.max(...ys) : null,
+      height: Number((svg.getAttribute('viewBox') || '').split(/\\s+/)[3] || 0),
+      head: d.slice(0, 60),
+    };
+  })()`;
+
+  /* 采集页：直接进得去（波形回放，取向=回波） */
+  await evaluate(`location.hash = "#/hardware?tab=capture"`);
+  let captureChart = null;
+  for (let i = 0; i < 60; i += 1) {
+    captureChart = await evaluate(readChart);
+    if (captureChart) break;
+    await sleep(300);
+  }
+  check(
+    "采集页（波形回放，取向=回波）波形画得出来且没越界",
+    Boolean(captureChart) &&
+      captureChart.minY !== null &&
+      captureChart.minY >= -1 &&
+      captureChart.maxY <= captureChart.height + 1 &&
+      captureChart.ticks.some((text) => /ns|MHz/.test(text)),
+    captureChart
+      ? `刻度 ${captureChart.ticks.slice(-3).join(" ")}；y∈[${captureChart.minY?.toFixed(1)}, ${captureChart.maxY?.toFixed(1)}]，画布高 ${captureChart.height}`
+      : "没有找到波形图",
+  );
+
+  /*
+    投屏页（`/present`）显示什么由**服务端的投屏焦点**决定，不是 URL ——
+    所以要像讲解人那样先投放一次「采集作业 / Z04 / 复扫批次」，再去看那一页。
+    （这条也顺带验了投屏通道：写焦点 → 展示窗口跟着变。）
+  */
+  const projectionSet = await (async () => {
+    const login = await fetch(`${BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ account: "shi", password: "123456" }),
+    });
+    const { token } = await login.json();
+    const response = await fetch(`${BASE}/api/projection`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "demo-01",
+        hold: true,
+        viewType: "capture",
+        focusIds: ["order:SH-2026-0901", "component:Z04", "batch:scan-Z04-002"],
+      }),
+    });
+    return { status: response.status, body: await response.json().catch(() => ({})) };
+  })();
+  await evaluate(`location.hash = "#/present"`);
+  let presentChart = null;
+  for (let i = 0; i < 80; i += 1) {
+    presentChart = await evaluate(readChart);
+    if (presentChart) break;
+    await sleep(300);
+  }
+  check(
+    "投屏页（讲解用，取向=频谱）按服务端焦点渲染出波形且没越界",
+    projectionSet.status === 200 &&
+      Boolean(presentChart) &&
+      presentChart.minY !== null &&
+      presentChart.minY >= -1 &&
+      presentChart.maxY <= presentChart.height + 1 &&
+      presentChart.ticks.some((text) => /MHz/.test(text)),
+    `投屏焦点接口 ${projectionSet.status}` +
+      (presentChart
+        ? `；图 ${presentChart.charts} 张；刻度 ${presentChart.ticks.slice(-3).join(" ")}；` +
+          `y∈[${presentChart.minY?.toFixed(1)}, ${presentChart.maxY?.toFixed(1)}]，画布高 ${presentChart.height}；路径头=「${presentChart.head}」`
+        : "；没有找到波形图"),
+  );
 
   /* ---------- ⑤ 服务端共享：换账号（饶）也看得到这一帧 ---------- */
   const asShi = await serverKeyframes("shi");

@@ -51,7 +51,7 @@ import {
   FAILED_EXPERIMENT,
   IMPORTABLE_PACKAGES,
   TRAIN_NODE,
-  WAVEFORMS,
+  waveformFor,
 } from "../seed/scenario";
 import type {
   DataPackage,
@@ -991,7 +991,8 @@ function DataPanel({
         <ul className="pkg-list2">
           {rows.map((item) => {
             const expanded = openId === item.id;
-            const waveform = WAVEFORMS.find((wave) => wave.batchId === item.batchId);
+            /* 训练/验证页列的是这批数据的频域特征，取向取频谱 */
+            const waveform = waveformFor(item.batchId ?? "", "spectrum");
             const failed = item.checks.filter((check) => !check.pass);
             return (
               <li key={item.id} className={expanded ? "is-open" : ""}>
@@ -1038,6 +1039,9 @@ function DataPanel({
                         points={waveform.points}
                         unit={waveform.unit}
                         axisLabel={waveform.axisLabel}
+                        bipolar={waveform.bipolar}
+                        xTicks={waveform.xTicks}
+                        paramLine={waveform.paramLine}
                         markers={waveform.markers}
                       />
                     ) : null}

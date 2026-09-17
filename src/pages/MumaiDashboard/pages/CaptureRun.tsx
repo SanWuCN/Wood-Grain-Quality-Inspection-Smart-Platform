@@ -9,7 +9,7 @@ import {
   DATA_PACKAGES,
   REFERENCE_BATCHES,
   SCAN_BATCHES,
-  WAVEFORMS,
+  waveformFor,
 } from "../seed/scenario";
 import type { BootCheckItem } from "../seed/types";
 import CaptureScreen from "../sensors/CaptureScreen";
@@ -96,7 +96,8 @@ export function CaptureTab() {
   const [params, setParams] = useSearchParams();
   const batchId = params.get("batch") ?? SCAN_BATCHES[0]?.batchId ?? "";
   const batch = SCAN_BATCHES.find((item)=>item.batchId===batchId) ?? SCAN_BATCHES[0];
-  const waveform = WAVEFORMS.find((item)=>item.batchId===batch.batchId) ?? WAVEFORMS[0];
+  /* 采集页看的是**原始时域形状**（波形回放），所以取向取回波 */
+  const waveform = waveformFor(batch.batchId, "echo");
   const [checkOpen,setCheckOpen] = useState(false);
   const [configOpen,setConfigOpen] = useState(false);
   const [dataTab,setDataTab] = useState("outcome");
@@ -141,7 +142,7 @@ export function CaptureTab() {
           <section className="capture-outcome__issues" aria-label="待复核记录"><header><b>待复核记录</b><Btn tone="ghost" onClick={()=>setDataTab('wave')}>查看波形依据</Btn></header>{insights.issues.length?<ul>{insights.issues.map((item)=><li key={item.key}><span>{item.source}</span><b>{item.detail}</b></li>)}</ul>:<StateBlock kind="empty" title="当前批次没有待复核记录"/>}</section>
         </div> : null}
         {dataTab==='receive' ? <div className="capture-receive">{insights.channels.map((item)=><div key={item.key}><header><b>{item.label}</b><StatusChip text={item.state} tone={RECEIVE_TONE[item.state]??'muted'} dot/></header><div><strong><NumberAnimation value={item.received} group={false}/><small> / <NumberAnimation value={item.expected} group={false}/></small></strong><span><NumberAnimation value={item.progress} group={false}/>%</span></div><progress max={100} value={item.progress} aria-label={`${item.label}接收进度`}/></div>)}</div> : null}
-        {dataTab==='wave' ? <div className="capture-wave"><div className="capture-wave__actions"><span className="note">批次波形回放 · 人工标记 <NumberAnimation value={manualMarks.length}/> 处</span><Btn disabled={!waveform?.points?.length} onClick={addMark}><Icon name="biz-manual-mark" size={16} aria-hidden/>人工标记</Btn><Btn disabled={!manualMarks.length} tone="ghost" onClick={()=>setManualMarks([])}>清除标记</Btn></div><WaveChart points={waveform?.points??[]} unit={waveform?.unit} axisLabel={waveform?.axisLabel} markers={[...(waveform?.markers??[]),...manualMarks.map((m)=>({...m,tone:'cyan' as const}))]}/></div> : null}
+        {dataTab==='wave' ? <div className="capture-wave"><div className="capture-wave__actions"><span className="note">批次波形回放 · 人工标记 <NumberAnimation value={manualMarks.length}/> 处</span><Btn disabled={!waveform?.points?.length} onClick={addMark}><Icon name="biz-manual-mark" size={16} aria-hidden/>人工标记</Btn><Btn disabled={!manualMarks.length} tone="ghost" onClick={()=>setManualMarks([])}>清除标记</Btn></div><WaveChart points={waveform?.points??[]} unit={waveform?.unit} axisLabel={waveform?.axisLabel} bipolar={waveform?.bipolar} xTicks={waveform?.xTicks} paramLine={waveform?.paramLine} markers={[...(waveform?.markers??[]),...manualMarks.map((m)=>({...m,tone:'cyan' as const}))]}/></div> : null}
         {dataTab==='samples' ? <DataTable head={["批次","分组","材种来源","扫描次数","方向"]} rows={REFERENCE_BATCHES.map((r)=>[r.batchId,r.groupId,r.material,String(r.scans),r.direction])}/> : null}
       </div>
     </section>

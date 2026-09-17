@@ -10,6 +10,18 @@
  * 种子整体标 source_mode: replay，界面按 PRD 15 显示「演示回放」来源标识。
  */
 
+import {
+  MATERIAL_ER,
+  RADAR_PARAMS,
+  RADAR_PARAM_LINE,
+  buildEcho,
+  buildSpectrum,
+  fractionOf,
+  ticksFor,
+  type EchoResult,
+  type Reflector,
+  type SpectrumResult,
+} from "./radarEcho.ts";
 import type {
   AnomalyEvent,
   ArchiveItem,
@@ -52,6 +64,7 @@ import type {
   TrainingConfigField,
   UpdatePackage,
   Waveform,
+  WaveSample,
   Waypoint,
 } from "./types.ts";
 
@@ -1323,56 +1336,159 @@ export const SCAN_BATCHES: ScanBatch[] = [
   },
 ];
 
-/** 频率轴（已是频谱，不再做 FFT；横轴标频点索引，不写作深度） */
-function specPoints(seed: number, peaks: { x: number; h: number }[]): { x: number; y: number }[] {
-  const out: { x: number; y: number }[] = [];
-  for (let i = 0; i <= 240; i += 1) {
-    const x = i / 240;
-    let y =
-      0.16 +
-      0.05 * Math.sin(i * 0.21 + seed) +
-      0.035 * Math.sin(i * 0.63 + seed * 2) +
-      0.02 * Math.sin(i * 1.7 + seed * 3);
-    for (const peak of peaks) {
-      const d = x - peak.x;
-      y += peak.h * Math.exp(-(d * d) / 0.0009);
-    }
-    out.push({ x: Number(x.toFixed(4)), y: Number(Math.max(0.02, Math.min(0.99, y)).toFixed(4)) });
-  }
-  return out;
+/*
+ * ── 雷达回波与频谱（用户口径 2026-09-18：「数字孪生的雷达回波频谱真实些」）──────
+ *
+ * 原来这里是**画出来的波浪线**（三条正弦 + 几个高斯鼓包），既不像真实回波，
+ * 也说不清那条曲线是哪来的。现在改成由 `seed/radarEcho.ts` 按探地雷达实际能测到的量生成：
+ *
+ *   · 时域（`kind: "echo"`）：双极性 A-scan —— 直达波（天线耦合，最先最强）
+ *     → 表面反射 → 目标层反射 → 层间多次波，叠 ±9 mV 白噪声与极小直流漂移；
+ *   · 频域（`kind: "spectrum"`）：对**同一条回波**做 FFT（去均值 → Hann 窗 → 补零 8192 →
+ *     FFT → 归一化 0 dB → 乘介质衰减），所以主频/带宽是从回波算出来的，两块自洽。
+ *
+ * ⚠ 口径（平台硬规矩，别越线）：横轴只有**双程走时 ns** 与**频率 MHz**，不写深度、不写 mm；
+ *   反射体的双程走时按"柱脚附近下部测区"折算过来（6.8 ns ↔ 杉木 εr≈3 时约 0.6 m），
+ *   这个换算只写在本段注释里交代来路，**界面与台词一个字都不许出现**。
+ *   参数是仪器与材种的公开量（中心频率/采样/时窗/εr），不是测量结论。
+ */
+
+/** Z04 下部测区的反射体：表面 → 目标层（异常）→ 更深界面 + 目标层多次波 */
+const Z04_REFLECTORS: Reflector[] = [
+  { twoWayNs: 1.6, coefficient: -0.34, label: "表面反射" },
+  { twoWayNs: 6.8, coefficient: 0.22, label: "下部测区异常响应" },
+  { twoWayNs: 12.4, coefficient: 0.08, label: "更深界面" },
+  { twoWayNs: 13.6, coefficient: -0.05, label: "目标层多次波" },
+];
+/** 初扫那一批：异常还没精扫出来，响应明显弱 */
+const Z04_FIRST_REFLECTORS: Reflector[] = [
+  { twoWayNs: 1.6, coefficient: -0.34, label: "表面反射" },
+  { twoWayNs: 6.8, coefficient: 0.1, label: "下部测区疑似响应" },
+  { twoWayNs: 12.4, coefficient: 0.07, label: "更深界面" },
+];
+/** 参考件：只有一个标准反射面，没有异常 —— 用来对照补偿前后的基线 */
+const REF_REFLECTORS: Reflector[] = [
+  { twoWayNs: 1.5, coefficient: -0.32, label: "表面反射" },
+  { twoWayNs: 9.4, coefficient: 0.18, label: "参考反射面" },
+];
+
+const ECHO_Z04_FIRST = buildEcho({ er: MATERIAL_ER.杉木, reflectors: Z04_FIRST_REFLECTORS, seed: 3407 });
+const ECHO_Z04_RESCAN = buildEcho({ er: MATERIAL_ER.杉木, reflectors: Z04_REFLECTORS, seed: 9117 });
+const ECHO_REF = buildEcho({ er: MATERIAL_ER.参考件, reflectors: REF_REFLECTORS, seed: 5201 });
+/*
+ * 「补偿后基线」的那条回波 = 参考件回波**去掉直达波与表面反射**之后的结果。
+ * 真实处理链就是这么做的（直达波抑制 + 走时增益），效果是低频那一大坨没了、
+ * 频谱更平、本底更低 —— 所以补偿前后两条曲线放在一起是"同一件事的两种处理"，
+ * 不是随手把幅值改小。
+ */
+const ECHO_REF_COMPENSATED = buildEcho({
+  er: MATERIAL_ER.参考件,
+  directMv: 0,
+  reflectors: [{ twoWayNs: 9.4, coefficient: 0.18, label: "参考反射面" }],
+  seed: 5201,
+});
+const SPEC_Z04_FIRST = buildSpectrum(ECHO_Z04_FIRST.points);
+const SPEC_Z04_RESCAN = buildSpectrum(ECHO_Z04_RESCAN.points);
+const SPEC_REF = buildSpectrum(ECHO_REF.points);
+const SPEC_REF_COMPENSATED = buildSpectrum(ECHO_REF_COMPENSATED.points);
+
+/** 时域点 → 0–1 占比（图表口径）；刻度写真实 ns */
+function echoPoints(echo: EchoResult): WaveSample[] {
+  return echo.points.map((point) => ({ x: fractionOf(point.x, RADAR_PARAMS.windowNs), y: point.y }));
+}
+/** 频域点 → 0–1 占比；刻度写真实 MHz */
+function spectrumPoints(spectrum: SpectrumResult, maxMhz = 1200): WaveSample[] {
+  return spectrum.points.map((point) => ({ x: fractionOf(point.x, maxMhz), y: point.y }));
 }
 
 export const WAVEFORMS: Waveform[] = [
   {
-    id: "wf-Z04-001", batchId: "scan-Z04-001", axisLabel: "频点索引（未标定距离轴）", unit: "归一化幅值",
-    points: specPoints(1.2, [{ x: 0.62, h: 0.52 }, { x: 0.29, h: 0.2 }]),
-    markers: [{ x: 0.62, label: "疑点响应段 seg-11", tone: "amber" }],
+    id: "wf-Z04-001-echo", batchId: "scan-Z04-001", kind: "echo",
+    axisLabel: "双程走时（ns，未标定距离轴）", unit: "mV",
+    xMax: RADAR_PARAMS.windowNs, xUnit: "ns", xTicks: ticksFor(RADAR_PARAMS.windowNs, "ns"),
+    bipolar: true, paramLine: RADAR_PARAM_LINE,
+    points: echoPoints(ECHO_Z04_FIRST),
+    markers: [{ x: fractionOf(ECHO_Z04_FIRST.targetNs, RADAR_PARAMS.windowNs), label: "疑点响应段 seg-11", tone: "amber" }],
   },
   {
-    id: "wf-Z04-002", batchId: "scan-Z04-002", axisLabel: "频点索引（未标定距离轴）", unit: "归一化幅值",
-    points: specPoints(2.4, [{ x: 0.62, h: 0.58 }, { x: 0.47, h: 0.31 }, { x: 0.29, h: 0.26 }]),
+    id: "wf-Z04-001", batchId: "scan-Z04-001", kind: "spectrum",
+    axisLabel: "频率（MHz）", unit: "dB",
+    xMax: 1200, xUnit: "MHz", xTicks: ticksFor(1200, "MHz"),
+    paramLine: RADAR_PARAM_LINE,
+    stats: { dominantMhz: SPEC_Z04_FIRST.dominantMhz, bandwidthMhz: SPEC_Z04_FIRST.bandwidthMhz, floorDb: SPEC_Z04_FIRST.floorDb },
+    points: spectrumPoints(SPEC_Z04_FIRST),
+    markers: [{ x: fractionOf(SPEC_Z04_FIRST.dominantMhz, 1200), label: `主频 ${SPEC_Z04_FIRST.dominantMhz} MHz`, tone: "amber" }],
+  },
+  {
+    id: "wf-Z04-002-echo", batchId: "scan-Z04-002", kind: "echo",
+    axisLabel: "双程走时（ns，未标定距离轴）", unit: "mV",
+    xMax: RADAR_PARAMS.windowNs, xUnit: "ns", xTicks: ticksFor(RADAR_PARAMS.windowNs, "ns"),
+    bipolar: true, paramLine: RADAR_PARAM_LINE,
+    points: echoPoints(ECHO_Z04_RESCAN),
     markers: [
-      { x: 0.29, label: "疑似受潮 0.71", tone: "amber" },
-      { x: 0.47, label: "疑似空洞 0.84", tone: "red" },
-      { x: 0.62, label: "疑似空洞 0.87", tone: "red" },
+      { x: fractionOf(6.8, RADAR_PARAMS.windowNs), label: "疑似受潮 0.71", tone: "amber" },
+      { x: fractionOf(ECHO_Z04_RESCAN.targetNs, RADAR_PARAMS.windowNs), label: "疑似空洞 0.87", tone: "red" },
     ],
   },
   {
-    id: "wf-ref-01", batchId: "ref-batch-01", axisLabel: "频点索引（未标定距离轴）", unit: "归一化幅值",
-    points: specPoints(0.6, [{ x: 0.33, h: 0.18 }]),
+    id: "wf-Z04-002", batchId: "scan-Z04-002", kind: "spectrum",
+    axisLabel: "频率（MHz）", unit: "dB",
+    xMax: 1200, xUnit: "MHz", xTicks: ticksFor(1200, "MHz"),
+    paramLine: RADAR_PARAM_LINE,
+    stats: { dominantMhz: SPEC_Z04_RESCAN.dominantMhz, bandwidthMhz: SPEC_Z04_RESCAN.bandwidthMhz, floorDb: SPEC_Z04_RESCAN.floorDb },
+    points: spectrumPoints(SPEC_Z04_RESCAN),
+    markers: [
+      { x: fractionOf(360, 1200), label: "疑似受潮 0.71", tone: "amber" },
+      { x: fractionOf(SPEC_Z04_RESCAN.dominantMhz, 1200), label: `疑似空洞 0.87 · 主频 ${SPEC_Z04_RESCAN.dominantMhz} MHz`, tone: "red" },
+    ],
+  },
+  {
+    id: "wf-ref-01-echo", batchId: "ref-batch-01", kind: "echo",
+    axisLabel: "双程走时（ns，未标定距离轴）", unit: "mV",
+    xMax: RADAR_PARAMS.windowNs, xUnit: "ns", xTicks: ticksFor(RADAR_PARAMS.windowNs, "ns"),
+    bipolar: true, paramLine: RADAR_PARAM_LINE,
+    points: echoPoints(ECHO_REF),
+    markers: [{ x: fractionOf(ECHO_REF.targetNs, RADAR_PARAMS.windowNs), label: "参考反射面", tone: "cyan" }],
+  },
+  {
+    id: "wf-ref-01", batchId: "ref-batch-01", kind: "spectrum",
+    axisLabel: "频率（MHz）", unit: "dB",
+    xMax: 1200, xUnit: "MHz", xTicks: ticksFor(1200, "MHz"),
+    paramLine: RADAR_PARAM_LINE,
+    stats: { dominantMhz: SPEC_REF.dominantMhz, bandwidthMhz: SPEC_REF.bandwidthMhz, floorDb: SPEC_REF.floorDb },
+    points: spectrumPoints(SPEC_REF),
     markers: [],
   },
   {
-    id: "wf-comp-before", batchId: "env-2026-0911-01", axisLabel: "参考件频点索引", unit: "归一化幅值",
-    points: specPoints(3.1, [{ x: 0.33, h: 0.44 }]),
-    markers: [{ x: 0.33, label: "补偿前基线", tone: "cyan" }],
+    id: "wf-comp-before", batchId: "env-2026-0911-01", kind: "spectrum",
+    axisLabel: "频率（MHz）", unit: "dB",
+    xMax: 1200, xUnit: "MHz", xTicks: ticksFor(1200, "MHz"),
+    paramLine: RADAR_PARAM_LINE,
+    stats: { dominantMhz: SPEC_REF.dominantMhz, bandwidthMhz: SPEC_REF.bandwidthMhz, floorDb: SPEC_REF.floorDb },
+    points: spectrumPoints(SPEC_REF),
+    markers: [{ x: fractionOf(SPEC_REF.dominantMhz, 1200), label: "补偿前基线", tone: "cyan" }],
   },
   {
-    id: "wf-comp-after", batchId: "env-2026-0911-01", axisLabel: "参考件频点索引", unit: "归一化幅值",
-    points: specPoints(3.1, [{ x: 0.33, h: 0.2 }]),
-    markers: [{ x: 0.33, label: "补偿后基线", tone: "cyan" }],
+    id: "wf-comp-after", batchId: "env-2026-0911-01", kind: "spectrum",
+    axisLabel: "频率（MHz）", unit: "dB",
+    xMax: 1200, xUnit: "MHz", xTicks: ticksFor(1200, "MHz"),
+    paramLine: RADAR_PARAM_LINE,
+    stats: { dominantMhz: SPEC_REF_COMPENSATED.dominantMhz, bandwidthMhz: SPEC_REF_COMPENSATED.bandwidthMhz, floorDb: SPEC_REF_COMPENSATED.floorDb },
+    points: spectrumPoints(SPEC_REF_COMPENSATED),
+    markers: [{ x: fractionOf(SPEC_REF_COMPENSATED.dominantMhz, 1200), label: "补偿后基线", tone: "cyan" }],
   },
 ];
+
+/**
+ * 取某批次的一条曲线：`prefer` 决定取向 ——
+ *   · `"spectrum"`（默认）：讲数据（主频/带宽/本底）用，台词与投屏都走它；
+ *   · `"echo"`：采集页"波形回放"用，看的是原始时域形状。
+ * 取不到指定取向时退回该批次的第一条，再退回全表第一条（与老代码的兜底一致）。
+ */
+export function waveformFor(batchId: string, prefer: "echo" | "spectrum" = "spectrum"): Waveform {
+  const list = WAVEFORMS.filter((item) => item.batchId === batchId);
+  return list.find((item) => item.kind === prefer) ?? list[0] ?? WAVEFORMS[0];
+}
 
 /** 异常排查四项（PRD 3.4） */
 /**

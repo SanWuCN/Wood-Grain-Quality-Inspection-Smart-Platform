@@ -873,6 +873,18 @@
   height: auto;
 }
 
+/*
+  图下那行参数小字（中心频率 / 等效采样 / 时窗）：
+  现场被问"这台雷达什么参数"时要答得出来，所以放在图上而不是折进说明文档。
+*/
+.wavechart__param {
+  margin: 2px 0 0;
+  color: var(--text-tertiary);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 图表坐标轴文字：§5.1 的 #647990，字号走辅助级 */
 .linechart .axis,
 .wavechart .axis {
@@ -7853,6 +7865,20 @@
   display: flex;
   gap: var(--space-2);
   margin-bottom: var(--space-2);
+}
+
+/*
+  孪生页的波形块：一个批次下面挂两条曲线（时域回波 / 频域频谱），
+  各带一行说明（这一条是什么域、横轴纵轴口径）。
+*/
+.twin-wave + .twin-wave {
+  margin-top: var(--space-3);
+}
+
+.twin-wave__cap {
+  margin: 0 0 2px;
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
 }
 
 .twin-wavepick button {

@@ -25,7 +25,7 @@ import NumberAnimation from "@/components/numberAnimation";
 import { useDashboardStore, requestMapMode } from "../map/store";
 import Map from "../mapDemo";
 import { Icon } from "../icons";
-import { StatusChip } from "../ui";
+import { StatusChip, WaveChart } from "../ui";
 import { useMumai } from "../context";
 import { holderLabel, usePresentFocus, usePresentOnline, VIEW_LABEL } from "../focus";
 import {
@@ -37,7 +37,7 @@ import {
   ARCHIVE_ITEMS,
   SCAN_BATCHES,
   SCENES,
-  WAVEFORMS,
+  waveformFor,
   WORK_ORDER,
 } from "../seed/scenario";
 import { artifacts as artifactsOf, publishedScene, useSharedStore } from "../store/shared";
@@ -125,37 +125,31 @@ function SceneView({ componentId, sceneId }: { componentId: string; sceneId: str
 function CaptureView({ componentId, batchId }: { componentId: string; batchId: string }) {
   const component = COMPONENTS.find((item) => item.id === componentId) ?? COMPONENTS[0];
   const batch = SCAN_BATCHES.find((item) => item.batchId === batchId) ?? SCAN_BATCHES[0];
-  const wave = WAVEFORMS.find((item) => item.batchId === batch?.batchId) ?? WAVEFORMS[0];
+  /* 投屏讲的是主频/带宽/本底，取向取频谱（与小木台词同一口径） */
+  const wave = waveformFor(batch?.batchId ?? "", "spectrum");
   const risk = CURRENT_RISKS.find((item) => item.componentId === component.id);
-
-  /** 回波折线：把 points 映射成 viewBox 内的折线，投屏上只表达形状与标记位置 */
-  const path = useMemo(() => {
-    if (!wave?.points.length) return "";
-    const xs = wave.points.map((point) => point.x);
-    const ys = wave.points.map((point) => point.y);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    const spanX = maxX - minX || 1;
-    const spanY = maxY - minY || 1;
-    return wave.points
-      .map((point, index) => {
-        const x = ((point.x - minX) / spanX) * 1000;
-        const y = 260 - ((point.y - minY) / spanY) * 240;
-        return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(" ");
-  }, [wave]);
 
   return (
     <div className="present__view">
       <h2>采集作业 · 回波与测区</h2>
       <div className="present__capture">
         <div className="present__waveshot">
-          <svg viewBox="0 0 1000 280" preserveAspectRatio="none" aria-label="回波曲线">
-            <path d={path} fill="none" stroke="var(--glow-cyan)" strokeWidth="3" />
-          </svg>
+          {/*
+            ⚠ 这里原来自己手写了一段 SVG 折线（把 points 映射到 0–1000 / 0–280）。
+            两个问题：一是**同一张图两处实现**，波形口径（双极性、真实刻度、
+            参数小字）一改就得记得两边都改；二是它按 min–max 铺满，负半周看不出零轴。
+            现在统一走共享的 `WaveChart`：一处实现、投屏与页面看到的是同一条曲线。
+          */}
+          <WaveChart
+            points={wave?.points ?? []}
+            unit={wave?.unit}
+            axisLabel={wave?.axisLabel}
+            bipolar={wave?.bipolar}
+            xTicks={wave?.xTicks}
+            paramLine={wave?.paramLine}
+            markers={wave?.markers ?? []}
+            height={168}
+          />
           <span className="present__waveshot-axis">
             {wave?.axisLabel ?? "—"}（{wave?.unit ?? "—"}）
           </span>

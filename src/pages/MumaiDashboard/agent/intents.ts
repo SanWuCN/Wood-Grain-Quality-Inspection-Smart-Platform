@@ -594,17 +594,19 @@ export const INTENTS: Intent[] = [
     ],
     response: {
       text:
-        "{waveBatch} 的回波（{waveAxis}，单位 {waveUnit}）：峰值位于频点索引 {echoPeakIndex}，" +
-        "归一化幅值 {echoAmplitude}；标记点 {waveMarkers}。{echoNote}",
+        "{waveBatch} 的频谱（{waveAxis}，单位 {waveUnit}）：主频 {echoPeakLabel}，本底 {echoFloorDb} dB；" +
+        "标记点 {waveMarkers}。{echoNote}",
       alternatives: [
-        "{waveBatch} 回波峰值频点 {echoPeakIndex}，幅值 {echoAmplitude}（单位 {waveUnit}）；标记：{waveMarkers}。",
+        "{waveBatch} 频谱主频 {echoPeakMhz} MHz，−6 dB 带宽约 {echoBandwidthMhz} MHz；标记：{waveMarkers}。",
       ],
       facts: [
         "waveBatch",
         "waveAxis",
         "waveUnit",
-        "echoPeakIndex",
-        "echoAmplitude",
+        "echoPeakLabel",
+        "echoPeakMhz",
+        "echoBandwidthMhz",
+        "echoFloorDb",
         "waveMarkers",
         "echoNote",
       ],
