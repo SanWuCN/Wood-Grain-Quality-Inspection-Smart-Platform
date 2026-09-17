@@ -13,7 +13,7 @@
  *     不把手绘虫道、深度或承载能力当成扫描测量
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useMumai } from "../context";
 import { Icon } from "../icons";
@@ -22,8 +22,7 @@ import { api, isApiError } from "../api/client";
 import { isOnline, scenes as scenesOf, useSharedStore } from "../store/shared";
 import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
-import { Btn, Modal, PermNote, StateBlock, StatusChip, Toolbar, WaveChart } from "../ui";
-import {
+import { Btn, Modal, PermNote, StateBlock, StatusChip, Toolbar, WaveChart } from "../ui";import {
   CURRENT_RISKS,
   HISTORIC_ORDERS,
   HISTORY_RISKS,
@@ -33,11 +32,23 @@ import {
   WAVEFORMS,
   WORK_ORDER,
 } from "../seed/scenario";
-import SplatStage from "./SplatStage";
+/**
+ * 泼溅渲染舞台（`SplatStage`）**异步加载**。
+ *
+ * ── 为什么必须异步（2026-09-17 实测）────────────────────────────
+ * 它引的是 `@sparkjsdev/spark`：**单入口 5.2 MB 整包**（无子路径导出、无法按需），
+ * 打包后 Twin 分包 **4.85 MB**，其中 2.07 MB 还是包内自带的内联 base64 WASM。
+ * 静态 import 的后果是：**只要打开 /twin 就先下这 4.85 MB** ——
+ * 而本页在"工单还没上传重建模型"时显示的只是空态（`hasModel === false`），
+ * 那一刻根本不需要渲染器。
+ *
+ * 所以改成按需：渲染器只在**确实有模型文件**时才挂载（见下面 twin-stage 里的条件）。
+ * 空态与错误态都是覆盖层，不依赖它内部状态，语义上本来就不该为它们下载渲染器。
+ */
+const SplatStage = lazy(() => import("./SplatStage"));
 
 /** 首页工单清单：本轮 + 历史，与工单看板同一份来源 */
 const ORDERS = [WORK_ORDER, ...HISTORIC_ORDERS];
-
 /**
  * 场景库的行（服务端版本 ∪ 本地参照条目）
  *
@@ -267,13 +278,22 @@ export default function Twin() {
         {/* 主视图：占页面 2/3 以上 */}
         <div className="twin-stage">
           <div className="twin-view">
-            <SplatStage
-              url={orderScene?.assetFileId ? api.modelUrl(orderScene.assetFileId, orderScene.assetName) : ""}
-              active={hasModel && !splatError}
-              camera={null}
-              fitNonce={fitNonce}
-              onError={(message) => setSplatError(message)}
-            />
+            {/*
+              只在**确实有模型文件**时挂载渲染器（= 只在此时下载那个异步分包）。
+              没有模型时 `.twin-view` 仍是空的黑底，空态覆盖层照旧显示在上面；
+              fallback 取 null：分包到达前不显示骨架，避免黑底上闪一下。
+            */}
+            {hasModel ? (
+              <Suspense fallback={null}>
+                <SplatStage
+                  url={orderScene?.assetFileId ? api.modelUrl(orderScene.assetFileId, orderScene.assetName) : ""}
+                  active={!splatError}
+                  camera={null}
+                  fitNonce={fitNonce}
+                  onError={(message) => setSplatError(message)}
+                />
+              </Suspense>
+            ) : null}
           </div>
 
           {/*
