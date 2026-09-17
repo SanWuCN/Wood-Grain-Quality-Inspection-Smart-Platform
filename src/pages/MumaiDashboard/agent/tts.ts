@@ -42,7 +42,7 @@ type SpeechSynthesisLike = {
   getVoices: () => SpeechSynthesisVoice[];
 };
 
-/** 预录音频探测结果缓存：同一个路径只探测一次，避免重复网络请求 */
+/** 预录音频探测结果缓存：同一个路径只探测一次，避免重复网络请求（**只缓存有结论的**，见 `decideProbe`） */
 const audioProbe = new Map<string, boolean>();
 
 function synthesis(): SpeechSynthesisLike | null {
@@ -51,33 +51,73 @@ function synthesis(): SpeechSynthesisLike | null {
   return scope.speechSynthesis ?? null;
 }
 
+/** 一次探测的结论：有 / 确实没有 / 没在预算内给结论 */
+export type ProbeResult = "ok" | "missing" | "timeout";
+
+/**
+ * 探测结论该怎么处理（纯函数，`tts.test.ts` 钉住）。
+ *
+ * ── 为什么要区分 `missing` 与 `timeout`（2026-09-17 实测的现场事故）────
+ * 老实现把两者都当"没有素材"，而且**把 false 也缓存**：
+ * 首屏正忙（刚登录进来、包刚解析完）时第一轮按键，1.2 秒预算内 `canplaythrough`
+ * 还没来 → 判定"没有语音包" → 这一轮**直接回退浏览器合成音**，
+ * 而且这个 false 被缓存住，后面的轮次也一起受影响。
+ * 现场表现是"第一轮声音是机器的、后面又好了"或者"整场都是机器的"，且不报任何错。
+ *
+ * 现在的口径：
+ *   · `ok`      → 有素材，缓存"有"；
+ *   · `missing` → `onerror`，浏览器明确说读不了（多半是文件真不在），缓存"没有"；
+ *   · `timeout` → **只是没来得及**，再审一次（更长预算），且**绝不缓存"没有"**。
+ */
+export function decideProbe(
+  result: ProbeResult,
+  alreadyRetried: boolean,
+): { retry: boolean; cache: boolean; value: boolean } {
+  if (result === "ok") return { retry: false, cache: true, value: true };
+  if (result === "missing") return { retry: false, cache: true, value: false };
+  return { retry: !alreadyRetried, cache: false, value: false };
+}
+
+/** 探一次：`canplaythrough` 说有、`onerror` 说没有、超时说不确定 */
+function probeOnce(url: string, timeoutMs: number): Promise<ProbeResult> {
+  return new Promise<ProbeResult>((resolve) => {
+    if (typeof window === "undefined" || typeof Audio === "undefined") {
+      resolve("missing");
+      return;
+    }
+    const audio = new Audio();
+    let settled = false;
+    const done = (result: ProbeResult) => {
+      if (settled) return;
+      settled = true;
+      audio.oncanplaythrough = null;
+      audio.onerror = null;
+      resolve(result);
+    };
+    audio.oncanplaythrough = () => done("ok");
+    audio.onerror = () => done("missing");
+    audio.preload = "auto";
+    audio.src = url;
+    window.setTimeout(() => done("timeout"), timeoutMs);
+  });
+}
+
 /**
  * 探测预录音频是否存在。
- * 用 HEAD 请求 + <audio> 的 canplay 判定：不存在就直接回落 TTS，不抛错。
+ * 用 `<audio>` 的 `canplaythrough` 判定：不存在就直接回落 TTS，不抛错。
+ * 超时不算"不存在"—— 再审一次，且不缓存否定结论（见 `decideProbe`）。
  */
 export async function probeAudio(url: string): Promise<boolean> {
   const cached = audioProbe.get(url);
   if (cached !== undefined) return cached;
-  const result = await new Promise<boolean>((resolve) => {
-    if (typeof window === "undefined" || typeof Audio === "undefined") {
-      resolve(false);
-      return;
-    }
-    const audio = new Audio();
-    const done = (ok: boolean) => {
-      audio.oncanplaythrough = null;
-      audio.onerror = null;
-      resolve(ok);
-    };
-    audio.oncanplaythrough = () => done(true);
-    audio.onerror = () => done(false);
-    audio.preload = "auto";
-    audio.src = url;
-    // 兜底超时：1.2s 内没有结论就认为没有素材
-    window.setTimeout(() => done(false), 1200);
-  });
-  audioProbe.set(url, result);
-  return result;
+  let retried = false;
+  for (;;) {
+    const result = await probeOnce(url, retried ? 2600 : 1200);
+    const decision = decideProbe(result, retried);
+    if (decision.cache) audioProbe.set(url, decision.value);
+    if (!decision.retry) return decision.value;
+    retried = true;
+  }
 }
 
 /** 选一个中文语音（优先本地离线语音，避免依赖联网语音服务） */

@@ -32,7 +32,7 @@ import { getAgentState, resolveConfirm, setAgent, subscribeAgent } from "./store
 import { microphoneSupported } from "./asr";
 import { shortcutSheetRows, walkShortcutNote } from "./shortcutSheet";
 import { wakeChannel, type WakeSnapshot } from "./wakeChannel";
-import { buildReplyView, latestBotTurn, latestUserText, type ReplyView } from "./replyView";
+import { bubbleUserText, buildReplyView, latestBotTurn, latestUserText, type ReplyView } from "./replyView";
 import { VoiceOutput } from "./tts";
 import {
   clampPos,
@@ -475,6 +475,13 @@ export default function XiaomuDock() {
   const query = latestUserText(agent.turns);
   const turn = latestBotTurn(agent.turns);
   const reply: ReplyView | null = useMemo(() => (turn ? buildReplyView(turn, query) : null), [turn, query]);
+  /*
+    气泡里显示的那句"用户话"：实时字幕优先、已入库整句兜底。
+    优先级收在 `bubbleUserText()` 里（不是在这里手写 `||`）——
+    两次报障都是这处顺序：写成"整句 || 实时字幕"后，第一轮之后整句恒真，
+    新一轮的逐字文本就再也不显示了。
+  */
+  const userText = bubbleUserText({ wakePartial: wake.partial, partial: agent.partial, query });
 
   /**
    * 什么时候显示气泡面板。
@@ -759,21 +766,20 @@ export default function XiaomuDock() {
           {/*
             用户流式字幕：定稿前就地更新，不重复新增气泡（FR-07）。
 
-            ⚠ 三个来源的优先级不能少任何一个（2026-09-17 用户实测报的 bug）：
+            ⚠ 三个来源的优先级**顺序不能错**（两次用户实测报的都是这一处）：
               1. `wake.partial` —— **真实唤醒**的流式字幕，来自唤醒通道；
-              2. `query`        —— 已入库的整句（`agent.turns` 里的用户轮次）；
-              3. `agent.partial`—— **脚本化模拟**的流式字幕（剧本快捷键 Ctrl+B/Y/M+数字、
-                                   「示例问句」都走 `VoiceInput.simulate()`，写的是这里）。
+              2. `agent.partial`—— **脚本化模拟**的流式字幕（剧本快捷键 Ctrl+B/Y/M+数字、
+                                  一条龙 Ctrl+Shift+Z、「示例问句」都走 `VoiceInput.simulate()`）；
+              3. `query`        —— 已入库的整句（`agent.turns` 里最近一条用户轮次），兜底。
 
-            缺了第 3 条会怎样：`simulate()` 每个字都在跑（实测 onPartial len=1..17 连续），
-            但气泡里**没有任何元素渲染 `agent.partial`** —— 屏幕上就是"小木没反应，
-            过一会儿突然接收到一整句话"，正是用户报的现象。
-            全屏控制台（`VoiceConsole`）本来就读 `state.partial`，所以那条路径一直正常，
-            只有气泡这条一直缺这个出口。
+            · 缺了第 2 条（第一次报）：`simulate()` 每个字都在跑，但气泡里没有任何元素
+              渲染 `agent.partial` —— 屏幕上就是"小木没反应，过一会儿突然接收到一整句话"。
+            · 把第 3 条排在第 2 条前面（第二次报「用一次对话后，下面再触发又做不到逐一
+              显示录入信息了」）：第一轮结束后整句已有上一轮那句话，`||` 永远短路到**旧句子**，
+              新一轮的逐字文本显示不出来。优先级与判据收在 `replyView.bubbleUserText()`，
+              由 `replyView.test.ts` 钉住。
           */}
-          {wake.partial || query || agent.partial ? (
-            <p className="xd__user">{wake.partial || query || agent.partial}</p>
-          ) : null}
+          {userText ? <p className="xd__user">{userText}</p> : null}
 
           {agent.pendingConfirm ? (
             <div className="xd__confirm" role="alertdialog" aria-label="高风险操作确认">

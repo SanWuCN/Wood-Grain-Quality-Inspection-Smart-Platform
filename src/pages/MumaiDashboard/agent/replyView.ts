@@ -154,3 +154,26 @@ export function latestUserText(turns: readonly { kind: string; text?: string }[]
   }
   return "";
 }
+
+/**
+ * 气泡里那句"用户话"到底显示什么：**实时字幕优先，已入库的整句兜底**。
+ *
+ * ── 为什么要单独一个函数（2026-09-17 用户第二次报的同类 bug）────────
+ * 用户原话：「在使用一次对话后，下面再触发，小木气泡又做不到逐一显示录入信息了」。
+ * 根因是渲染顺序写成了 `wake.partial || 已入库整句 || agent.partial`：
+ * 第一轮跑完后"已入库整句"已经有上一轮那句话，于是 `||` **永远短路到旧句子**上，
+ * 新一轮的逐字文本一辈子显示不出来 —— 第一次能用，只是因为那时整句还是空的。
+ *
+ * 顺序写反一次就会退回这个现象（两次报障都是这一处的顺序问题），所以优先级
+ * 收进这个纯函数、由 `replyView.test.ts` 钉住，组件只负责渲染。
+ */
+export function bubbleUserText(input: {
+  /** 真实唤醒通道的流式字幕（优先级最高：麦克风正在说话） */
+  wakePartial?: string;
+  /** 脚本化模拟的流式字幕（`VoiceInput.simulate()` 写的那一份） */
+  partial?: string;
+  /** 已入库的整句（`latestUserText(turns)`）——只在没有实时字幕时兜底显示 */
+  query?: string;
+}): string {
+  return input.wakePartial || input.partial || input.query || "";
+}

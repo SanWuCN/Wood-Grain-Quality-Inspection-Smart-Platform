@@ -329,8 +329,49 @@ try {
   })()`);
   /* 先等第①轮的播报彻底收尾，避免两条模拟抢同一个 ask 队列 */
   await sleep(6000);
+  /*
+    ⚠ 先记下按键前气泡里已经有什么：第一轮那句是**已入库整句**，
+    按下去到新字幕第一个字之间会有一瞬间还显示着它（那是正常的兜底显示）。
+    判据要的是"新一轮有没有逐字涨上来"，所以采样时把旧句子剔掉再判 ——
+    不剔的话，序列开头那个 45 字会把"最短样本"顶掉，判据就假红了。
+  */
+  const staleTexts = new Set(
+    ((await evaluate(`window.__probe()`))?.userTexts ?? []).filter(Boolean),
+  );
   await dispatch("b");
   await dispatch("4");
+
+  /* ---------- 甲2：**第二次触发**也必须逐字（用户 2026-09-17 第二次报的 bug）----------
+     用户原话：「在使用一次对话之后，下面再触发，小木气泡又做不到逐一显示录入信息了」。
+     根因是气泡里那句"用户话"的渲染顺序：写成 `整句 || 实时字幕` 时，第一轮结束后
+     整句已经有上一轮那句话，`||` 永远短路到**旧句子**，新一轮的逐字文本显示不出来
+     —— 第一次能用只是因为那时整句还是空的。这里在第二次触发上采长度序列钉住它。
+  */
+  const secondSeq = [];
+  let secondFinal = "";
+  for (let i = 0; i < 90; i += 1) {
+    const p = await evaluate(`window.__probe()`);
+    const texts = (p?.userTexts ?? []).filter(Boolean);
+    const fresh = texts.filter((t) => !staleTexts.has(t));
+    const longest = fresh.reduce((max, t) => Math.max(max, t.length), 0);
+    if (longest > 0) secondSeq.push(longest);
+    if (/同步备份/.test(texts.join(" "))) {
+      secondFinal = texts.find((t) => /同步备份/.test(t)) ?? "";
+      break;
+    }
+    await sleep(80);
+  }
+  const secondUniq = [...new Set(secondSeq)];
+  check(
+    "第二次触发（Ctrl+B+4）同样逐字显示录入，而不是直接甩出上一轮的旧句子",
+    secondUniq.length >= 3 &&
+      secondUniq[secondUniq.length - 1] === secondFinal.length &&
+      secondUniq[0] < secondFinal.length &&
+      /同步备份/.test(secondFinal),
+    `长度序列 ${secondUniq.slice(0, 10).join("→")}${secondUniq.length > 10 ? "…" : ""}；` +
+      `终句=「${secondFinal.slice(0, 22)}${secondFinal.length > 22 ? "…" : ""}」（${secondFinal.length} 字）`,
+  );
+
   let syncShown = false;
   for (let i = 0; i < 120; i += 1) {
     if (await evaluate(`window.__probeSync()`)) {
