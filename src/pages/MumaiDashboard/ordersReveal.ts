@@ -35,7 +35,10 @@
 import { useEffect, useState } from "react";
 
 /** 单次揭示计划的兜底存活时间：agent 中途被打断也不会让页面停在半截 */
+/** 计划最长活多久（与工单页同一口径）：到点自动解除，页面回到可自由操作 */
 const PLAN_TTL_MS = 30000;
+/** 补拍点前最多等目标页面挂载多久（导航/接口慢于播报时的上限） */
+const CATCHUP_MOUNT_DEADLINE_MS = 8000;
 
 /**
  * 中文播报语速（字/秒）。
@@ -68,6 +71,21 @@ export function splitSegments(text: string): string[] {
   const parts = String(text)
     .split(/[。！？；\n]+/)
     .map((s) => s.trim())
+    .filter(Boolean);
+  return parts.length ? parts : [String(text)];
+}
+
+/**
+ * 按**小句**切（逗号、顿号也切）。
+ *
+ * 给「一句话里三小句」的轮次用：⑰ 的台词是
+ * 「清洗完成，待审核记录已列出，数据集已按物理样本分组。」——按句子切只有 1 段，
+ * 三拍会被合并成一拍，逐步推进就没了；按小句切正好一拍推一段。
+ */
+export function splitClauses(text: string): string[] {
+  const parts = String(text)
+    .split(/[。！？；，、\n]+/)
+    .map((item) => item.trim())
     .filter(Boolean);
   return parts.length ? parts : [String(text)];
 }
@@ -147,6 +165,70 @@ export function buildRevealSchedule(segments: string[], beats: string[][]): Reve
     acc += segmentDurationMs(segments[i]);
   }
   return out;
+}
+
+/**
+ * 按时间线把"该推进的组"交给调用方 —— 工单详情页与数据清洗流程页**共用这一份**。
+ *
+ * ── 为什么抽出来 ──────────────────────────────────────────────────
+ * 这套时间线有三条踩出来的规矩，抄第二遍必然抄漏一条：
+ *   ① 先 `alignBeats()` 再算时刻，否则多出来的组**连定时器都没有**（永久不亮）；
+ *   ② 播报结束时**只补"按时间已经该到"的拍点**，不能一次铺满
+ *      （旧写法一次推完 → 页面刚出现就全亮，逐段展开等于没发生）；
+ *   ③ 补拍点前要等目标页面**真的挂载**（探针给 `mountReady`），
+ *      固定延时要么不够要么白等。
+ *
+ * @param segments   台词的语义段
+ * @param beats      声明的拍点表（本函数内部做 `alignBeats`）
+ * @param apply      推进这些组（幂等由调用方保证）
+ * @param clear      没有任何拍点时清掉计划（页面回到完整显示，而不是留个空壳）
+ * @param spoken     播报 Promise（拿不到就退回纯估算）
+ * @param mountReady 目标页面是否已挂载（默认认为已挂载）
+ */
+export function runRevealTimeline(options: {
+  segments: string[];
+  beats: string[][];
+  apply: (sections: string[]) => void;
+  clear: () => void;
+  spoken?: unknown;
+  mountReady?: () => boolean;
+}): void {
+  const { segments, beats, apply, clear, spoken, mountReady } = options;
+  const schedule = buildRevealSchedule(segments, alignBeats(segments, beats));
+  if (schedule.length === 0) {
+    clear();
+    return;
+  }
+  const planStart = Date.now();
+  for (const beat of schedule) {
+    window.setTimeout(() => apply(beat.sections), beat.atMs);
+  }
+  if (!spoken || typeof (spoken as Promise<void>).then !== "function") return;
+  void (spoken as Promise<void>)
+    .catch(() => {
+      /* 播报失败也要把页面铺完，不能停在半截 */
+    })
+    .then(() => {
+      settleWhenMounted(() => {
+        const elapsed = Date.now() - planStart;
+        const due = schedule.filter((beat) => beat.atMs <= elapsed);
+        if (due.length) apply(due.flatMap((beat) => beat.sections));
+      }, mountReady);
+    });
+}
+
+/** 等目标页面挂载好（最多 `CATCHUP_MOUNT_DEADLINE_MS`），再执行 `settle` */
+export function settleWhenMounted(settle: () => void, mountReady?: () => boolean): void {
+  const startedAt = Date.now();
+  const probe = () => {
+    const ready = mountReady ? mountReady() : true;
+    if (ready || Date.now() - startedAt >= CATCHUP_MOUNT_DEADLINE_MS) {
+      settle();
+      return;
+    }
+    window.setTimeout(probe, 120);
+  };
+  probe();
 }
 
 type RevealPlan = {

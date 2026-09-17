@@ -31,6 +31,7 @@ import NumberAnimation from "@/components/numberAnimation";
 import { useMumai } from "../context";
 import { Modal } from "../ui";
 import { DatasetCleanFlow, type CleanVersionResult } from "./DatasetCleanFlow";
+import { DEFAULT_THRESHOLDS, runClean } from "../cleanLogic";
 import { Panel } from "../Panel";
 import {
   Btn,
@@ -40,7 +41,6 @@ import {
 } from "../ui";
 import { checkGrouping } from "../lib";
 import {
-  CLEAN_STEPS,
   DATASET,
   FUSION_RECORD,
   FUSION_RULES,
@@ -66,6 +66,8 @@ export function DatasetTab() {
     DATASET.splits.map((split) => ({ ...split, sampleIds: [...split.sampleIds] })),
   );
   const groups = useMemo(() => [...new Set(SAMPLES.map((sample) => sample.physicalSampleId))], []);
+  /* 清洗漏斗：与流程页、事实表、小木台词读的是**同一份实算结果**（不再手写） */
+  const funnel = useMemo(() => runClean(SAMPLES, DEFAULT_THRESHOLDS), []);
   const [group, setGroup] = useState(groups[0] ?? "");
   const [target, setTarget] = useState<SplitGroup["name"]>("训练集");
   /** 清洗流程产出的新版本成员；为空表示本轮还没生成过 */
@@ -156,14 +158,21 @@ export function DatasetTab() {
             tone={versionResult || DATASET.frozen ? "ok" : "warn"}
           />
         }>
+        {/*
+          这张表原来读种子里**手写**的 `CLEAN_STEPS`（12 → 9 → 8 → 7 → 6），
+          与实际算出来的漏斗对不上（真跑是 12 → 10 → …，且 r-0008 那条算不出来）。
+          现在直接读 `cleanLogic` 的实算结果：8 步，每步都带**命中记录号**，
+          页面上的数字与核验弹窗里的记录逐条对得上。
+        */}
         <DataTable
-          head={["步骤", "输入", "保留", "待审核", "处理口径"]}
-          rows={CLEAN_STEPS.map((step) => [
+          head={["步骤", "输入", "保留", "待审核", "命中记录", "处理口径"]}
+          rows={funnel.steps.map((step) => [
             <b key={`k-${step.key}`}>{step.label}</b>,
             String(step.input),
             String(step.kept),
             String(step.review),
-            step.reason,
+            step.hits.length ? step.hits.join(" / ") : "—",
+            step.detail,
           ])}
         />
       </Panel>

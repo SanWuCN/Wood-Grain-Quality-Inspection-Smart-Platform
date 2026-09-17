@@ -3238,7 +3238,8 @@
   margin-bottom: var(--space-4);
 }
 
-.dc-process > header {
+.dc-process > header,
+.dc-groups > header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3247,7 +3248,8 @@
   font-size: var(--fs-aux);
 }
 
-.dc-process > header span {
+.dc-process > header span,
+.dc-groups > header span {
   color: var(--text-tertiary);
   font-family: var(--font-data-mixed);
 }
@@ -3451,6 +3453,77 @@
 .dc-review__ops {
   display: flex;
   gap: var(--space-1);
+}
+
+/*
+  行语气：校验类步骤（unique / group）无命中即通过，命中即入核验队列；
+  剔除类（schema）单独算一类，不进核验。左侧色条与 KPI 卡同一套语言。
+*/
+.dc-process li.is-check {
+  box-shadow: inset 2px 0 0 0 var(--border-subtle);
+}
+
+.dc-process li.is-hit {
+  box-shadow: inset 2px 0 0 0 var(--warning);
+}
+
+/*
+  「命中哪几条」必须逐条列出来 —— 核验弹窗里是同一批记录号。
+  ⚠ 选择器要带 .dc-process__copy：.dc-process__copy small 已经定了 tertiary 色，
+  只写类名压不住（这里是"要能被核对"的信息，比普通说明文字高一档）。
+*/
+.dc-process__copy .dc-process__hits {
+  color: var(--text-secondary);
+  font-family: var(--font-data-mixed);
+}
+
+.dc-process__copy .dc-process__hits.is-clean {
+  color: var(--text-tertiary);
+  font-family: inherit;
+}
+
+/* 分组与划分：一段几张小卡，漏没漏一眼看完 */
+.dc-groups {
+  margin-bottom: var(--space-4);
+}
+
+.dc-groups__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--border-subtle);
+}
+
+.dc-groups__list li {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.dc-groups__list b {
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 500;
+}
+
+.dc-groups__list span {
+  color: var(--text-secondary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-aux);
+}
+
+.dc-groups__list small {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.dc-groups > p {
+  margin: var(--space-2) 0 0;
 }
 
 @media (max-width: 1200px) {

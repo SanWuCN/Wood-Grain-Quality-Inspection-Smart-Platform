@@ -33,6 +33,7 @@ import {
   SCAN_BATCHES,
   SCENES,
   SCENE_BOOKMARKS,
+  SAMPLES,
   STAGES,
   UPDATE_PACKAGE,
   WAYPOINTS,
@@ -41,6 +42,7 @@ import {
   componentById,
 } from "../seed/scenario";
 import { runEvaluation } from "../lib";
+import { CLEAN_CATEGORIES, DEFAULT_THRESHOLDS, runClean } from "../cleanLogic";
 import { NAV_ITEMS } from "../design";
 import { formatDistance, routeDistance } from "./lib/geo";
 import type { EntityBag } from "./types";
@@ -282,8 +284,19 @@ export function evaluateFacts(intent: Intent, ctx: FactContext): FactSet {
   table.datasetFrozenAt = DATASET.frozenAt ?? "—";
   table.datasetFrozen = DATASET.frozen ? `已冻结（${DATASET.frozenAt ?? "—"}）` : "未冻结";
   table.splitText = DATASET.splits.map((item) => `${item.name} ${item.sampleIds.length} 条`).join(" / ");
-  table.cleanSteps = `${DATASET.cleanSteps.length} 步：${DATASET.cleanSteps.map((item) => item.label).join(" → ")}`;
-  table.reviewCount = `${DATASET.cleanSteps.reduce((sum, item) => sum + item.review, 0)} 条待审核记录`;
+  /*
+    清洗漏斗、待审核条数：**只从 `cleanLogic` 的实算结果读**。
+    原来这里读的是种子里手写的 `DATASET.cleanSteps` —— 那张表与实际算出来的对不上
+    （手写 12→9→8→7→6、3 条待审核，实跑 12→10→…、4 条命中），
+    小木念的数字和页面上核验弹窗里的记录会互相打架。现在同一份来源，漂不动。
+  */
+  const clean = runClean(SAMPLES, DEFAULT_THRESHOLDS);
+  table.cleanSteps = `${clean.steps.length} 步：${clean.steps.map((item) => item.label).join(" → ")}`;
+  table.reviewCount = `${clean.flagged.length} 条待审核记录`;
+  table.cleanKept = `${clean.kept} 条保留、${clean.unusable} 条直接剔除（空文件 / 格式损坏）`;
+  table.cleanCategories = CLEAN_CATEGORIES.map(
+    (category) => `${category} ${clean.flagged.filter((item) => item.category === category).length} 条`,
+  ).join("、");
   table.reviewPassed = String(DATASET.reviewAssign.filter((item) => item.state === "已通过").length);
   table.reviewTotal = String(DATASET.reviewAssign.length);
   table.reviewState = `${table.reviewPassed}/${table.reviewTotal} 已通过`;

@@ -105,7 +105,13 @@ export type ScriptRound = {
    * 拍点时间由 `buildRevealSchedule()` 按段累加算出（不是平均分配）。
    */
   reveal?: {
-    target: "order-detail";
+    /**
+     * 揭示目标：
+     *   · `order-detail` —— 工单详情页按「组」逐段展开（①④⑧⑩⑳㉑ 等轮）；
+     *   · `clean-flow`   —— 数据清洗流程页按「阶段」逐拍推进到人工核验（⑰）。
+     * 两者共用 `ordersReveal.runRevealTimeline` 的时间线，只是应用对象不同。
+     */
+    target: "order-detail" | "clean-flow";
     sections: string[];
     beats: string[][];
   };
@@ -676,6 +682,16 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "沈：我来检查数据划分。同一块木样的连续扫描很相似。",
     voicePack: "AI语音5",
     intentId: "clean_dataset",
+    /*
+      数据清洗流程：按台词的三小句逐拍推进（选择数据集 → 配置阈值 → 预检查 → 执行清洗）。
+      ⚠ 只推到 `cleaned`：**人工核验一步不替人点** —— 核验是人的责任，
+        要逐条点采纳/排除（平台口径：这一步是人工责任，必须逐条过）。
+    */
+    reveal: {
+      target: "clean-flow",
+      sections: ["pick", "configure", "precheck", "cleaned"],
+      beats: [["pick"], ["configure"], ["precheck"], ["cleaned"]],
+    },
     precondition: "第 2 句是人工审核未结束时的备用播报，只在审核未完成时播",
   },
   {

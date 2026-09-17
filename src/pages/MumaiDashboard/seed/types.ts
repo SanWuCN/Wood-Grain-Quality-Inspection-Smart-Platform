@@ -521,15 +521,6 @@ export type Sample = {
   sourceBatch: string;
 };
 
-export type CleanStep = {
-  key: string;
-  label: string;
-  input: number;
-  kept: number;
-  review: number;
-  reason: string;
-};
-
 export type SplitGroup = {
   name: "训练集" | "验证集" | "测试集";
   sampleIds: string[];
@@ -541,7 +532,6 @@ export type Dataset = {
   frozen: boolean;
   frozenAt: string | null;
   reviewAssign: { owner: string; task: string; state: "已通过" | "待处理" | "已退回" }[];
-  cleanSteps: CleanStep[];
   splits: SplitGroup[];
   indexVersion: string;
   sourceMode: SourceMode;

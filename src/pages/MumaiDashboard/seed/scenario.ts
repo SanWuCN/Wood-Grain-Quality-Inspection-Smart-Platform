@@ -26,7 +26,6 @@ import type {
   AnomalyEvent,
   ArchiveItem,
   BootCheckItem,
-  CleanStep,
   ChannelStatus,
   ClockPhase,
   Component,
@@ -1833,20 +1832,28 @@ export const SAMPLES: Sample[] = [
   { physicalSampleId: "S-02", recordId: "r-0005", path: "ref/ref-Z04-g2/scan_001.csv", materialSource: "同批旧料 · 杉木", knownState: "正常", labelBasis: "来源卡 + 目视复核", quality: "不可用", qualityReason: "空文件（0 字节）", groupId: "G-SAMPLE-02", distanceMm: 25, direction: "90°", saturationPct: 0, duplicateOf: null, sourceBatch: "ref-Z04-g2" },
   { physicalSampleId: "S-03", recordId: "r-0006", path: "ref/ref-Z04-g3/scan_000.csv", materialSource: "待核验来源 · 楠木", knownState: "已知缺陷", labelBasis: "人工标记（含空洞）", quality: "可用", qualityReason: "字段完整", groupId: "G-SAMPLE-03", distanceMm: 22, direction: "0°", saturationPct: 2.4, duplicateOf: null, sourceBatch: "ref-Z04-g3" },
   { physicalSampleId: "S-03", recordId: "r-0007", path: "ref/ref-Z04-g3/scan_001.csv", materialSource: "待核验来源 · 楠木", knownState: "未知待核验", labelBasis: "无标签依据，保留待核验", quality: "待审核", qualityReason: "标签待核验，不进入监督训练", groupId: "G-SAMPLE-03", distanceMm: 22, direction: "30°", saturationPct: 11.8, duplicateOf: null, sourceBatch: "ref-Z04-g3" },
-  { physicalSampleId: "S-04", recordId: "r-0008", path: "rescan/scan-Z04-002/frame_018.csv", materialSource: "现场 Z04 复扫", knownState: "未知待核验", labelBasis: "无标签依据，单列待核验集合", quality: "待审核", qualityReason: "数值离群（距组中心 3.4σ）", groupId: "G-SAMPLE-04", distanceMm: 28, direction: "0°", saturationPct: 4.2, duplicateOf: null, sourceBatch: "scan-Z04-002" },
-  { physicalSampleId: "S-04", recordId: "r-0009", path: "rescan/scan-Z04-002/frame_031.csv", materialSource: "现场 Z04 复扫", knownState: "已知缺陷", labelBasis: "融合规则 FUSION-03 标注 + 人工确认", quality: "可用", qualityReason: "字段完整", groupId: "G-SAMPLE-04", distanceMm: 28, direction: "0°", saturationPct: 3.1, duplicateOf: null, sourceBatch: "scan-Z04-002" },
+  { physicalSampleId: "S-04", recordId: "r-0008", path: "rescan/scan-Z04-002/frame_018.csv", materialSource: "现场 Z04 复扫", knownState: "未知待核验", labelBasis: "无标签依据，单列待核验集合", quality: "待审核", qualityReason: "标签依据不可追溯，待人工核验", groupId: "G-SAMPLE-04", distanceMm: 28, direction: "0°", saturationPct: 4.2, duplicateOf: null, sourceBatch: "scan-Z04-002" },
+  /*
+   * r-0009：融合规则标注过的已知缺陷样本，但**距离读数 47 mm**远超声程标定带
+   * （参考件标定中位 25 mm ± 8 mm）——「特征幅度与参考分布比对」那一步就是靠它
+   * 命中一条真实记录。原来是 28 mm（与同组 r-0008 一样），那条"聚偏离群"的
+   * 说法在任何规则下都算不出来，属于编的数字，一并换掉。
+   */
+  { physicalSampleId: "S-04", recordId: "r-0009", path: "rescan/scan-Z04-002/frame_031.csv", materialSource: "现场 Z04 复扫", knownState: "已知缺陷", labelBasis: "融合规则 FUSION-03 标注 + 人工确认", quality: "可用", qualityReason: "字段完整", groupId: "G-SAMPLE-04", distanceMm: 47, direction: "0°", saturationPct: 3.1, duplicateOf: null, sourceBatch: "scan-Z04-002" },
   { physicalSampleId: "S-05", recordId: "r-0010", path: "legacy/may-round1/Z01_scan.csv", materialSource: "五月批次 · 杉木", knownState: "正常", labelBasis: "历史报告 MAY-DEMO-01", quality: "不可用", qualityReason: "格式损坏（列数不一致）", groupId: "G-SAMPLE-05", distanceMm: 25, direction: "0°", saturationPct: 0, duplicateOf: null, sourceBatch: "may-round1" },
   { physicalSampleId: "S-05", recordId: "r-0011", path: "legacy/may-round1/Z02_scan.csv", materialSource: "五月批次 · 杉木", knownState: "正常", labelBasis: "历史报告 MAY-DEMO-01", quality: "可用", qualityReason: "字段完整", groupId: "G-SAMPLE-05", distanceMm: 25, direction: "0°", saturationPct: 0.8, duplicateOf: null, sourceBatch: "may-round1" },
   { physicalSampleId: "S-06", recordId: "r-0012", path: "legacy/may-round1/Z03_scan.csv", materialSource: "五月批次 · 楠木", knownState: "正常", labelBasis: "历史报告 MAY-DEMO-01", quality: "可用", qualityReason: "字段完整", groupId: "G-SAMPLE-06", distanceMm: 25, direction: "0°", saturationPct: 1.2, duplicateOf: null, sourceBatch: "may-round1" },
 ];
 
-export const CLEAN_STEPS: CleanStep[] = [
-  { key: "schema", label: "字段与空值检查", input: 12, kept: 9, review: 0, reason: "3 条空文件 / 格式损坏，确定不可用，不进审核队列" },
-  { key: "dup", label: "重复摘要筛查", input: 9, kept: 8, review: 1, reason: "r-0003 与 r-0002 摘要高度相似，先待审核" },
-  { key: "range", label: "数值范围与饱和检查", input: 8, kept: 7, review: 1, reason: "r-0007 饱和比例 11.8% 超限，待审核" },
-  { key: "cluster", label: "特征相似度与聚类（固定随机种子）", input: 7, kept: 6, review: 1, reason: "r-0008 距组中心 3.4σ，作为审核建议而非自动删除" },
-  { key: "group", label: "按物理样本分组并输出组清单", input: 6, kept: 6, review: 0, reason: "同一 physical_sample_id 编入同一 group_id，训练集不做跨组拆分" },
-];
+/*
+ * ⚠ 原来这里有一张**手写的** `CLEAN_STEPS`（12 → 9 → 8 → 7 → 6，3 条待审核，
+ * 其中 r-0008 写作「数值离群（距组中心 3.4σ）」）。2026-09-18 删掉，原因是它与实际
+ * 算出来的对不上：`runClean` 跑出来是 12 → 10 → …，而 r-0008 那条**任何规则都挑
+ * 不出来**——它真正的问题是标签依据不可追溯（σ 判据平台里压根没有，且该组只有两条
+ * 记录，两条记录算不出 σ）。页面上的数字和核验弹窗里的记录对不上，现场一问就穿帮；
+ * r-0008 的"质量说明"这句也跟着改成能对上的说法。现在漏斗由 `cleanLogic.runClean()`
+ * 实算（8 步），页面、事实表、小木台词全部读同一份结果。
+ */
 
 export const DATASET: Dataset = {
   id: "DS-06",
@@ -1859,7 +1866,6 @@ export const DATASET: Dataset = {
     { owner: "沈", task: "标签与集合分组复核（受限 Python 校验单元）", state: "已通过" },
     { owner: "史", task: "版本确认与冻结", state: "已通过" },
   ],
-  cleanSteps: CLEAN_STEPS,
   splits: [
     { name: "训练集", sampleIds: ["S-01", "S-02", "S-03"] },
     { name: "验证集", sampleIds: ["S-04", "S-05"] },

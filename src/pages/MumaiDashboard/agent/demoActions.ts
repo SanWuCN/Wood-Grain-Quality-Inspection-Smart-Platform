@@ -299,8 +299,14 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
   },
   {
     roundNo: "⑰",
-    title: "展开清洗漏斗与分组校验",
+    /*
+      用户口径 2026-09-18：「…这个对话需要小木跳转到固件及模型，数据集，
+      直接一步一步引导到人工核验」——**页面自己就是那个动作**（清洗流程逐拍推进到人工核验），
+      再叠一层浮层就是「页面 + 浮层」打架（同 ②③④⑪⑳ 的处理）。
+    */
+    title: "数据清洗流程逐拍推进到人工核验",
     surface: "clean",
+    revealOnly: true,
     dataKeys: [
       "clean.rawCount",
       "clean.keptCount",

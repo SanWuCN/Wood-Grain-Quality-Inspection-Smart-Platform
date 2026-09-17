@@ -19,7 +19,7 @@
  */
 
 import { clockStamp } from "../lib";
-import { CURRENT_RISKS, KNOWLEDGE_META, WAYPOINTS } from "../seed/scenario";
+import { CURRENT_RISKS, DATASET, KNOWLEDGE_META, WAYPOINTS } from "../seed/scenario";
 import {
   annotateHighRiskBlocked,
   annotateLowConfidence,
@@ -37,7 +37,13 @@ import {
   voicePackOf,
   type Intent,
 } from "./intents";
-import { advanceOrderReveal, alignBeats, beginOrderReveal, buildRevealSchedule, cancelOrderReveal, splitSegments } from "../ordersReveal";
+import { advanceOrderReveal, beginOrderReveal, cancelOrderReveal, runRevealTimeline, splitClauses, splitSegments } from "../ordersReveal";
+import {
+  advanceCleanFlowReveal,
+  beginCleanFlowReveal,
+  cancelCleanFlowReveal,
+  cleanFlowMounted,
+} from "../cleanFlowReveal";
 import { commissionBinding } from "../commissionBinding";
 import { useWorkOrderStore } from "../store/workOrders";
 import { understand, SEMANTIC_THRESHOLDS, type MatchResult } from "./matcher";
@@ -81,14 +87,6 @@ export type Runtime = {
 
 /** 每步之间的真实延时上限，让观众看清执行过程（§24 的重点就是「看得见」） */
 const STEP_DELAY = 900;
-
-/**
- * 播报结束后等"工单页挂载"的上限（毫秒）。
- *
- * 超过这个时间还没探到挂载点，就照旧把剩余板块补齐 ——
- * 宁可没有展开动画，也不能让页面停在半展开（§12 第 12 条）。
- */
-const CATCHUP_MOUNT_DEADLINE_MS = 8000;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
@@ -464,6 +462,9 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
   }
   if (round.reveal?.target === "order-detail") {
     startOrderDetailReveal(round, entities.order ?? "", spoken);
+  } else if (round.reveal?.target === "clean-flow") {
+    /* ⑰：数据集页跟着播报逐拍推进（推到「执行清洗」为止，人工核验不替人点） */
+    startCleanFlowReveal(round, spoken);
   }
 
   /*
@@ -565,57 +566,44 @@ function startOrderDetailReveal(round: ScriptRound, orderId: string, spoken?: un
   if (!orderId || !reveal || reveal.sections.length === 0) return;
 
   beginOrderReveal(orderId, reveal.sections);
-
-  const segments = splitSegments(mainLineOf(round));
   /*
-    ⚠ 必须先 `alignBeats()`：声明里的拍数是按"这段台词会切出几句话"写的，
-      而实际段数由语言决定（全是顿号就只切得出 1 段）。不对齐的话
-      `buildRevealSchedule` 的 `min(段数, 拍数)` 会把多出来的组**整组丢掉** ——
-      第①轮 3 段/4 拍 → `pending` 永不揭示（永久停在 3/7），
-      第④⑩⑰⑳㉑轮 1 段/3 拍 → 只亮摘要，另两组永不出现。详见 `ordersReveal.alignBeats`。
+    时间线（切段 → 对齐拍点 → 按时刻推进 → 播报结束补拍）统一在
+    ordersReveal 的 runRevealTimeline 里，数据清洗流程页走的是同一份实现 ——
+    那三条规矩（先对齐、只补到点、等挂载）抄第二遍必漏一条。
   */
-  const schedule = buildRevealSchedule(segments, alignBeats(segments, reveal.beats));
-  if (schedule.length === 0) {
-    /* 没有可算的拍点（段或 beat 为空）→ 不登记计划，页面完整显示，而不是留个空壳 */
-    cancelOrderReveal();
-    return;
-  }
-
-  const planStart = Date.now();
-  for (const beat of schedule) {
-    window.setTimeout(() => advanceOrderReveal(orderId, beat.sections), beat.atMs);
-  }
-
-  /*
-    真实播报结束 → **只补"按时间已经该亮"的那几拍**，没到点的交给原定时器继续走。
-    `VoiceOutput.speak()` 是 Promise（音频 onended / 合成 onend 时 resolve，有看门狗兜底）。
-    拿不到 Promise（注入的是同步实现）时什么都不做，退回纯估算。
-
-    ── 为什么不把剩下的拍点一次性推完（真踩过）────────────────────────
-    旧写法是播报一结束就 `clearTimeout` 全部定时器 + 把剩余组**一次推完**。
-    后果：播报比页面挂载快时（headless 无音频、或本机播报很短而导航较慢），
-    页面刚出现就被一次推成 7/7 —— **逐组展开等于没发生**，观感是
-    "页面先全亮、然后才跳过去"。实测时序：计划登记 0.23 秒后就被解除，点亮数 0 → 1 → 7。
-
-    改成"补到当前时刻该有的进度"之后：
-      · 声音念完时页面早就挂载 → 各拍按原节奏走完，观感不变；
-      · 声音念完时页面才挂载（或还没挂载）→ 先补上已经该亮的那几组，
-        其余仍按 `atMs` 节奏展开，而不是一次铺满。
-    页面永远不会停在半展开：账没结清就继续走，计划自带的 30 秒 TTL 是最后一道兜底。
-  */
-  if (spoken && typeof (spoken as Promise<void>).then === "function") {
-    void (spoken as Promise<void>)
-      .catch(() => { /* 播报失败也要把页面铺完，不能停在半截 */ })
-      .then(() => {
-        settleAfterMount(() => {
-          const elapsed = Date.now() - planStart;
-          const due = schedule.filter((b) => b.atMs <= elapsed);
-          if (due.length) advanceOrderReveal(orderId, due.flatMap((b) => b.sections));
-        });
-      });
-  }
+  runRevealTimeline({
+    segments: splitSegments(mainLineOf(round)),
+    beats: reveal.beats,
+    apply: (sections) => advanceOrderReveal(orderId, sections),
+    clear: () => cancelOrderReveal(),
+    spoken,
+    mountReady: orderDetailMounted,
+  });
 }
 
+/**
+ * 第 17 条（⑰ 数据清洗与人工审核）：数据集页**跟着播报逐拍推进**。
+ *
+ * 用户口径 2026-09-18：「…这个对话需要小木跳转到固件及模型，数据集，
+ * 直接一步一步引导到人工核验」——脚本把流程推到「执行清洗」为止，
+ * **人工核验一步不替人点**（核验是人的责任，逐条采纳/排除）。
+ * 台词里一句话有三小句（清洗完成 / 待审核记录已列出 / 数据集已按物理样本分组），
+ * 按小句切正好一拍推一段。
+ */
+function startCleanFlowReveal(round: ScriptRound, spoken?: unknown): void {
+  const reveal = round.reveal;
+  if (!reveal || reveal.sections.length === 0) return;
+  const datasetId = DATASET.id;
+  beginCleanFlowReveal(datasetId, reveal.sections);
+  runRevealTimeline({
+    segments: splitClauses(mainLineOf(round)),
+    beats: reveal.beats,
+    apply: (stages) => advanceCleanFlowReveal(datasetId, stages),
+    clear: () => cancelCleanFlowReveal(),
+    spoken,
+    mountReady: cleanFlowMounted,
+  });
+}
 /**
  * 等工单详情页**真的挂载**之后再执行 `settle`（最多等 `CATCHUP_MOUNT_DEADLINE_MS`）。
  *
@@ -623,9 +611,7 @@ function startOrderDetailReveal(round: ScriptRound, orderId: string, spoken?: un
  * 计划先被解掉，展开效果丢失），要么白等（页面早就到了）。
  * 直接探测挂载点最准，这也是判断"能不能看见展开动画"的唯一依据。
  */
-function settleAfterMount(settle: () => void): void {
-  const startedAt = Date.now();
-  const probe = () => {
+function orderDetailMounted(): boolean {
     /*
       两个条件都看，缺一不可：
         · `.wop-actions` —— 工单详情页骨架已渲染（说明导航真的到了）；
@@ -635,15 +621,9 @@ function settleAfterMount(settle: () => void): void {
         （实测时序：计划登记 0.2 秒后就被解除，点亮数从 0 直接跳到 7）。
         判据本身写错，看起来却像"功能没生效"。
     */
-    const pageReady = document.querySelector(".wop-actions") !== null;
-    const groupsReady = document.querySelector(".wop-reveal") !== null;
-    if ((pageReady && groupsReady) || Date.now() - startedAt >= CATCHUP_MOUNT_DEADLINE_MS) {
-      settle();
-      return;
-    }
-    window.setTimeout(probe, 120);
-  };
-  probe();
+  return (
+    document.querySelector(".wop-actions") !== null && document.querySelector(".wop-reveal") !== null
+  );
 }
 
 /**

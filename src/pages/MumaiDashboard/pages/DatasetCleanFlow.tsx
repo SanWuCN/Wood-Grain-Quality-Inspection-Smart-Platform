@@ -16,14 +16,16 @@
  * （react-refresh 要求组件文件不导出非组件）。
  */
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import { Btn, Modal, StatusChip } from "../ui";
 import { DATASET, SAMPLES } from "../seed/scenario";
+import { cancelCleanFlowReveal, useCleanFlowReveal } from "../cleanFlowReveal";
 import { clockStamp } from "../lib";
 import {
   DEFAULT_THRESHOLDS,
+  checkSplitLeakage,
   runClean,
   selectCleanVersionRecords,
   type CleanOutcome,
@@ -63,8 +65,33 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (result: CleanV
   const [outcome, setOutcome] = useState<(CleanOutcome & { at: string }) | null>(null);
   const [versionLabel, setVersionLabel] = useState<string | null>(null);
 
+  /*
+    ── 小木带着这一页走（用户口径 2026-09-18）────────────────────────
+    「…这个对话需要小木跳转到固件及模型，数据集，直接一步一步引导到人工核验」。
+    `useCleanFlowReveal` 给出脚本已经推进到的阶段；这里只**向前**跟到最后一个，
+    并复用按钮那两条副作用（预检查 / 执行清洗）——
+    所以"跟着念"与"自己点"走的是同一段代码。
+    ⚠ 用户一旦自己点过任何一步（`manual`），计划立刻作废：页面归人，脚本不再抢。
+  */
+  const revealed = useCleanFlowReveal(DATASET.id);
+  const manual = useRef(false);
+  /** 包一层：用户点任何一步都视为"接管这一页" */
+  const userAdvance = (run: () => void) => () => {
+    manual.current = true;
+    cancelCleanFlowReveal();
+    run();
+  };
+
   const sourceBatchCount = useMemo(() => new Set(SAMPLES.map((sample) => sample.sourceBatch)).size, []);
   const physicalSampleCount = useMemo(() => new Set(SAMPLES.map((sample) => sample.physicalSampleId)).size, []);
+  /** 物理样本 → 分组（分组与划分那一段用它，顺便当"同一样本两处分组"的可视检查） */
+  const groups = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const sample of SAMPLES) if (!map.has(sample.physicalSampleId)) map.set(sample.physicalSampleId, sample.groupId);
+    return [...map.entries()].map(([physicalSampleId, groupId]) => ({ physicalSampleId, groupId }));
+  }, []);
+  /** 划分泄漏检查（纯函数在 cleanLogic，单独一步：改划分不必重跑清洗） */
+  const splitLeaks = useMemo(() => checkSplitLeakage(DATASET.splits), []);
   const stepIndex = STAGE_ORDER.indexOf(stage);
 
   /** 预检查：真的看一眼这份数据集能不能洗（体量、格式、标签依据、分组） */
@@ -151,6 +178,31 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (result: CleanV
     excludedFalsePositives: excluded,
   });
 
+  /*
+    跟着小木往前走：计划推到哪一步，这一页就走到哪一步（**只向前**，不回退）。
+    「预检查 / 执行清洗」各有副作用（跑规则、算漏斗），所以这里调的是与按钮同一个函数 ——
+    否则舞台上是"到了这一步，但页面上没有这一步的结果"。
+  */
+  useEffect(() => {
+    if (!revealed || manual.current) return;
+    const target = revealed[revealed.length - 1];
+    if (!target) return;
+    const targetIndex = STAGE_ORDER.indexOf(target);
+    if (targetIndex <= STAGE_ORDER.indexOf(stage)) return;
+    if (target === "configure") {
+      setStage("configure");
+      return;
+    }
+    if (target === "precheck") {
+      runPrecheck();
+      return;
+    }
+    if (target === "cleaned") {
+      runCleaning();
+    }
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [revealed, stage]);
+
   const makeVersion = () => {
     if (!outcome) return;
     const membership = selectCleanVersionRecords(SAMPLES, outcome, decisions);
@@ -219,18 +271,81 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (result: CleanV
 
         {outcome ? (
           <section className="dc-process" aria-label="清洗执行明细">
-            <header><b>清洗执行明细</b><span>{outcome.at} · {outcome.steps.length} 个算法步骤</span></header>
+            <header>
+              <b>清洗执行明细</b>
+              <span>
+                {outcome.at} · {outcome.steps.length} 个算法步骤 · 参考件标定中位 {outcome.nominalMm} mm
+              </span>
+            </header>
             <ol>
               {outcome.steps.map((item, index) => (
-                <li key={item.key}>
+                <li key={item.key} className={item.kind === "check" ? "is-check" : item.hits.length ? "is-hit" : ""}>
                   <span className="dc-process__index">{String(index + 1).padStart(2, "0")}</span>
-                  <span className="dc-process__copy"><b>{item.label}</b><small>{item.detail}</small></span>
-                  <span className="dc-process__counts">输入 {item.input} · 保留 {item.kept} · 待核验 {item.review}</span>
+                  <span className="dc-process__copy">
+                    <b>{item.label}</b>
+                    <small>{item.detail}</small>
+                    {/*
+                      每一步都要能**逐条对上**：命中了哪几条记录写在行里，
+                      核对的人在核验弹窗里能看到同样的记录号（不再只给一个数字）。
+                    */}
+                    {item.hits.length ? (
+                      <small className="dc-process__hits">
+                        命中 {item.hits.length} 条：{item.hits.join(" / ")}
+                        {item.kind === "removed" ? "（确定不可用，直接剔除、不进核验队列）" : ""}
+                      </small>
+                    ) : (
+                      <small className="dc-process__hits is-clean">本步无命中（校验通过）</small>
+                    )}
+                  </span>
+                  <span className="dc-process__counts">
+                    输入 {item.input} · 保留 {item.kept}
+                    {item.kind === "check" ? " · 仅校验" : ` · 待核验 ${item.review}`}
+                  </span>
                   <progress max={item.input || 1} value={item.kept + item.review} aria-label={`${item.label}处理进度`} />
-                  <StatusChip text="已执行" tone="ok" />
+                  <StatusChip
+                    text={item.kind === "removed" ? "已剔除" : item.kind === "check" ? "校验通过" : item.hits.length ? "待核验" : "自动通过"}
+                    tone={item.kind === "removed" ? "warn" : item.kind === "check" ? "ok" : item.hits.length ? "warn" : "ok"}
+                  />
                 </li>
               ))}
             </ol>
+          </section>
+        ) : null}
+
+        {/* 分组与划分：清洗完成后紧接着要交代的两件事（分组对不对、划分漏没漏） */}
+        {outcome ? (
+          <section className="dc-groups" aria-label="物理样本分组与数据集划分">
+            <header>
+              <b>物理样本分组与划分</b>
+              <span>
+                {physicalSampleCount} 个物理样本 · {groups.length} 个分组 ·{" "}
+                {splitLeaks.length ? `⚠ ${splitLeaks.length} 处跨划分泄漏` : "无跨划分泄漏"}
+              </span>
+            </header>
+            <ul className="dc-groups__list">
+              {DATASET.splits.map((split) => (
+                <li key={split.name}>
+                  <b>{split.name}</b>
+                  <span>{split.sampleIds.join(" / ") || "—"}</span>
+                  <small>
+                    {/* 写清"清洗后"：这段的小卡与隔壁「分组检查」（按物理样本计数）挨着，
+                        不写清楚会被当成清洗前的记录数 */}
+                    清洗后记录{" "}
+                    {SAMPLES.filter(
+                      (sample) =>
+                        split.sampleIds.includes(sample.physicalSampleId) &&
+                        outcome.flagged.every((flag) => flag.recordId !== sample.recordId) &&
+                        outcome.dropped.every((item) => item.recordId !== sample.recordId),
+                    ).length}{" "}
+                    条
+                  </small>
+                </li>
+              ))}
+            </ul>
+            <p className="muted">
+              同一 physical_sample_id 的记录必须落在同一个划分里 —— 这是"同一块木样的连续扫描不能
+              一边训练一边验证"的硬约束（跨组泄漏会让验证分数虚高）。
+            </p>
           </section>
         ) : null}
 
@@ -245,7 +360,7 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (result: CleanV
               <NumberAnimation value={physicalSampleCount} group={false} /> 个物理样本 ·{" "}
               <NumberAnimation value={sourceBatchCount} group={false} /> 个来源批次
             </span>
-            <Btn tone="primary" onClick={() => setStage("configure")}>
+            <Btn tone="primary" onClick={userAdvance(() => setStage("configure"))}>
               下一步：配置算法与阈值
             </Btn>
           </div>
@@ -259,16 +374,16 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (result: CleanV
                 <b>{thresholds.saturationMax}%</b>
               </li>
               <li>
-                <span>幅值偏离下限</span>
-                <b>{thresholds.amplitudeMin} mm</b>
+                <span>参考距离允许偏差</span>
+                <b>±{thresholds.referenceToleranceMm} mm</b>
               </li>
               <li>
                 <span>重复帧合并</span>
                 <b>{thresholds.dedupe ? "开启" : "关闭"}</b>
               </li>
             </ul>
-            <Btn onClick={() => setConfigOpen(true)}>调整算法与阈值</Btn>
-            <Btn tone="primary" onClick={runPrecheck}>
+            <Btn onClick={userAdvance(() => setConfigOpen(true))}>调整算法与阈值</Btn>
+            <Btn tone="primary" onClick={userAdvance(runPrecheck)}>
               下一步：预检查
             </Btn>
           </div>
@@ -286,7 +401,7 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (result: CleanV
             </ul>
             <div className="adapt-actions">
               <span className="muted">预检查 {precheck.at}</span>
-              <Btn tone="primary" onClick={runCleaning}>
+              <Btn tone="primary" onClick={userAdvance(runCleaning)}>
                 下一步：执行清洗
               </Btn>
             </div>
@@ -321,8 +436,11 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (result: CleanV
               </li>
             </ul>
             <div className="adapt-actions">
-              <Btn onClick={() => setOutcome({ ...runClean(SAMPLES, thresholds), at: clockStamp() })}>重跑</Btn>
-              <Btn tone="primary" disabled={!outcome.flagged.length} onClick={() => setReviewOpen(true)}>
+              <Btn
+                onClick={userAdvance(() => setOutcome({ ...runClean(SAMPLES, thresholds), at: clockStamp() }))}>
+                重跑
+              </Btn>
+              <Btn tone="primary" disabled={!outcome.flagged.length} onClick={userAdvance(() => setReviewOpen(true))}>
                 {/* `.btn` 是 inline-flex + 8px gap：文案保持一个 span，间距与原样一致 */}
                 <span>
                   下一步：人工核验 <NumberAnimation value={outcome.flagged.length} /> 条
@@ -355,8 +473,8 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (result: CleanV
               </li>
             </ul>
             <div className="adapt-actions">
-              <Btn onClick={() => setReviewOpen(true)}>继续核验</Btn>
-              <Btn tone="primary" disabled={undecided > 0} onClick={makeVersion}>
+              <Btn onClick={userAdvance(() => setReviewOpen(true))}>继续核验</Btn>
+              <Btn tone="primary" disabled={undecided > 0} onClick={userAdvance(makeVersion)}>
                 确认结果并生成新版本
               </Btn>
             </div>
@@ -404,14 +522,14 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (result: CleanV
               <Btn onClick={() => setThresholds(DEFAULT_THRESHOLDS)}>恢复默认</Btn>
               <Btn
                 tone="primary"
-                onClick={() => {
+                onClick={userAdvance(() => {
                   setConfigOpen(false);
                   // 改了阈值就要重跑预检查与清洗，否则页面上留着上一套阈值的结果
                   setPrecheck(null);
                   setOutcome(null);
                   setDecisions({});
                   setStage("configure");
-                }}>
+                })}>
                 保存并重跑
               </Btn>
             </>
@@ -427,13 +545,15 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (result: CleanV
             />
           </label>
           <label className="field">
-            <span>幅值偏离下限（mm）</span>
+            <span>参考距离允许偏差（mm）</span>
             <input
               type="number"
               min={1}
               max={100}
-              value={thresholds.amplitudeMin}
-              onChange={(event) => setThresholds((prev) => ({ ...prev, amplitudeMin: Number(event.target.value) }))}
+              value={thresholds.referenceToleranceMm}
+              onChange={(event) =>
+                setThresholds((prev) => ({ ...prev, referenceToleranceMm: Number(event.target.value) }))
+              }
             />
           </label>
           <label className="field">
@@ -473,10 +593,10 @@ export function DatasetCleanFlow({ onVersioned }: { onVersioned: (result: CleanV
               <Btn
                 tone="primary"
                 disabled={undecided > 0}
-                onClick={() => {
+                onClick={userAdvance(() => {
                   setReviewOpen(false);
                   setStage("reviewed");
-                }}>
+                })}>
                 完成核验
               </Btn>
             </>
