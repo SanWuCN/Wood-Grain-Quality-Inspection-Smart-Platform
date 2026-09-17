@@ -1,7 +1,7 @@
 /**
  * 剧本快捷键序列判定的单测
  * ── 这一组在防什么 ──────────────────────────────────────────────
- * `Ctrl+B/N/M + 数字` 是两段式序列，判定里全是时间窗与修饰键条件。写错的后果分两种，
+ * `Ctrl+B/J/M + 数字` 是两段式序列，判定里全是时间窗与修饰键条件。写错的后果分两种，
  * 都很隐蔽：
  *   · 太宽 → 用户按 Ctrl+B 想干别的（加粗、或输入法选词）时**凭空触发一轮对话**；
  *   · 太严 → 现场按键没反应，讲解人以为功能坏了。
@@ -9,8 +9,10 @@
  *
  * ── 2026-09-17 键位改成三段（用户口径）──────────────────────────
  * 「1到10对话是 Ctrl+B+1到0，11到20是 Ctrl+N+1到0，21到25则是 Ctrl+M+1到5」。
+ * 随后又改了一次：「ctrl加n换成加j的，ctrl加n有功能冲突了」—— Ctrl+N 是浏览器「新建窗口」，
+ * 所以第二段的段前缀是 **J**，不是 N。
  * 于是**同一个数字键在三段里含义不同**：这里凡是查键位的地方都用复合 id
- * （`"b:1"` / `"n:0"` / `"m:5"`，见 `shortcutId`），并专门钉住"跨段不许串"。
+ * （`"b:1"` / `"j:0"` / `"m:5"`，见 `shortcutId`），并专门钉住"跨段不许串"。
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -56,8 +58,8 @@ test("三段前缀各自命中自己的复合 id（同一个数字键含义不�
   const cases: [string, string, string][] = [
     ["b", "1", "b:1"],
     ["b", "0", "b:0"],
-    ["n", "1", "n:1"],
-    ["n", "0", "n:0"],
+    ["j", "1", "j:1"],
+    ["j", "0", "j:0"],
     ["m", "1", "m:1"],
     ["m", "5", "m:5"],
   ];
@@ -71,13 +73,13 @@ test("三段前缀各自命中自己的复合 id（同一个数字键含义不�
 test("跨段不许串：段外的数字不命中，且不清掉半截序列以外的行为要一致", () => {
   /* Ctrl+M 这一段只有 1..5 —— 按 6 不该命中（第 26 条不存在） */
   assert.equal(advanceSequence(key("6"), arm("m"), 300).kind, "ignore");
-  /* Ctrl+B / Ctrl+N 两段各有 1..0，0 有效；字母不是任何段的目标键 */
+  /* Ctrl+B / Ctrl+J 两段各有 1..0，0 有效；字母不是任何段的目标键 */
   assert.equal(advanceSequence(key("q"), arm("b"), 300).kind, "ignore");
-  assert.equal(advanceSequence(key("a"), arm("n"), 300).kind, "ignore");
+  assert.equal(advanceSequence(key("a"), arm("j"), 300).kind, "ignore");
 });
 
 test("超出 1.5 秒窗口 → 不命中，且半截序列被清掉", () => {
-  const state = arm("n", 0);
+  const state = arm("j", 0);
   const late = advanceSequence(key("2"), state, SCRIPT_SEQUENCE_WINDOW_MS + 1);
   assert.equal(late.kind, "ignore");
   assert.equal(late.state.armedPrefix, null, "过期后必须清状态，否则下一次按键会被当成序列后半截");
@@ -133,26 +135,26 @@ test("输入框 / 文本域 / 可编辑区域里不触发", () => {
   assert.equal(advanceSequence(key("1", { target: { tagName: "DIV" } }), current, 50).kind, "fire");
 });
 
-test("键表 = 用户口径的三段（B:1..0 / N:1..0 / M:1..5），共 25 个位置", () => {
+test("键表 = 用户口径的三段（B:1..0 / J:1..0 / M:1..5），共 25 个位置", () => {
   /* 键表顺序 = 用户《小木对话总文案.txt》25 条的顺序；错一位就会"按了第 7 个键、
      小木念第 8 条"。 */
   assert.deepEqual(
     [...SCRIPT_SHORTCUT_KEYS],
     [
       ...["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((k) => `b:${k}`),
-      ...["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((k) => `n:${k}`),
+      ...["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"].map((k) => `j:${k}`),
       ...["1", "2", "3", "4", "5"].map((k) => `m:${k}`),
     ],
-    "必须是 Ctrl+B+1..0、Ctrl+N+1..0、Ctrl+M+1..5",
+    "必须是 Ctrl+B+1..0、Ctrl+J+1..0、Ctrl+M+1..5",
   );
   assert.equal(SCRIPT_SHORTCUT_KEYS.length, 25, "25 个键对应文档 25 条对话");
   assert.equal(new Set(SCRIPT_SHORTCUT_KEYS).size, 25, "复合 id 必须互不相同");
   assert.deepEqual(
     SCRIPT_SHORTCUT_GROUPS.map((g) => g.prefix),
-    ["b", "n", "m"],
+    ["b", "j", "m"],
     "前缀顺序 = 段落顺序（1–10、11–20、21–25）",
   );
-  assert.deepEqual([...SCRIPT_SEQUENCE_PREFIX_KEYS], ["b", "n", "m"]);
+  assert.deepEqual([...SCRIPT_SEQUENCE_PREFIX_KEYS], ["b", "j", "m"]);
   /* 每段的键数要能覆盖对应条数：10 + 10 + 5 */
   assert.deepEqual(
     SCRIPT_SHORTCUT_GROUPS.map((g) => g.keys.length),
@@ -162,9 +164,9 @@ test("键表 = 用户口径的三段（B:1..0 / N:1..0 / M:1..5），共 25 个�
 
 test("键位文本：复合 id → Ctrl+B+1 这样的写法（唯一一处实现）", () => {
   assert.equal(shortcutLabel("b:1"), "Ctrl+B+1");
-  assert.equal(shortcutLabel("n:0"), "Ctrl+N+0");
+  assert.equal(shortcutLabel("j:0"), "Ctrl+J+0");
   assert.equal(shortcutLabel("m:5"), "Ctrl+M+5");
-  assert.deepEqual(parseShortcutId("n:0"), { prefix: "n", key: "0" });
+  assert.deepEqual(parseShortcutId("j:0"), { prefix: "j", key: "0" });
   assert.equal(parseShortcutId("nonsense"), null, "形状不对要返回 null，而不是硬猜");
   assert.equal(shortcutId("M", "5"), "m:5", "大小写归一");
 });

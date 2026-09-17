@@ -66,7 +66,7 @@ import { DemoSurface } from "./agent/demoSurface";
 import { SyncBackupPanel } from "./agent/SyncBackupPanel";
 import type { SyncBackupStream } from "./agent/syncBackup";
 /*
-   剧本快捷键（Ctrl+B+1..0 / Ctrl+N+1..0 / Ctrl+M+1..5）：把"听到某一句"演成逐字识别，再走与气泡/控制台
+   剧本快捷键（Ctrl+B+1..0 / Ctrl+J+1..0 / Ctrl+M+1..5）：把"听到某一句"演成逐字识别，再走与气泡/控制台
   同一条 `ask()` 链路。运行时要求 `speak` 是可用的（缺了会在运行时报错），
   所以这里也建一个与气泡同实现的 `VoiceOutput` —— 注意它**不依赖控制台是否打开**，
   否则"没开控制台按快捷键就没声音"。

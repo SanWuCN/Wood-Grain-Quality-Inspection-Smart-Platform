@@ -85,6 +85,22 @@ async function waitForTarget(timeoutMs = 30000) {
   throw new Error("等不到可调试的页面（服务在跑吗？）");
 }
 
+/**
+ * 浏览器里现有的 page 目标（`id url`）。
+ *
+ * 用来查「按 Ctrl+J 有没有被浏览器抢走」：Chrome 的 Ctrl+J 是下载页、Ctrl+N 是新建窗口。
+ * 页面能不能拦下这类默认行为，是用户要求把第二段前缀从 N 换成 J 的**原因**，
+ * 所以这里得有一条断言钉住它（用户口径 2026-09-17：「ctrl加n有功能冲突了」）。
+ */
+async function pageTargets() {
+  try {
+    const list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
+    return list.filter((t) => t.type === "page").map((t) => `${t.id} ${t.url}`);
+  } catch {
+    return [];
+  }
+}
+
 let failed = 0;
 const check = (name, ok, detail) => {
   console.log(`  ${ok ? "✓" : "✗"} ${name}${detail ? `　（${detail}）` : ""}`);
@@ -375,8 +391,11 @@ try {
   */
   const baselineProbe = await evaluate(`window.__probe()`);
   const baselineTexts = new Set(baselineProbe?.userTexts ?? []);
+  /* 记下按键前的浏览器页面清单与地址：按完要核对"浏览器有没有被 Ctrl+J 带走" */
+  const pageTargetsBefore = new Set(await pageTargets());
+  const urlBefore = await evaluate(`location.href`);
   const alertT0 = Date.now();
-  await dispatch("n");
+  await dispatch("j");
   await dispatch("3");
 
   /* 甲：按键后 2 秒内不许出现**新的**用户文本，尤其不许出现第⑬轮那句（老实现会逐字涨上去） */
@@ -410,13 +429,23 @@ try {
   /* 这张图就是这次修的那件事：气泡里是"思考中"，**没有**逐字收到的用户文本 */
   await shot(send, "4-主动发起-思考中（没有收到消息）");
 
+  const freshPageTargets = (await pageTargets()).filter((t) => !pageTargetsBefore.has(t));
+  const urlAfter = await evaluate(`location.href`);
+  check(
+    "Ctrl+J 没把浏览器带走（没弹下载页、没开新标签，页面还在原地址）",
+    freshPageTargets.length === 0 && String(urlAfter) === String(urlBefore),
+    freshPageTargets.length
+      ? `新开了 ${freshPageTargets.length} 个页面：${freshPageTargets.join(" / ").slice(0, 140)}`
+      : `页面地址未变（${String(urlAfter).slice(0, 56)}）`,
+  );
+
   let alertWin = { shown: false };
   for (let i = 0; i < 240; i += 1) {
     alertWin = await evaluate(`window.__probeAlert()`);
     if (alertWin?.shown) break;
     await sleep(250);
   }
-  check("Ctrl+N+3 之后弹出预警窗（.dsf--alert）", Boolean(alertWin?.shown), alertWin?.title || "始终没出现");
+  check("Ctrl+J+3 之后弹出预警窗（.dsf--alert）", Boolean(alertWin?.shown), alertWin?.title || "始终没出现");
   await shot(send, "2-第⑬轮预警窗");
   check("预警窗带「预警」角标", alertWin?.chip === "预警", `角标=「${alertWin?.chip ?? ""}」`);
   check("预警窗里有确认按钮", Boolean(alertWin?.btnText), `按钮=「${alertWin?.btnText ?? ""}」`);

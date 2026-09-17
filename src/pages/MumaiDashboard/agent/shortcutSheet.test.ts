@@ -40,10 +40,10 @@ test("键位序与序列实现同源（一览表不会自成一套键位）", ()
     assert.equal(row.keys, shortcutLabel(id), `第 ${index + 1} 行与 SCRIPT_SHORTCUT_KEYS 的第 ${index + 1} 位不一致`);
   });
   /* 三段前缀各自的键位文本必须真的出现在表里（缺一段说明前缀串了） */
-  for (const sample of ["Ctrl+B+1", "Ctrl+N+1", "Ctrl+M+1", "Ctrl+M+5"]) {
+  for (const sample of ["Ctrl+B+1", "Ctrl+J+1", "Ctrl+M+1", "Ctrl+M+5"]) {
     assert.ok(
       rows.some((row) => row.keys === sample),
-      `一览表里没有 ${sample} —— 三段前缀（B/N/M）应当各出现在自己的段里`,
+      `一览表里没有 ${sample} —— 三段前缀（B/J/M）应当各出现在自己的段里`,
     );
   }
 });
