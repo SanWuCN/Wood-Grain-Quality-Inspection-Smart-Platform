@@ -50,6 +50,12 @@ export const FIELD_LABELS: Record<string, FieldLabel> = {
   "weather.rain.stormDays": { label: "暴雨天数", unit: "天", demoData: true },
   "weather.rain.longestWetSpellDays": { label: "最长连续降雨", unit: "天", demoData: true },
   "weather.rain.peakDailyMm": { label: "单日降雨峰值", unit: "mm", demoData: true },
+  /*
+    ①（三个月巡检与风险统计）挂着这个键：台词说的是"检索近三个月的巡检工单、
+    风险记录和施工反馈"，这一行给出**降雨口径的风险项**（真实取自天气档案，
+    不是台词里那组没有出处的统计数字）。
+  */
+  "weather.rain.risks": { label: "降雨风险项", demoData: true },
   "weather.humidity.avgPct": { label: "平均相对湿度", unit: "%", demoData: true },
   "weather.humidity.highHumidityDays": { label: "高湿日", unit: "天", demoData: true },
   "weather.humidity.maxDailyAvgPct": { label: "最高日均湿度", unit: "%", demoData: true },

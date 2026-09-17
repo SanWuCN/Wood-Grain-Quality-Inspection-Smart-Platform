@@ -19,7 +19,7 @@
  * 剧本负责"说什么"，本表负责"说完页面做什么"。两者都不重复对方的内容。
  */
 
-/** §10 阶段 D 点名的 10 个表面 + `order`（①④⑧⑩⑰⑳㉑㉒ 用的工单详情） */
+/** §10 阶段 D 点名的 10 个表面 + `order`（②③④⑪⑳㉓㉔㉕ 用的工单详情） */
 export const SURFACE_KINDS = [
   "order", // 工单详情（既有：逐组展开）
   "weather", // 天气四分类
@@ -72,15 +72,42 @@ export type DemoAction = {
 };
 
 /**
- * 22 轮的动作，按剧本顺序。
+ * 25 轮的动作，按剧本顺序（= 用户《小木对话总文案.txt》25 条的顺序）。
  *
- * 说明：`order` 这类既有表面（①④⑧⑩⑰⑳㉑㉒）在这里**也登记**，
+ * 说明：`order` 这类既有表面（②③④⑪⑳㉓㉔㉕）在这里**也登记**，
  * 因为它们同样有"必须发生的可见动作"（跳转工单详情 + 逐组展开）。
- * 登记它们让"22 轮每轮都有动作"成为一条可断言的事实，而不是靠记忆。
+ * 登记它们让"每一轮都有动作"成为一条可断言的事实，而不是靠记忆。
+ *
+ * ⚠ 2026-09-17 剧本重排：本表**逐轮重排过**，并补上新增的 ④（同步备份）
+ * 与 ⑦（设备编号与数据来源核对）两轮的表面。`demoActions.test.ts` 会核对
+ * "本表顺序 == SCRIPT_ROUNDS 顺序"、"每轮都有动作"、"数据键都取得到值"，
+ * 顺序错了会直接红。
  */
 export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
   {
     roundNo: "①",
+    /*
+      ⚠ 用户 2026-09-17 的统计问答（文档第 1 条）：
+      「过去三个月到过多少个地方巡检、发现多少个风险点、已修复多少」。
+      展示面用 `evidence`（资料检索结果），与台词「我正在检索 RAG 知识库」对应。
+
+      ⚠ **不挂统计数字的 dataKeys**：台词里的统计数字（4 处 / 14 个风险点 / 2 处高风险 /
+      7 处已修复 / 2 处施工中 / 5 处已受理）在冻结数据包里**没有出处**
+      （已全仓扫描确认）。没有数据键就不出数字卡片，
+      避免"台词念 14、卡片显示别的数"这种同屏矛盾。
+    */
+    title: "检索知识库，汇总近三个月巡检地点与风险处置情况",
+    surface: "evidence",
+    /*
+      ⚠ 挂的是**真实存在**的数据键（`SCENARIO_KEYS` 里能查到）：
+      `components.count`（构件数）、`weather.rain.risks`（降雨风险项）、
+      `clean.rawCount`（原始记录数）——它们支撑"巡检了什么、看了哪些风险"这层叙述。
+    */
+    dataKeys: ["components.count", "weather.rain.risks", "clean.rawCount"],
+    simulated: true,
+  },
+  {
+    roundNo: "②",
     title: "打开工单档案，任务范围与执行模块就位",
     surface: "order",
     /* 这一轮的页面动作就是工单详情页本身（逐组展开），不再叠加浮层 —— 现场实测会像两个页面打架 */
@@ -89,7 +116,30 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     simulated: true,
   },
   {
-    roundNo: "②",
+    roundNo: "③",
+    title: "定位开工清单里唯一待确认项",
+    surface: "order",
+    /* 这一轮的页面动作就是工单详情页本身（逐组展开），不再叠加浮层 —— 现场实测会像两个页面打架 */
+    revealOnly: true,
+    dataKeys: ["components.codes", "siteEnv.airTempC"],
+    simulated: true,
+  },
+  {
+    roundNo: "④",
+    /*
+      ⚠ 这一轮有两处可见动作，**都不在浮层里**：
+        ① 工单详情页按三段台词逐组展开（`script.ts` 的 reveal 声明）；
+        ② 播报收尾由 executor 派发 `mumai:sync-backup` 弹出同步备份小窗。
+      所以标 revealOnly（不叠演示浮层），否则就是"页面 + 浮层 + 小窗"三层打架。
+    */
+    title: "平台服务可访问，三类数据通道分别核对",
+    surface: "order",
+    revealOnly: true,
+    dataKeys: ["components.codes", "mission.id", "map.version"],
+    simulated: true,
+  },
+  {
+    roundNo: "⑤",
     title: "打开平台环境档案",
     surface: "weather",
     dataKeys: [
@@ -112,7 +162,7 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     simulated: true,
   },
   {
-    roundNo: "③",
+    roundNo: "⑥",
     title: "工作台生成四张任务卡，第一张进入进行中",
     surface: "tasks",
     dataKeys: ["components.codes", "components.focus"],
@@ -120,16 +170,20 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     simulated: true,
   },
   {
-    roundNo: "④",
-    title: "定位开工清单里唯一待确认项",
-    surface: "order",
-    /* 这一轮的页面动作就是工单详情页本身（逐组展开），不再叠加浮层 —— 现场实测会像两个页面打架 */
-    revealOnly: true,
-    dataKeys: ["components.codes", "siteEnv.airTempC"],
+    roundNo: "⑦",
+    /*
+      用户文档第 7 条：「我按设备编号核对数据来源，确认平台显示的是本次设备数据，
+      不串数据。发现异常立即叫停。」
+      展示面用 `material`（本次采集的设备数据：段数 / 分辨率 / 构件编号）——
+      正是"平台显示的这批数据"本身。
+    */
+    title: "按设备编号核对数据来源，确认是本次数据",
+    surface: "material",
+    dataKeys: ["material.videoCount", "material.resolutionText", "components.codes"],
     simulated: true,
   },
   {
-    roundNo: "⑤",
+    roundNo: "⑧",
     title: "打开环境补偿参数对比卡",
     surface: "params",
     dataKeys: ["siteEnv.airTempC", "siteEnv.relativeHumidityPct", "siteEnv.windSpeedMs"],
@@ -137,14 +191,14 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     simulated: true,
   },
   {
-    roundNo: "⑥",
+    roundNo: "⑨",
     title: "并排显示地图质量与视频通道状态",
     surface: "channels",
     dataKeys: ["map.version", "map.coveragePct", "map.resolutionM", "mission.routeLengthM"],
     simulated: true,
   },
   {
-    roundNo: "⑦",
+    roundNo: "⑩",
     title: "打开素材质检，定位两处低清晰度片段",
     surface: "material",
     dataKeys: [
@@ -159,7 +213,7 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     simulated: true,
   },
   {
-    roundNo: "⑧",
+    roundNo: "⑪",
     title: "四柱卡片按风险重排并高亮 Z04",
     surface: "order",
     /* 这一轮的页面动作就是工单详情页本身（逐组展开），不再叠加浮层 —— 现场实测会像两个页面打架 */
@@ -168,35 +222,21 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     simulated: true,
   },
   {
-    roundNo: "⑨",
+    roundNo: "⑫",
     title: "打开 Z04 原始证据查看器",
     surface: "evidence",
     dataKeys: ["components.focus", "anomaly.batchId"],
     simulated: true,
   },
   {
-    roundNo: "⑩",
-    title: "工单页展开下发区，路线预览可见（未下发）",
-    surface: "channels",
-    /* 这一轮的页面动作就是工单详情页本身（逐组展开），不再叠加浮层 —— 现场实测会像两个页面打架 */
-    revealOnly: true,
-    dataKeys: ["mission.id", "mission.waypointCount", "mission.routeLengthM"],
-    /*
-      ⚠ 这里**不能**再挂按钮：浮层不显示了，按钮就没有落点（测试会拦）。
-      这一轮真正该有的"确认下发"在工单页的下发区里（`DispatchPanel`），
-      不是浮层上的一个演习按钮。台词也已经说清"预览已打开，尚未真实下发"。
-    */
-    simulated: true,
-  },
-  {
-    roundNo: "⑪",
+    roundNo: "⑬",
     title: "顶部出现主动提醒，检查项逐条置为完成",
     surface: "channels",
     dataKeys: ["mission.id", "components.codes"],
     simulated: true,
   },
   {
-    roundNo: "⑫",
+    roundNo: "⑭",
     title: "打开异常卡与帧缺口分布，结论栏显示待补采",
     surface: "anomaly",
     dataKeys: [
@@ -210,21 +250,21 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     simulated: true,
   },
   {
-    roundNo: "⑬",
+    roundNo: "⑮",
     title: "生成四张本地任务卡（负责人 / 输入 / 完成条件）",
     surface: "tasks",
     dataKeys: ["anomaly.batchId", "anomaly.missingFrames", "components.focus"],
     simulated: true,
   },
   {
-    roundNo: "⑭",
+    roundNo: "⑯",
     title: "打开接收清单并筛选三条待审核记录",
     surface: "receipt",
     dataKeys: ["clean.rawCount", "material.missingFiles"],
     simulated: true,
   },
   {
-    roundNo: "⑮",
+    roundNo: "⑰",
     title: "展开清洗漏斗与分组校验",
     surface: "clean",
     dataKeys: [
@@ -239,7 +279,19 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     simulated: true,
   },
   {
-    roundNo: "⑯",
+    roundNo: "⑱",
+    /*
+      用户文档第 18 条：「跟踪现场任务状态，同时打开归档版本的验证摘要。
+      两项记录已分开显示。」—— 展示面用 `review`（左右分栏），
+      左栏现场任务、右栏归档验证记录，正好对应"两项记录分开显示"。
+    */
+    title: "现场任务与归档验证记录分开显示",
+    surface: "review",
+    dataKeys: ["delivery.total", "delivery.passed", "delivery.missing"],
+    simulated: true,
+  },
+  {
+    roundNo: "⑲",
     title: "打开固定测试集的对照页（禁止只显示单个总分）",
     surface: "model",
     dataKeys: [
@@ -255,7 +307,7 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     simulated: true,
   },
   {
-    roundNo: "⑰",
+    roundNo: "⑳",
     title: "工单页展开下发区，版本与自检结果可见",
     surface: "deploy",
     /* 这一轮的页面动作就是工单详情页本身（逐组展开），不再叠加浮层 —— 现场实测会像两个页面打架 */
@@ -268,15 +320,15 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
       "package.selfCheckPassed",
     ],
     /*
-      ⚠ 同 ⑩：浮层不显示了，就不再挂浮层按钮。
+      ⚠ 同 ④：浮层不显示了，就不再挂浮层按钮。
       "不得真实刷写"这条约束没有丢，它由两层保证 ——
       ① 工具门槛（高风险工具剧本一律不执行，由 验剧本工具链 工装核对）；
-      ② 台词第⑰轮自己只说"自检7项通过、回退版本完整"，没有任何"已刷写"的说法。
+      ② 台词自己只说"收到版本信息后还要检查自检结果"，没有任何"已刷写"的说法。
     */
     simulated: true,
   },
   {
-    roundNo: "⑱",
+    roundNo: "㉑",
     title: "展开三路数据时间轴并生成融合记录卡",
     surface: "fusion",
     dataKeys: [
@@ -289,7 +341,7 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     simulated: true,
   },
   {
-    roundNo: "⑲",
+    roundNo: "㉒",
     title: "显示两张优先复核与一张待补采证据卡",
     surface: "evidence",
     dataKeys: [
@@ -301,7 +353,7 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     simulated: true,
   },
   {
-    roundNo: "⑳",
+    roundNo: "㉓",
     title: "跳转工单草稿页，附件、范围、证据与审核栏就位",
     surface: "order",
     /* 这一轮的页面动作就是工单详情页本身（逐组展开），不再叠加浮层 —— 现场实测会像两个页面打架 */
@@ -310,45 +362,21 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     simulated: true,
   },
   {
-    roundNo: "㉑",
+    roundNo: "㉔",
     title: "打开复盘页，左右分栏显示已验证与待处理",
     surface: "review",
+    /* 这一轮会跳到工单详情页（剧本里有 nav + reveal），不再叠浮层 */
+    revealOnly: true,
     dataKeys: ["delivery.total", "delivery.passed", "delivery.missing", "delivery.summaryMismatch"],
     simulated: true,
   },
   {
-    roundNo: "㉒",
+    roundNo: "㉕",
     title: "打开交付摘要并自动筛选三项待办",
     surface: "delivery",
+    /* 这一轮会跳到工单详情页（剧本里有 nav + reveal），不再叠浮层 */
+    revealOnly: true,
     dataKeys: ["delivery.total", "delivery.passed", "delivery.missing", "delivery.summaryMismatch"],
-    simulated: true,
-  },
-  {
-    roundNo: "㉓",
-    /*
-      ⚠ 用户 2026-09-17 追加的独立问答（快捷键 Ctrl+Q+Z）：
-      「过去三个月到过多少个地方巡检、发现多少个风险点、已修复多少」。
-      展示面用 `knowledge`（资料检索结果），与台词「我正在检索 RAG 知识库」对应。
-
-      ⚠ **不挂 dataKeys**：台词里的统计数字（4 处 / 14 个风险点 / 2 处高风险 /
-      7 处已修复 / 2 处施工中 / 5 处已受理）在冻结数据包里**没有出处**
-      （已全仓扫描确认）。没有数据键就不出数字卡片，
-      避免"台词念 14、卡片显示别的数"这种同屏矛盾。
-    */
-    title: "检索知识库，汇总近三个月巡检地点与风险处置情况",
-    surface: "evidence",
-    /*
-      ⚠ 挂的是**真实存在**的数据键（`SCENARIO_KEYS` 里能查到）：
-      `components.count`（构件数）、`weather.rain.risks`（降雨风险项）、
-      `clean.rawCount`（原始记录数）——它们支撑"巡检了什么、看了哪些风险"这层叙述。
-
-      ⚠ 但台词里那组统计（4 处地点 / 14 个风险点 / 2 处高风险 / 7 处已修复 / 2 处施工中 /
-      5 处已受理）**在冻结数据包里没有出处**（已全仓扫描确认），
-      所以这里**不把那些数字挂进来** —— 宁可卡片只显示真实存在的几项，
-      也不让屏幕上出现"台词说 14、卡片是别的数"这种同屏矛盾。
-      要把那组数上屏，得先把它补进 seed（属独立改动）。
-    */
-    dataKeys: ["components.count", "weather.rain.risks", "clean.rawCount"],
     simulated: true,
   },
 ]);

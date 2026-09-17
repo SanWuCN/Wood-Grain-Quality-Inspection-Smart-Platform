@@ -2,14 +2,14 @@
  * 剧本快捷键的**序列匹配**（纯函数，可单测）
  *
  * ── 为什么单独一个纯函数 ────────────────────────────────────────────
- * Ctrl+Q+N 是**两段式序列**（先 Q 再数字），判定里全是时间窗、修饰键、
+ * Ctrl+M+N 是**两段式序列**（先 M 再目标键），判定里全是时间窗、修饰键、
  * 输入框/输入法这些容易写错又难复现的条件。仓库里已经有同款实现
  * （`useWorkOrderShortcut.ts` 的 Ctrl+Q+L），那份把判定写在 effect 里、
  * 没有单测；这里把判定抽成纯函数，配套测试直接喂"按键事件"验证行为，
  * 不必起浏览器。
  *
  * ── 口径（逐条与 useWorkOrderShortcut 对齐，避免两条序列各有一套规矩）──
- *   · 按住 Ctrl，先按 Q，再在 1.5 秒内按目标键；
+ *   · 按住 Ctrl，先按 M，再在 1.5 秒内按目标键；
  *   · 长按产生的 repeat 不参与判定；输入法组字期间不参与；
  *   · 输入框 / 文本域 / 可编辑区域里不触发（用户可能正在打字）；
  *   · 只对**确实匹配**的序列处理默认行为（`preventDefault`），
@@ -33,36 +33,44 @@ export type KeyLike = {
 
 export type SequenceState = {
   /**
-   * 是否已经按过 Q、正等后半截。
+   * 是否已经按过前缀键（M）、正等后半截。
    *
-   * ⚠ 不能拿 `qPressedAt > 0` 当"已按过"的标志 —— 那等于把 0 当哨兵值，
+   * ⚠ 不能拿 `pressedAt > 0` 当"已按过"的标志 —— 那等于把 0 当哨兵值，
    * 而 `performance.now()` 在页面刚加载时**真的可能返回 0**（测试里注入 0 也同理）：
    * 那时 armed 会被判成"没按过"，快捷键就哑了。实测踩过这个坑
    * （序列永远不命中），所以用显式标志位。
    */
   armed: boolean;
-  /** 按 Q 的时刻（performance.now() 口径），仅在 armed 为真时有意义 */
-  qPressedAt: number;
+  /** 按下前缀键的时刻（performance.now() 口径），仅在 armed 为真时有意义 */
+  pressedAt: number;
 };
 
-export const initialSequenceState: SequenceState = { armed: false, qPressedAt: 0 };
+export const initialSequenceState: SequenceState = { armed: false, pressedAt: 0 };
 
 /**
- * 允许的目标键。
+ * 序列的**前缀键**：按住 Ctrl 先按它，再按目标键。
  *
- * ── 为什么数字之后还要字母 ─────────────────────────────────────────
- * 剧本里小木的戏份有 **24 条**（抽取见 `_script_extract/xiaomu_scenes.md`），
- * 而 `Ctrl+Q+1..9` 只有 9 个位置。第二条序列段沿用**同一个结构**
- * （按住 Ctrl+Q 再按一个键），字母部分与既有的 `Ctrl+Q+L` 同构：
- *   · 数字 `1..9`  → 前 9 条（主线、最常按的）
- *   · 字母 `A..Z`  → 第 10 条起，**排除 L**（L 是建单快捷键，绝不复用）
- * 为什么不用"两段数字"（Ctrl+Q+1+1）：那要求连按三个键，现场单手很难按准，
- * 而字母与数字混排时"按住 Ctrl+Q 再按一下"的手感是一致的。
+ * ⚠ 用户 2026-09-17 口径：「前 10 句话 Ctrl+M+1..0，然后再按照键盘 q 开头那排
+ *   顺序来，以此类推」—— 前缀从 Q 换成 M，目标键改成**键盘行序**（见
+ *   `SCRIPT_SHORTCUT_KEYS`）。`Ctrl+Q+L`（建单）是另一条序列，不受影响。
+ */
+export const SCRIPT_SEQUENCE_PREFIX_KEY = "m";
+
+/**
+ * 允许的目标键，**顺序 = 文档 25 条的顺序**（第 i 个键 = 第 i 条对话）。
+ *
+ * ── 为什么是这个顺序 ────────────────────────────────────────────
+ * 用户口径（2026-09-17）：「前 10 句话 Ctrl+M+1..0，然后再按照键盘 q 开头那排
+ * 顺序来，以此类推」。所以：
+ *   · `1 2 3 4 5 6 7 8 9 0`      → 文档第 1–10 条
+ *   · `q w e r t y u i o p [ ] \` → 文档第 11–23 条（键盘上 q 那一排，13 个键）
+ *   · `a s`                       → 文档第 24–25 条（接着是 a 那一排）
+ * 现场演示时"照着文档顺序往下按"就是键盘从左到右一排排按，不用记编号。
  */
 export const SCRIPT_SHORTCUT_KEYS = [
-  "1", "2", "3", "4", "5", "6", "7", "8", "9",
-  "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "m",
-  "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+  "1", "2", "3", "4", "5", "6", "7", "8", "9", "0",
+  "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "[", "]", "\\",
+  "a", "s",
 ] as const;
 
 /** 被既有功能占用的键，一律不许出现在剧本快捷键表里 */
@@ -105,10 +113,10 @@ export function advanceSequence(event: KeyLike, state: SequenceState, nowMs: num
   /* 正在输入框/可编辑区域里打字：整条序列不参与（也不清状态，用户可能只是抬手碰了下键盘） */
   if (isEditable(event.target)) return { kind: "ignore", state };
 
-  if (key === "q") {
+  if (key === SCRIPT_SEQUENCE_PREFIX_KEY) {
     /* 只记时刻，不在这里 preventDefault —— 由调用方在 fire 或 armed 时决定，
-       见下方说明：Ctrl+Q 在部分浏览器里有默认行为，需要拦；但纯函数不该碰事件 */
-    return { kind: "armed", state: { armed: true, qPressedAt: nowMs } };
+       见下方说明：Ctrl+M 在部分浏览器里有默认行为，需要拦；但纯函数不该碰事件 */
+    return { kind: "armed", state: { armed: true, pressedAt: nowMs } };
   }
 
   /* 被既有功能占用的键（如 L = 建单）显式拒绝：光靠"不在允许集合里"是隐式的，
@@ -118,7 +126,7 @@ export function advanceSequence(event: KeyLike, state: SequenceState, nowMs: num
   }
 
   if ((SCRIPT_SHORTCUT_KEYS as readonly string[]).includes(key)) {
-    const within = state.armed && nowMs - state.qPressedAt <= SCRIPT_SEQUENCE_WINDOW_MS;
+    const within = state.armed && nowMs - state.pressedAt <= SCRIPT_SEQUENCE_WINDOW_MS;
     if (!within) return { kind: "ignore", state: initialSequenceState };
     return { kind: "fire", key, state: initialSequenceState };
   }
@@ -127,3 +135,4 @@ export function advanceSequence(event: KeyLike, state: SequenceState, nowMs: num
      两条序列互不干扰（都只对自己关心的键做判定）。 */
   return { kind: "ignore", state };
 }
+

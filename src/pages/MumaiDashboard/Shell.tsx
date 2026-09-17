@@ -54,19 +54,19 @@ import { commissionBinding } from "./commissionBinding";
 import { api, type WorkOrderDetail } from "./api/client";
 import { CommissionPreview } from "./pages/orders/CommissionPreview";
 /*
-  演示表面（工作清单 v1.0 §10 阶段 D）：22 轮每轮"说完之后页面做什么"的可视化。
+   演示表面（工作清单 v1.0 §10 阶段 D）：25 轮每轮"说完之后页面做什么"的可视化。
   它按 `roundNo` 从动作注册表取数据键渲染，是**一个组件覆盖 15 个表面**的设计 ——
   不是 15 个各自独立的页面。挂在外壳上，任何已登录页面都能弹。
 */
 import { DemoSurface } from "./agent/demoSurface";
 /*
-  同步备份小窗（第④轮说完「收到，我来核对范围…」后弹出）。
+  同步备份小窗（第④轮「同步备份」说完「平台服务可访问，任务已建立。…」后弹出）。
   与演示表面分开：它的生命周期由自己的时长控制，且位置在右上角。
 */
 import { SyncBackupPanel } from "./agent/SyncBackupPanel";
 import type { SyncBackupStream } from "./agent/syncBackup";
 /*
-  剧本快捷键（Ctrl+Q+1..9）：把"听到某一句"演成逐字识别，再走与气泡/控制台
+   剧本快捷键（Ctrl+M+1..0 / q 那一排 / a 那一排）：把"听到某一句"演成逐字识别，再走与气泡/控制台
   同一条 `ask()` 链路。运行时要求 `speak` 是可用的（缺了会在运行时报错），
   所以这里也建一个与气泡同实现的 `VoiceOutput` —— 注意它**不依赖控制台是否打开**，
   否则"没开控制台按快捷键就没声音"。
@@ -825,7 +825,7 @@ export default function Shell() {
       ) : null}
 
       {/*
-        同步备份小窗：第④轮小木说完「收到，我来核对范围…」之后，executor 派发
+        同步备份小窗：第④轮「同步备份」小木说完「平台服务可访问，任务已建立。…」之后，executor 派发
         `mumai:sync-backup` 打开它，列出真实工单附件与本地语音包，到点（时长按条数算）
         自动收起。位置在右上角，与左下角的演示表面、右下角的小木气泡互不遮挡。
       */}
