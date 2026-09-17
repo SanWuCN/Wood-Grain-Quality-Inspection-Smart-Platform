@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 木脉智检 · 演示种子（PRD 16 素材种子清单）
  *
  * 全部页面从这一份种子取数：
@@ -1879,11 +1879,27 @@ export const DATASET: Dataset = {
  * 11. 训练验证实验（PRD 3.6 / 11.2）
  * ------------------------------------------------------------------ */
 
+/*
+  轮次数与早停规则：曲线、控制台日志、执行节点占用序列**共用这一组数**。
+
+  ⚠ 这三个数必须一起对得上（踩过）：
+    · 实际跑过的轮数 30（`maxEpochs` 上限 40，早停在 30 触发）；
+    · 配置里声明的早停耐心 6（「验证损失连续 6 轮不下降即停止」）；
+    · 于是**最优轮次必然是 30 − 6 = 24** —— 验证损失曲线的最低点必须落在第 24 轮。
+  旧实现的验证损失是「衰减 + 正弦涟漪」随手生成的，最低点落在第 28 轮（成功案例）
+  / 第 23 轮（失败案例），而页面上照样写着「连续 6 轮不下降、第 30 轮停止」：
+  数是 2 和 7，现场数一遍格子就穿帮。现在**先定规则、再由规则生成曲线**。
+*/
+export const TRAIN_EPOCHS = 30;
+/** 验证损失连续多少轮不下降即停止（与 `TRAIN_CONFIG` 里那一项同源） */
+export const EARLY_STOP_PATIENCE = 6;
+/** 最优轮次 = 停止轮次 − 耐心；曲线的形状从这条规则反推，不是反过来 */
+export const TRAIN_BEST_EPOCH = TRAIN_EPOCHS - EARLY_STOP_PATIENCE;
+
 function lossCurve(base: number, floor: number, decay: number, id: string, label: string, color: string): Curve {
   const points: { x: number; y: number }[] = [];
-  // 30 = 本轮实际跑过的轮数（maxEpochs=40，早停在第 30 轮触发）。
   // 曲线长度必须等于实际轮数，界面上「跟着回放画到第几轮」才有意义。
-  for (let e = 1; e <= 30; e += 1) {
+  for (let e = 1; e <= TRAIN_EPOCHS; e += 1) {
     const y = floor + (base - floor) * Math.exp(-decay * e) + 0.004 * Math.sin(e * 0.9);
     points.push({ x: e, y: Number(y.toFixed(4)) });
   }
@@ -1891,11 +1907,16 @@ function lossCurve(base: number, floor: number, decay: number, id: string, label
 }
 
 /**
- * 验证损失曲线。
+ * 验证损失曲线 —— 与早停规则**同源**生成。
  *
- * `overfitFrom` 之后验证损失开始反向抬升 —— 剧本 S16 让架构师口播的
- * 「训练误差下降、验证误差却持续上升」就是这一段。成功案例给 null（不发散）。
- * 用同一个衰减核加上一段可控的抬升，保证两套案例的曲线形状同源、可比。
+ * 第 1…`TRAIN_BEST_EPOCH` 轮：衰减 + 涟漪，涟漪幅度随接近最优轮次线性收到 0，
+ * 保证最低点正好落在第 24 轮（衰减每轮降约 0.01，远大于涟漪，序列不会在别处更低）。
+ * 第 25…30 轮（最优之后）：
+ *   · 成功案例 `risePerEpoch = 0.0012` —— 不再下降、极缓上抬，
+ *     末轮比最低点高 0.0072（< 0.02 判据），页面上读作「训练/验证同向收敛」；
+ *   · 失败案例 `risePerEpoch = 0.011` —— 干净利落地反向抬升，
+ *     末轮比最低点高 0.066（> 0.02），页面上读作「验证损失自第 24 轮起回升」（过拟合）。
+ * 抬升段不叠正弦：发散段要干净可读，不然像噪声。
  */
 function valCurve(
   base: number,
@@ -1904,15 +1925,19 @@ function valCurve(
   id: string,
   label: string,
   color: string,
-  overfitFrom: number | null = null,
+  risePerEpoch = 0.0012,
 ): Curve {
   const points: { x: number; y: number }[] = [];
-  for (let e = 1; e <= 30; e += 1) {
-    let y = floor + 0.03 + (base - floor) * Math.exp(-decay * 0.72 * e) + 0.008 * Math.sin(e * 1.3);
-    if (overfitFrom !== null && e > overfitFrom) {
-      // 抬升斜率固定，且不叠正弦 —— 发散段要干净可读，不然像噪声
-      y += 0.011 * (e - overfitFrom);
-    }
+  const best =
+    floor + 0.03 + (base - floor) * Math.exp(-decay * 0.72 * TRAIN_BEST_EPOCH);
+  for (let e = 1; e <= TRAIN_EPOCHS; e += 1) {
+    const y =
+      e <= TRAIN_BEST_EPOCH
+        ? floor +
+          0.03 +
+          (base - floor) * Math.exp(-decay * 0.72 * e) +
+          0.008 * Math.sin(e * 1.3) * ((TRAIN_BEST_EPOCH - e) / TRAIN_BEST_EPOCH)
+        : best + risePerEpoch * (e - TRAIN_BEST_EPOCH);
     points.push({ x: e, y: Number(Math.max(0.02, y).toFixed(4)) });
   }
   return { id, label, color, points };
@@ -1964,7 +1989,16 @@ const TRAINING_CONFIG: TrainingConfigField[] = [
   { key: "lr", label: "学习率", value: 0.0005, digits: 4, min: 0.00001, max: 0.01, step: 0.0001, note: "本轮小样本微调取值" },
   { key: "batch", label: "批大小", value: 16, min: 4, max: 128, step: 4, note: "上限受设备侧单批内存限制" },
   { key: "epochs", label: "最大轮数", value: 40, min: 12, max: 120, step: 4, note: "上限 120" },
-  { key: "patience", label: "早停耐心", value: 6, min: 2, max: 20, step: 1, note: "验证损失连续多少轮不下降即停止，当前 6" },
+  {
+    key: "patience",
+    label: "早停耐心",
+    /* 值取自 EARLY_STOP_PATIENCE：曲线的最低点就是按它反推出来的，两处写两个数必然漂 */
+    value: EARLY_STOP_PATIENCE,
+    min: 2,
+    max: 20,
+    step: 1,
+    note: `验证损失连续多少轮不下降即停止，当前 ${EARLY_STOP_PATIENCE}`,
+  },
   { key: "threshold", label: "判定阈值", value: 0.5, digits: 2, min: 0.05, max: 0.95, step: 0.05, note: "新旧版本共用同一阈值" },
   { key: "seed", label: "随机种子", value: 20260911, readonly: true, note: "固定种子" },
 ];
@@ -2078,7 +2112,7 @@ export const EXPERIMENT: Experiment = {
   candidateVersion: "DEMO-M02b",
   datasetVersion: "DS-06（已冻结）",
   learningRate: 0.0005,
-  stopCondition: "验证损失连续 6 轮未下降即停止；最少 12 轮，最多 40 轮",
+  stopCondition: `验证损失连续 ${EARLY_STOP_PATIENCE} 轮未下降即停止；最少 12 轮，最多 40 轮`,
   updateScope: "仅材质相关分支：最后 2 个卷积块 + 分类头（约 8.4% 参数）",
   inputSpec: "输入 1×420 频谱向量（均匀采样），float32 → INT8 量化，输出 3 类材质 + 异常二分类",
   threshold: 0.5,
@@ -2093,7 +2127,8 @@ export const EXPERIMENT: Experiment = {
   curveNew: lossCurve(1.18, 0.19, 0.13, "new", "DEMO-M02b 新版损失", "#8fc2ff"),
   curveTrain: lossCurve(1.18, 0.185, 0.135, "train", "候选 · 训练损失", "#4ea8ff"),
   // 成功案例：验证损失贴着训练损失收敛，不发散（对照 S16 的过拟合判据）
-  curveVal: valCurve(1.22, 0.2, 0.135, "val", "候选 · 验证损失", "#5fd4c4"),
+  /* 成功案例：最优之后只做极缓上抬（0.0012/轮，末轮比最低点高 0.0072 < 0.02） */
+  curveVal: valCurve(1.22, 0.16, 0.135, "val", "候选 · 验证损失", "#5fd4c4"),
   predictionsOld: predictions("old"),
   predictionsNew: predictions("new"),
   config: TRAINING_CONFIG,
@@ -2118,7 +2153,8 @@ export const FAILED_EXPERIMENT: Experiment = {
   predictionsNew: predictions("old"),
   // 失败案例的判据就在曲线上：第 18 轮后验证损失反向抬升、训练损失继续下降
   // —— 典型的过拟合，剧本 S16 讲的正是这一现象。界面据此阻止进入发布。
-  curveVal: valCurve(1.22, 0.2, 0.135, "val", "候选 · 验证损失", "#5fd4c4", 18),
+  /* 失败案例：最优之后按 0.011/轮反向抬升（末轮比最低点高 0.066 > 0.02） */
+  curveVal: valCurve(1.22, 0.16, 0.135, "val", "候选 · 验证损失", "#5fd4c4", 0.011),
   log: FAILED_JOB_LOG,
   acceptance: [
     { key: "same-test", label: "测试集一致", detail: "新旧版本使用同一测试清单与同一预处理版本", pass: true },

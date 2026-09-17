@@ -34,7 +34,6 @@ import {
   Btn,
   ConfusionMatrix,
   DataTable,
-  LineChart,
   Modal,
   SourceTag,
   StateBlock,
@@ -62,6 +61,14 @@ import type {
   NodeMetric,
   TrainingConfigField,
 } from "../seed/types";
+import {
+  buildLossOption,
+  curveStats,
+  detectOverfit,
+  earlyStopOf,
+  patienceOf,
+} from "../trainingCurve";
+import EChart from "./OverviewCharts";
 import { SampleComparePanel } from "./SampleCompare";
 import { buildDistillScript, buildTrainScript } from "./terminalScripts";
 import { buildTrainingTracking, type TrainingTracking } from "./trainingTracking";
@@ -776,23 +783,7 @@ function NodePanel({
  * ④ 损失曲线（训练 / 验证 / 基线）
  * ------------------------------------------------------------------ */
 
-/**
- * 从验证损失序列里找出发散点。
- *
- * 剧本 S16 让架构师口播「训练误差下降、验证误差却持续上升，说明开始过拟合」——
- * 这句话要能从曲线上直接读出来，所以这里把最低点之后是否持续抬升算出来，
- * 而不是把结论写死在页面上：换成成功案例时这个提示自然就不出现。
- */
-function detectOverfit(val: number[]): { minEpoch: number; rise: number } | null {
-  let minIndex = 0;
-  val.forEach((value, index) => {
-    if (value < val[minIndex]) minIndex = index;
-  });
-  const rise = val[val.length - 1] - val[minIndex];
-  // 抬升不足 0.02 视为正常波动，不报发散
-  if (minIndex >= val.length - 2 || rise < 0.02) return null;
-  return { minEpoch: minIndex + 1, rise };
-}
+/* 发散判据 / 曲线统计 / option 组装都在 `trainingCurve.ts`（纯函数，有单测） */
 
 /**
  * 损失曲线。
@@ -802,21 +793,40 @@ function detectOverfit(val: number[]): { minEpoch: number; rise: number } | null
  * 而「画到第 24 轮就早停了」本身就是结论的一部分。
  */
 function LossPanel({ experiment, drawn, dominant = false }: { experiment: Experiment; drawn: number; /** 当前主视图：横跨整行 */ dominant?: boolean }) {
+  const total = experiment.curveTrain.points.length;
+  /** 已回放到的轮数：所有"当前值"都只算到这一轮，不提前把后面的结果摆出来 */
+  const upto = Math.max(1, Math.min(drawn, total));
+  const trainStats = useMemo(() => curveStats(experiment.curveTrain.points.slice(0, upto)), [experiment, upto]);
+  const valStats = useMemo(() => curveStats(experiment.curveVal.points.slice(0, upto)), [experiment, upto]);
   const overfit = useMemo(
-    () => detectOverfit(experiment.curveVal.points.map((point) => point.y)),
-    [experiment],
+    () => detectOverfit(experiment.curveVal.points.slice(0, upto).map((point) => point.y)),
+    [experiment, upto],
+  );
+  /**
+   * 早停对账用**整条**曲线（归档记录本来就完整），但对账结论只在回放走完之后才摆出来；
+   * 两条标记线（最优轮次 / 停止轮次）也由 `drawn` 把关 —— 回放没走到就不剧透。
+   */
+  const patience = patienceOf(experiment.config);
+  const stop = useMemo(
+    () => earlyStopOf(curveStats(experiment.curveVal.points), patience ?? 0),
+    [experiment, patience],
+  );
+  const option = useMemo(
+    () =>
+      buildLossOption({
+        train: { name: experiment.curveTrain.label, color: experiment.curveTrain.color, points: experiment.curveTrain.points },
+        val: { name: experiment.curveVal.label, color: experiment.curveVal.color, points: experiment.curveVal.points },
+        baseline: { name: experiment.curveOld.label, color: experiment.curveOld.color, points: experiment.curveOld.points },
+        drawn: upto,
+        epochCount: total,
+        bestEpoch: stop.bestEpoch,
+        stopEpoch: stop.stopEpoch,
+      }),
+    [experiment, upto, total, stop.bestEpoch, stop.stopEpoch],
   );
 
-  const total = experiment.curveTrain.points.length;
-  /**
-   * 候选模型的两条曲线跟着回放长；**基线整条铺满**。
-   *
-   * 基线是上一版模型跑完的历史记录，本来就该是完整的 —— 留着它整条，
-   * 候选曲线往上长的时候才有对照物（「现在降到基线下面了没有」）。
-   * 三条一起截断反而看不出谁比谁好。
-   */
-  const growing = (points: { x: number; y: number }[]) =>
-    points.slice(0, Math.max(1, Math.min(drawn, points.length)));
+  const baselineLast = experiment.curveOld.points[experiment.curveOld.points.length - 1]?.y ?? 0;
+  const vsBaseline = baselineLast - valStats.last;
 
   return (
     <Panel
@@ -824,7 +834,7 @@ function LossPanel({ experiment, drawn, dominant = false }: { experiment: Experi
       extra={
         <span className="fw-console__actions">
           <span className="muted">
-            epoch <NumberAnimation value={Math.min(drawn, total)} group={false} />/
+            epoch <NumberAnimation value={upto} group={false} />/
             <NumberAnimation value={total} group={false} />
           </span>
           {overfit ? (
@@ -844,38 +854,66 @@ function LossPanel({ experiment, drawn, dominant = false }: { experiment: Experi
         </span>
       }
       className={`fw-panel ${dominant ? "fw-panel--wide" : "fw-panel--loss"}`}>
-      <LineChart
-        series={[
-          {
-            id: experiment.curveTrain.id,
-            label: experiment.curveTrain.label,
-            color: experiment.curveTrain.color,
-            points: growing(experiment.curveTrain.points),
-          },
-          {
-            id: experiment.curveVal.id,
-            label: experiment.curveVal.label,
-            color: experiment.curveVal.color,
-            points: growing(experiment.curveVal.points),
-          },
-          {
-            id: experiment.curveOld.id,
-            label: experiment.curveOld.label,
-            color: experiment.curveOld.color,
-            points: experiment.curveOld.points,
-          },
-        ]}
-        xLabel="轮次"
-        yLabel="损失"
-        // 横轴按整轮（30）固定，纵轴按训练曲线的起点固定：
-        // 回放时曲线从左往右长，而不是 3 个点铺满整幅假装跑完了
-        xMax={total}
-        yMax={experiment.curveTrain.points[0]?.y}
+      {/*
+        四个口径（当前训练损失 / 当前验证损失 / 与基线对照 / 早停规则）都从曲线现算，
+        不在页面上写死数字 —— 换案例（成功 ↔ 失败）整排跟着变。
+      */}
+      <ul className="tw-kpi">
+        <li>
+          <small>当前训练损失</small>
+          <b>
+            <NumberAnimation value={trainStats.last} digits={4} group={false} />
+          </b>
+          <span>
+            首轮 <NumberAnimation value={trainStats.first} digits={4} group={false} /> · 已降{" "}
+            <NumberAnimation value={trainStats.drop} digits={4} group={false} />
+          </span>
+        </li>
+        <li className={overfit ? "is-warn" : "is-ok"}>
+          <small>当前验证损失</small>
+          <b>
+            <NumberAnimation value={valStats.last} digits={4} group={false} />
+          </b>
+          <span>
+            最低 <NumberAnimation value={valStats.min} digits={4} group={false} />（第{" "}
+            <NumberAnimation value={valStats.minEpoch} group={false} /> 轮）
+          </span>
+        </li>
+        <li className={vsBaseline >= 0 ? "is-ok" : "is-warn"}>
+          <small>与基线对照</small>
+          <b>
+            <NumberAnimation value={vsBaseline} digits={4} group={false} />
+          </b>
+          <span>
+            基线末值 <NumberAnimation value={baselineLast} digits={4} group={false} /> · 候选更低为佳
+          </span>
+        </li>
+        <li className={stop.consistent ? "is-ok" : "is-warn"}>
+          <small>早停规则</small>
+          <b>
+            连续 <NumberAnimation value={patience ?? 0} group={false} /> 轮不下降即停止
+          </b>
+          <span>
+            {upto >= total && stop.consistent
+              ? `第 ${stop.stopEpoch} 轮停止 · 距最低点（第 ${stop.bestEpoch} 轮）${stop.roundsWithoutImprovement} 轮，与规则一致`
+              : `已回放 ${upto}/${total} 轮 · 与归档实验包的 patience 对账`}
+          </span>
+        </li>
+      </ul>
+
+      <EChart
+        className="tw-chart"
+        option={option}
+        ariaLabel={`训练与验证损失曲线：训练损失 ${trainStats.last}、验证损失 ${valStats.last}、基线与候选对照`}
+        /* 回放本身就是"曲线从左往右长"，不需要 ECharts 再补一次入场动画（会闪） */
+        animate={false}
       />
+
       <p className="note">
         {overfit
           ? `验证损失自第 ${overfit.minEpoch} 轮起回升 ${overfit.rise.toFixed(3)}，训练损失仍在下降；该候选版本按验证表现评估，不按训练表现。`
           : "训练损失与验证损失同向收敛，未出现分叉。"}
+        {" "}曲线、执行节点占用与控制台日志同来自归档实验包 {experiment.id} 的 epochs.csv（同一 epoch 轴）。
       </p>
     </Panel>
   );

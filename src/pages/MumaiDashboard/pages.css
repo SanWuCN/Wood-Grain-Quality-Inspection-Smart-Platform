@@ -867,7 +867,6 @@
 }
 
 /* 图表 */
-.linechart svg,
 .wavechart svg {
   width: 100%;
   height: auto;
@@ -886,27 +885,10 @@
 }
 
 /* 图表坐标轴文字：§5.1 的 #647990，字号走辅助级 */
-.linechart .axis,
 .wavechart .axis {
   fill: var(--chart-axis-text);
   font-family: var(--font-data);
   font-size: var(--fs-aux);
-}
-
-.linechart__legend {
-  display: flex;
-  gap: var(--space-4);
-  margin-top: 4px;
-  font-size: var(--fs-aux);
-  color: var(--ma-text-2);
-}
-
-.linechart__legend i {
-  display: inline-block;
-  width: 14px;
-  height: 2px;
-  margin-right: 5px;
-  vertical-align: middle;
 }
 
 .matrix {
@@ -6746,6 +6728,82 @@
   .fw-panel--data {
     grid-column: span 12;
   }
+}
+
+/* 训练曲线：口径条在中等宽度退成两列，窄视口单列并把图压矮 */
+@media (max-width: 1200px) {
+  .tw-kpi {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .tw-kpi {
+    grid-template-columns: 1fr;
+  }
+
+  .tw-chart,
+  .fw-panel--wide .tw-chart {
+    height: 220px;
+  }
+}
+
+/* ---- 训练曲线（训练验证 · 训练曲线）：一排现算口径 + ECharts 折线 ---- */
+
+.tw-kpi {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.tw-kpi li {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.tw-kpi li.is-ok {
+  border-left-color: var(--success);
+}
+
+.tw-kpi li.is-warn {
+  border-left-color: var(--warning);
+}
+
+.tw-kpi small {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.tw-kpi b {
+  color: var(--text-primary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+}
+
+.tw-kpi span {
+  color: var(--text-tertiary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-aux);
+}
+
+/*
+  ECharts 要容器有**确定高度**才画得出来（0 高就是一块空白 canvas）。
+  宽度交给栅格，高度按视图给：横跨整行时高一些，读得出两条曲线的间距。
+*/
+.tw-chart {
+  width: 100%;
+  height: 268px;
+}
+
+.fw-panel--wide .tw-chart {
+  height: 320px;
 }
 
 /* ---- 采集数据：数据包清单 ---- */
