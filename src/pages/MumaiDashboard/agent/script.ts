@@ -136,6 +136,47 @@ export type ScriptRound = {
   };
 };
 
+import { scenarioValue } from "../seed/scenario";
+
+/**
+ * 第⑦轮（段101）「素材检查」的播报文本 —— **由冻结数据包拼出**，不写字面量。
+ *
+ * ── 为什么这一段要拼，而别的轮次是字面量 ────────────────────────────
+ * 净稿段101 的原文是过程稿：「正在检查素材。。（3s），xxx这批总时长xxx，视频质量xxx。」
+ * 三个 `xxx` 是**待填的实测值**，不是可以上台的话。而 §6.3 早已冻结了这批素材的全部数字
+ * （`DEMO_SCENARIO_V3.material`；`demoActions` 的 material 表面引用同一组键）。
+ *
+ * 仓库的硬规则是「**数字必须取自数据包，不能是字面量**」（`demoActions.test.ts` 有断言）。
+ * 台词里的数字同样受这条约束 —— 否则数据包一改，台词就与屏幕上的质检卡对不上，
+ * 而这两处观众**同时看得到**。
+ *
+ * ⚠ 取不到值时留 `?` / `（缺失）` 并如实标注（§11.1：进缺失态，不许给「听起来合理」的默认值）。
+ *   宁可听着别扭，也不能让台词说出屏幕上没有的数字。
+ */
+function materialInspectionLine(): string {
+  const videoCount = scenarioValue("material.videoCount");
+  const duration = scenarioValue("material.durationText");
+  const resolution = scenarioValue("material.resolutionText");
+  const keyFrames = scenarioValue("material.keyFrames");
+  const missing = scenarioValue("material.missingFiles");
+  const lowClips = scenarioValue("material.lowQualityClips");
+  const marks = scenarioValue("material.lowQualityMarks");
+
+  const missingText = typeof missing === "number" ? `缺失文件${missing}个，` : "";
+  const lowText =
+    typeof lowClips === "number" && Array.isArray(marks) && marks.length > 0
+      ? `低清晰度片段${lowClips}处，已在${marks.join("和")}标记。`
+      : "";
+
+  return (
+    `素材检查完成：视频${typeof videoCount === "number" ? videoCount : "?"}段，` +
+    `时长${typeof duration === "string" ? duration : "（缺失）"}，` +
+    `分辨率${typeof resolution === "string" ? resolution : "（缺失）"}，` +
+    `共${typeof keyFrames === "number" ? keyFrames : "?"}个关键帧。` +
+    `${missingText}${lowText}`
+  );
+}
+
 /** 一句台词 */
 export type ScriptLine = {
   text: string;
@@ -404,7 +445,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
           「已实现-文案不同（=该定稿句）」。按新剧本改台词时这句曾被过程稿整段覆盖回来，
           由占位符守卫抓回，这里保留定稿句作为唯一口径。
         */
-        text: "素材检查完成：视频1段，时长4分18秒，分辨率3840×1920，共214个关键帧。缺失文件0个，低清晰度片段2处，已在00:43和02:17标记。",
+        text: materialInspectionLine(),
       },
     ],
     next: "饶：我们使用 MipMap 软件进行全景影像的高斯场景重建。",

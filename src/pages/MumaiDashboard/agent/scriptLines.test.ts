@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 22 轮 · 台词逐字冻结（工作清单 v1.0 §7、§8）
  *
  * ── 这一组在防什么 ──────────────────────────────────────────────────
@@ -19,6 +19,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { SCRIPT_ROUNDS, mainLineOf } from "./script.ts";
+import { scenarioValue } from "../seed/scenario";
 import {
   FORBIDDEN_LEGACY_PHRASES,
   REQUIRED_REWRITE_PHRASES,
@@ -125,6 +126,41 @@ test("§7 点名的 7 处改写已录入，且旧措辞不存在于平台任何�
 /* ------------------------------------------------------------------ *
  * 3. 占位符与"喵"字（§10 阶段 F、§7 末）
  * ------------------------------------------------------------------ */
+/*
+  ── ⑦ 轮的素材数字必须与冻结数据包同源（2026-09-17 加）──────────────
+  净稿段101 是过程稿（「xxx这批总时长xxx，视频质量xxx」），现网用 §6.3 的冻结值。
+  但"台词里的数字"与"屏幕质检卡上的数字"是**同一场观众同时看到的两处**，
+  一旦有人把数字写回字面量、或改了数据包忘了改台词，两处就对不上 ——
+  而画面上一个说 214 帧、卡片写 96 帧，比数字缺失更难解释。
+  所以这里钉住：台词里的每个数字都必须能在数据包里逐字找到。
+*/
+test("⑦ 轮素材台词里的数字必须与冻结数据包逐字同源", () => {
+  const text = lineOf("⑦");
+  const keys = [
+    "material.videoCount",
+    "material.durationText",
+    "material.resolutionText",
+    "material.keyFrames",
+    "material.missingFiles",
+    "material.lowQualityClips",
+  ];
+  for (const key of keys) {
+    const value = scenarioValue(key);
+    assert.notEqual(value, undefined, `数据包里没有 ${key} —— ⑦ 轮台词不该引用它`);
+    assert.ok(
+      text.includes(String(value)),
+      `⑦ 轮台词里找不到数据包的 ${key}=${String(value)}：台词「${text.slice(0, 40)}…」`,
+    );
+  }
+  /* 时间点数组要逐个出现（00:43 和 02:17） */
+  const marks = scenarioValue("material.lowQualityMarks");
+  assert.ok(Array.isArray(marks) && marks.length > 0, "低清晰度标记点应当是数组");
+  for (const mark of marks as string[]) {
+    assert.ok(text.includes(mark), `⑦ 轮台词里缺少标记点 ${mark}`);
+  }
+  /* 判据不是恒真：把数字换掉必须被抓出来 */
+  assert.ok(!text.includes("xxx"), "⑦ 轮台词不得残留过程稿占位符");
+});
 
 test("全剧本不得残留占位符（xxx / xxxx / 待补文案）", () => {
   for (const round of SCRIPT_ROUNDS) {
