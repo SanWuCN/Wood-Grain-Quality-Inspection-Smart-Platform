@@ -37,8 +37,9 @@ test("标签表里已有的键都能真的取到值（防「标签写了、数�
 });
 
 test("rowsOf 逐键产出标签与值，且值带单位", () => {
-  const weather = DEMO_ACTIONS.find((a) => a.roundNo === "②");
-  assert.ok(weather, "② 轮必须存在");
+  /* ⚠ 天气四分类表面挂在 ⑤（天气风险查询）—— 2026-09-17 剧本重排后它不是 ② 了 */
+  const weather = DEMO_ACTIONS.find((a) => a.roundNo === "⑤");
+  assert.ok(weather, "⑤ 轮（天气风险查询）必须存在");
   const rows = rowsOf(weather!);
 
   assert.equal(rows.length, weather!.dataKeys.length, "每个数据键产出一行");
@@ -49,9 +50,10 @@ test("rowsOf 逐键产出标签与值，且值带单位", () => {
   assert.equal(rainTotal!.demoData, true, "天气快照属于本地实测数据，必须标注来源性质");
 
   /* 数组值用顿号连接（编号清单、标记时间点都是数组） */
-  const codes = rowsOf(DEMO_ACTIONS.find((a) => a.roundNo === "①")!).find(
-    (r) => r.key === "components.codes",
-  );
+  const codesAction = DEMO_ACTIONS.find((a) => a.roundNo === "②");
+  assert.ok(codesAction, "② 轮（接单整理）必须存在");
+  const codes = rowsOf(codesAction!).find((r) => r.key === "components.codes");
+  assert.ok(codes, "② 轮的数据键里应有平台编号这一项");
   assert.equal(codes!.value, "Z01、Z02、Z03、Z04", `数组值应顿号连接（实际「${codes!.value}」）`);
 });
 

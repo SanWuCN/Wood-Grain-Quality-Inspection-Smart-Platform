@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 语音对照表的**同步锁**
  *
  * 这张表是给人照读的，所以它最大的风险不是"写错一个字"，而是**悄悄过期**：
@@ -18,8 +18,8 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { SCRIPT_ROUNDS } from "./script.ts";
 
-const TABLE = "D:\\平台\\tools-夜间\\小木语音触发与回答对照表-v1.0.md";
-const QUICK = "D:\\平台\\tools-夜间\\小木说什么它回什么-速查表-v1.0.md";
+const TABLE = "D:\\平台\\tools-夜间\\小木语音触发与回答对照表-v2.0.md";
+const QUICK = "D:\\平台\\tools-夜间\\小木说什么它回什么-速查表-v2.0.md";
 
 /**
  * 这几张表是**运行时产物**，刻意放在仓库外（`D:\平台\tools-夜间\`），生成脚本也在那里。
@@ -42,7 +42,7 @@ function loadTable(path: string, what: string): string | null {
   return null;
 }
 
-test("语音对照表存在且覆盖全部 22 轮", () => {
+test("语音对照表存在且覆盖全部 25 轮", () => {
   const text = loadTable(TABLE, "语音对照表");
   if (!text) return;
   assert.ok(text.includes("小木语音触发与回答对照表"), "标题不对，可能拿错了文件");
@@ -113,7 +113,7 @@ test("表里给出的判定阈值与实现一致（阈值改过而表没改 → 
  *
  * 它比对照表更"危险"：现场的人只看这一张。所以要求更硬 ——
  * 每一句台词、每一条说法必须逐字在里面，序号必须用**剧本圈号**，
- * 且第⑪轮不得出现在"我说什么"那一列（它不是语音触发的）。
+ * 且第⑬轮不得出现在"我说什么"那一列（它不是语音触发的）。
  * ------------------------------------------------------------------ */
 
 test("速查表：每一轮的推荐说法与回答逐字在内，且用剧本圈号", () => {
@@ -125,19 +125,19 @@ test("速查表：每一轮的推荐说法与回答逐字在内，且用剧本�
     const main = round.lines.find((l) => l.role === "main");
     assert.ok(main, `第 ${round.roundNo} 轮没有 main 台词`);
     assert.ok(text.includes(main.text), `速查表里缺少第 ${round.roundNo} 轮的台词，请重跑 出速查表.ts`);
-    /* 序号必须是圈号本身，不能是 1..22 的流水号 —— 现场对不上号就是缺陷 */
+    /* 序号必须是圈号本身，不能是 1..25 的流水号 —— 现场对不上号就是缺陷 */
     const pattern = new RegExp(`\\| ${round.roundNo} \\|`, "u");
     assert.ok(pattern.test(text), `速查表里没有以圈号「${round.roundNo}」开头的行，请重跑 出速查表.ts`);
   }
 });
 
-test("速查表：推荐说法列不含第⑪轮（它是本地事件触发，说了也不响应）", () => {
+test("速查表：推荐说法列不含第⑬轮（它是本地事件触发，说了也不响应）", () => {
   const text = loadTable(QUICK, "速查表");
   if (!text) return;
   const local = SCRIPT_ROUNDS.filter((r) => r.triggerSource === "local-event");
-  assert.ok(local.length > 0, "应当存在非语音轮次（⑪）");
+  assert.ok(local.length > 0, "应当存在非语音轮次（⑬）");
 
-  /* 主表那一节里，⑪ 必须以「不用说话」出现，而不是给一个说法 */
+  /* 主表那一节里，⑬ 必须以「不用说话」出现，而不是给一个说法 */
   const mainSection = text.split("## 二、")[0];
   for (const round of local) {
     assert.ok(
@@ -147,5 +147,5 @@ test("速查表：推荐说法列不含第⑪轮（它是本地事件触发，�
     assert.ok(mainSection.includes("不用说话") || !mainSection.includes(`| ${round.roundNo} |`),
       `速查表主表里第 ${round.roundNo} 轮必须要么不出现、要么明确写「不用说话」`);
   }
-  assert.ok(text.includes("不用说话"), "速查表必须明确标出第⑪轮不用说话");
+  assert.ok(text.includes("不用说话"), "速查表必须明确标出第⑬轮不用说话");
 });

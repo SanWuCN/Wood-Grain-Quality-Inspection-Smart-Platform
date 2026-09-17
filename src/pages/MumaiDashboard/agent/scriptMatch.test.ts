@@ -7,7 +7,7 @@
  * 而且在浏览器里手动点很难覆盖（要靠嘴说 + ASR 出错字），所以必须靠单测钉住。
  *
  * 覆盖五类：
- *   1. 数据完整性 —— 20 轮、圈号唯一、台词逐字、语音编号只在稿子标注的那几轮出现
+ *   1. 数据完整性 —— 25 轮、圈号唯一、台词逐字、语音编号只在稿子标注的那几轮出现
  *   2. 精确命中 —— 稿子里的"上一句"原话必须命中对应轮次
  *   3. 容错 —— 错字 / 同音字 / 词序乱 / 漏字 仍要命中
  *   4. 收口 —— 无关句不能命中；两轮得分接近要判 ambiguous（宁可反问）
@@ -32,13 +32,13 @@ import {
  * 1. 数据完整性
  * ------------------------------------------------------------------ */
 
-test("剧本共 22 轮，圈号唯一", () => {
+test("剧本共 25 轮，圈号唯一", () => {
   /*
-    ⚠ 提取稿开头写的是"20 轮完整交互"，但稿子自己的圈号是 ①~㉒ 共 22 个。
-    差异来自口径：稿子把"⑧⑨ 连续两轮共享同一条下一句"和"⑮ 一轮含 2 句"分别合并计数。
-    实现按**圈号**走（对稿、对台词都以圈号为准），所以这里是 22。
+    ⚠ 轮数跟着**用户文档**走：2026-09-17 用户给的《小木对话总文案.txt》是 25 条，
+    剧本按它 1:1 重排（快捷键也是 1..0 / q 排 / a 排按这个顺序分配的）。
+    历史上这里是 22 / 23 —— 每一次都是用户改稿，不是"实现漏了"。
   */
-  assert.equal(SCRIPT_ROUND_COUNT, 23, "剧本改为 23 轮（用户 2026-09-17 定稿：删巡检任务预检、拆归档验证摘要、追加统计问答）");
+  assert.equal(SCRIPT_ROUND_COUNT, 25, "剧本 25 轮（用户 2026-09-17 文档 25 条，逐条对应）");
   const nos = SCRIPT_ROUNDS.map((r) => r.roundNo);
   assert.equal(new Set(nos).size, nos.length, "圈号有重复");
 });
@@ -46,7 +46,7 @@ test("剧本共 22 轮，圈号唯一", () => {
 test("每轮都有标题、至少一个触发说法、且恰有一句主台词", () => {
   for (const round of SCRIPT_ROUNDS) {
     assert.ok(round.title.length > 0, `${round.roundNo} 缺标题`);
-    /* ⚠ ⑪ 是本地事件触发（triggerSource: "local-event"），按设计**没有**语音触发短语 */
+    /* ⚠ ⑬ 是本地事件触发（triggerSource: "local-event"），按设计**没有**语音触发短语 */
     if (round.triggerSource === "voice") {
       assert.ok(round.triggers.length >= 1, `${round.roundNo} 声明了语音触发，却没有触发说法`);
     } else {
@@ -96,14 +96,17 @@ test("语音编号格式合法且不冲突（编号随录音交付增加，不�
 
 test("含备用播报的轮次已登记，且备用台词不参与主播报", () => {
   /*
-    ⚠ 这条原来断言"只有 ③ ⑮ 两轮有多行"。2026-09-17 按新剧本补戏份时，
-    段15（同步备份）挂进了 ④、段221（两项记录已分开显示）挂进了 ⑯ ——
-    两处都是稿子标「等待时选用」的备用播报，按 `role: "waiting"` 存档。
-    所以名单变成 4 轮；**本意不变**：多行只能是非 main 的备用句，
-    且它们的内容绝不能混进主播报（否则现场会把"等待中的话"当成结论念出来）。
+    ⚠ 这条原来断言"只有 ③ ⑮ 两轮有多行"，后来变成 4 轮。2026-09-17 剧本按文档
+    重排后只剩 **2 轮**有多行，而且**成员换了**：
+      · ⑥ 任务顺序同步（重排前的 ④）—— 稿子标「等待时选用」的备用播报；
+      · ⑰ 数据清洗与人工审核（重排前的 ⑮）—— `role: "audit"` 的人工审核清单。
+    旧名单里的 ③（开工清单核对）与 ④（同步备份）已不再有多行：段15 那句
+    「收到，已启用同步备份」被用户文档第 4 条的完整回答取代，见 `script.ts` 的注释。
+    **本意不变**：多行只能是非 main 的备用句，且它们的内容绝不能混进主播报
+    （否则现场会把"等待中的话"当成结论念出来）。
   */
   const withExtra = SCRIPT_ROUNDS.filter((r) => r.lines.length > 1);
-  assert.deepEqual(withExtra.map((r) => r.roundNo), ["③", "④", "⑮", "⑯"]);
+  assert.deepEqual(withExtra.map((r) => r.roundNo), ["⑥", "⑰"]);
   for (const round of withExtra) {
     const extras = round.lines.filter((l) => l.role !== "main");
     assert.equal(
@@ -118,17 +121,17 @@ test("含备用播报的轮次已登记，且备用台词不参与主播报", ()
       );
     }
   }
-  const r15 = roundByNo("⑮");
-  assert.ok(r15);
-  assert.equal(r15.lines[1].role, "audit");
-  assert.ok(!mainLineOf(r15).includes("重复疑点"), "主台词不应包含备用播报内容");
+  const r17 = roundByNo("⑰");
+  assert.ok(r17);
+  assert.equal(r17.lines[1].role, "audit");
+  assert.ok(!mainLineOf(r17).includes("重复疑点"), "主台词不应包含备用播报内容");
 });
 
-test("⑪ 是唯一由小木主动发起、没有对应意图的预警轮", () => {
-  const r11 = roundByNo("⑪");
-  assert.ok(r11);
-  assert.equal(r11.intentId, null);
-  assert.ok(r11.precondition && r11.precondition.includes("主动起头"));
+test("⑬ 是唯一由小木主动发起、没有对应意图的预警轮", () => {
+  const r13 = roundByNo("⑬");
+  assert.ok(r13);
+  assert.equal(r13.intentId, null);
+  assert.ok(r13.precondition && r13.precondition.includes("主动起头"));
 });
 
 /* ------------------------------------------------------------------ *
@@ -145,14 +148,14 @@ test("⑪ 是唯一由小木主动发起、没有对应意图的预警轮", () =
  * 并接受"长句可能被子串抢走"——准备阶段规避即可）。所以这里改为
  * **按剧本登记的 triggers 逐条断言**，与 `tools/验唤醒链路.mjs` 同一口径：
  *
- *   · 覆盖 —— 22 轮**每一轮**都必须至少有一个短语能命中它自己（这是功能承诺）
+ *   · 覆盖 —— 25 轮**每一轮**都必须至少有一个短语能命中它自己（这是功能承诺）
  *   · 自洽 —— 每条登记短语都必须命中它所属的那一轮，verdict 必须是 hit
  *
  * 好处是它不会因为"改了一句台词/换了一个短语"而失效 —— 这正是上一版失守的原因。
  */
 test("每一轮登记的准备短语，逐条命中它自己", () => {
   for (const round of SCRIPT_ROUNDS) {
-    /* ⑪ 由本地事件触发，没有语音触发短语 —— 跳过它，其余轮必须逐条自洽 */
+    /* ⑬ 由本地事件触发，没有语音触发短语 —— 跳过它，其余轮必须逐条自洽 */
     if (round.triggerSource !== "voice") continue;
     for (const phrase of round.triggers) {
       const utterance = stripWakeWord(`小木小木，${phrase}`);
@@ -173,12 +176,13 @@ test("每一轮登记的准备短语，逐条命中它自己", () => {
  * ------------------------------------------------------------------ */
 
 test("同音错字仍能命中（ASR 最常见的错误）", () => {
+  /* ⚠ 期望值 = 剧本重排后的**新圈号**（旧的 ⑧⑮⑯⑬⑳ 依次变成 ⑪⑰⑲⑮㉓） */
   const cases: [string, string][] = [
-    ["比较这四住木构件，给出优先覆核顺序", "⑧"],      // 柱→住、复→覆
-    ["启动数据青洗，列出需要人工合对的记录", "⑮"],      // 清→青、核→合
-    ["对比两个摸型", "⑯"],                    // 模→摸
-    ["把补彩、数据审核和适配验证拆成任务卡", "⑬"],      // 采→彩
-    ["生成工丹草稿，列出复核位置", "⑳"],                // 单→丹
+    ["比较这四住木构件，给出优先覆核顺序", "⑪"],      // 柱→住、复→覆
+    ["启动数据青洗，列出需要人工合对的记录", "⑰"],      // 清→青、核→合
+    ["对比两个摸型", "⑲"],                    // 模→摸
+    ["把补彩、数据审核和适配验证拆成任务卡", "⑮"],      // 采→彩
+    ["生成工丹草稿，列出复核位置", "㉓"],                // 单→丹
   ];
   for (const [utterance, expected] of cases) {
     const m = matchScriptRound(utterance);
@@ -189,15 +193,19 @@ test("同音错字仍能命中（ASR 最常见的错误）", () => {
 
 test("漏字/截断仍能命中（用户只说触发词的一部分）", () => {
   const cases: [string, string][] = [
-    ["读取工单", "①"],
-    ["近三个月天气", "②"],
-    ["开工清单", "④"],
-    ["补偿参数建议", "⑤"],
-    ["重建素材", "⑦"],
-    ["巡检任务预检", "⑩"],
-    ["核对接收清单", "⑭"],
-    ["工单草稿", "⑳"],
+    ["读取工单", "②"],
+    ["近三个月天气", "⑤"],
+    ["开工清单", "③"],
+    ["补偿参数建议", "⑧"],
+    ["重建素材", "⑩"],
+    ["核对接收清单", "⑯"],
+    ["工单草稿", "㉓"],
   ];
+  /*
+    ⚠ 原来还有一条 ["巡检任务预检", "⑩"]。那一轮**已被用户删掉**
+    （《小木对话总文案.txt》25 条里没有它），所以这条用例随之删除 ——
+    不是"测不过就不测"，是"断言的对象不存在了"。其余 7 条一条没少。
+  */
   for (const [utterance, expected] of cases) {
     const m = matchScriptRound(utterance);
     assert.ok(m, `「${utterance}」没有返回匹配`);
@@ -208,7 +216,7 @@ test("漏字/截断仍能命中（用户只说触发词的一部分）", () => {
 test("词序打乱仍能命中（覆盖率用计数而非子串）", () => {
   const m = matchScriptRound("整理出发清单和任务范围，把这份工单读了");
   assert.ok(m);
-  assert.equal(m.round.roundNo, "①", m.reason);
+  assert.equal(m.round.roundNo, "②", m.reason);
 });
 
 /* ------------------------------------------------------------------ *
@@ -234,7 +242,7 @@ test("无关的话不能命中（宁可不答，也不能乱答台词）", () =>
 
 test("两轮得分接近时判 ambiguous，不硬选一个", () => {
   /*
-    ⑫ 汇总本次异常证据   vs   ⑯ 汇总新旧模型的验证结果
+    ⑭ 汇总本次异常证据   vs   ⑲ 汇总新旧模型的验证结果
     只说"汇总一下"时，两个都有"汇总"，应当判为歧义。
     这里断言的是**行为**：要么 too-weak、要么 ambiguous，绝不能是 hit。
   */
@@ -262,7 +270,7 @@ test("剥掉唤醒词后剩下的是要匹配的内容", () => {
 test("整句「小木小木 + 关键词」直接可匹配（端到端口径）", () => {
   const m = matchScriptRound(stripWakeWord("小木小木，对比四根木柱"));
   assert.ok(m);
-  assert.equal(m.round.roundNo, "⑧", m.reason);
+  assert.equal(m.round.roundNo, "⑪", m.reason);
   assert.equal(m.verdict, "hit");
 });
 
@@ -310,7 +318,7 @@ test("coverageOf：完全覆盖=1，部分覆盖按比例，空触发=0", () => 
 test("rankScriptRounds 返回按分数降序的候选，且长度受 topN 限制", () => {
   const ranked = rankScriptRounds("小木小木，启动数据清洗", 3);
   assert.equal(ranked.length, 3);
-  assert.equal(ranked[0].round.roundNo, "⑮");
+  assert.equal(ranked[0].round.roundNo, "⑰");
   for (let i = 0; i + 1 < ranked.length; i += 1) {
     assert.ok(ranked[i].score >= ranked[i + 1].score, "候选没有按分数降序");
   }

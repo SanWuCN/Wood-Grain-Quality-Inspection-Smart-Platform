@@ -235,7 +235,7 @@ test("空输入不抛异常，返回空计划", () => {
  * 「声明的组排不进任何一拍」都必须在这里红掉。
  * ------------------------------------------------------------------ */
 
-test("真实 22 轮：凡声明揭示的组，都必须排得进某一拍（一个都不能落下）", () => {
+test("真实 25 轮：凡声明揭示的组，都必须排得进某一拍（一个都不能落下）", () => {
   type RevealDecl = NonNullable<(typeof SCRIPT_ROUNDS)[number]["reveal"]>;
   const rounds: { roundNo: string; reveal: RevealDecl; text: string }[] = [];
   for (const r of SCRIPT_ROUNDS) {
