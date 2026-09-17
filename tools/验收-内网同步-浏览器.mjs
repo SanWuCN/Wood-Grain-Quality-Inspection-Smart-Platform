@@ -47,6 +47,26 @@ const check = (name, ok, detail) => {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * 截个图存盘（证据图）。判据是数字，但"长什么样"只有图能说明 ——
+ * 用户要看的就是那几行字（在线端数、该念的地址）。
+ */
+const SHOT_DIR = "D:\\平台\\_归档-临时产物-20260917";
+async function shot(send, name) {
+  try {
+    const r = await send("Page.captureScreenshot", { format: "png" });
+    const data = r?.result?.data;
+    if (!data) return null;
+    const { writeFileSync, mkdirSync } = await import("node:fs");
+    mkdirSync(SHOT_DIR, { recursive: true });
+    const file = `${SHOT_DIR}\\内网同步-${name}.png`;
+    writeFileSync(file, Buffer.from(data, "base64"));
+    return file;
+  } catch {
+    return null;
+  }
+}
+
 /* ---------- "另一台机器"：一个独立的 HTTP 客户端（沈） ---------- */
 function machine(account) {
   let token = "";
@@ -304,6 +324,10 @@ try {
     Number(lan?.peers ?? 0) >= 1,
     `读数=${lan?.peers ?? "?"} 台　原文「${String(lan?.text ?? "").slice(0, 60)}…」`,
   );
+  /* 截图前先滚到那一块：这一页在小窗口下是竖向堆叠的，面板在首屏之外 */
+  await evaluate(`document.querySelector('.cs-lan-panel')?.scrollIntoView({ block: 'center' })`);
+  await sleep(400);
+  await shot(send, "1-排练控制台-内网协同");
 } catch (error) {
   console.error(`\n验收中断：${error.message}`);
   fail += 1;
