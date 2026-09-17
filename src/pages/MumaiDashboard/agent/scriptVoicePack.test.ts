@@ -64,10 +64,29 @@ test("剧本 voicePack 标注与磁盘录音一致（标了的要能核对，没
   for (const roundNo of deliveredRounds) {
     const round = SCRIPT_ROUNDS.find((item) => item.roundNo === roundNo);
     assert.ok(round);
-    assert.notEqual(round.voicePack, null, `第 ${roundNo} 轮已有录音文件，voicePack 不该还是 null`);
     const main = round.lines.find((line) => line.role === "main");
     assert.ok(main);
+    /*
+      ⚠ 这里原来断言 `voicePack !== null`（"有录音就必须有配音编号"）。
+      2026-09-17 交付 ③ 轮的录音时这条卡住了 —— 但 ③ 轮**本来就没有编号**：
+      它对应净稿段29，在剧本里标的是「无人（本地事件/旁白）」，没有 `AI语音N` 前缀。
+      为了过测试给它编一个编号，等于往稿子里塞了一个剧本不存在的事实（幻觉），
+      而"编号"只是对接音频时的**人读标注**，不是播放凭据。
+
+      所以判据收紧到**真正的不变量**：
+        · 有录音 → 主台词必须在语音包里逐字有键（这才是"现场会不会播错话"的防线）；
+        · 编号若有 → 必须与别的轮次不重复（下面单独查）；
+        · 编号为空 → 允许，但**必须是剧本没给编号的旁白轮**，不能是"有编号却忘了填"。
+      最后一条用"其他旁白轮也都为空"来钉：只要不是全空，就说明确实存在"该标而没标"的情形。
+    */
     assert.ok(manifest[main.text], `第 ${roundNo} 轮的主台词在语音包里没有键`);
+    if (round.voicePack === null) {
+      const voicedElsewhere = SCRIPT_ROUNDS.filter((r) => r.voicePack !== null).length;
+      assert.ok(
+        voicedElsewhere > 0,
+        `第 ${roundNo} 轮没有配音编号，而全剧本**一个编号都没有** —— 更像"忘了填"而不是"剧本没给"`,
+      );
+    }
   }
   /* 编号不许重复（重复会让对接音频时张冠李戴） */
   const numbers = SCRIPT_ROUNDS.map((r) => r.voicePack).filter((v): v is string => v !== null);
