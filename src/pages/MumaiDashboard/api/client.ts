@@ -129,6 +129,25 @@ export type SceneEntity = {
   publishedAt: string | null;
 };
 
+/**
+ * 内网协同（服务端 /api/sessions/:id/peers）。
+ *
+ * `peers` 是**服务端数的真实连接数**（WebSocket 房间大小，含本机这一台），
+ * `lanUrls` 是服务端从网卡枚举出来的内网地址 —— 两个都不在前端猜，
+ * 现场"别人连上了没有""同事该打开哪个地址"直接照这个念。
+ */
+export type LanPeers = {
+  sessionId: string;
+  /** 本会话房间里现在有几台端连着（含自己） */
+  peers: number;
+  /** 所有会话房间的总连接数（排查用：换过会话时它比 peers 大） */
+  clients: number;
+  /** 同事可直接打开的地址（非回环、非 link-local 的 IPv4） */
+  lanUrls: string[];
+  port: number | null;
+  serverTime: string;
+};
+
 /** 排练控制台的总览（服务端 /api/console/overview） */
 export type RehearsalOverview = {
   currentSessionId: string;
@@ -694,6 +713,15 @@ export const api = {
     return apiRequest<RehearsalOverview>(`/api/console/overview?sessionId=${encodeURIComponent(sessionId)}`);
   },
 
+  /**
+   * 内网协同：本会话有几台端连着 + 同事该打开哪个地址（用户口径 2026-09-17）。
+   * 端数是服务端数的真实 WebSocket 连接数，内网地址由服务端从网卡枚举出来，
+   * 两边都不在前端猜。
+   */
+  sessionPeers(sessionId: string) {
+    return apiRequest<LanPeers>(`/api/sessions/${encodeURIComponent(sessionId)}/peers`);
+  },
+
   /** 新建一场演示会话：新一轮隔离，从开场状态开始 */
   consoleNewSession(scenarioId = "chapter2") {
     return apiRequest<{ session: RehearsalOverview["sessions"][number]; entityCount: number }>(
@@ -1113,6 +1141,12 @@ export function subscribe(
   let lastSeq = 0;
   let retryTimer = 0;
   let pingTimer = 0;
+  let watchdogTimer = 0;
+  /** 最近一次**收到任何消息**的时刻（事件 / hello / pong 都算） */
+  let lastMessageAt = Date.now();
+
+  const STALE_AFTER_MS = 45_000;
+  const PING_EVERY_MS = 15_000;
 
   const url = () => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -1130,13 +1164,36 @@ export function subscribe(
     }
     socket.onopen = () => {
       attempt = 0;
+      lastMessageAt = Date.now();
       handlers.onStatus?.("open");
       // 应用层保活：局域网里空闲连接会被中间设备掐掉
       pingTimer = window.setInterval(() => {
         if (socket?.readyState === WebSocket.OPEN) socket.send("ping");
-      }, 15000);
+      }, PING_EVERY_MS);
+      /*
+        ── 失联自检（2026-09-17 加）─────────────────────────────────────
+        局域网里笔记本休眠、切 Wi-Fi、拔网线之后，TCP 会变成**半开**：
+        浏览器既不报错也不触发 `onclose`，`readyState` 一直显示 OPEN。
+        此时页面收不到任何事件，顶栏却还写着「正常」—— 用户看到的就是
+        「这边改了，那边不动」，与"同步坏了"完全一样。
+
+        所以按"最近一次收到消息"计时：服务端每收到一次 `ping` 就回 `pong`
+        （见 hub.mjs），而客户端每 15 秒发一次；45 秒还一条消息都没有，
+        就说明这条链路已经不通 —— 主动 `close()` 把它推回重连退避，
+        重连时会带上 `afterSeq` 把断线期间的事件补回来（PRD §7）。
+      */
+      watchdogTimer = window.setInterval(() => {
+        if (closed) return;
+        if (Date.now() - lastMessageAt <= STALE_AFTER_MS) return;
+        try {
+          socket?.close();
+        } catch {
+          /* 已经烂掉的 socket，close 抛错也无所谓，下面的 onclose 会兜住 */
+        }
+      }, 10_000);
     };
     socket.onmessage = (raw) => {
+      lastMessageAt = Date.now();
       let message: Record<string, unknown>;
       try {
         message = JSON.parse(String(raw.data));
@@ -1157,6 +1214,7 @@ export function subscribe(
     };
     socket.onclose = () => {
       window.clearInterval(pingTimer);
+      window.clearInterval(watchdogTimer);
       handlers.onStatus?.("closed");
       scheduleRetry();
     };
@@ -1179,6 +1237,7 @@ export function subscribe(
       closed = true;
       window.clearTimeout(retryTimer);
       window.clearInterval(pingTimer);
+      window.clearInterval(watchdogTimer);
       socket?.close();
     },
   };

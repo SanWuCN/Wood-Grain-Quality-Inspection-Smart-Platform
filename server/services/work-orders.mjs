@@ -491,6 +491,23 @@ export function createWorkOrderService({ db, hub = null, devices = null, session
     }
   }
 
+  /**
+   * 流程动作（开始 / 提交验收 / 验收 / 归档 / 暂停 / 恢复）的放行判据。
+   *
+   * 2026-09-17 从"只有项目经理"改成**权限判据**（`workorder:operate`，沈与史都有）：
+   * 用户要求给架构师放开（「shi 账号权限拉满」），而演示里实际在平台上点这些按钮的
+   * 就是架构师。判据必须与 `capabilities()` 里算出来的 `canPause/canResume/…` **同源**，
+   * 否则会出现"按钮亮着、点下去 403"——那是最难排查的一种不一致。
+   */
+  function requireOperator(accountId, action) {
+    if (isProjectManager(accountId) || allows(accountId, "workorder:operate")) return;
+    throw error(
+      403,
+      "FORBIDDEN",
+      `「${action}」需要项目经理或「流程操作」权限（当前账号：${displayLabel(accountId)}）`,
+    );
+  }
+
   function log(orderId, type, text, actorId = null) {
     db.prepare("INSERT INTO work_order_logs (work_order_id, type, text, actor_id, at) VALUES (?,?,?,?,?)").run(
       orderId,
@@ -676,8 +693,22 @@ export function createWorkOrderService({ db, hub = null, devices = null, session
     const duties = dutiesOf(orderId, accountId);
     const assigned = Boolean(assignment) && (assignment.leader_account_id === accountId || duties.size > 0);
     const openStatus = ["待准备", "待作业", "作业中", "待验收"].includes(row.status);
+    /*
+      ── 流程动作的两种放行方式（用户 2026-09-17「shi 权限拉满」）─────────
+      原来这些判据一律写 `manager && …`，于是"项目经理"这一个岗位既是**指派权**、
+      又垄断了运行校验/暂停/恢复/验收/归档。架构师（史）在演示里是实际在操作平台的人，
+      却连"运行环境校验""录环境读数"都点不动。
+
+      现在按 PRD §6.2 的原意分成两条**权限**，而不是两个岗位：
+        · `workorder:operate` —— 流程动作（校验、暂停/恢复/开始/提交/验收/归档）；
+        · `env:entry`         —— 录环境读数（PRD 3.1 的录入这一步）。
+      指派（`canAssign`）仍然**只认 `workorder:assign`**：
+      PRD 明令架构师不得因"全权限"拿到指派权，且演示动线里这一步是项目经理做的。
+    */
+    const operator = manager || allows(accountId, "workorder:operate");
+    const envEntry = manager || duties.has("environment_entry") || allows(accountId, "env:entry");
     return {
-      /* 指派：只有项目经理，且本单未归档 */
+      /* 指派：只有项目经理（= 有 workorder:assign），且本单未归档 */
       canAssign: manager && row.status !== "已归档",
       /*
         删除不设权限：任何已登录账号都能删（产品口径 2026-09-14）。
@@ -685,18 +716,18 @@ export function createWorkOrderService({ db, hub = null, devices = null, session
         为它加一道岗位门槛只会让清场变慢。破坏性由界面的二次确认兜。
       */
       canDelete: true,
-      canViewFull: manager || assigned,
+      canViewFull: manager || assigned || envEntry,
       assigned,
       isLeader: assignment?.leader_account_id === accountId,
-      canEditEnvironment: row.status !== "已归档" && (manager || duties.has("environment_entry")),
-      canValidate: manager && row.status !== "已归档",
+      canEditEnvironment: row.status !== "已归档" && envEntry,
+      canValidate: row.status !== "已归档" && (manager || allows(accountId, "env:validate")),
       canDispatch: row.status !== "已归档" && (manager || duties.has("scanner_dispatch")),
-      canPause: manager && openStatus,
-      canResume: manager && row.status === "已暂停",
-      canStart: manager && row.status === "待作业",
-      canSubmit: manager && row.status === "作业中",
-      canAccept: manager && row.status === "待验收",
-      canArchive: manager && ["待准备", "待作业", "作业中", "待验收", "已暂停"].includes(row.status),
+      canPause: operator && openStatus,
+      canResume: operator && row.status === "已暂停",
+      canStart: operator && row.status === "待作业",
+      canSubmit: operator && row.status === "作业中",
+      canAccept: operator && row.status === "待验收",
+      canArchive: operator && ["待准备", "待作业", "作业中", "待验收", "已暂停"].includes(row.status),
     };
   }
 
@@ -985,7 +1016,7 @@ export function createWorkOrderService({ db, hub = null, devices = null, session
     if (!row) throw error(404, "ORDER_NOT_FOUND", `找不到工单 ${orderId}`);
     const transition = TRANSITIONS[action];
     if (!transition) throw error(422, "BAD_ACTION", `不支持的状态动作 ${action}`);
-    requireManager(actorId, transition.label);
+    requireOperator(actorId, transition.label);
     if (expectedRevision !== null && Number(expectedRevision) !== row.revision) {
       throw error(409, "REVISION_CONFLICT", "工单已变化，请刷新后重试", { retryable: true });
     }
@@ -1104,7 +1135,13 @@ export function createWorkOrderService({ db, hub = null, devices = null, session
     if (row.status === "已归档") throw error(422, "ORDER_ARCHIVED", "已归档工单不能再改环境读数");
     const caps = capabilities(row.id, actorId);
     if (!caps.canEditEnvironment) {
-      throw error(403, "FORBIDDEN", caps.assigned ? "你在本单没有「环境录入」职责" : "尚未指派到此工单");
+      throw error(
+        403,
+        "FORBIDDEN",
+        caps.assigned
+          ? "你在本单没有「环境录入」职责"
+          : "当前账号既没有「环境录入」权限，也没有被指派到本工单（可用项目经理或架构师账号）",
+      );
     }
     const current = draftRow(row.id);
     if (expectedRevision !== null && Number(expectedRevision) !== (current?.revision ?? 0)) {
@@ -1258,11 +1295,16 @@ export function createWorkOrderService({ db, hub = null, devices = null, session
     if (!row) throw error(404, "ORDER_NOT_FOUND", `找不到工单 ${orderId}`);
     const caps = capabilities(row.id, actorId);
     if (!caps.canValidate) {
-      // 本期只有项目经理能运行校验并出版本（PRD §6.2）
+      /*
+        2026-09-17 起判据是**权限**而不是"是不是项目经理"（用户要求给架构师放开）：
+        有 `env:validate` 的账号都能跑校验出版本（沈、史），其余账号仍被挡。
+      */
       throw error(
         403,
         "FORBIDDEN",
-        isProjectManager(actorId) ? "已归档工单不能运行校验" : "本期「运行校验、生成配置版本」只有项目经理可以做",
+        isProjectManager(actorId) || allows(actorId, "env:validate")
+          ? "已归档工单不能运行校验"
+          : "当前账号没有「环境校验」权限，不能生成配置版本",
       );
     }
     const draft = draftRow(row.id);

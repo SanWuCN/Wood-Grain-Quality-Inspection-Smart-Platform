@@ -28,6 +28,15 @@ import { ACCOUNTS, NAV_ITEMS, type Account } from "./design";
  */
 export type Permission =
   /* —— PRD 2.1 沈 · 项目经理：工单与审核 —— */
+  /**
+   * 环境记录录入（PRD 3.1「录入环境记录」）。
+   *
+   * 与「环境校验」分开：录入是**填读数**，校验是**跑判定并出版本**。
+   * 用户口径（2026-09-17）：「我，shi账号下，应该是有权限填写环境记录与
+   * 配置校验录入数据的」—— 架构师要能录数，所以这条权限给沈与史。
+   * 服务端同一份权限名在 `server/services/permissions.mjs`，两边的判据一致。
+   */
+  | "env:entry"
   /** 环境校验（PATCH/POST /checks/environment），通过后生成不可变配置版本 */
   | "env:validate"
   /** 分组检查（POST /checks/group），读取训练/验证/测试的物理样本 ID 求交集 */
@@ -104,6 +113,7 @@ export type Permission =
 
 /** 权限中文名（PRD 用语，用于置灰提示；不带感叹号） */
 export const PERMISSION_LABEL: Record<Permission, string> = {
+  "env:entry": "环境记录录入",
   "env:validate": "环境校验",
   "dataset:groupcheck": "分组检查",
   "evaluation:compare": "新旧评估对比",
@@ -150,8 +160,15 @@ export const ALL_PERMISSIONS: readonly Permission[] = Object.keys(
  * 四个账号的权限集合。
  *
  * 用户要求「项目经理和人工智能架构师权限最大，所有都可以操作」，
- * 因此沈 / 史直接取全量；饶 / 马严格按 PRD 2.1「可执行操作」一列给，
- * 不额外放权。逐条对应关系见每行注释里的 PRD 出处。
+ * 后来（2026-09-17）又明确：「我，shi账号下，应该是有权限填写环境记录与配置校验
+ * 录入数据的，你干脆给我 shi 账号权限拉满得了」。
+ *
+ * 因此沈 / 史在前端持有全量权限，例外只有两条**刻意的**：
+ *   · `scene:submit` / `scene:upload` —— 高斯模型上传只有饶能做（见下）；
+ *   · 指派权不在前端这张表里（它由服务端的 `workorder:assign` 判定，
+ *     架构师没有，PRD §6.2 明令）。
+ * 新增的 `env:entry`（环境记录录入）加进 `PERMISSION_LABEL` 即自动落到沈 / 史头上，
+ * 与「拉满」的口径一致。
  */
 const ROLE_ACTIONS: Record<string, readonly Permission[]> = {
   /*

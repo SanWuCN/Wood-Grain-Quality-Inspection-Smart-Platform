@@ -9,6 +9,7 @@
  */
 
 import { createReadStream, existsSync, statSync } from "node:fs";
+import { networkInterfaces } from "node:os";
 import { extname, join, normalize, resolve } from "node:path";
 import {
   ASSETS_ROOT,
@@ -648,6 +649,56 @@ export function createApi({ db, hub, bridge, devices = null, workOrders = null, 
     const session = requireSession(ctx.query.sessionId);
     const afterSeq = Number(ctx.query.afterSeq ?? 0);
     return { sessionId: session.id, events: eventsSince(db, session.id, afterSeq), lastSeq: session.lastSeq };
+  });
+
+  /**
+   * 内网协同：这个会话现在有几台端连着 + 同事该用哪个地址打开。
+   *
+   * ── 为什么要有这个接口（用户口径 2026-09-17「完善平台内网同步」）──────
+   * 多机演示有两件事只在页面上问得出来、在命令行里问不出来：
+   *   1. **「别人连上了没有」** —— 现场最常见的疑问。端数是服务端数的**真实连接数**
+   *      （`hub.peerCount`，WebSocket 房间大小），不是前端估的；
+   *   2. **「同事该打开哪个地址」** —— 内网 IP 换个网络就可能变，
+   *      让用户去 `ipconfig` 里翻是最容易念错的一步。
+   *
+   * ── 地址要挑，不能把网卡全列出来（实测踩到）─────────────────────────
+   * 这台机器上 IPv4 有八条，其中五条是**虚拟网卡**：VPN 隧道（198.18/26.x）、
+   * 以太网 2 与 VirtualBox Host-Only（169.254 自动私有地址）、VMware VMnet1/8
+   * （192.168.62/75）。全列出来用户根本不知道念哪一个。
+   * 所以按两条过滤：① 只保留**私有网段**（10/8、172.16/12、192.168/16）——
+   * 公网与隧道地址本来也不是"内网地址"；② 按网卡名排掉明显是虚拟交换机的
+   * （VMware / VirtualBox / Hyper-V / VPN / Radmin / ZeroTier / Tailscale / Docker / WSL…）。
+   * 过滤结果为空时**如实返回空数组**，由页面说明"这一台没读到内网地址"，
+   * 不拿一个可能是错的地址糊上去。
+   */
+  const VIRTUAL_ADAPTER_RE =
+    /vmware|virtualbox|vbox|hyper-?v|vethernet|loopback|bluetooth|radmin|zerotier|tailscale|hamachi|ikuuu|vpn|tap|tun|docker|wsl|npcap|virtual/i;
+  const isPrivateIpv4 = (address) =>
+    /^10\./.test(address) ||
+    /^192\.168\./.test(address) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(address);
+
+  route("GET", "/api/sessions/:id/peers", async (ctx) => {
+    const session = requireSession(ctx.params.id);
+    const port = ctx.req?.socket?.localPort ?? null;
+    const lanUrls = [];
+    for (const [name, list] of Object.entries(networkInterfaces())) {
+      if (VIRTUAL_ADAPTER_RE.test(name)) continue;
+      for (const item of list ?? []) {
+        if (!item || item.family !== "IPv4" || item.internal) continue;
+        if (!isPrivateIpv4(item.address)) continue;
+        lanUrls.push(port ? `http://${item.address}:${port}` : `http://${item.address}`);
+      }
+    }
+    return {
+      sessionId: session.id,
+      /* 这个房间里的 WebSocket 连接数 = 现在开着页面的端数（含本机这一台） */
+      peers: hub.peerCount(session.id),
+      clients: hub.clientCount(),
+      lanUrls,
+      port,
+      serverTime: new Date().toISOString(),
+    };
   });
 
   /* ---- 命令总线（PRD §12 /api/commands） ---- */

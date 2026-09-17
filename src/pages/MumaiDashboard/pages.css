@@ -4983,6 +4983,63 @@
   scrollbar-width: thin;
 }
 
+/*
+  内网协同横跨一整行：它是"给别人念的信息"（地址、在线端数），
+  挤进三列里会换行折断地址，反而念不清。
+*/
+.page--console .cs-layout > .cs-lan-panel {
+  grid-column: 1 / -1;
+}
+
+.cs-lan {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.cs-lan li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.cs-lan li > b {
+  flex: none;
+  min-width: 108px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.cs-lan li > span {
+  min-width: 0;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.cs-lan li em {
+  color: var(--text-tertiary);
+  font-style: normal;
+}
+
+.cs-lan__url {
+  margin-right: 8px;
+  padding: 1px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: rgba(78, 168, 255, 0.1);
+  color: var(--text-accent);
+  font: inherit;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  cursor: pointer;
+}
+
+.cs-lan__url:hover {
+  background: rgba(78, 168, 255, 0.2);
+}
+
 .cs-sessions,
 .cs-snapshots,
 .cs-preflight {

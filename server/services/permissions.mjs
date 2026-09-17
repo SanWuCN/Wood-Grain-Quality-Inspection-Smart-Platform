@@ -95,13 +95,58 @@ const CONSOLE_PERMISSIONS = ["console:admin"];
  */
 const WORK_ORDER_PERMISSIONS = ["workorder:assign", "workorder:operate"];
 
+/*
+ * 环境录入（PRD 3.1 的"录入环境记录"这一步）。
+ *
+ * ── 为什么单列一个权限（用户 2026-09-17 口径）────────────────────────
+ * 用户原话：「我，shi账号下，应该是有权限填写环境记录与配置校验录入数据的，
+ * 你干脆给我shi账号权限拉满得了」。
+ *
+ * 原来能不能录环境读数是**按岗/按单**判的（`work-orders.mjs` 的
+ * `manager || duties.has("environment_entry")`）：人工智能架构师既不是负责人、
+ * 默认职责里也没有「环境录入」，于是他在工单页看到的是灰掉的录入表单 ——
+ * 而 PRD 的岗位表里，环境数据本来就是"现场谁先到谁先录"的一件事。
+ *
+ * 现在把它写成一条**明确的平台权限**（而不是再往职责字典里塞一条）：
+ * 有 `env:entry` 就能录数、有 `env:validate` 就能跑校验出版本，
+ * 与"是不是项目经理""有没有被指派"解耦。沈、史各拿一条，饶仍然只有 `env:ack`
+ * （接收配置），马没有 —— 与 PRD 2.1 的可执行操作列一致。
+ */
+const ENV_ENTRY_PERMISSION = ["env:entry"];
+
 export const ROLE_PERMISSIONS = {
-  // 沈：项目经理。全量业务权限 + 工单指派权
+  // 沈：项目经理。全量业务权限 + 工单指派权 + 环境录入
   shen: [
-    ...new Set([...ALL_BUT_UPLOAD, ...ARCHIVE_PERMISSIONS, ...CONSOLE_PERMISSIONS, ...KNOWLEDGE_PERMISSIONS, ...WORK_ORDER_PERMISSIONS]),
+    ...new Set([
+      ...ALL_BUT_UPLOAD,
+      ...ARCHIVE_PERMISSIONS,
+      ...CONSOLE_PERMISSIONS,
+      ...KNOWLEDGE_PERMISSIONS,
+      ...WORK_ORDER_PERMISSIONS,
+      ...ENV_ENTRY_PERMISSION,
+    ]),
   ],
-  // 史：人工智能架构师。权限最大，但**不含**工单指派权（PRD §6.2）
-  shi: [...new Set([...ALL_BUT_UPLOAD, ...ARCHIVE_PERMISSIONS, ...CONSOLE_PERMISSIONS, ...KNOWLEDGE_PERMISSIONS])],
+  /*
+    史：人工智能架构师。**除指派权与模型上传外全给**（用户 2026-09-17「拉满」）：
+      · 加上 `workorder:operate` —— 运行环境校验、暂停/恢复/验收/归档这些流程动作，
+        架构师在演示里是实际在操作平台的人（`work-orders.mjs` 的 capabilities
+        按这条权限放行）；
+      · 加上 `env:entry` —— 录环境读数（本次诉求的原话）；
+      · 仍然**不给** `workorder:assign`：PRD §6.2 明令「人工智能架构师、管理员或
+        小木智能体不能因为现有『全权限』集合而获得指派权」，而且演示动线里
+        "别人那边选择人员调度"正是由项目经理做的，给了反而看不到协同。
+      · 仍然**不给** `scene:submit` / `scene:upload`：高斯模型上传只有全栈开发工程师能做。
+  */
+  shi: [
+    ...new Set([
+      ...ALL_BUT_UPLOAD,
+      ...ARCHIVE_PERMISSIONS,
+      ...CONSOLE_PERMISSIONS,
+      ...KNOWLEDGE_PERMISSIONS,
+      "workorder:operate",
+      ...ENV_ENTRY_PERMISSION,
+    ]),
+  ],
   rao: [
     "env:ack",
     "scan:capture",

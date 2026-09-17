@@ -136,6 +136,16 @@ export function createHub({ server, db, path = "/ws", noServer = false }) {
       return total;
     },
     /**
+     * 某个会话房间里有几台端连着。
+     *
+     * 为什么要单独给"每房间"的数：多机演示时用户要能看见
+     * 「我这台 + 另外几台都连上了没有」。总数（`clientCount`）会把别的会话房间
+     * 也算进来，换会话之后看着像"人都到齐了"其实没有。
+     */
+    peerCount(sessionId) {
+      return rooms.get(sessionId)?.size ?? 0;
+    },
+    /**
      * 由 index.mjs 的 upgrade 路由调用。
      * 不是本通道的路径 **原样退回**（不写响应、不销毁 socket），交给下一个通道；
      * 是本通道才真正完成握手。

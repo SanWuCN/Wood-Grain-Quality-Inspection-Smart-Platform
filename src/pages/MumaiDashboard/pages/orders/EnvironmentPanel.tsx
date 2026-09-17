@@ -182,16 +182,19 @@ export function EnvironmentPanel({
               ? "录入四项读数与测量信息"
               : detail.capabilities.assigned
                 ? "你在本单没有「环境录入」职责"
-                : "尚未指派到此工单"
+                : "当前账号没有「环境记录录入」权限（项目经理与架构师都有）"
           }
           onClick={() => setOpen(true)}>
           录入读数
         </Btn>
-        {/* PRD §6.2：本期只有项目经理能运行校验并生成配置版本 */}
+        {/*
+          校验的判据是**权限**（`env:validate`）而不是岗位：沈、史都有，
+          所以文案不再写"只有项目经理"（2026-09-17 用户要求给架构师放开）。
+        */}
         <Btn
           tone="primary"
           disabled={!canValidate || busy}
-          title={canValidate ? "运行校验并生成配置版本" : "只有项目经理可以运行校验"}
+          title={canValidate ? "运行校验并生成配置版本" : "当前账号没有「环境校验」权限"}
           onClick={() => void runValidate()}>
           运行校验
         </Btn>

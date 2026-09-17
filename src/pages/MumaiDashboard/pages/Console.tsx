@@ -19,16 +19,20 @@ import { useCallback, useEffect, useState } from "react";
 import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import { Btn, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
-import { api, isApiError, type RehearsalOverview } from "../api/client";
+import { api, isApiError, type LanPeers, type RehearsalOverview } from "../api/client";
 import { isOnline, useSharedStore } from "../store/shared";
 import { useMumai } from "../context";
 import { actorName } from "../api/accounts";
+
+/** 内网端数多久读一次：它是本页唯一会"自己变"的读数（别人开关页面） */
+const PEERS_POLL_MS = 10000;
 
 export default function Console() {
   const { toast } = useMumai();
   const online = useSharedStore(isOnline);
   const currentSessionId = useSharedStore((state) => state.sessionId);
   const [overview, setOverview] = useState<RehearsalOverview | null>(null);
+  const [peers, setPeers] = useState<LanPeers | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [stage, setStage] = useState("P11");
   const [label, setLabel] = useState("");
@@ -42,9 +46,40 @@ export default function Console() {
     }
   }, [currentSessionId, online]);
 
+  /**
+   * 读内网协同信息：本会话有几台端连着 + 同事该打开哪个地址。
+   *
+   * ⚠ 这一条是本页**唯一**的轮询（10 秒一次，一个极小的 GET）：
+   *   端数是"别人开关页面"这件事的读数，不轮询就永远是打开本页那一刻的快照，
+   *   而它恰恰是多机演示里最需要眼见为实的一格。其余面板仍然只在
+   *   首次读取与动作之后更新。
+   */
+  const refreshPeers = useCallback(async () => {
+    if (!online) {
+      setPeers(null);
+      return;
+    }
+    try {
+      setPeers(await api.sessionPeers(currentSessionId));
+    } catch {
+      setPeers(null);
+    }
+  }, [currentSessionId, online]);
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    void refreshPeers();
+    const timer = window.setInterval(() => void refreshPeers(), PEERS_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [refreshPeers]);
+
+  /** 「重新读取」把两类读数一起刷新（端数平时自己轮询，不必等按钮） */
+  const refreshAll = useCallback(async () => {
+    await Promise.all([refresh(), refreshPeers()]);
+  }, [refresh, refreshPeers]);
 
   /** 统一包一层：忙态、错误提示、成功后重拉，避免三处各写一遍 */
   const run = useCallback(
@@ -118,7 +153,7 @@ export default function Console() {
         <Btn disabled={!online || busy !== null} onClick={() => void exportDiagnostics()}>
           {busy === "diagnostics" ? "导出中…" : "导出诊断包"}
         </Btn>
-        <Btn disabled={!online || busy !== null} onClick={() => void refresh()}>
+        <Btn disabled={!online || busy !== null} onClick={() => void refreshAll()}>
           重新读取
         </Btn>
       </Toolbar>
@@ -227,6 +262,68 @@ export default function Console() {
           ) : (
             <StateBlock kind="empty" title="尚未读取预检" />
           )}
+        </Panel>
+
+        {/*
+          ── 内网协同（用户口径 2026-09-17「完善平台内网同步」）──────────
+          多机演示现场只问两件事：「别人连上了没有」「同事该打开哪个地址」。
+          这两件都从服务端读（`/api/sessions/:id/peers`）：端数是 WebSocket
+          房间里的真实连接数，地址是服务端从网卡枚举出来的内网 IPv4。
+          刻意不写死 IP，也不去猜端数 —— 现场念错一个数字就要多排查一轮。
+        */}
+        <Panel
+          title="内网协同"
+          className="cs-lan-panel"
+          extra={
+            peers ? (
+              <StatusChip
+                text={`${peers.peers} 台在线`}
+                tone={peers.peers > 1 ? "ok" : "warn"}
+              />
+            ) : (
+              <StatusChip text="未读取" tone="muted" />
+            )
+          }>
+          <ul className="cs-lan">
+            <li>
+              <b>本会话在线端数</b>
+              <span>
+                <NumberAnimation value={peers?.peers ?? 0} /> 台
+                {peers && peers.peers <= 1 ? "（只有本机；同事打开下面的地址后这里会加上去）" : ""}
+              </span>
+            </li>
+            <li>
+              <b>同事打开这个地址</b>
+              <span>
+                {peers?.lanUrls.length ? (
+                  peers.lanUrls.map((url) => (
+                    <button
+                      key={url}
+                      type="button"
+                      className="cs-lan__url"
+                      title="点一下复制"
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(url).then(
+                          () => toast(`已复制 ${url}`, "ok"),
+                          () => toast("复制失败，请手动选中这段地址", "warn"),
+                        );
+                      }}>
+                      {url}
+                    </button>
+                  ))
+                ) : (
+                  <em>这一台没读到内网地址（可能没连局域网）</em>
+                )}
+              </span>
+            </li>
+            <li>
+              <b>实时通道</b>
+              <span>
+                {online ? "正常 · 新工单与调度会自己出现，无需刷新" : "未连接共享服务"}
+                {peers ? `（会话 ${peers.sessionId}）` : ""}
+              </span>
+            </li>
+          </ul>
         </Panel>
       </div>
     </div>
