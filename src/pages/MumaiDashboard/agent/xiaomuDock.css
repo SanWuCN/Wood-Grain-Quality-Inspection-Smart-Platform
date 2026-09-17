@@ -1098,3 +1098,64 @@
   .xd { opacity: 1; transform: none; }
 }
 
+
+/* ------------------------------------------------------------------ *
+ * 快捷键一览（气泡底部；用户口径 2026-09-17「别人内网登上去也得能用快捷键」）
+ *
+ * 理由与数据源见 `XiaomuDock.tsx` 的那段注释：键位表原来只存在于代码与主机上
+ * 的一份 md 里，内网另一台机器登进来的人看不到。这里是它在界面上的落点。
+ * 25 行要能一屏翻完，所以行高压到最小、键位与轮次一行、怎么说另起一行。
+ * ------------------------------------------------------------------ */
+
+.xd__keys-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border-subtle, rgba(78, 168, 255, 0.12));
+}
+
+.xd__keys {
+  margin: 0;
+  padding: 0 0 0 2px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* 25 行列表在气泡里滚动，不把气泡撑长 */
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.xd__keys li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  padding: 3px 0;
+  border-bottom: 1px dashed rgba(78, 168, 255, 0.08);
+  font-size: 12px;
+}
+
+.xd__keys li:last-child {
+  border-bottom: none;
+}
+
+.xd__keys b {
+  grid-row: span 2;
+  align-self: start;
+  min-width: 76px;
+  color: var(--text-accent, #70c4ff);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-weight: 600;
+}
+
+.xd__keys-round {
+  color: var(--text-secondary, #aabbd0);
+}
+
+.xd__keys-how {
+  grid-column: 2;
+  color: var(--text-tertiary, #70849c);
+  line-height: 1.35;
+}

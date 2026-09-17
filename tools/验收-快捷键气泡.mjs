@@ -443,6 +443,63 @@ try {
   check("点确认后按钮禁用（不会重复确认）", afterClick?.btnDisabled === true, `disabled=${afterClick?.btnDisabled}`);
 
   await evaluate(`window.__probe = undefined; window.__probeSync = undefined; window.__probeAlert = undefined`);
+
+  /* ---------- ⑦ 气泡里的「快捷键一览」（别人在内网机器上得看得到这张表）----------
+     用户口径 2026-09-17：「小木呢，别人内网登上去也得能用快捷键呼唤出来相应对话」。
+     快捷键本身在任何机器上都好使（本脚本就是证明），缺的是"别人怎么知道按哪个键" ——
+     所以气泡里必须有一张从剧本生成的表，且内网 http 打开时要如实说明麦克风用不了。
+  */
+  const isLoopback = /^(127\.0\.0\.1|localhost)$/i.test(new URL(PAGE).hostname);
+  const openedSheet = await evaluate(`(() => {
+    /* 面板没开就先点形象展开（前面几段结束时应该还开着，这里只做兜底） */
+    if (!document.querySelector('.xd__panel')) {
+      const avatar = document.querySelector('.xd__avatar');
+      if (avatar) avatar.click();
+    }
+    const btn = [...document.querySelectorAll('.xd__fold-btn')].find((b) =>
+      (b.textContent || '').includes('快捷键一览'),
+    );
+    if (btn && btn.getAttribute('aria-expanded') !== 'true') btn.click();
+    return Boolean(btn);
+  })()`);
+  await sleep(400);
+  const sheet = await evaluate(`(() => {
+    const list = document.querySelector('.xd__keys');
+    const items = list ? [...list.querySelectorAll('li')] : [];
+    const note = document.querySelector('.xd__keys-wrap .xd__note');
+    return {
+      found: Boolean(list),
+      count: items.length,
+      first: (items[0]?.querySelector('b')?.textContent || '').trim(),
+      last: (items[items.length - 1]?.querySelector('b')?.textContent || '').trim(),
+      note: note ? (note.textContent || '').replace(/\\s+/g, ' ').trim() : '',
+    };
+  })()`);
+  check("气泡里能找到「快捷键一览」入口", openedSheet);
+  check(
+    "一览表列出全部 25 条（任何机器都看得到键位）",
+    Boolean(sheet?.found) && sheet.count === 25,
+    `${sheet?.count ?? 0} 条`,
+  );
+  check(
+    "首尾键位对得上（Ctrl+M+1 … Ctrl+M+S）",
+    sheet?.first === "Ctrl+M+1" && sheet?.last === "Ctrl+M+S",
+    `${sheet?.first ?? "?"} … ${sheet?.last ?? "?"}`,
+  );
+  if (isLoopback) {
+    check(
+      "本机（localhost）不显示麦克风受限提示（能用就不吓人）",
+      !String(sheet?.note ?? "").includes("麦克风"),
+      sheet?.note ? `却显示了「${sheet.note.slice(0, 30)}…」` : "没有提示",
+    );
+  } else {
+    check(
+      "内网 http 打开时如实说明麦克风用不了（而不是让人以为小木坏了）",
+      String(sheet?.note ?? "").includes("麦克风"),
+      sheet?.note ? `提示「${sheet.note.slice(0, 40)}…」` : "没有任何提示",
+    );
+  }
+  await shot(send, "5-气泡里的快捷键一览");
 } finally {
   chrome.kill();
 }

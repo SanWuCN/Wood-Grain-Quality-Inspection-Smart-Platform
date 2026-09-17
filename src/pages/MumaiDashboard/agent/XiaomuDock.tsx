@@ -29,6 +29,8 @@ import { closeAgent, hasForeignModal, nextInteractionId } from "./api";
 import { stableNote, WAKE_REPLY_TEXT } from "./degrade";
 import { useAgentNavigate, useAgentSession } from "./agentSession";
 import { getAgentState, resolveConfirm, setAgent, subscribeAgent } from "./store";
+import { microphoneSupported } from "./asr";
+import { shortcutSheetRows } from "./shortcutSheet";
 import { wakeChannel, type WakeSnapshot } from "./wakeChannel";
 import { buildReplyView, latestBotTurn, latestUserText, type ReplyView } from "./replyView";
 import { VoiceOutput } from "./tts";
@@ -105,6 +107,24 @@ export default function XiaomuDock() {
   const [factsOpen, setFactsOpen] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [openSource, setOpenSource] = useState<string | null>(null);
+  /** 快捷键一览展开态（默认收起：它是说明书，不是每次都要看） */
+  const [keysOpen, setKeysOpen] = useState(false);
+  /*
+    一览表的行只在挂载时算一次：它来自剧本与条目表（编译期常量），运行时不会变。
+    `useMemo` 而不是每次渲染都调，是因为它内部会做一致性校验（对不上会抛错），
+    每渲染一次跑一遍校验没有意义。
+  */
+  const sheetRows = useMemo(() => shortcutSheetRows(), []);
+  /**
+   * 麦克风是否可用（= 浏览器是否处于安全上下文）。
+   *
+   * 同事用 `http://192.168.x.x:8000` 打开时 `navigator.mediaDevices` 是 undefined，
+   * 唤醒与语音输入都用不了 —— 那时候要把话说清楚，并把快捷键指给他。
+   * 在 `useEffect` 里读而不是直接读：这是一个只在浏览器里存在的全局，
+   * 服务端渲染/首帧读到 undefined 会让提示闪一下。
+   */
+  const [micOk, setMicOk] = useState(true);
+  useEffect(() => setMicOk(microphoneSupported()), []);
 
   useEffect(() => wakeChannel().subscribe(setWake), []);
 
@@ -863,6 +883,45 @@ export default function XiaomuDock() {
             </button>
             <span className="xd__hint">两遍「小木小木」 → 停一下 → 说命令</span>
           </footer>
+
+          {/*
+            ── 快捷键一览（用户口径 2026-09-17）─────────────────────────
+            「小木呢，别人内网登上去也得能用快捷键呼唤出来相应对话」。
+            键位表原来只在代码和主机上的一份 md 里，内网另一台机器登进来的人看不到，
+            于是"能用"变成"不会用"。这里把表放进气泡：任何机器、任何账号都看得到，
+            数据源是条目表 + 剧本（`shortcutSheet.ts`），不手抄一行字。
+
+            ⚠ 麦克风那行是**必须说的实话**：浏览器只在 https 或 localhost 下暴露
+              `navigator.mediaDevices`，同事用内网 IP + http 打开时唤醒是用不了的，
+              不写清楚就会被当成"小木坏了"。
+          */}
+          <div className="xd__keys-wrap">
+            <button
+              type="button"
+              className="xd__fold-btn"
+              aria-expanded={keysOpen}
+              onClick={() => setKeysOpen((value) => !value)}
+            >
+              快捷键一览 · {sheetRows.length} 条（Ctrl+M）{keysOpen ? "▾" : "▸"}
+            </button>
+            {!micOk ? (
+              <p className="xd__note">
+                本机浏览器不允许用麦克风（内网 http 的安全限制，只有本机 localhost 或 https 才行）——
+                唤醒与语音输入在这台机器上用不了；上面这张表里的快捷键**照样能唤出每一轮对话**。
+              </p>
+            ) : null}
+            {keysOpen ? (
+              <ol className="xd__keys">
+                {sheetRows.map((row) => (
+                  <li key={row.index}>
+                    <b>{row.keys}</b>
+                    <span className="xd__keys-round">{row.round}</span>
+                    <span className="xd__keys-how">{row.how}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+          </div>
         </section>
       ) : null}
 
