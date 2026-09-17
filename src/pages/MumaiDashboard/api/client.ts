@@ -700,6 +700,27 @@ export const api = {
   },
 
   /**
+   * 设备链路自检（用户 2026-09-22 给的「设备接入交接包」）。
+   *
+   * 判据在服务端算（既有服务里现取事实），这里只取结论 ——
+   * 页面（硬件详情 → 设备接入）与小木的回答读的是**同一份**结论。
+   */
+  deviceReadiness() {
+    return apiRequest<{
+      generatedAt: string;
+      counts: { ok: number; fail: number; warn: number };
+      exitCode: 0 | 1;
+      verdict: "ok" | "fail";
+      sections: {
+        key: string;
+        title: string;
+        items: { level: "ok" | "fail" | "warn"; title: string; detail?: string; hints?: string[] }[];
+      }[];
+      configs: { key: string; file: string; present: boolean; placeholder: boolean; purpose: string; env: string }[];
+    }>("/api/device-readiness");
+  },
+
+  /**
    * 归档完整性校验（PRD §12 / 评审 F11）。
    *
    * 服务端逐项流式读文件字节重算 SHA-256，再与清单登记值比 ——

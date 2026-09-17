@@ -796,6 +796,35 @@ export const INTENTS: Intent[] = [
     },
     action: { tool: "get_robot_status", params: {} },
   },
+  {
+    id: "device_link_check",
+    name: "自检设备链路",
+    type: "QUERY",
+    examples: [
+      "为什么看不到小车",
+      "小车连上了吗",
+      "设备接好了吗",
+      "看不到扫描仪画面",
+      "设备链路自检",
+      "扫描仪连上了吗",
+      "小车画面怎么是黑的",
+      "链路自检一下",
+    ],
+    slots: [],
+    /*
+      这一条问的是「设备接没接上」，不是「设备读数是多少」（后者是 device_status）。
+      答案里的每个事实都来自服务端的自检结论（/api/device-readiness）——
+      与「硬件详情 → 设备接入」那一页读的是同一份，现场两处不会各说一套。
+    */
+    response: {
+      text: "设备链路自检：{linkVerdict}（{linkCounts}）。小车：{cartLine}；扫描仪：{deviceLine}。配置：{configLine}。下一步：{fixHint}",
+      alternatives: [
+        "{linkVerdict} —— 小车侧 {cartLine}；终端侧 {deviceLine}。先办这一件：{fixHint}",
+      ],
+      facts: ["linkVerdict", "linkCounts", "cartLine", "deviceLine", "configLine", "fixHint"],
+    },
+    action: { tool: "get_device_link_status", params: {} },
+  },
 ];
 
 /* ------------------------------------------------------------------ *

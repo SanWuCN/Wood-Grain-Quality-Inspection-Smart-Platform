@@ -55,6 +55,8 @@ const EXAMPLE_PICKS: { intentId: string; example: string }[] = [
   { intentId: "view_four_pillars", example: "查看四柱状态" },
   { intentId: "view_echo", example: "查看回波" },
   { intentId: "device_status", example: "小车现在电量多少" },
+  /* 问"设备接没接上"而不是"读数多少"：答案来自 /api/device-readiness 的自检结论 */
+  { intentId: "device_link_check", example: "为什么看不到小车" },
   { intentId: "view_batch", example: "查看复扫批次" },
   { intentId: "site_weather", example: "查近三个月天气" },
   { intentId: "history_summary", example: "查今年五月示例寺巡检" },

@@ -31,6 +31,7 @@ import {
   WAVEFORMS,
 } from "../seed/scenario";
 import { requestMapMode, useDashboardStore } from "../map/store";
+import { api } from "../api/client";
 import { formatDistance, routeDistance } from "./lib/geo";
 import { defaultPillar, normalizePillar, resolvePillar } from "./lib/entities";
 import type { EntityBag } from "./types";
@@ -465,6 +466,63 @@ export const TOOLS: ToolDef[] = [
           missionState: live.missionState,
         },
       };
+    },
+  },
+  {
+    name: "get_device_link_status",
+    label: "自检设备链路",
+    description:
+      "问平台自己的设备链路自检：小车（平台→小车）与手持扫描仪（设备→平台）通不通、三份本地配置缺哪一份。" +
+      "判据与交接包的 smoke-devices.sh 同一套，只是从服务内部取数（/api/device-readiness）。",
+    parameters: { type: "object", properties: {}, required: [] },
+    risk: 0,
+    requireConfirmation: false,
+    run: async () => {
+      /*
+        这一步是**只读自检**：把服务端算好的结论读回来，不在这里另算一套阈值 ——
+        页面（硬件详情 → 设备接入）与小木的回答必须是同一份结论，否则现场两处对不上。
+      */
+      try {
+        const report = await api.deviceReadiness();
+        const items = report.sections.flatMap((section) => section.items.map((item) => ({ ...item, section: section.title })));
+        const failures = items.filter((item) => item.level === "fail");
+        const cartFail = failures.find((item) => item.section.includes("小车"));
+        const deviceFail = failures.find((item) => item.section.includes("扫描仪") || item.section.includes("终端"));
+        const missing = report.configs.filter((config) => !config.present || config.placeholder);
+
+        return {
+          ok: true,
+          summary:
+            report.verdict === "ok"
+              ? "设备链路自检通过：小车与扫描仪两条链路都在"
+              : `设备链路自检：${report.counts.fail} 项失败 —— ${failures.map((item) => item.title).join("；")}`,
+          facts: {
+            linkVerdict: report.verdict === "ok" ? "两条链路都在" : `${report.counts.fail} 项失败`,
+            cartLine: cartFail ? cartFail.title : "小车链路正常",
+            deviceLine: deviceFail ? deviceFail.title : "扫描仪链路上报正常",
+            configLine: missing.length
+              ? `缺 ${missing.map((config) => config.file.replace("server/data/", "")).join("、")}`
+              : "三份本地配置都在",
+            fixHint: failures[0]?.hints?.[0] ?? "无需处理",
+            linkCounts: `通过 ${report.counts.ok} · 提醒 ${report.counts.warn} · 失败 ${report.counts.fail}`,
+          },
+        };
+      } catch (error) {
+        /* 自检接口拿不到就如实说，不编一个"都正常"；事实键给全，回复模板才渲染得出来 */
+        const message = `读不到设备链路自检结果（${error instanceof Error ? error.message : "接口异常"}）`;
+        return {
+          ok: false,
+          summary: message,
+          facts: {
+            linkVerdict: "读不到自检结果",
+            linkCounts: "—",
+            cartLine: "未自检",
+            deviceLine: "未自检",
+            configLine: "未自检",
+            fixHint: "确认后端在跑（node server/index.mjs --static dist），再问一次",
+          },
+        };
+      }
     },
   },
   {

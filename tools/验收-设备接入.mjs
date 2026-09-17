@@ -365,6 +365,80 @@ try {
     summary.notes.find((t) => /smoke-devices\.sh/.test(t) && /验收-设备接入\.mjs/.test(t))?.slice(0, 130) ?? "—",
   );
 
+  /* ---------- 小木能不能回答「为什么看不到小车」 ---------- */
+  /*
+    走**真实的唤醒事件**（mumai:xiaomu-ask，生产构建里也注册着），
+    不用 window.__mumaiAsk —— 那个只在 DEV 构建里存在。
+  */
+  await evaluate(`(() => {
+    window.dispatchEvent(new CustomEvent('mumai:xiaomu-ask', {
+      detail: { question: '为什么看不到小车', interactionId: 'e2e-device-link-' + Date.now() },
+    }));
+    return true;
+  })()`);
+
+  let answer = null;
+  for (let i = 0; i < 100; i += 1) {
+    answer = await evaluate(`(() => {
+      const dock = document.querySelector('.xd__panel');
+      if (!dock) return null;
+      return {
+        intent: dock.querySelector('.xd__intent')?.textContent.replace(/\\s+/g, ' ').trim() ?? '',
+        text: dock.querySelector('.xd__answer')?.textContent.replace(/\\s+/g, ' ').trim() ?? '',
+        fold: dock.querySelector('.xd__fold-btn')?.textContent.replace(/\\s+/g, ' ').trim() ?? '',
+        state: dock.querySelector('.xd__state')?.textContent.trim() ?? '',
+      };
+    })()`);
+    if (answer?.text) break;
+    await sleep(400);
+  }
+
+  /* 业务事实表默认折叠（渐进披露）：点开再读，否则读到的是空 */
+  const facts = await evaluate(`(() => {
+    const dock = document.querySelector('.xd__panel');
+    const btn = [...(dock?.querySelectorAll('.xd__fold-btn') ?? [])].find((el) => el.textContent.includes('业务状态'));
+    if (btn && btn.getAttribute('aria-expanded') !== 'true') btn.click();
+    return true;
+  })()`);
+  await sleep(400);
+  const factRows = await evaluate(`(() => {
+    const dock = document.querySelector('.xd__panel');
+    return [...(dock?.querySelectorAll('.xd__facts > div') ?? [])].map((row) => ({
+      key: row.querySelector('dt')?.textContent.trim() ?? '',
+      value: row.querySelector('dd')?.textContent.replace(/\\s+/g, ' ').trim() ?? '',
+    }));
+  })()`);
+
+  check(
+    "小木按真实唤醒链路答「为什么看不到小车」",
+    Boolean(answer?.text),
+    answer?.text ? answer.text.slice(0, 120) : `没等到回答（气泡状态：${answer?.state ?? "无气泡"}）`,
+  );
+  check(
+    "命中的是设备链路的自检意图（不是设备读数那条）",
+    /device_link_check/.test(answer?.intent ?? ""),
+    answer?.intent ?? "—",
+  );
+  check(
+    "答案里的数与自检接口一致（同一份结论）",
+    Boolean(answer?.text) && answer.text.includes(`${readiness?.counts?.fail} 项失败`),
+    `接口 counts.fail=${readiness?.counts?.fail} · 回答「${(answer?.text ?? "").match(/\d+ 项失败/)?.[0] ?? "无"}」`,
+  );
+  check(
+    "答案给出下一步怎么修（改哪个文件 / 重启什么），不是只说「没接上」",
+    /server\/data\/cart\.json|MUMAI_CART_URL|重启后端|platform_url/.test(answer?.text ?? ""),
+    (answer?.text ?? "").slice(-90),
+  );
+  check(
+    "业务状态表默认折叠，点开后 6 项事实齐（判定 / 计数 / 小车 / 终端 / 配置 / 修法）",
+    facts === true &&
+      answer?.fold.includes("业务状态 6 项") === true &&
+      ["linkVerdict", "linkCounts", "cartLine", "deviceLine", "configLine", "fixHint"].every((key) =>
+        factRows.some((row) => row.key === key && row.value.length > 0),
+      ),
+    `${answer?.fold ?? "—"} · ${factRows.map((row) => `${row.key}=${row.value.slice(0, 20)}`).join(" | ")}`,
+  );
+
   try {
     /* 等页面停稳再截图：断言时内容已在 DOM 里，但整页装载动画可能还盖在上面 */
     await sleep(1800);

@@ -297,6 +297,21 @@ export const EXAMPLE_ROWS: { id: string; examples: string[] }[] = [
     ],
   },
   {
+    /* 新增对话「自检设备链路」（用户 2026-09-22 给的设备接入交接包）：
+       与 agent/intents.ts 的 device_link_check 逐条一致（8 条），必须同步后再跑标定 */
+    id: "device_link_check",
+    examples: [
+      "为什么看不到小车",
+      "小车连上了吗",
+      "设备接好了吗",
+      "看不到扫描仪画面",
+      "设备链路自检",
+      "扫描仪连上了吗",
+      "小车画面怎么是黑的",
+      "链路自检一下",
+    ],
+  },
+  {
     /* 新增对话「小木自我介绍」：与 agent/intents.ts 的
        INTRODUCE_SELF_EXAMPLES 逐条一致（8 条），改 examples 时一起同步 */
     id: "introduce_self",
