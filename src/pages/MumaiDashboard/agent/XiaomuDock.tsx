@@ -26,7 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import XiaomuFace from "./XiaomuFace";
 import { ask, type Runtime } from "./executor";
 import { closeAgent, hasForeignModal, nextInteractionId } from "./api";
-import { stableNote } from "./degrade";
+import { stableNote, WAKE_REPLY_TEXT } from "./degrade";
 import { useAgentNavigate, useAgentSession } from "./agentSession";
 import { getAgentState, resolveConfirm, setAgent, subscribeAgent } from "./store";
 import { wakeChannel, type WakeSnapshot } from "./wakeChannel";
@@ -486,6 +486,34 @@ export default function XiaomuDock() {
   const visible = agent.open || expanded || active;
 
   /**
+   * 唤醒应答：判定唤醒后先回一句「我在」，用户再继续说命令。
+   *
+   * ── 判据为什么是 wakeCount 变化，而不是 lastWake 不为空 ──────────
+   * `lastWake` 是**有值就一直在**（上一轮的唤醒信息会保留），拿它当条件会变成
+   * "每次重渲染都播一遍"。`wakeCount` 只在服务端判定唤醒时自增
+   * （`wakeChannel.ts` 的 `this.wakeCount += 1`），"计数变了"才等于"这一次唤醒"。
+   *
+   * ── 为什么不用 Agent state 驱动 ────────────────────────────────
+   * 唤醒应答要在**命令还没说完**时就出声（PRD §9：唤醒到可见反馈 ≤800ms），
+   * 而 Agent 状态是命令识别之后才动的 —— 挂在唤醒通道上才赶得上。
+   *
+   * 气泡已收起（`visible` 为假）时不播：用户已经把形象收起来了。
+   *
+   * 依赖里必须**同时**写 `visible`：少了它，唤醒发生时闭包里读到的是旧值
+   * （气泡明明收着却出声，或者反过来）；判断用的是「计数变了」这个 ref 闸门，
+   * 所以多跟一个 `visible` 也不会变成"每次重渲染都播"。
+   */
+  const wakeRepliedRef = useRef(wakeChannel().wakeCountValue);
+  useEffect(() => {
+    if (wake.wakeCount === wakeRepliedRef.current) return;
+    wakeRepliedRef.current = wake.wakeCount;
+    if (!visible) return;
+    void outputRef.current?.speak(WAKE_REPLY_TEXT).catch(() => {
+      /* 播报失败不阻断交互：语音包缺失时 VoiceOutput 自己会回退合成音 */
+    });
+  }, [wake.wakeCount, visible]);
+
+  /**
    * 焦点归还用的两个 ref（见 close() 里的说明）：
    *   · `avatarRef`     —— 兜底落点：小木的常驻入口，永远存在
    *   · `focusReturnRef` —— 面板出现**之前**焦点在谁身上，关闭时还给它
@@ -569,6 +597,18 @@ export default function XiaomuDock() {
       if (!g) return;
       const dx = e.clientX - g.x, dy = e.clientY - g.y;
       if (g.mode === "drag") {
+        /**
+         * 拖动倾斜：左右移动时形象微微侧身，最大 ±5°。
+         *
+         * 角度写进 CSS 变量而不是直接改 transform —— 形象上挂着一整套状态动画
+         * （`xd-idle` / `xd-listen` / … 都在动 transform），直接写 inline transform 会被
+         * 动画覆盖，而变量能让 CSS 用 `.xd--dragging` 这一个开关统管两条规则：
+         * 拖动期间 `animation: none` 停掉状态动画，再由变量做 rotate。
+         */
+        const tilt = Math.max(-5, Math.min(5, dx * 0.08));
+        if (dockRef.current) {
+          dockRef.current.style.setProperty("--drag-tilt", String(tilt));
+        }
         setStagePos(clampPos(
           posFromDrag({ right: g.startRight, bottom: g.startBottom, x: g.x, y: g.y }, dx, dy),
           { size: g.startSize }, panelSizeOf(), window.innerWidth, window.innerHeight,
@@ -591,6 +631,16 @@ export default function XiaomuDock() {
       const g = gestureRef.current;
       gestureRef.current = null;
       setGesture(null);
+      /**
+       * 松手必须**清掉倾斜**。
+       *
+       * 不清的后果实测过：`.xd[style*="--drag-tilt"]` 这条选择器在拖完之后依然命中 ——
+       * 形象会**永久歪着**，而且一直带着 `scale(1.02)`，看着像"卡住了"。
+       * 这里连同 `--drag-tilt` 一起把 inline 样式清空，CSS 那两条规则随之失效。
+       */
+      if (dockRef.current) {
+        dockRef.current.style.removeProperty("--drag-tilt");
+      }
       /* 手势结束时才写记忆：拖动过程中每帧写 localStorage 会明显掉帧 */
       if (g) setStagePos((cur) => { writeStageMemory({ pos: cur, size: g.mode === "resize" ? size : g.startSize }); return cur; });
     };
@@ -873,4 +923,6 @@ export default function XiaomuDock() {
     </div>
   );
 }
+
+
 

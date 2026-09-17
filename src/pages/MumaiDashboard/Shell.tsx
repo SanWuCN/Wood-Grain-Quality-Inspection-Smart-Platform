@@ -59,6 +59,23 @@ import { CommissionPreview } from "./pages/orders/CommissionPreview";
   不是 15 个各自独立的页面。挂在外壳上，任何已登录页面都能弹。
 */
 import { DemoSurface } from "./agent/demoSurface";
+/*
+  同步备份小窗（第④轮说完「收到，我来核对范围…」后弹出）。
+  与演示表面分开：它的生命周期由自己的时长控制，且位置在右上角。
+*/
+import { SyncBackupPanel } from "./agent/SyncBackupPanel";
+import type { SyncBackupStream } from "./agent/syncBackup";
+/*
+  剧本快捷键（Ctrl+Q+1..9）：把"听到某一句"演成逐字识别，再走与气泡/控制台
+  同一条 `ask()` 链路。运行时要求 `speak` 是可用的（缺了会在运行时报错），
+  所以这里也建一个与气泡同实现的 `VoiceOutput` —— 注意它**不依赖控制台是否打开**，
+  否则"没开控制台按快捷键就没声音"。
+*/
+import { useScriptShortcut } from "./agent/useScriptShortcut";
+import { SCRIPT_SHORTCUT_ENTRIES } from "./agent/scriptShortcutEntries";
+import { VoiceOutput } from "./agent/tts";
+import { useAgentNavigate, useAgentSession } from "./agent/agentSession";
+import type { Runtime } from "./agent/executor";
 import "./appshell.css";
 import "./pages.css";
 /*
@@ -212,6 +229,52 @@ export default function Shell() {
    * （`mumai:xiaomu-ask`、`mumai:script-route` 同理）。
    */
   const [demoSurfaceRound, setDemoSurfaceRound] = useState<string | null>(null);
+
+  /**
+   * 同步备份小窗的状态。与演示表面分开一个 state：
+   * 两者的生命周期不同 —— 表面是"这一轮说到哪"，小窗是"备份跑完自动消失"，
+   * 合成一个 state 会让"关掉小窗"顺带把表面也关掉（反之亦然）。
+   */
+  const [syncBackup, setSyncBackup] = useState<SyncBackupStream | null>(null);
+
+  /**
+   * 剧本快捷键的运行时。
+   *
+   * ⚠ 与 `XiaomuDock` 的 runtime **同源同实现**（都用 `VoiceOutput`、都用
+   * `useAgentSession()` 的会话事实），但**各自一份实例**：气泡可能被关掉、
+   * 控制台可能没打开，而快捷键要在任何页面都能说话 —— 依赖别人的实例就会出现
+   * "没开那个面板 → 快捷键没声音"。两边共用的是同一份事实来源，不是同一个对象。
+   */
+  const shortcutSession = useAgentSession();
+  const shortcutNavigate = useAgentNavigate();
+  const shortcutOutputRef = useRef<VoiceOutput | null>(null);
+  if (!shortcutOutputRef.current && typeof window !== "undefined") {
+    shortcutOutputRef.current = new VoiceOutput();
+  }
+  const scriptShortcutRuntime = useMemo<Runtime>(
+    () => ({
+      navigate: shortcutNavigate,
+      session: {
+        stageKey: shortcutSession.stageKey,
+        accountLabel: shortcutSession.accountLabel,
+        sourceMode: shortcutSession.sourceMode,
+        channelSummary: shortcutSession.channelSummary,
+      },
+      speak: (text: string) => shortcutOutputRef.current?.speak(text),
+    }),
+    [shortcutNavigate, shortcutSession],
+  );
+  useScriptShortcut({ entries: SCRIPT_SHORTCUT_ENTRIES, runtime: scriptShortcutRuntime });
+
+  useEffect(() => {
+    const onSync = (event: Event) => {
+      const detail = (event as CustomEvent<SyncBackupStream | undefined>).detail;
+      /* 没有内容就不开窗：宁可什么都不弹，也不弹一个只有标题的空壳 */
+      setSyncBackup(detail ? (detail as SyncBackupStream) : null);
+    };
+    window.addEventListener("mumai:sync-backup", onSync);
+    return () => window.removeEventListener("mumai:sync-backup", onSync);
+  }, []);
 
   useEffect(() => {
     const onSurface = (event: Event) => {
@@ -760,6 +823,13 @@ export default function Shell() {
       {demoSurfaceRound ? (
         <DemoSurface roundNo={demoSurfaceRound} onClose={() => setDemoSurfaceRound(null)} />
       ) : null}
+
+      {/*
+        同步备份小窗：第④轮小木说完「收到，我来核对范围…」之后，executor 派发
+        `mumai:sync-backup` 打开它，列出真实工单附件与本地语音包，到点（时长按条数算）
+        自动收起。位置在右上角，与左下角的演示表面、右下角的小木气泡互不遮挡。
+      */}
+      {syncBackup ? <SyncBackupPanel stream={syncBackup} onClose={() => setSyncBackup(null)} /> : null}
     </div>
   );
 }

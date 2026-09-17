@@ -889,6 +889,89 @@ export const HISTORY_STATS = {
   open: HISTORY_RISKS.filter((item) => !item.closed).length,
 };
 
+/* ------------------------------------------------------------------ *
+ * 近三个月巡检窗口（`patrol_risk_summary` 意图的固定回答数据）
+ *
+ * 谁在用：agent/intents.ts 的 `patrol_risk_summary` 模板 + agent/facts.ts 的
+ * `table.patrol*`。回答是**提前备好的固定语句**，本块只负责给它提供数字，
+ * 运行时不做任何统计推理、不调用任何工具。
+ *
+ * ── 哪部分是真数据，哪部分是演示值（必须分清）────────────────────
+ *   · **真**：窗口起止日期与 `DEMO_SCENARIO_V3.weather` 完全一致（近三个月
+ *     在本平台只有一个口径）；地点清单由 `HISTORIC_ORDERS` 在窗口内过滤得出，
+ *     逐条能指到工单号；「地点数」因此是真数据。
+ *   · **演示值**：`PATROL_WINDOW_RISKS` 这 14 条记录，以及由它派生的风险数、
+ *     高风险数、三个修复状态数。为什么是演示值 —— 窗口内那 5 张工单的
+ *     `sourceRiskIds` 目前是空数组，仓库里没有窗口内的风险记录；而五月那轮
+ *     （MAY-DEMO-01 / HISTORY_RISKS 6 条）在 2026-06-11 窗口外，拿它回答
+ *     「近三个月」会与天气档案的口径正面冲突（评审 F05 的同类前科）。
+ *   演示值的口径按演示台词冻结：14 发现 / 2 高风险 / 7 已修复 / 2 正在安排
+ *   施工 / 5 已受理待处置，`demoScenario.test.ts` 逐项钉住。
+ *
+ * 将来把窗口内工单的真实风险补进 seed 后，只需替换 `PATROL_WINDOW_RISKS`，
+ * 三个派生统计会自动跟随，模板与页面都不用改。
+ * ------------------------------------------------------------------ */
+
+/** 窗口内的风险记录状态：已修复 / 正在安排施工 / 已受理待处置 */
+export type PatrolRiskStatus = "已修复" | "正在安排施工" | "已受理待处置";
+/** 风险等级：只有「优先复核」计入高风险，与 CURRENT_RISKS.priority 同一套用词 */
+export type PatrolRiskLevel = "优先复核" | "一般复核";
+
+export type PatrolWindowRisk = {
+  id: string;
+  /** 与窗口内 `HISTORIC_ORDERS.site` 逐字一致，保证「地点数」可由这张表复核 */
+  site: string;
+  /** 风险描述，随记录一起冻结 */
+  label: string;
+  level: PatrolRiskLevel;
+  status: PatrolRiskStatus;
+};
+
+/** 近三个月窗口内的 14 个风险点（演示值，出处见上方说明） */
+export const PATROL_WINDOW_RISKS: PatrolWindowRisk[] = [
+  { id: "PW-01", site: "寒山寺", label: "钟楼二层 Z02 受潮范围扩大", level: "优先复核", status: "已修复" },
+  { id: "PW-02", site: "寒山寺", label: "钟楼排水沟淤积", level: "一般复核", status: "已修复" },
+  { id: "PW-03", site: "寒山寺", label: "二层木构件表面霉斑", level: "一般复核", status: "已修复" },
+  { id: "PW-04", site: "报国寺", label: "山门东侧 Z01 表面裂隙", level: "优先复核", status: "正在安排施工" },
+  { id: "PW-05", site: "报国寺", label: "裂隙周边漆层起翘", level: "一般复核", status: "已受理待处置" },
+  { id: "PW-06", site: "报国寺", label: "台基排水坡度不足", level: "一般复核", status: "已修复" },
+  { id: "PW-07", site: "灵隐寺", label: "大殿后檐柱含水率偏高", level: "一般复核", status: "已修复" },
+  { id: "PW-08", site: "灵隐寺", label: "后檐通风口面积不足", level: "一般复核", status: "已修复" },
+  { id: "PW-09", site: "灵隐寺", label: "柱脚地仗修补痕迹复现", level: "一般复核", status: "已受理待处置" },
+  { id: "PW-10", site: "崇圣寺三塔", label: "主塔外观局部污损", level: "一般复核", status: "已受理待处置" },
+  { id: "PW-11", site: "崇圣寺三塔", label: "倾斜观测点标记缺失", level: "一般复核", status: "正在安排施工" },
+  { id: "PW-12", site: "崇圣寺三塔", label: "塔基周边植被过密", level: "一般复核", status: "已受理待处置" },
+  { id: "PW-13", site: "应县木塔", label: "斗栱变形观测点超出预警值", level: "一般复核", status: "已修复" },
+  { id: "PW-14", site: "应县木塔", label: "塔身倾斜复核数据待复测", level: "一般复核", status: "已受理待处置" },
+];
+
+/** 近三个月窗口的起止日期：只在这里写一次，用于过滤真实工单（测试钉住） */
+const PATROL_RANGE_START = "2026-06-11";
+const PATROL_RANGE_END = "2026-09-10";
+
+/**
+ * 近三个月巡检汇总：地点数来自真实工单窗口，风险数与三个状态数由
+ * `PATROL_WINDOW_RISKS` 算出（口径见上方说明）。
+ */
+export const PATROL_WINDOW_STATS = {
+  /** 与 `DEMO_SCENARIO_V3.weather` 同一窗口，改一处必须改另一处（测试钉住） */
+  rangeStart: PATROL_RANGE_START,
+  rangeEnd: PATROL_RANGE_END,
+  /** 窗口内办结的巡检工单条数 = 到过的地点数（真数据） */
+  siteCount: HISTORIC_ORDERS.filter(
+    (order) =>
+      order.createdAt.slice(0, 10) >= PATROL_RANGE_START && order.createdAt.slice(0, 10) <= PATROL_RANGE_END,
+  ).length,
+  /** `PATROL_WINDOW_RISKS` 里出现过的站点，测试用来钉「地点数与风险记录对得上」 */
+  sites: PATROL_WINDOW_RISKS.map((item) => item.site).filter((site, index, all) => all.indexOf(site) === index),
+  riskCount: PATROL_WINDOW_RISKS.length,
+  highRiskCount: PATROL_WINDOW_RISKS.filter((item) => item.level === "优先复核").length,
+  repairedCount: PATROL_WINDOW_RISKS.filter((item) => item.status === "已修复").length,
+  scheduledCount: PATROL_WINDOW_RISKS.filter((item) => item.status === "正在安排施工").length,
+  acceptedCount: PATROL_WINDOW_RISKS.filter((item) => item.status === "已受理待处置").length,
+};
+
+
 export const CURRENT_RISKS: CurrentRisk[] = [
   {
     id: "CUR-Z04-01", componentId: "Z04", zoneId: "Z04-lower",

@@ -1,10 +1,12 @@
 /**
  * 小木语音智能体 · 意图库（技术方案 §13 / §38 / §39 / §40）
  *
- * 意图条数 = PRD 4.2 意图目录的 14 条（docs/prd-gap-analysis.md §4 R-4.2.1 指出原实现只有 10 条）
- *          + 第二章剧本要求的 7 条平台与小车控制意图（介绍平台 / 打开页面 / 查看工单 /
- *            打开 Z04 证据 / 查看四柱 / 查看回波 / 小车移动 / 开始巡检 / 停止 / 返回起点 /
- *            开始建图 / 查看批次 / 问设备状态）。
+ * 意图条数：**以运行时数组长度为准**（`INTENT_COUNT`，模板末尾 `INTENTS.push` 也算）。
+ * 历史上的来源是「PRD 4.2 意图目录 14 条 + 第二章剧本新增的平台与小车控制意图」，
+ * 之后又追加了多步编排（`robot_patrol_route`）与近三个月巡检风险汇总
+ * （`patrol_risk_summary`）。**改条数时不要只改这段文字** —— 界面显示取
+ * `INTENT_COUNT`，标定脚本与 `tools/agent-calib-data.mts` 各有一份语料副本，
+ * 改完 examples 要一起同步（见 matcher.ts 顶部那一段说明）。
  *
  * 约束：所有业务文本与数字都来自 seed/scenario.ts，本文件只放「意图配置 + 模板」，
  * 模板里的 {占位符} 由 facts.ts 从 seed 里取真实值填充；一个数字都不在这里硬编码。
@@ -120,8 +122,16 @@ export type Intent = {
   confirmText?: string;
 };
 
-/** 无命中回复（PRD 4.2 指定文案，方案 §41） */
-export const FALLBACK_TEXT = "我没有理解你的指令，可以换一种说法。";
+/**
+ * 无命中回复（PRD 4.2 指定文案，方案 §41）。
+ *
+ * ⚠ 用户口径（2026-09-17）：**与「未听清」统一成同一句短话**
+ * （`degrade.ts` 的 `NOT_HEARD_TEXT` 也是「不好意思，请再说一遍」）。
+ * 现场理由：远场演示时用户站得远、只说一句，短话更容易一次说清，
+ * 也便于整句录音逐字命中。改这里要同时改 `NOT_HEARD_TEXT`（有测试盯两者一致），
+ * 并重录 `public/voice` 里对应那句（老录音会失配、静默回退浏览器合成音）。
+ */
+export const FALLBACK_TEXT = "不好意思，请再说一遍";
 /** 兜底时可选的下一步（PRD 4.2：可查询巡检资料、查看构件或启动当前业务流程） */
 export const FALLBACK_HINT = "可查询巡检资料、查看构件或启动当前业务流程";
 
@@ -822,6 +832,125 @@ INTENTS.push({
       "已按你的说法生成执行计划：{goal}。路线为 {routeText}，速度档位 {missionSpeed}。",
     ],
     facts: ["goal", "homeLabel", "routeText", "missionSpeed"],
+  },
+});
+
+/* ------------------------------------------------------------------ *
+ * 近三个月巡检风险汇总（新增对话）
+ *
+ * 用户问法：「（小木，）过去三个月我们一共到过多少个地方巡检，发现了多少个
+ * 风险点，目前已修复的有多少？」—— 原实现没有任何一条意图覆盖「多少地点 /
+ * 多少风险点 / 已修复」这套说法，覆盖率过低，实测 Top1 只有 0.145，
+ * 低于 `SEMANTIC_THRESHOLDS.lowConfidence` → 直接回退兜底话术
+ * （当时是「我没有理解你的指令」；2026-09-17 起两条兜底统一为「不好意思，请再说一遍」）。
+ *
+ * 回答是**提前备好的固定语句**：数字来自 seed 的 `PATROL_WINDOW_STATS`
+ * （窗口与地点数取自真实工单，风险数与三个状态数取自 `PATROL_WINDOW_RISKS`
+ * 的演示记录，出处见 seed 里那一段说明），运行时不做统计推理、不调用工具。
+ *
+ * ⚠ 必须 append 在数组**末尾**：`voicePackOf()` 按数组下标生成「AI语音N」，
+ * 插在中间会让其后所有意图的语音编号整体漂移（见本文件第 288 行那段记录）。
+ * ------------------------------------------------------------------ */
+
+export const PATROL_RISK_SUMMARY_ID = "patrol_risk_summary";
+
+export const PATROL_RISK_SUMMARY_EXAMPLES = [
+  /* 用户的原始问法：留着它，演示时照读即可命中 */
+  "小木，帮我查一下过去三个月我们一共到过多少个地方巡检，发现了多少个风险点，目前已修复的有多少",
+  /* 去掉称呼与冗余成分的同义说法 */
+  "查过去三个月我们一共到过多少个地方巡检，发现了多少个风险点，目前已修复的有多少",
+  "过去三个月我们一共到过多少个地方巡检，发现了多少个风险点",
+  "过去三个月我们一共到过多少个地方巡检",
+  /* 换时间说法与换量词 */
+  "近三个月巡检了多少个地方，发现多少个风险点，已修复多少个",
+  "这三个月一共到过多少个地方巡检，发现了多少个风险点，已修复了多少",
+  /* 口语化（换动词、换名词） */
+  "近三个月巡了几个地方，发现几个风险点，修好多少",
+  "最近三个月去巡检了几个地方，发现几个问题点，修好了几个",
+  "过去三个月巡检了几处地方，多少风险点，修复多少",
+  /* 只问地点数的简化问法（现场实际这么说） */
+  "过去三个月我们一共到过多少个地方",
+  /* 识别错字变体：实机把「巡检」听成「寻寂」，容错表会折回，仍保留一条实测语料 */
+  "过去三个月我们一共到多少个地方寻寂人",
+];
+
+INTENTS.push({
+  id: PATROL_RISK_SUMMARY_ID,
+  name: "查近三个月巡检风险汇总",
+  type: "QUERY",
+  examples: PATROL_RISK_SUMMARY_EXAMPLES,
+  slots: [],
+  response: {
+    text:
+      "查询完成。过去三个月共巡检 {patrolSiteCount} 处地点，发现 {patrolRiskCount} 个风险点，" +
+      "其中高风险点 {patrolHighRiskCount} 处。目前已有 {patrolRepairedCount} 处完成修复，" +
+      "{patrolScheduledCount} 处正在安排施工，其余 {patrolAcceptedCount} 处已受理，正在等待后续处置。",
+    /*
+      这条回答刻意不给 `alternatives`：数字是演示台词的一部分，多一个变体就多一套
+      要核对的数字；真要加，先按上面 seed 的口径算完再加（与 site_weather 同理）。
+
+      ⚠ 首句「查询完成。」不是装饰 —— 预录的 `patrol_risk_summary.mp3` 里就是这么念的
+      （用户口播版，见 public/voice/README 的录音清单）。屏幕文案与录音必须**逐字**一致，
+      否则 `VoiceOutput.speak()` 按文本匹配会失配、静默回退浏览器合成音。
+      录音里**不含**"等待 3 秒"这类提词，模板里也不许再写（`patrolRiskSummary.test.ts` 会拦）。
+    */
+    facts: [
+      "patrolSiteCount",
+      "patrolRiskCount",
+      "patrolHighRiskCount",
+      "patrolRepairedCount",
+      "patrolScheduledCount",
+      "patrolAcceptedCount",
+    ],
+    /*
+      资料引用落点：维修反馈与验收说明（施工反馈 / 验收关闭 / 待验收三段口径）
+      + 历史巡检报告（巡检记录的归档出处）。引用只声明「哪份资料的哪一段」，
+      标题与原文由 facts.ts 的 sourcesOf() 从 seed 解析。
+    */
+    sources: [
+      { docId: "doc-repair-feedback", chunkId: "f-01" },
+      { docId: "doc-may-report", chunkId: "c-03" },
+    ],
+  },
+});
+
+/* ------------------------------------------------------------------ *
+ * 小木自我介绍（新增对话）
+ *
+ * 用户问法：「小木，请介绍下自己。」—— 注意与 `introduce_platform`
+ * （「介绍一下这个平台 / 这套系统」）是**两个不同的意图**：那个讲平台，这个讲小木自己。
+ * 两者共享「介绍」这个高频词，属于最容易互抢的一对，所以：
+ *   · 语料里刻意不出现「平台 / 系统 / 项目 / 功能」这类指平台的词；
+ *   · `agent/introduceSelf.test.ts` 用 margin 把两边钉住（谁被抢走就红）。
+ *
+ * 回答是固定语句，没有数字、没有占位符，因此 response.facts 为空、不带资料引用。
+ * ⚠ 同样必须 append 在**末尾**（`voicePackOf` 按下标生成「AI语音N」）。
+ * ------------------------------------------------------------------ */
+
+export const INTRODUCE_SELF_ID = "introduce_self";
+
+export const INTRODUCE_SELF_EXAMPLES = [
+  /* 用户原话：留着它，演示时照读即可命中（唤醒词由上游剥离，这里再留一条带称呼的） */
+  "小木，请介绍下自己",
+  "介绍一下你自己",
+  "先做个自我介绍",
+  "你是谁",
+  "你叫什么名字",
+  "你是做什么的",
+  "你是哪位",
+  "你能干什么",
+];
+
+INTENTS.push({
+  id: INTRODUCE_SELF_ID,
+  name: "小木自我介绍",
+  type: "RESPONSE",
+  examples: INTRODUCE_SELF_EXAMPLES,
+  slots: [],
+  response: {
+    text: "我是智能数字工程师，负责古建维保问答、参数推荐和会议主持。",
+    /* 固定身份话术，不给 alternatives：多一个变体就多一份要录的音频 */
+    facts: [],
   },
 });
 

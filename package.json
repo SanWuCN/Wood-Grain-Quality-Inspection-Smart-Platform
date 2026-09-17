@@ -8,7 +8,9 @@
     "server": "node server/index.mjs",
     "server:static": "node server/index.mjs --static dist",
     "preflight": "node tools/preflight.mjs",
+    "test": "node --import ./tools/test-resolve-ts.mjs --test \"src/**/*.test.ts\"",
     "test:emc": "node tools/test-emc.mjs",
+    "test:agent": "node --import ./tools/test-resolve-ts.mjs --test \"src/pages/MumaiDashboard/agent/*.test.ts\"",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

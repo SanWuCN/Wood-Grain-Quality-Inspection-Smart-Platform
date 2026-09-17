@@ -1,0 +1,217 @@
+/**
+ * 同步备份小窗样式
+ *
+ * 走平台既有深色令牌（与 `demoSurface.css`、`xiaomuDock.css` 同一套），
+ * 三个浮层同时在屏幕上时看起来是一个产品。
+ *
+ * 位置：右上角。左下角是演示表面、右下角是小木气泡，这里避开两者。
+ * z-index 75：低于小木气泡（80）与演示表面（76），高于页面内容。
+ */
+
+.sxb {
+  position: fixed;
+  right: 16px;
+  top: 16px;
+  z-index: 75;
+  width: min(340px, calc(100vw - 32px));
+  max-height: min(58vh, 460px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  background: var(--panel-surface, rgba(9, 19, 33, 0.92));
+  border: 1px solid var(--border-default, rgba(78, 168, 255, 0.18));
+  box-shadow: 0 16px 40px rgba(0, 6, 16, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--text-primary, #eaf3ff);
+  overflow: hidden;
+  animation: sxb-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes sxb-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.sxb__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+}
+
+/* 头部呼吸点：表示"正在同步"。纯装饰，不承担任何数据含义 */
+.sxb__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mumai-success, #68d6a5);
+  box-shadow: 0 0 0 0 rgba(104, 214, 165, 0.5);
+  animation: sxb-breathe 1.6s ease-out infinite;
+}
+
+@keyframes sxb-breathe {
+  0% {
+    box-shadow: 0 0 0 0 rgba(104, 214, 165, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(104, 214, 165, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(104, 214, 165, 0);
+  }
+}
+
+.sxb__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.sxb__count {
+  margin-left: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--text-secondary, #9fb3c8);
+}
+
+.sxb__close {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #9fb3c8);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.sxb__close:hover {
+  color: var(--text-primary, #eaf3ff);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* 竖向数据流轨迹：一条细线 + 一个流动光点，做"数据在走"的观感 */
+.sxb__stream {
+  position: relative;
+  height: 2px;
+  overflow: hidden;
+  background: linear-gradient(90deg, transparent, rgba(107, 203, 224, 0.35), transparent);
+}
+
+.sxb__rail {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(107, 203, 224, 0.18), transparent);
+}
+
+.sxb__pulse {
+  position: absolute;
+  top: 0;
+  left: -30%;
+  width: 30%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--mumai-accent, #6bcbe0), transparent);
+  animation: sxb-flow 1.4s linear infinite;
+}
+
+@keyframes sxb-flow {
+  from {
+    left: -30%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+.sxb__list {
+  margin: 0;
+  padding: 6px 12px;
+  list-style: none;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 每条错峰浮现：名字 → 体量 → 状态一次点亮 */
+.sxb__row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 0;
+  font-size: 11.5px;
+  opacity: 0;
+  transform: translateX(-4px);
+  animation: sxb-row 0.32s ease-out forwards;
+}
+
+@keyframes sxb-row {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.sxb__name {
+  color: var(--text-primary, #eaf3ff);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sxb__size {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text-secondary, #9fb3c8);
+  white-space: nowrap;
+}
+
+.sxb__state {
+  color: var(--mumai-success, #68d6a5);
+  white-space: nowrap;
+}
+
+.sxb__row.is-tail .sxb__name {
+  color: var(--text-secondary, #9fb3c8);
+}
+
+.sxb__foot {
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+}
+
+.sxb__summary {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-primary, #eaf3ff);
+}
+
+.sxb__source {
+  margin: 4px 0 0;
+  font-size: 10.5px;
+  color: var(--text-tertiary, #7d8fa3);
+}
+
+/* 尊重系统的"减少动态效果"设置：关掉呼吸点与流动光点，内容照旧 */
+@media (prefers-reduced-motion: reduce) {
+  .sxb,
+  .sxb__row {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .sxb__dot,
+  .sxb__pulse {
+    animation: none;
+  }
+}

@@ -115,10 +115,20 @@ export const REQUIRED_REWRITE_PHRASES: readonly string[] = Object.freeze([
  *     那一列的作用就是记下"原来这里是占位符"，把它也扫掉等于删掉改写的凭据。
  *   所以扫描函数要能按用途切换，而不是简单 `includes`。
  */
-export const PLACEHOLDER_PATTERNS: readonly string[] = Object.freeze([
-  "待补文案",
-  "占位符",
-  "xxxx",
+export const PLACEHOLDER_PATTERNS: readonly RegExp[] = Object.freeze([
+  /待补文案/g,
+  /占位符/g,
+  /*
+    ⚠ 3 个 x 与 4 个 x 必须**分别精确匹配**，不能用 `includes` 粗判：
+      · 原先只收了 `"xxxx"`，而净稿里的实际写法是 **3 个 x**（「xxx这批总时长xxx，视频质量xxx」），
+        `includes("xxxx")` 对 3 个 x 恒为 false —— ⑦ 轮台词被过程稿整段覆盖回来，
+        占位符守卫却仍是绿灯（2026-09-16 实测漏检）。少一个字符，守卫就整条失效；
+      · 反过来，若把 `"xxx"` 也当子串收进去，它又会**吃进** `"xxxx"`，
+        于是「这里写着 xxxx」会被报成 `xxx`，改写表里那条记录也跟着判错。
+    所以用前后视断言钉住**恰好** 3 个 / 恰好 4 个 x。
+  */
+  /(?<!x)x{3}(?!x)/g,
+  /(?<!x)x{4}(?!x)/g,
 ]);
 
 /**
@@ -127,27 +137,25 @@ export const PLACEHOLDER_PATTERNS: readonly string[] = Object.freeze([
  * @param text       待扫描文本
  * @param allowRecord true = 允许"记录式"提及（如 `段落 171 含 xxxx`）；
  *                    false = 严格模式，任何出现都算残留
+ * @returns 命中的占位符写法（去重，便于直接打进断言消息）
  */
 export function findPlaceholders(text: string, allowRecord = false): string[] {
   const hits: string[] = [];
   for (const pattern of PLACEHOLDER_PATTERNS) {
-    if (!text.includes(pattern)) continue;
-    /*
-      非严格模式下放行"记录式"提及：形如「含 xxx」「原来是 xxx」这类
-      明确在**描述历史问题**的写法。判据是占位符前面 6 个字里出现
-      "含 / 原 / 旧 / 曾" 这类提示词 —— 与"页面上直接显示占位符"区分开。
-    */
-    if (allowRecord) {
-      let idx = text.indexOf(pattern);
-      let allRecorded = true;
-      while (idx >= 0) {
+    /* 每条模式都要独立扫全串：一条文本里可能同时出现 3 个 x 与 4 个 x。 */
+    for (const hit of text.matchAll(pattern)) {
+      const idx = hit.index ?? 0;
+      /*
+        非严格模式下放行"记录式"提及：形如「含 xxx」「原来是 xxx」这类
+        明确在**描述历史问题**的写法。判据是占位符前面 6 个字里出现
+        "含 / 原 / 旧 / 曾 / 仍" 这类提示词 —— 与"页面上直接显示占位符"区分开。
+      */
+      if (allowRecord) {
         const before = text.slice(Math.max(0, idx - 6), idx);
-        if (!/[含原旧曾]/.test(before)) { allRecorded = false; break; }
-        idx = text.indexOf(pattern, idx + 1);
+        if (/[含原旧曾仍]/.test(before)) continue;
       }
-      if (allRecorded) continue;
+      if (!hits.includes(hit[0])) hits.push(hit[0]);
     }
-    hits.push(pattern);
   }
   return hits;
 }

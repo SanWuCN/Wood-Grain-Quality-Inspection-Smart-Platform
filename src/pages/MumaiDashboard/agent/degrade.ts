@@ -54,14 +54,28 @@ import type { BotTurn } from "./types";
  * 文案（唯一来源；验收脚本直接断言这些字符串）
  * ------------------------------------------------------------------ */
 
-/** FR-10 第 1 条：未听清 */
-export const NOT_HEARD_TEXT = "没有听清，请再说一次";
-/** 未听清时的可选动作：复用 Fallback 的提示，不另写一套说法 */
-export const NOT_HEARD_HINT = FALLBACK_HINT;
-/** 兜底时真正播报出去的整句（主回答 + 可选动作），文字入口与语音入口共用 */
-export const FALLBACK_SPOKEN = `${FALLBACK_TEXT}${FALLBACK_HINT}。`;
 /**
- * 未听清时给用户一个"照着说"的样本。
+ * FR-10 第 1 条：未听清（麦克风拿到空文本 / 没有可用的识别文本）。
+ *
+ * 用户口径（2026-09-17）：「小木没识别出来的回复」统一改成这一句，
+ * 并且**只说这一句** —— 不再在后面追加"例如可以说「…」"。
+ * 为什么去掉举例：远场演示时用户就站在几米外，一句短话更容易一次说清、
+ * 也便于整句录音逐字命中（长句要被逐字念对才命中，命中率低）。
+ */
+export const NOT_HEARD_TEXT = "不好意思，请再说一遍";
+/** 未听清时的可选动作：复用 Fallback 的提示，不另写一套说法（界面 note 用，不进播报） */
+export const NOT_HEARD_HINT = FALLBACK_HINT;
+/**
+ * 兜底（未命中意图）时真正播报出去的整句。
+ *
+ * 用户口径（2026-09-17）：**只说这一句**，不再在后面追加"可查询巡检资料、查看构件…"
+ * 这类长附加语 —— 远场演示时短句更容易一次说清，也便于整句录音逐字命中。
+ * `FALLBACK_HINT` 继续保留：它仍出现在气泡的 note（给用户看的可选动作）里，只是不进播报。
+ * 文字入口与语音入口共用本常量，避免两处各写一套。
+ */
+export const FALLBACK_SPOKEN = FALLBACK_TEXT;
+/**
+ * 未听清时给用户一个"照着说"的样本 —— **只用于界面提示，不进播报**。
  *
  * ⚠ 这里**不再硬编码**那句样本（原来写的是 `"查近三个月天气"`）：
  * 它是 `intents.ts` 的 `site_weather` 首条例句的副本 —— 意图目录改一个字，
@@ -69,8 +83,7 @@ export const FALLBACK_SPOKEN = `${FALLBACK_TEXT}${FALLBACK_HINT}。`;
  * 现在从**意图目录本身**取：有 `site_weather` 就用它的首条例句；
  * 意图改名/删除时退回一句与业务无关的通用说法，不会指着一个不存在的意图。
  *
- * 这句会被 `replyNotHeard` 拼进提示（"没有听清，请再说一次。例如可以说「…」"），
- * 也被 `suggestPhraseOf()` 用作**没有命中意图时**的兜底建议
+ * 这句也被 `suggestPhraseOf()` 用作**没有命中意图时**的兜底建议
  * （命中意图时用那个意图自己的首条例句）。
  */
 export const NOT_HEARD_EXAMPLE =
@@ -119,7 +132,12 @@ export function replyNotHeard(via: "text" | "mic" | "example"): BotTurn {
     kind: "bot",
     id: nextId(),
     at: clockStamp(),
-    text: `${NOT_HEARD_TEXT}。例如可以说「${NOT_HEARD_EXAMPLE}」。`,
+    /*
+      只播这一句，**不再追加**"例如可以说「…」"（用户口径 2026-09-17）：
+      远场演示时短句更容易一次说清，也便于整句录音逐字命中。
+      `NOT_HEARD_EXAMPLE` 仍然保留给界面提示（suggestPhraseOf）使用，不在这里拼。
+    */
+    text: `${NOT_HEARD_TEXT}。`,
     intentId: null,
     intentName: "未听清",
     type: "RESPONSE",

@@ -28,6 +28,7 @@ import {
   KNOWLEDGE_DOCS,
   MAP_VERSIONS,
   MISSION,
+  PATROL_WINDOW_STATS,
   REVISIT_PLAN,
   SCAN_BATCHES,
   SCENES,
@@ -190,6 +191,14 @@ export function evaluateFacts(intent: Intent, ctx: FactContext): FactSet {
   table.open = String(HISTORY_STATS.open);
   table.followup = followupText();
   table.items = openRiskText();
+
+  /* ---- 近三个月巡检汇总（patrol_risk_summary：固定语句，数字来自 seed） ---- */
+  table.patrolSiteCount = String(PATROL_WINDOW_STATS.siteCount);
+  table.patrolRiskCount = String(PATROL_WINDOW_STATS.riskCount);
+  table.patrolHighRiskCount = String(PATROL_WINDOW_STATS.highRiskCount);
+  table.patrolRepairedCount = String(PATROL_WINDOW_STATS.repairedCount);
+  table.patrolScheduledCount = String(PATROL_WINDOW_STATS.scheduledCount);
+  table.patrolAcceptedCount = String(PATROL_WINDOW_STATS.acceptedCount);
 
   /* ---- 场景（技术方案 §17 实体：scene） ---- */
   const historyScene = sceneOf("history");
