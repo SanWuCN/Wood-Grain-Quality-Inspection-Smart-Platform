@@ -440,6 +440,14 @@ export default function XiaomuDock() {
       return "thinking";
     }
     if (agent.agentState === "RECOGNIZING") return "recognizing";
+    /*
+      ⚠ `LISTENING` 原来没被映射，于是**脚本化模拟**（剧本快捷键 Ctrl+Q+N、示例问句）
+      期间徽标一直写「待机」—— 逐字字幕已经出来了，状态却像什么都没发生。
+      `wake.state === "live"` 那条只覆盖**真实唤醒**（那时才有通道），脚本化输入没有通道，
+      所以必须在这里按 `agentState` 补上。放在 `RECOGNIZING` 之后，
+      "正在收尾识别"优先于"正在听"，与真实链路的先后一致。
+    */
+    if (agent.agentState === "LISTENING") return "listening";
     if (wake.state === "live" && (wake.collecting || wake.partial)) return "listening";
     return "idle";
   }, [agent.agentState, agent.pendingConfirm, wake.collecting, wake.partial, wake.state]);
@@ -717,9 +725,23 @@ export default function XiaomuDock() {
             </button>
           </header>
 
-          {/* 用户流式字幕：定稿前就地更新，不重复新增气泡（FR-07） */}
-          {query || wake.partial ? (
-            <p className="xd__user">{wake.partial || query}</p>
+          {/*
+            用户流式字幕：定稿前就地更新，不重复新增气泡（FR-07）。
+
+            ⚠ 三个来源的优先级不能少任何一个（2026-09-17 用户实测报的 bug）：
+              1. `wake.partial` —— **真实唤醒**的流式字幕，来自唤醒通道；
+              2. `query`        —— 已入库的整句（`agent.turns` 里的用户轮次）；
+              3. `agent.partial`—— **脚本化模拟**的流式字幕（剧本快捷键 Ctrl+Q+N、
+                                   「示例问句」都走 `VoiceInput.simulate()`，写的是这里）。
+
+            缺了第 3 条会怎样：`simulate()` 每个字都在跑（实测 onPartial len=1..17 连续），
+            但气泡里**没有任何元素渲染 `agent.partial`** —— 屏幕上就是"小木没反应，
+            过一会儿突然接收到一整句话"，正是用户报的现象。
+            全屏控制台（`VoiceConsole`）本来就读 `state.partial`，所以那条路径一直正常，
+            只有气泡这条一直缺这个出口。
+          */}
+          {wake.partial || query || agent.partial ? (
+            <p className="xd__user">{wake.partial || query || agent.partial}</p>
           ) : null}
 
           {agent.pendingConfirm ? (

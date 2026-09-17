@@ -135,7 +135,24 @@ export function useScriptShortcut({
     */
     const pending = pendingRef;
     const input = new VoiceInput({
-      onListening: () => setAgent({ agentState: "LISTENING", stateNote: "识别中（脚本化模拟）" }),
+      /*
+        ⚠ 必须同时置 `open: true`（2026-09-17 用户实测出的真 bug）。
+        只写 `partial` 的话，逐字文本**根本没有地方显示** —— 气泡面板的门控是
+        `if (!agent.open && !expanded) return;`（`XiaomuDock.tsx`），
+        而快捷键此前从不置 `open`。现场表现正如用户描述：
+        「点击的时候小木应该有正在录入的样子…实测是小木没反应，过一会儿突然接收到一整句话」——
+        那串 partial 一直在 store 里累积，但气泡被挡住，直到 `ask()` 收尾才看到整句。
+        `open` 的语义在 dock 注释里写得很清楚：**本轮交互由程序发起**（唤醒/串口/命令式打开），
+        快捷键属于同一类，所以这里置它是符合既有约定的，而不是绕过门控。
+      */
+      onListening: () =>
+        setAgent({
+          open: true,
+          agentState: "LISTENING",
+          stateNote: "识别中（脚本化模拟）",
+          partial: "",
+          finalText: "",
+        }),
       onPartial: (text, final) =>
         setAgent({ partial: final ? "" : text, agentState: final ? "RECOGNIZING" : "LISTENING" }),
       onLevel: (level) => setAgent({ level }),
