@@ -66,9 +66,14 @@ export function DemoSurface({ roundNo, onClose }: DemoSurfaceProps) {
   const showDemoBadge = hasDemoData(action);
 
   return (
-    <aside className="dsf" role="dialog" aria-label={action.title}>
+    <aside className={`dsf${action.alert ? " dsf--alert" : ""}`} role="dialog" aria-label={action.title}>
       <header className="dsf__head">
         <span className="dsf__round">{roundNo}</span>
+        {/*
+          预警轮多一个「预警」角标：它和普通数据面板的区别必须**一眼看得出来**——
+          这一轮是要人回话的（下面那个确认按钮就是给它准备的）。
+        */}
+        {action.alert ? <span className="dsf__alert">预警</span> : null}
         <h3 className="dsf__title">{action.title}</h3>
         {/*
           §4.2/§4.3：数据来源性质要标注，且不得显示第三方接口名或

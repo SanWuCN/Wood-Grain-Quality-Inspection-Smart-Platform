@@ -91,6 +91,27 @@ const check = (name, ok, detail) => {
   if (!ok) failed += 1;
 };
 
+/**
+ * 截个图存盘（证据图）。
+ * 判据是数字，但"长什么样"只有图能说明 —— 用户要的是**看到的**预警窗，
+ * 所以每次验收都把当时的画面落一份，方便肉眼复核。
+ */
+const SHOT_DIR = "D:\\平台\\_归档-临时产物-20260917";
+async function shot(send, name) {
+  try {
+    const r = await send("Page.captureScreenshot", { format: "png" });
+    const data = r?.result?.data;
+    if (!data) return null;
+    const { writeFileSync, mkdirSync } = await import("node:fs");
+    mkdirSync(SHOT_DIR, { recursive: true });
+    const file = `${SHOT_DIR}\\快捷键验收-${name}.png`;
+    writeFileSync(file, Buffer.from(data, "base64"));
+    return file;
+  } catch {
+    return null;
+  }
+}
+
 try {
   const ws = new WebSocket(await waitForTarget());
   await new Promise((r) => ws.addEventListener("open", r, { once: true }));
@@ -224,6 +245,7 @@ try {
     await sleep(80);
   }
   const uniq = [...new Set(lengths)].sort((a, b) => a - b);
+  const shotStream = await shot(send, "1-逐字识别中的气泡");
   check(
     "识别期间文字逐字累积（≥3 个不同长度）",
     uniq.length >= 3,
@@ -301,6 +323,7 @@ try {
     await sleep(250);
   }
   check("Ctrl+M+4 之后弹出同步备份小窗（第④轮的可见动作落地）", syncShown);
+  await shot(send, "3-第④轮同步备份小窗");
 
   const audio4 = await evaluate(`window.__audio`);
   const played4 = (audio4?.played ?? []).filter(Boolean);
@@ -311,7 +334,68 @@ try {
   );
   check("第④轮没有回退到浏览器合成音", (audio4?.synth ?? 0) === 0, `speechSynthesis.speak 调用 ${audio4?.synth ?? 0} 次`);
 
-  await evaluate(`window.__probe = undefined; window.__probeSync = undefined`);
+  /* ---------- ⑥ 第⑬轮「适用性预警」：要弹出**预警窗**，并且带确认按钮 ----------
+     用户口径 2026-09-17：「⑬ 这个触发时，会弹出预警窗口，然后带个确认按钮」。
+     判据全部可证伪：
+       · 出现的是 `.dsf--alert`（预警样式），不是普通数据面板；
+       · 窗里有一个按钮，文案就是确认按钮；
+       · 窗里的数据行**没有一行是缺失态**（证明挂的数据键在构建产物里真的取得到值）；
+       · 点下去之后按钮禁用 + 说明变成"已更新平台状态，未向设备发送指令"（只改本地状态）。
+  */
+  await evaluate(`(() => {
+    window.__probeAlert = () => {
+      const box = document.querySelector('.dsf--alert');
+      if (!box) return { shown: false };
+      const btn = box.querySelector('.dsf__btn');
+      return {
+        shown: true,
+        title: (box.querySelector('.dsf__title')?.textContent || '').trim(),
+        chip: (box.querySelector('.dsf__alert')?.textContent || '').trim(),
+        btnText: btn ? (btn.textContent || '').trim() : '',
+        btnDisabled: btn ? btn.disabled : null,
+        missingRows: box.querySelectorAll('.dsf__row.is-missing').length,
+        note: (box.querySelector('.dsf__note')?.textContent || '').trim(),
+      };
+    };
+    return true;
+  })()`);
+  await sleep(1500);
+  await dispatch("m");
+  await dispatch("e");
+
+  let alertWin = { shown: false };
+  for (let i = 0; i < 240; i += 1) {
+    alertWin = await evaluate(`window.__probeAlert()`);
+    if (alertWin?.shown) break;
+    await sleep(250);
+  }
+  check("Ctrl+M+E 之后弹出预警窗（.dsf--alert）", Boolean(alertWin?.shown), alertWin?.title || "始终没出现");
+  await shot(send, "2-第⑬轮预警窗");
+  check("预警窗带「预警」角标", alertWin?.chip === "预警", `角标=「${alertWin?.chip ?? ""}」`);
+  check("预警窗里有确认按钮", Boolean(alertWin?.btnText), `按钮=「${alertWin?.btnText ?? ""}」`);
+  check("预警窗的数据行都取到了值（没有缺失态）", alertWin?.missingRows === 0, `缺失 ${alertWin?.missingRows ?? "?"} 行`);
+  check(
+    "确认按钮的默认说明说清影响范围",
+    String(alertWin?.note ?? "").includes("不向设备发送指令"),
+    `说明=「${alertWin?.note ?? ""}」`,
+  );
+
+  /* 真的点一下：必须变成"已确认"，且按钮禁用（不可重复确认） */
+  await evaluate(`(() => {
+    const btn = document.querySelector('.dsf--alert .dsf__btn');
+    if (btn) btn.click();
+    return true;
+  })()`);
+  await sleep(400);
+  const afterClick = await evaluate(`window.__probeAlert()`);
+  check(
+    "点确认后说明变为「已更新平台状态，未向设备发送指令」",
+    String(afterClick?.note ?? "").includes("已更新平台状态"),
+    `说明=「${afterClick?.note ?? ""}」`,
+  );
+  check("点确认后按钮禁用（不会重复确认）", afterClick?.btnDisabled === true, `disabled=${afterClick?.btnDisabled}`);
+
+  await evaluate(`window.__probe = undefined; window.__probeSync = undefined; window.__probeAlert = undefined`);
 } finally {
   chrome.kill();
 }

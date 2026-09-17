@@ -131,6 +131,45 @@
   color: var(--warning, #f2b84b);
 }
 
+/* ------------------------------------------------------------------ *
+ * 预警窗（`alert: true` 的轮次，目前是 ⑬ 小木主动起头的适用性预警）
+ *
+ * 用户口径（2026-09-17）：「⑬ 这个触发时，会弹出预警窗口，然后带个确认按钮」。
+ * 预警窗与普通数据面板的差别只在"要不要人回话"这一件事上，所以视觉上
+ * **只加强描边与角标**，不改尺寸、不改位置 —— 位置留在左下角是刻意的：
+ * 右下角是小木气泡，中间是讲解要看的主内容，挪过去就会挡住正在讲的东西。
+ * ------------------------------------------------------------------ */
+
+.dsf--alert {
+  border-color: rgba(255, 92, 112, 0.42);
+  box-shadow: 0 16px 40px rgba(0, 6, 16, 0.6), 0 0 0 1px rgba(255, 92, 112, 0.16);
+}
+
+.dsf--alert .dsf__head {
+  background: linear-gradient(180deg, rgba(255, 92, 112, 0.16), rgba(9, 19, 33, 0.96));
+  border-bottom-color: rgba(255, 92, 112, 0.28);
+}
+
+.dsf__alert {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 92, 112, 0.2);
+  color: var(--danger, #ff5c70);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.dsf--alert .dsf__btn {
+  border-color: rgba(255, 92, 112, 0.45);
+  background: rgba(255, 92, 112, 0.16);
+}
+
+.dsf--alert .dsf__btn:hover:not(:disabled) {
+  background: rgba(255, 92, 112, 0.28);
+}
+
 .dsf__foot {
   display: flex;
   align-items: center;

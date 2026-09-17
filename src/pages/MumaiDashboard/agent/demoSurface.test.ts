@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { DEMO_ACTIONS } from "./demoActions.ts";
 import { rowsOf } from "./demoSurfaceRows.ts";
 import { FIELD_LABELS, formatValue, labelOf } from "./demoSurfaceLabels.ts";
+import { scenarioValue } from "../seed/scenario.ts";
 
 test("每个被引用的数据键都有中文标签（漏了会在投屏上显示原始键名）", () => {
   for (const action of DEMO_ACTIONS) {
@@ -83,6 +84,49 @@ test("formatValue 的三种形态：数字带单位、数组顿号、空值占�
   assert.equal(formatValue(["a", "b"]), "a、b");
   assert.equal(formatValue(undefined), "—");
   assert.equal(formatValue(null), "—");
+});
+
+/* ------------------------------------------------------------------ *
+ * 预警窗（用户口径 2026-09-17）
+ *
+ * 「⑬ 这个触发时，会弹出预警窗口，然后带个确认按钮」。
+ * 预警窗与普通数据面板的差别是"要不要人回话"，这件事必须能被证伪：
+ * 标了 `alert` 却没有确认按钮，就等于"看完就没了"—— 台上没人知道该谁回话。
+ * ------------------------------------------------------------------ */
+
+test("预警窗必须带确认按钮（否则预警没人回话）", () => {
+  const alerts = DEMO_ACTIONS.filter((a) => a.alert);
+  assert.ok(alerts.length >= 1, "至少应有一轮是预警窗（⑬ 小木主动起头的适用性预警）");
+  for (const action of alerts) {
+    assert.ok(
+      action.button && action.button.length > 0,
+      `第 ${action.roundNo} 轮是预警窗，却没有确认按钮 —— 预警窗是要人回话的`,
+    );
+    /* 预警窗要真的弹得出来：标了 revealOnly 的轮次不弹浮层，两者互斥 */
+    assert.notEqual(
+      action.revealOnly,
+      true,
+      `第 ${action.roundNo} 轮既是预警窗又标了 revealOnly，浮层永远不弹 —— 自相矛盾`,
+    );
+    /* 确认按钮的文案不得带真实操作语义（由上面那条通用断言兜住，这里再点一次名） */
+    for (const bad of ["下发设备", "刷写", "开始训练", "部署到设备"]) {
+      assert.ok(
+        !action.button.includes(bad),
+        `第 ${action.roundNo} 轮的确认按钮「${action.button}」含真实操作语义「${bad}」`,
+      );
+    }
+  }
+});
+
+test("预警窗的每一行都取真实数据键（不写死数字）", () => {
+  for (const action of DEMO_ACTIONS.filter((a) => a.alert)) {
+    assert.ok(action.dataKeys.length >= 3, `第 ${action.roundNo} 轮的预警窗只有 ${action.dataKeys.length} 行，信息不足以支撑一次判断`);
+    for (const key of action.dataKeys) {
+      const value = scenarioValue(key);
+      assert.notEqual(value, undefined, `第 ${action.roundNo} 轮预警窗引用了不存在的数据键「${key}」`);
+      assert.ok(labelOf(key) !== null, `第 ${action.roundNo} 轮预警窗的键「${key}」没有中文标签`);
+    }
+  }
 });
 
 test("标签文案不得出现无法核验的空话（§11.10）", () => {

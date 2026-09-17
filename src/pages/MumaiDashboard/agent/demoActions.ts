@@ -65,6 +65,20 @@ export type DemoAction = {
    * `script.ts` 里有 `reveal.order-detail` 声明，否则就成了"既没浮层也没页面动作"。
    */
   revealOnly?: boolean;
+  /**
+   * 这一轮是**小木主动起头的预警**，浮层要渲染成"预警窗"：
+   * 警示色描边 + 标题栏「预警」角标（见 `demoSurface.tsx` 的 `dsf--alert`）。
+   *
+   * ── 为什么预警窗必须带确认按钮（用户口径 2026-09-17）────────────────
+   * 用户原话：「⑬ 这个触发时，会弹出预警窗口，然后带个确认按钮」。
+   * 预警不同于普通数据面板：它是**要人回话的**，所以标了 `alert` 的轮次
+   * 必须同时给 `button`（确认按钮）—— 这条由 `demoSurface.test.ts` 锁住，
+   * 免得以后有人把按钮删掉、预警窗变成"看完就没了"。
+   *
+   * ⚠ 确认按钮只改本地状态（同 `button` 的既有约束）：
+   *   它表示"架构师已收到并知悉"，**不代表**核验通过、更不向设备发任何指令。
+   */
+  alert?: boolean;
   /** 可选：表面底部的一个本地按钮（只改本地状态） */
   button?: string;
   /** 这个动作是否只影响本地状态（§10 阶段 D 要求；恒为 true，显式写出来） */
@@ -230,9 +244,29 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
   },
   {
     roundNo: "⑬",
-    title: "顶部出现主动提醒，检查项逐条置为完成",
-    surface: "channels",
-    dataKeys: ["mission.id", "components.codes"],
+    /*
+      用户口径（2026-09-17）：「⑬ 这个触发时，会弹出预警窗口，然后带个确认按钮」。
+      所以这一轮不是普通数据面板，而是**预警窗**：`alert: true` 给警示描边与「预警」角标，
+      `button` 给确认按钮 —— 两者缺一，`demoSurface.test.ts` 会红。
+
+      ⚠ 展示的每一行都取真实数据键，不写死数字：
+        · 重点构件 / 异常批次 / 特征偏移 —— 适用性预警就是由特征偏移触发的那条叙事；
+        · 当前部署模型 —— 预警原因（`seed/scenario.ts` 的批次 `freezeReason`、
+          `seed/deviceLogs.ts` 的 28:04 日志）说的正是"模型 DEMO-M02 缺少该批次
+          木材的有效标定记录"，而 DEMO-M02 就是 `package.rollbackVersion`（未升级前的版本）。
+      ⚠ 不挂统计口径的键（缺失帧、有效比例那些属于 ⑭ 的异常证据），避免两轮讲同一件事。
+    */
+    title: "适用性预警：Z04 当前批次诊断输出已冻结，请架构师确认",
+    alert: true,
+    surface: "anomaly",
+    dataKeys: [
+      "components.focus",
+      "anomaly.batchId",
+      "anomaly.featureShiftSigma",
+      "package.rollbackVersion",
+      "anomaly.conclusion",
+    ],
+    button: "确认收到",
     simulated: true,
   },
   {
