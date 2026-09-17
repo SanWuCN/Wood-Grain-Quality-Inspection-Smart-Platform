@@ -16,3 +16,7 @@
 *.docx binary
 *.zip binary
 *.sog binary
+
+# 用户给的原件按**字节**入库（CRLF 也不动）：这份对照表在测试里用 sha256 钉住，
+# 被换行符转换一次哈希就变了，测试会在别人的机器上红
+public/photo-batch-20260922/*.csv -text
