@@ -13,8 +13,9 @@
  *   · `trigger` 的入队语义（用假 VoiceInput 替身验证）
  * 钩子本体（`useScriptShortcut`）的接线由 `tsc` 与浏览器端验收覆盖。
  *
- * 2026-09-17 口径更新：前缀由 Ctrl+Q 换成 **Ctrl+M**，目标键按键盘行序排
- * （1..0 → q 那一排 → a 那一排），下面的样例表按新键位写。
+ * 2026-09-17 口径更新：键位改成三段 —— 第 1–10 条 `Ctrl+B+1..0`、
+ * 第 11–20 条 `Ctrl+N+1..0`、第 21–25 条 `Ctrl+M+1..5`；条目表的 `key`
+ * 因此是复合 id（`"b:1"` / `"m:5"`），下面的样例表按新键位写。
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -22,38 +23,40 @@ import assert from "node:assert/strict";
 import { SCRIPT_ROUNDS, mainLineOf } from "./script.ts";
 import { SCRIPT_SHORTCUT_ENTRIES } from "./scriptShortcutEntries.ts";
 import {
-  SCRIPT_SEQUENCE_PREFIX_KEY,
+  SCRIPT_SEQUENCE_PREFIX_KEYS,
   advanceSequence,
   initialSequenceState,
+  parseShortcutId,
+  shortcutLabel,
 } from "./scriptShortcutSequence.ts";
 import { askArgsFor, planFor, type ScriptShortcutEntry } from "./useScriptShortcut.ts";
 
-/** 与 Shell 里那份表同构的最小样例（键位 → 台词 + 圈号），键位照键盘行序 */
+/** 与 Shell 里那份表同构的最小样例（复合键位 → 台词 + 圈号），三段的头一条各取一个 */
 const ENTRIES: ScriptShortcutEntry[] = [
-  { key: "1", text: "小木小木，查过去三个月我们一共到过多少个地方巡检，发现了多少个风险点，目前已修复的有多少？", label: "第1条 · ① 三个月巡检与风险统计", roundNo: "①" },
-  { key: "2", text: "小木读取当前工单与附件索引，生成任务卡和装备核对清单，未填字段标为待补。", label: "第2条 · ② 接单整理", roundNo: "②" },
-  { key: "3", text: "小木，核对开工清单，显示接下来需要完成的项目。", label: "第3条 · ③ 开工清单核对", roundNo: "③" },
+  { key: "b:1", text: "小木小木，查过去三个月我们一共到过多少个地方巡检，发现了多少个风险点，目前已修复的有多少？", label: "第1条 · ① 三个月巡检与风险统计", roundNo: "①" },
+  { key: "b:2", text: "小木读取当前工单与附件索引，生成任务卡和装备核对清单，未填字段标为待补。", label: "第2条 · ② 接单整理", roundNo: "②" },
+  { key: "n:1", text: "小木，分析比较这四组标记的木构件，进行风险评估。", label: "第11条 · ⑪ 四柱风险初筛", roundNo: "⑪" },
+  { key: "m:1", text: "小木，调用本批次分析流程，完成图像标注和雷达分析，再按测区融合结果。", label: "第21条 · ㉑ 本批次分析流程", roundNo: "㉑" },
 ];
 
-test("按 Ctrl+M+数字 能对应到唯一一条（键位不重复、台词非空）", () => {
+test("按 Ctrl+B/N/M + 数字 能对应到唯一一条（键位不重复、台词非空）", () => {
   const keys = ENTRIES.map((e) => e.key);
   assert.deepEqual([...new Set(keys)].length, keys.length, `键位重复：${keys.join(",")}`);
   for (const e of ENTRIES) {
     assert.ok(e.text.trim().length > 0, `${e.label} 的台词是空的`);
     assert.ok(e.label.trim().length > 0, `键 ${e.key} 少了标签（清单里要能看懂是哪一轮）`);
+    assert.ok(parseShortcutId(e.key), `键位 ${e.key} 不是"前缀:键"的复合 id`);
   }
+  assert.ok(SCRIPT_SEQUENCE_PREFIX_KEYS.length >= 3, "三段前缀都要在实现里登记");
 });
 
-test("序列判定与条目表配合：M+1/M+2/M+3 各自命中对应的键", () => {
+test("序列判定与条目表配合：三段各自的头一条都能命中自己的复合 id", () => {
   for (const entry of ENTRIES) {
-    const armed = advanceSequence(
-      { key: SCRIPT_SEQUENCE_PREFIX_KEY, ctrlKey: true },
-      initialSequenceState,
-      0,
-    );
-    const fired = advanceSequence({ key: entry.key, ctrlKey: true }, armed.state, 300);
-    assert.equal(fired.kind, "fire", `Ctrl+M+${entry.key} 没命中`);
-    assert.equal(fired.kind === "fire" ? fired.key : "", entry.key);
+    const { prefix, key } = parseShortcutId(entry.key)!;
+    const armed = advanceSequence({ key: prefix, ctrlKey: true }, initialSequenceState, 0);
+    const fired = advanceSequence({ key, ctrlKey: true }, armed.state, 300);
+    assert.equal(fired.kind, "fire", `${shortcutLabel(entry.key)} 没命中`);
+    assert.equal(fired.kind === "fire" ? fired.id : "", entry.key);
   }
 });
 

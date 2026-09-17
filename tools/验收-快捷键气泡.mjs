@@ -12,7 +12,7 @@
  * 直到 `ask()` 收尾才看到整句 —— 与用户描述完全一致。
  *
  * ── 判据（都能证伪，不是"看着像"）──────────────────────────────────
- *   ① 按下 Ctrl+M+1 后 **400ms 内**气泡面板出现在 DOM 里（`visible` 变真）；
+ *   ① 按下 Ctrl+B+1 后 **400ms 内**气泡面板出现在 DOM 里（`visible` 变真）；
  *   ② 识别期间用户气泡里的文字**至少出现 3 个不同长度**（逐字累积；
  *      若只在最后一次性出现，这条必红 —— 那正是本次修的 bug）；
  *   ③ 采样到的最大长度**小于**该句总长度（证明是"逐渐"，不是"一次给完"）；
@@ -206,7 +206,7 @@ try {
     return true;
   })()`);
 
-  /* ---------- 触发 Ctrl+M+1（第①轮 · 三个月巡检与风险统计）---------- */
+  /* ---------- 触发 Ctrl+B+1（第①轮 · 三个月巡检与风险统计）---------- */
   const dispatch = (key) =>
     evaluate(`(() => {
       const opts = { key: ${JSON.stringify(key)}, code: 'Key' + ${JSON.stringify(key.toUpperCase())},
@@ -216,7 +216,7 @@ try {
     })()`);
 
   const T0 = Date.now();
-  await dispatch("m");
+  await dispatch("b");
   await dispatch("1");
 
   /* ---------- ① 气泡是否很快出现 ---------- */
@@ -312,7 +312,7 @@ try {
   })()`);
   /* 先等第①轮的播报彻底收尾，避免两条模拟抢同一个 ask 队列 */
   await sleep(6000);
-  await dispatch("m");
+  await dispatch("b");
   await dispatch("4");
   let syncShown = false;
   for (let i = 0; i < 120; i += 1) {
@@ -322,7 +322,7 @@ try {
     }
     await sleep(250);
   }
-  check("Ctrl+M+4 之后弹出同步备份小窗（第④轮的可见动作落地）", syncShown);
+  check("Ctrl+B+4 之后弹出同步备份小窗（第④轮的可见动作落地）", syncShown);
   await shot(send, "3-第④轮同步备份小窗");
 
   const audio4 = await evaluate(`window.__audio`);
@@ -369,15 +369,15 @@ try {
   await sleep(1500);
   /*
     ⚠ 判据要按"**有没有新的**用户文本"来写，不能按"气泡里有没有用户文本"：
-    面板是**对话历史**，上一轮（Ctrl+M+4）的「小木，请帮我做同步备份。」还挂在上面，
+    面板是**对话历史**，上一轮（Ctrl+B+4）的「小木，请帮我做同步备份。」还挂在上面，
     按"非空即失败"会把它误判成这一轮收到了消息（第一版就是这么假红的）。
     所以先记下按键前的基线，再看这 2 秒里有没有**新增**。
   */
   const baselineProbe = await evaluate(`window.__probe()`);
   const baselineTexts = new Set(baselineProbe?.userTexts ?? []);
   const alertT0 = Date.now();
-  await dispatch("m");
-  await dispatch("e");
+  await dispatch("n");
+  await dispatch("3");
 
   /* 甲：按键后 2 秒内不许出现**新的**用户文本，尤其不许出现第⑬轮那句（老实现会逐字涨上去） */
   const newUserTexts = [];
@@ -416,7 +416,7 @@ try {
     if (alertWin?.shown) break;
     await sleep(250);
   }
-  check("Ctrl+M+E 之后弹出预警窗（.dsf--alert）", Boolean(alertWin?.shown), alertWin?.title || "始终没出现");
+  check("Ctrl+N+3 之后弹出预警窗（.dsf--alert）", Boolean(alertWin?.shown), alertWin?.title || "始终没出现");
   await shot(send, "2-第⑬轮预警窗");
   check("预警窗带「预警」角标", alertWin?.chip === "预警", `角标=「${alertWin?.chip ?? ""}」`);
   check("预警窗里有确认按钮", Boolean(alertWin?.btnText), `按钮=「${alertWin?.btnText ?? ""}」`);
@@ -482,8 +482,8 @@ try {
     `${sheet?.count ?? 0} 条`,
   );
   check(
-    "首尾键位对得上（Ctrl+M+1 … Ctrl+M+S）",
-    sheet?.first === "Ctrl+M+1" && sheet?.last === "Ctrl+M+S",
+    "首尾键位对得上（Ctrl+B+1 … Ctrl+M+5）",
+    sheet?.first === "Ctrl+B+1" && sheet?.last === "Ctrl+M+5",
     `${sheet?.first ?? "?"} … ${sheet?.last ?? "?"}`,
   );
   if (isLoopback) {
@@ -513,7 +513,7 @@ try {
   */
   await evaluate(`(() => { window.__audio = { played: [], synth: 0 }; return true; })()`);
   await sleep(1500);
-  await dispatch("m");
+  await dispatch("b");
   await dispatch("5");
 
   /* 先等气泡里的回答出现（文字先上屏），立刻核对数字 */
@@ -552,8 +552,19 @@ try {
     missingOnPanel.length ? `面板缺 ${missingOnPanel.join(" / ")}` : `面板文本 ${panelText.length} 字，五个数字都在`,
   );
 
-  const audio5 = await evaluate(`window.__audio`);
-  const played5 = (audio5?.played ?? []).filter(Boolean);
+  /*
+    ⚠ 音频这一格必须**轮询**（与第①轮同样的理由）：`speak()` 在这一轮收尾才起播，
+    而"天气面板出现"与"play() 被调用"几乎同一瞬间 —— 早一次采样就会读到空数组，
+    误判成"没播录音"（实测踩到过：判据红、其实录音正常）。
+  */
+  let audio5 = null;
+  let played5 = [];
+  for (let i = 0; i < 60; i += 1) {
+    audio5 = await evaluate(`window.__audio`);
+    played5 = (audio5?.played ?? []).filter(Boolean);
+    if (played5.some((u) => String(u).includes("/voice/round-05.mp3"))) break;
+    await sleep(500);
+  }
   check(
     "第⑤轮播的是重新合成的录音（/voice/round-05.mp3）",
     played5.some((u) => String(u).includes("/voice/round-05.mp3")),

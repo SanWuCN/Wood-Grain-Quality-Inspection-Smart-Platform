@@ -10,8 +10,8 @@ import assert from "node:assert/strict";
 
 import { SCRIPT_ROUNDS, mainLineOf } from "./script.ts";
 import { SCRIPT_SHORTCUT_ENTRIES } from "./scriptShortcutEntries.ts";
-import { SCRIPT_SHORTCUT_KEYS, SCRIPT_SEQUENCE_PREFIX_KEY } from "./scriptShortcutSequence.ts";
-import { SHEET_PREFIX, keyLabel, shortcutSheetRows } from "./shortcutSheet.ts";
+import { SCRIPT_SHORTCUT_KEYS, shortcutLabel } from "./scriptShortcutSequence.ts";
+import { keyLabel, shortcutSheetRows } from "./shortcutSheet.ts";
 
 test("一览表的行数 = 剧本轮数 = 条目数（第 N 个键 = 第 N 轮）", () => {
   const rows = shortcutSheetRows();
@@ -26,7 +26,7 @@ test("每一行的键位、轮次、台词都与其来源逐字一致", () => {
     const entry = SCRIPT_SHORTCUT_ENTRIES[index];
     const round = SCRIPT_ROUNDS[index];
     assert.equal(entry.roundNo, round.roundNo, `第 ${index + 1} 行的条目与轮次错位`);
-    assert.equal(row.keys, `${SHEET_PREFIX}+${keyLabel(entry.key)}`, `第 ${index + 1} 行的键位不对`);
+    assert.equal(row.keys, keyLabel(entry.key), `第 ${index + 1} 行的键位不对`);
     assert.equal(row.round, `${round.roundNo} ${round.title}`, `第 ${index + 1} 行的轮次标题不对`);
     assert.equal(row.reply, mainLineOf(round), `第 ${index + 1} 行的小木台词与剧本不一致`);
     assert.ok(row.how.trim().length > 0, `第 ${index + 1} 行没写怎么触发`);
@@ -36,14 +36,16 @@ test("每一行的键位、轮次、台词都与其来源逐字一致", () => {
 test("键位序与序列实现同源（一览表不会自成一套键位）", () => {
   const rows = shortcutSheetRows();
   rows.forEach((row, index) => {
-    const key = SCRIPT_SHORTCUT_KEYS[index];
-    assert.equal(
-      row.keys,
-      `${SHEET_PREFIX}+${keyLabel(key)}`,
-      `第 ${index + 1} 行与 SCRIPT_SHORTCUT_KEYS 的第 ${index + 1} 位不一致`,
-    );
+    const id = SCRIPT_SHORTCUT_KEYS[index];
+    assert.equal(row.keys, shortcutLabel(id), `第 ${index + 1} 行与 SCRIPT_SHORTCUT_KEYS 的第 ${index + 1} 位不一致`);
   });
-  assert.equal(SHEET_PREFIX, `Ctrl+${SCRIPT_SEQUENCE_PREFIX_KEY.toUpperCase()}`);
+  /* 三段前缀各自的键位文本必须真的出现在表里（缺一段说明前缀串了） */
+  for (const sample of ["Ctrl+B+1", "Ctrl+N+1", "Ctrl+M+1", "Ctrl+M+5"]) {
+    assert.ok(
+      rows.some((row) => row.keys === sample),
+      `一览表里没有 ${sample} —— 三段前缀（B/N/M）应当各出现在自己的段里`,
+    );
+  }
 });
 
 test("主动发起的条目在表里写「按钮触发，不用说话」", () => {

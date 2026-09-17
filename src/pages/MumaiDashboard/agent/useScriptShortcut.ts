@@ -1,8 +1,8 @@
 /**
- * 剧本快捷键：Ctrl+M+N → 模拟"听到这一句" → 交给理解链路
+ * 剧本快捷键：Ctrl+B/N/M + 数字 → 模拟"听到这一句" → 交给理解链路
  *
  * ── 它在链路里的位置 ──────────────────────────────────────────────
- *   按键序列（`scriptShortcutSequence.ts` 判定）
+ *   按键序列（`scriptShortcutSequence.ts` 判定：三段前缀 + 段内数字）
  *     → `planFor(entry)` 决定这一条**该怎么演**（见下）
  *     → 被动应答：`VoiceInput.simulate()` 逐字吐出这句话（每字 100–300ms 随机，
  *       模拟流式 ASR）→ 与语音控制台**同一条** `ask()` 理解链路
@@ -28,8 +28,8 @@
  * （界面上出现"回答 A 挂在问题 B 下面"）—— 与控制台的 askQueue 同一套处理。
  *
  * ── 与既有快捷键的关系 ───────────────────────────────────────────
- * 序列是 `Ctrl+M+<目标键>`（键位顺序见 `SCRIPT_SHORTCUT_KEYS`，就是用户
- * 2026-09-17 要的"1..0 → q 那一排 → a 那一排"）；`Ctrl+Q+L` 是建单
+ * 序列是 `Ctrl+<段前缀>+<数字>`（前缀与键位见 `SCRIPT_SHORTCUT_GROUPS`，就是用户
+ * 2026-09-17 要的"1–10 用 B、11–20 用 N、21–25 用 M"）；`Ctrl+Q+L` 是建单
  * （`useWorkOrderShortcut.ts`），`Alt+W/E/R/M` 是气泡开关与重播。
  * 两条序列各自只对自己关心的键做判定，互不干扰（两边都不认识的键一律不动）。
  */
@@ -47,7 +47,13 @@ import {
 
 /** 一条"按快捷键就会说出这句话"的剧本对话 */
 export type ScriptShortcutEntry = {
-  /** 触发键（`1..0` / `q` 那一排 / `a` 那一排，对应 Ctrl+M+<key>） */
+  /**
+   * 触发键的**复合 id**：`"b:1"` / `"n:0"` / `"m:5"`。
+   *
+   * 为什么不是裸数字：同一个数字键在三段里含义不同（`Ctrl+B+1` 是第 1 条、
+   * `Ctrl+N+1` 是第 11 条），裸数字会让条目表、查表与清单三处都失去唯一性。
+   * 给人看的写法统一走 `shortcutLabel(id)` → `Ctrl+B+1`。
+   */
   key: string;
   /** 这一轮要说的话（逐字照剧本；模拟识别时会一个字一个字蹦出来） */
   text: string;
@@ -288,11 +294,13 @@ export function useScriptShortcut({
       state = verdict.state;
       if (verdict.kind === "ignore") return;
       /* 只对确实属于本序列的按键拦默认行为：
-         · armed —— Ctrl+Q 在部分浏览器有默认动作，必须拦，否则序列还没按完页面就动了；
+         · armed —— Ctrl+B/N/M 在部分浏览器有默认动作（B 是加粗等），
+           必须拦，否则序列还没按完页面就动了；
          · fire  —— 拦掉，避免数字键再触发别的默认行为。 */
       event.preventDefault();
       if (verdict.kind !== "fire") return;
-      const entry = byKey.current.get(verdict.key);
+      /* 查表用**复合 id**（"b:1"），不是裸数字：同一个数字在三段里是不同的条目 */
+      const entry = byKey.current.get(verdict.id);
       if (!entry) return;
       trigger(entry);
     };

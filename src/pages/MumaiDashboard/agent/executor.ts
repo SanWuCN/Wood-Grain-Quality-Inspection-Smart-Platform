@@ -1026,7 +1026,7 @@ export async function speakProactive(roundNo: string, runtime: Runtime): Promise
  * 执行一次"用户说了这句话"。
  *
  * @param target 可选的**目标轮次提示**（`roundNo`，如 "⑤"）。
- *   由剧本快捷键（`useScriptShortcut`）传入：按 `Ctrl+M+<键>` 时，演示人期望的就是
+ *   由剧本快捷键（`useScriptShortcut`）传入：按 `Ctrl+B/N/M+<数字>` 时，演示人期望的就是
  *   **第 N 条戏**，而识别/说法本身可能落到相邻轮次（实测：「请各岗位报告出发前准备
  *   情况。小木，请帮我做同步备份。」会命中第④轮而不是它自己的那一条）。
  *   给了提示就以它为准；**语音与文本入口不传这个参数**，仍然走正常的模糊匹配 ——
@@ -1102,7 +1102,7 @@ export async function ask(
     if (!(await enterThinking(gen, `剧本快捷键指定第 ${pinned.roundNo} 轮，思考中...`))) return;
     replyScript(
       pinned,
-      certainMatch(pinned, "剧本快捷键（Ctrl+M 序列）直接指定轮次，未经语音匹配"),
+      certainMatch(pinned, "剧本快捷键（Ctrl+B/N/M 序列）直接指定轮次，未经语音匹配"),
       runtime,
       target?.lineOverride,
     );

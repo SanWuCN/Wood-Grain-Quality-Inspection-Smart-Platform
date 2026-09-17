@@ -19,13 +19,13 @@
  */
 import { SCRIPT_ROUNDS, mainLineOf } from "./script";
 import { SCRIPT_SHORTCUT_ENTRIES } from "./scriptShortcutEntries";
-import { SCRIPT_SEQUENCE_PREFIX_KEY } from "./scriptShortcutSequence";
+import { shortcutLabel } from "./scriptShortcutSequence";
 
 /** 一条要显示的行（纯数据，便于单测；不依赖 DOM） */
 export type ShortcutSheetRow = {
   /** 序号，1 起 */
   index: number;
-  /** 显示用的键位，如 `Ctrl+M+1` / `Ctrl+M+Q` / `Ctrl+M+S` */
+  /** 显示用的键位，如 `Ctrl+B+1` / `Ctrl+N+0` / `Ctrl+M+5` */
   keys: string;
   /** 圈号与轮次标题，如 `① 三个月巡检与风险统计` */
   round: string;
@@ -35,12 +35,13 @@ export type ShortcutSheetRow = {
   reply: string;
 };
 
-/** 键位前缀（`Ctrl+M`）—— 与序列实现同源，改前缀这里跟着变 */
-export const SHEET_PREFIX = `Ctrl+${SCRIPT_SEQUENCE_PREFIX_KEY.toUpperCase()}`;
-
-/** 单个目标键 → 显示文本（字母大写、`[` `]` `\` 原样） */
-export function keyLabel(key: string): string {
-  return key.length === 1 && /[a-z]/.test(key) ? key.toUpperCase() : key;
+/**
+ * 键位文本的**唯一实现**在 `scriptShortcutSequence.shortcutLabel`：
+ * 2026-09-17 起三段前缀各不同（B/N/M），前缀不能再当成一个常量导出。
+ * 这里保留一个同名转发，方便页面侧少 import 一个模块。
+ */
+export function keyLabel(id: string): string {
+  return shortcutLabel(id);
 }
 
 /**
@@ -62,7 +63,8 @@ export function shortcutSheetRows(): ShortcutSheetRow[] {
     if (!round) throw new Error(`第 ${index + 1} 条指向的轮次 ${entry.roundNo} 不存在`);
     return {
       index: index + 1,
-      keys: `${SHEET_PREFIX}+${keyLabel(entry.key)}`,
+      /* 键位文本由复合 id 直接渲染：三段前缀各不同，这里不能再拼一个常量前缀 */
+      keys: keyLabel(entry.key),
       round: `${round.roundNo} ${round.title}`,
       /* 主动发起的条目 text 就是小木自己的台词 —— 那种情况没人说话 */
       how: entry.proactive ? "按钮触发，不用说话" : entry.text,

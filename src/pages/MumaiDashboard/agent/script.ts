@@ -158,7 +158,7 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     paragraph: "（用户 2026-09-17 文档第 1 条）",
     act: "第四幕 · 复扫融合与任务交付",
     title: "三个月巡检与风险统计",
-    /* 触发来源：唤醒词 + 说法（快捷键 Ctrl+M+1） */
+    /* 触发来源：唤醒词 + 说法（快捷键 Ctrl+B+1） */
     triggerSource: "voice",
     triggers: ["到过多少个地方巡检", "发现了多少个风险点", "已修复的有多少", "过去三个月统计"],
     lines: [
