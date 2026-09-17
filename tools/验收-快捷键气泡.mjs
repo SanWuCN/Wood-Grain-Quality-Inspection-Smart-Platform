@@ -12,7 +12,7 @@
  * 直到 `ask()` 收尾才看到整句 —— 与用户描述完全一致。
  *
  * ── 判据（都能证伪，不是"看着像"）──────────────────────────────────
- *   ① 按下 Ctrl+Q+1 后 **400ms 内**气泡面板出现在 DOM 里（`visible` 变真）；
+ *   ① 按下 Ctrl+M+1 后 **400ms 内**气泡面板出现在 DOM 里（`visible` 变真）；
  *   ② 识别期间用户气泡里的文字**至少出现 3 个不同长度**（逐字累积；
  *      若只在最后一次性出现，这条必红 —— 那正是本次修的 bug）；
  *   ③ 采样到的最大长度**小于**该句总长度（证明是"逐渐"，不是"一次给完"）；
@@ -167,10 +167,25 @@ try {
         userTexts: texts,
       };
     };
+    /* 音频探针：必须在按快捷键**之前**装好，否则抓不到这一轮的播放 */
+    window.__audio = { played: [], synth: 0 };
+    const origPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      try { window.__audio.played.push(this.currentSrc || this.src || ''); } catch (e) {}
+      return origPlay.apply(this, arguments);
+    };
+    const synth = window.speechSynthesis;
+    if (synth && synth.speak) {
+      const origSpeak = synth.speak.bind(synth);
+      synth.speak = function () {
+        window.__audio.synth += 1;
+        return origSpeak.apply(null, arguments);
+      };
+    }
     return true;
   })()`);
 
-  /* ---------- 触发 Ctrl+Q+1 ---------- */
+  /* ---------- 触发 Ctrl+M+1（第①轮 · 三个月巡检与风险统计）---------- */
   const dispatch = (key) =>
     evaluate(`(() => {
       const opts = { key: ${JSON.stringify(key)}, code: 'Key' + ${JSON.stringify(key.toUpperCase())},
@@ -180,7 +195,7 @@ try {
     })()`);
 
   const T0 = Date.now();
-  await dispatch("q");
+  await dispatch("m");
   await dispatch("1");
 
   /* ---------- ① 气泡是否很快出现 ---------- */
@@ -228,7 +243,7 @@ try {
       const t = document.querySelector('.xd__panel');
       return { shown: Boolean(t), text: (t?.textContent || '') };
     })()`);
-    if (p?.shown && /四项任务|现场建档/.test(p.text)) {
+    if (p?.shown && /RAG知识库|巡检4处地点/.test(p.text)) {
       replied = true;
       break;
     }
@@ -236,7 +251,67 @@ try {
   }
   check("随后小木给出该轮回复（ask 链路跑通）", replied);
 
-  await evaluate(`window.__probe = undefined`);
+  /* ---------- ⑤ 那一轮播的到底是**录音**还是浏览器合成音 ----------
+     用户 2026-09-17 的交付要求里有"音频能正常使用"。判据直接看运行时：
+       · `new Audio(url)` 拿到的 url 必须命中语音包（形如 /voice/round-01.mp3）；
+       · 同时 `speechSynthesis.speak` **不该**被调用 —— 被调用就说明回退成合成音了
+         （现场表现是"声音还是机器的"，而页面上看不出任何异常）。
+     探针在按键之前就装好了（见上面 `window.__audio`），所以这里读到的是这一轮的真实播放。
+  */
+  /*
+    ⚠ 这里必须**轮询**，不能回复文字一出现就断言：实测 `ask()` 是先把回答推进对话
+    （文字先上屏），随后才调 `speak()` 起播 —— 立刻取会读到空数组，误判成"没播录音"。
+    判据等的是"这一轮确实播了"，不是"此刻已经播了"。
+  */
+  let audio1 = null;
+  let played1 = [];
+  for (let i = 0; i < 40; i += 1) {
+    audio1 = await evaluate(`window.__audio`);
+    played1 = (audio1?.played ?? []).filter(Boolean);
+    if (played1.some((u) => String(u).includes("/voice/round-01.mp3"))) break;
+    await sleep(250);
+  }
+  check(
+    "第①轮播的是预录录音（/voice/round-01.mp3）",
+    played1.some((u) => String(u).includes("/voice/round-01.mp3")),
+    played1.length ? played1.map((u) => String(u).split("/").pop()).join(" / ") : "没有任何 Audio.play()",
+  );
+  check("第①轮没有回退到浏览器合成音", (audio1?.synth ?? 0) === 0, `speechSynthesis.speak 调用 ${audio1?.synth ?? 0} 次`);
+
+  /* ---------- ⑤ 第④轮「同步备份」：快捷键要能把同步备份小窗也带出来 ----------
+     这一轮是用户 2026-09-17 文档第 4 条拆出来的独立轮次，它的可见动作有两个：
+     工单详情页逐组展开 + 播报收尾弹「同步备份小窗」（executor 派发 `mumai:sync-backup`）。
+     快捷键若只"念台词"而不跑剧本动作，这里就会红 —— 所以这条判据能证明整条链路是通的。
+  */
+  await evaluate(`(() => {
+    window.__probeSync = () => Boolean(document.querySelector('.sxb'));
+    window.__audio = { played: [], synth: 0 };
+    return true;
+  })()`);
+  /* 先等第①轮的播报彻底收尾，避免两条模拟抢同一个 ask 队列 */
+  await sleep(6000);
+  await dispatch("m");
+  await dispatch("4");
+  let syncShown = false;
+  for (let i = 0; i < 120; i += 1) {
+    if (await evaluate(`window.__probeSync()`)) {
+      syncShown = true;
+      break;
+    }
+    await sleep(250);
+  }
+  check("Ctrl+M+4 之后弹出同步备份小窗（第④轮的可见动作落地）", syncShown);
+
+  const audio4 = await evaluate(`window.__audio`);
+  const played4 = (audio4?.played ?? []).filter(Boolean);
+  check(
+    "第④轮播的是预录录音（/voice/round-04.mp3）",
+    played4.some((u) => String(u).includes("/voice/round-04.mp3")),
+    played4.length ? played4.map((u) => String(u).split("/").pop()).join(" / ") : "没有任何 Audio.play()",
+  );
+  check("第④轮没有回退到浏览器合成音", (audio4?.synth ?? 0) === 0, `speechSynthesis.speak 调用 ${audio4?.synth ?? 0} 次`);
+
+  await evaluate(`window.__probe = undefined; window.__probeSync = undefined`);
 } finally {
   chrome.kill();
 }
