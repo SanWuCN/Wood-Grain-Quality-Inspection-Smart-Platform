@@ -433,7 +433,7 @@ try {
   const freshPageTargets = (await pageTargets()).filter((t) => !pageTargetsBefore.has(t));
   const urlAfter = await evaluate(`location.href`);
   check(
-    "Ctrl+Y 没把浏览器带走（没弹下载页、没开新标签，页面还在原地址）",
+    "按 Ctrl+Y 之后页面没被带走（页面级检查；浏览器加速键那一层由「验收-浏览器不吃键位」负责）",
     freshPageTargets.length === 0 && String(urlAfter) === String(urlBefore),
     freshPageTargets.length
       ? `新开了 ${freshPageTargets.length} 个页面：${freshPageTargets.join(" / ").slice(0, 140)}`
@@ -474,6 +474,113 @@ try {
 
   await evaluate(`window.__probe = undefined; window.__probeSync = undefined; window.__probeAlert = undefined`);
 
+  /* ---------- ⑭「一条龙」：Ctrl+Shift+Z 按一下走一条（用户口径 2026-09-17）----------
+     用户原话：「专门搞一个组合键用于完整走完流程。ctrl加shift加z，25个对话循环播放，
+     按一下播放一个」。判据（每条都能证伪）：
+       · 连按 3 下 → 依次走 ⑭⑮⑯，且**接着刚才手动按到的 ⑬ 往下走**（不是从第 1 条重来）；
+       · 每按一下气泡头部出现「一条龙 N/25」，当轮录音真的播了；
+       · 先手动按到第 25 条，再按一下 → 回到第 1 条（用户口径「循环播放」）。
+     ⚠ 这一节按的是**合成事件**：它测的是"页面自己的行为"。
+       浏览器加速键那一层（Ctrl+N 拦不住、我们的组合浏览器认不认）由
+       `tools/验收-浏览器不吃键位.mjs` 用 CDP 真实输入通道单独验 —— 合成事件触发不了浏览器快捷键，
+       拿它断言"没把浏览器带走"是空跑。
+  */
+  await evaluate(`window.__audio = { played: [], synth: 0 }`);
+  await evaluate(`(() => {
+    window.__probeWalk = () => ({
+      chip: (document.querySelector('.xd__walk')?.textContent || '').trim(),
+      panel: (document.querySelector('.xd__panel')?.textContent || ''),
+    });
+    return true;
+  })()`);
+  const walkChip = async () => (await evaluate(`window.__probeWalk()`))?.chip ?? "";
+  const dispatchWalk = () =>
+    evaluate(`(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Z', code: 'KeyZ', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true,
+      }));
+      return true;
+    })()`);
+  const playedList = async () =>
+    ((await evaluate(`window.__audio`))?.played ?? []).filter(Boolean).map(String);
+  /** 等这一轮的录音真的播出来（一条龙必须**一条走完再走下一条**，与现场节奏一致） */
+  const waitForAudio = async (needle, timeoutMs = 25000) => {
+    const deadline = Date.now() + timeoutMs;
+    let played = [];
+    while (Date.now() < deadline) {
+      played = await playedList();
+      if (played.some((u) => u.includes(needle))) return played;
+      await sleep(250);
+    }
+    return played;
+  };
+
+  const walkSteps = [
+    { want: "一条龙 14/25", round: "round-14.mp3", label: "⑭ 异常证据汇总" },
+    { want: "一条龙 15/25", round: "round-15.mp3", label: "⑮ 任务卡拆分" },
+    { want: "一条龙 16/25", round: "round-16.mp3", label: "⑯ 采样计划与接收清单核对" },
+  ];
+  const walkOrder = [];
+  for (const step of walkSteps) {
+    await dispatchWalk();
+    let chip = "";
+    for (let i = 0; i < 40; i += 1) {
+      chip = await walkChip();
+      if (chip.includes(step.want)) break;
+      await sleep(200);
+    }
+    check(
+      `按一下一条龙走到下一条（${step.want} · ${step.label}）`,
+      chip.includes(step.want),
+      `气泡头部=「${chip || "（空）"}」`,
+    );
+    /*
+      ⚠ 等这一轮**播完**再按下一下：逐字模拟要 4–14 秒，连按会把上一轮打断
+      （上一轮没走完就被新的 `simulate()` 顶掉），那样测到的不是"一条龙走流程"，
+      而是"连按三点会发生什么"。现场节奏本来就是一条一条走。
+    */
+    const played = await waitForAudio(step.round);
+    walkOrder.push(played.findIndex((u) => u.includes(step.round)));
+  }
+  /* 三轮的录音按顺序各播了一次（证明一条龙真的把整条链路跑起来了，不是只换了个标签） */
+  check(
+    "一条龙走的三轮按顺序各播了自己的录音",
+    walkOrder.every((index) => index >= 0) && walkOrder[0] < walkOrder[1] && walkOrder[1] < walkOrder[2],
+    `播放顺序：${(await playedList()).map((u) => u.split("/").pop()).join(" → ") || "没有任何 Audio.play()"}`,
+  );
+
+  /* 循环：先手动按到第 25 条（等它播完），再按一下一条龙 → 回到第 1 条 */
+  await evaluate(`window.__audio = { played: [], synth: 0 }`);
+  await dispatch("m");
+  await dispatch("5");
+  await waitForAudio("round-25.mp3");
+  await dispatchWalk();
+  let loopChip = "";
+  for (let i = 0; i < 40; i += 1) {
+    loopChip = await walkChip();
+    if (loopChip.includes("一条龙 1/25")) break;
+    await sleep(200);
+  }
+  check(
+    "走到第 25 条再按一下 → 回到第 1 条（用户口径「25 个对话循环播放」）",
+    loopChip.includes("一条龙 1/25"),
+    `气泡头部=「${loopChip || "（空）"}」`,
+  );
+  const loopPlayed = await waitForAudio("round-01.mp3", 30000);
+  check(
+    "循环回第 1 条时播的是第①轮的录音（回到开头，不是空响）",
+    loopPlayed.some((u) => u.includes("round-01.mp3")),
+    loopPlayed.map((u) => u.split("/").pop()).join(" / ") || "没有任何 Audio.play()",
+  );
+  /* 收尾等一下，让这一节的播放/播报彻底结束，别把余音算到下一节头上 */
+  let lastCount = -1;
+  for (let i = 0; i < 40; i += 1) {
+    const count = (await playedList()).length;
+    if (count === lastCount) break;
+    lastCount = count;
+    await sleep(500);
+  }
+
   /* ---------- ⑦ 气泡里的「快捷键一览」（别人在内网机器上得看得到这张表）----------
      用户口径 2026-09-17：「小木呢，别人内网登上去也得能用快捷键呼唤出来相应对话」。
      快捷键本身在任何机器上都好使（本脚本就是证明），缺的是"别人怎么知道按哪个键" ——
@@ -496,13 +603,21 @@ try {
   const sheet = await evaluate(`(() => {
     const list = document.querySelector('.xd__keys');
     const items = list ? [...list.querySelectorAll('li')] : [];
-    const note = document.querySelector('.xd__keys-wrap .xd__note');
+    /*
+      ⚠ 取"提示"不能只拿第一条 .xd__note：
+      一条龙那一行（.xd__note--walk）也在 .xd__keys-wrap 里，而且排在麦克风提示之前，
+      按第一条取会把一条龙的文案当成麦克风提示（第一版就是这么假红的）。
+      所以这里拿**全部**提示拼起来再判断。
+    */
+    const note = [...document.querySelectorAll('.xd__keys-wrap .xd__note')]
+      .map((el) => (el.textContent || '').trim())
+      .join(' ');
     return {
       found: Boolean(list),
       count: items.length,
       first: (items[0]?.querySelector('b')?.textContent || '').trim(),
       last: (items[items.length - 1]?.querySelector('b')?.textContent || '').trim(),
-      note: note ? (note.textContent || '').replace(/\\s+/g, ' ').trim() : '',
+      note: note ? note.replace(/\\s+/g, ' ') : '',
     };
   })()`);
   check("气泡里能找到「快捷键一览」入口", openedSheet);
@@ -515,6 +630,15 @@ try {
     "首尾键位对得上（Ctrl+B+1 … Ctrl+M+5）",
     sheet?.first === "Ctrl+B+1" && sheet?.last === "Ctrl+M+5",
     `${sheet?.first ?? "?"} … ${sheet?.last ?? "?"}`,
+  );
+  /* 「一条龙」那一行**不展开也要看得见**（它就是"不想记 25 个键位"的那条路） */
+  const walkHint = await evaluate(
+    `(document.querySelector('.xd__note--walk')?.textContent || '').trim()`,
+  );
+  check(
+    "气泡里不展开也能看到一条龙的组合键",
+    String(walkHint).includes("Ctrl+Shift+Z") && /循环|走一条/.test(String(walkHint)),
+    `提示=「${walkHint || "（没有）"}」`,
   );
   if (isLoopback) {
     check(

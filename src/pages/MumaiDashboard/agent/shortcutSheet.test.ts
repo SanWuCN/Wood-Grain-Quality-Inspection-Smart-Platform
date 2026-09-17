@@ -10,8 +10,8 @@ import assert from "node:assert/strict";
 
 import { SCRIPT_ROUNDS, mainLineOf } from "./script.ts";
 import { SCRIPT_SHORTCUT_ENTRIES } from "./scriptShortcutEntries.ts";
-import { SCRIPT_SHORTCUT_KEYS, shortcutLabel } from "./scriptShortcutSequence.ts";
-import { keyLabel, shortcutSheetRows } from "./shortcutSheet.ts";
+import { SCRIPT_SHORTCUT_KEYS, shortcutLabel, walkKeyLabel } from "./scriptShortcutSequence.ts";
+import { keyLabel, shortcutSheetRows, walkShortcutNote } from "./shortcutSheet.ts";
 
 test("一览表的行数 = 剧本轮数 = 条目数（第 N 个键 = 第 N 轮）", () => {
   const rows = shortcutSheetRows();
@@ -62,4 +62,17 @@ test("主动发起的条目在表里写「按钮触发，不用说话」", () =>
     if (SCRIPT_SHORTCUT_ENTRIES[index].proactive) return;
     assert.notEqual(row.how, "按钮触发，不用说话", `第 ${index + 1} 行不是主动发起，却写着不用说话`);
   });
+});
+
+test("「一条龙」组合键那一行的文本与键位唯一实现同源", () => {
+  /*
+    用户口径 2026-09-17：「专门搞一个组合键用于完整走完流程。ctrl加shift加z，
+    25个对话循环播放，按一下播放一个」。这一行是不用记 25 个键位的那条路，
+    所以键位文本不许在页面里手写 —— 必须来自 `walkKeyLabel()`，
+    条数也必须跟着一览表的实际行数走（剧本加一条就自动写成 26）。
+  */
+  const note = walkShortcutNote(25);
+  assert.ok(note.includes(walkKeyLabel()), `说明里必须带上组合键：${note}`);
+  assert.ok(note.includes("25"), `说明里要写清走到第几条：${note}`);
+  assert.ok(walkShortcutNote(26).includes("26"), "条数来自调用方（一览表行数），不写死 25");
 });

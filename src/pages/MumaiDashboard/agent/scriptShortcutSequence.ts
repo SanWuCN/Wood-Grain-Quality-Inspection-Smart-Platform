@@ -33,9 +33,11 @@
  * ⚠ 段前缀只能选**浏览器自己没有动作**的键，名单见下面的 `BROWSER_OWNED_CTRL_KEYS`；
  *   其中 `Ctrl+N`（新窗口）、`Ctrl+T`（新标签）、`Ctrl+W`（关标签）是浏览器**保留键**，
  *   页面 `preventDefault` 也拦不住（清单见 `BROWSER_RESERVED_CTRL_KEYS`）。
- *   本方案的 B / Y / M 里，只有 B 有默认动作（切书签栏）且拦得住，Y 与 M 完全没有动作。
+ *   本方案的 B / Y / M 在 Chrome / Edge 里**都没有**默认动作（书签栏开关是 `Ctrl+Shift+B`，
+ *   重做/撤销是编辑类动作；口径与实测见名单注释）。
  *   ⚠ 段内数字与 `Ctrl+1..9`（切换标签页）表面同形，靠 `preventDefault` 拦 ——
- *   验收脚本 `tools/验收-快捷键气泡.mjs` 钉住"按完页面与浏览器都没被带走"。
+ *   验收脚本 `tools/验收-快捷键气泡.mjs` 钉住"按完页面没被带走"，
+ *   浏览器加速键那一层另由 `tools/验收-浏览器不吃键位.mjs`（真实输入通道）负责。
  *
  * ⚠ 同一个数字键在三段里含义不同（`Ctrl+B+1` 是第 1 条，`Ctrl+Y+1` 是第 11 条），
  *   所以**键位不能用裸数字当标识**：全流程统一用 `"<前缀>:<键>"` 这种复合 id
@@ -141,18 +143,27 @@ export const RESERVED_SHORTCUT_KEYS = ["l"] as const;
 export const BROWSER_RESERVED_CTRL_KEYS: readonly string[] = ["n", "t", "w"];
 
 /**
- * 浏览器自己有默认动作的 `Ctrl+<字母>`（Chrome / Edge，Windows 口径）。
+ * 浏览器自己有默认动作的 `Ctrl+<字母>`（**Chrome / Edge，Windows 口径** —— 现场就用这两个）。
  *
  * 为什么单独一张名单：用户为"键位和浏览器撞了"前后换了**两次**键位 ——
  * 「ctrl加n换成加j的，ctrl加n有功能冲突了」、「找个没冲突的替代j」。
- * 所以"不许撞浏览器"不能只写在注释里，得是能跑的判据（见 `scriptShortcutSequence.test.ts`）。
+ * 所以"不许撞浏览器"不能只写在注释里，得是能跑的判据（见 `scriptShortcutSequence.test.ts`），
+ * 而且名单本身也要能被**真实按键**验一遍（见 `tools/验收-浏览器不吃键位.mjs`：
+ * 登录页上按 Ctrl+N 真的会开出新窗口、按 Ctrl+Shift+B 真的会切书签栏）。
  *
- * ⚠ `b` 在名单里（切书签栏），但它是 1–10 段在用的前缀，且**拦得住**、现场没出过问题，
- *   单测把它作为唯一豁免显式写出来，免得以后有人以为名单是"全都不许用"而误改第一段。
+ * ⚠ 口径与实测（2026-09-17 用 CDP 真实输入通道查过，别凭印象改）：
+ *   · `Ctrl+B` 在 Chrome / Edge 里**没有**动作（书签栏开关是 `Ctrl+Shift+B`）——
+ *     1–10 段的前缀就是它，所以那一段本来就不存在"拦不住"的问题；
+ *   · `Ctrl+Y`、`Ctrl+M` 在 Chrome / Edge 里也没有动作（重做/撤销是**编辑类**，
+ *     只在输入框里有意义，而本序列在输入框里不参与）；
+ *   · Firefox 另有一套（`Ctrl+B` 书签侧栏、`Ctrl+M` 静音标签、`Ctrl+I` 页面信息），
+ *     本项目按 Chrome / Edge 交付，不承诺 Firefox。
+ *
+ * ⚠ `b` 不在名单里（Chrome/Edge 没动作）；`z`（撤销）在名单里：它是编辑类动作，
+ *   虽然对我们无害（输入框里我们不参与），仍列出来提醒"浏览器认识这个键"。
  */
 export const BROWSER_OWNED_CTRL_KEYS: readonly string[] = [
   "a", // 全选
-  "b", // 书签栏开关（可拦；1–10 段在用，见上面的豁免说明）
   "c", // 复制
   "d", // 收藏
   "e", // 地址栏搜索
@@ -172,8 +183,58 @@ export const BROWSER_OWNED_CTRL_KEYS: readonly string[] = [
   "v", // 粘贴
   "w", // 关闭标签（保留键）
   "x", // 剪切
-  "z", // 撤销
+  "z", // 撤销（编辑类：只在输入框里有意义，见下面的"一条龙"组合键说明）
 ];
+
+/**
+ * 「一条龙」组合键：按住 Ctrl+Shift 连按 Z，**按一下走一条**，25 条走完回到第 1 条。
+ *
+ * ── 用户口径 2026-09-17 ────────────────────────────────────────────
+ * 「专门搞一个组合键用于完整走完流程。ctrl加shift加z，25个对话循环播放，按一下播放一个」。
+ * 用途是**完整走一遍流程时不用记 25 个键位**（彩排、录屏、给不熟键位的人演示都用它）；
+ * 单条精确跳转仍然走三段键位（`Ctrl+B/Y/M + 数字`），两套并存、互不干扰。
+ *
+ * ── 为什么这个组合是安全的（换过一次键位的教训见上面两张名单）──────
+ * `Ctrl+Shift+Z` 在 Chrome / Edge / Firefox 里只有**编辑类**动作（输入框里的"重做"），
+ * **没有浏览器级动作** —— 对比 `Ctrl+Shift+T`（重开刚关掉的标签）是浏览器保留键，拦不住。
+ * 而本 Hook 在输入框 / 可编辑区域里本来就不参与，所以在输入框里它仍是原生的重做。
+ */
+export const SCRIPT_WALK_KEY = { key: "z", ctrl: true, shift: true } as const;
+
+/** 「一条龙」组合键的显示文本（唯一一处拼法，气泡与生成器都从这里取） */
+export function walkKeyLabel(): string {
+  return ["Ctrl", SCRIPT_WALK_KEY.shift ? "Shift" : null, SCRIPT_WALK_KEY.key.toUpperCase()]
+    .filter((part): part is string => Boolean(part))
+    .join("+");
+}
+
+/** 这一次按键是不是「一条龙」组合键（长按 repeat、输入法组字、输入框里都不算） */
+export function isWalkKey(event: KeyLike): boolean {
+  return (
+    event.repeat !== true &&
+    event.isComposing !== true &&
+    !isEditable(event.target) &&
+    event.ctrlKey === true &&
+    event.shiftKey === true &&
+    event.metaKey !== true &&
+    event.altKey !== true &&
+    String(event.key ?? "").toLowerCase() === SCRIPT_WALK_KEY.key
+  );
+}
+
+/**
+ * 「一条龙」的游标：给"最近播过的那一条"的下标，返回**下一条**的下标；走到末尾回到 0。
+ *
+ * `lastPlayed = null` 表示"还没播过" → 第一次按键从第 1 条开始（用户口径「按一下播放一个」）。
+ * 越界或不合法的入参一律当"还没播过"，宁可从头开始，也不要跳到不存在的一条。
+ * 走完最后一条回到第一条 —— 用户口径「25个对话循环播放」。
+ */
+export function nextScriptIndex(lastPlayed: number | null, total: number): number {
+  if (!Number.isInteger(total) || total <= 0) return 0;
+  if (lastPlayed === null || !Number.isInteger(lastPlayed)) return 0;
+  if (lastPlayed < 0 || lastPlayed >= total) return 0;
+  return (lastPlayed + 1) % total;
+}
 
 export type SequenceVerdict =
   /** 本次按键与序列无关（或半截序列已过期），状态按 state 更新 */
@@ -204,9 +265,18 @@ export function advanceSequence(event: KeyLike, state: SequenceState, nowMs: num
 
   const key = String(event.key ?? "").toLowerCase();
 
-  /* 修饰键不合规：Ctrl 必须按住，且不带 Meta / Alt。
-     判据用"不满足就清空半截序列"，避免 Ctrl 松开后 1.5 秒内按数字还误触发 */
-  const modifierOk = event.ctrlKey === true && !event.metaKey && !event.altKey;
+  /*
+    修饰键不合规：Ctrl 必须按住，且不带 Meta / Alt / **Shift**。
+    判据用"不满足就清空半截序列"，避免 Ctrl 松开后 1.5 秒内按数字还误触发。
+
+    ⚠ Shift 必须排除（2026-09-17 实测查出）：`event.key` 在按住 Shift 时是大写，
+      旧判定一律 `toLowerCase()` 之后去比对段前缀，于是 **Ctrl+Shift+B 会把 1–10 段"待命"**，
+      顺手 `preventDefault()` 把浏览器自己的"显示/隐藏书签栏"吃掉了。
+      同一批被误吃的还有 Ctrl+Shift+Y/M 等组合。现在按住 Shift 一律不算本序列的键
+      ——「一条龙」`Ctrl+Shift+Z` 由 `isWalkKey` 单独判定，不受影响。
+  */
+  const modifierOk =
+    event.ctrlKey === true && !event.metaKey && !event.altKey && event.shiftKey !== true;
   if (!modifierOk) return { kind: "ignore", state: initialSequenceState };
 
   /* 正在输入框/可编辑区域里打字：整条序列不参与（也不清状态，用户可能只是抬手碰了下键盘） */

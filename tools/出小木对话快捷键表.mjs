@@ -1,5 +1,5 @@
 /**
- * 生成《小木对话 · 快捷键对应表 v3.2》—— 给演示人照读的那张纸。
+ * 生成《小木对话 · 快捷键对应表 v3.3》—— 给演示人照读的那张纸。
  *
  * ── 三条来源，一条都不手抄 ────────────────────────────────────────
  *   1. **键位与"照着说什么"** ← `scriptShortcutEntries.ts`
@@ -16,13 +16,13 @@ import { pathToFileURL } from "node:url";
 
 const ROOT =
   "D:/平台/Wood-Grain-Quality-Inspection-Smart-Platform-RAO/Wood-Grain-Quality-Inspection-Smart-Platform-RAO";
-const OUT = "D:\\平台\\小木对话-快捷键对应表-v3.2.md";
+const OUT = "D:\\平台\\小木对话-快捷键对应表-v3.3.md";
 const load = (rel) => import(pathToFileURL(`${ROOT}/src/pages/MumaiDashboard/${rel}`).href);
 
 const { SCRIPT_ROUNDS, mainLineOf } = await load("agent/script.ts");
 const { SCRIPT_SHORTCUT_ENTRIES } = await load("agent/scriptShortcutEntries.ts");
 const { actionFor } = await load("agent/demoActions.ts");
-const { SCRIPT_SHORTCUT_KEYS, SCRIPT_SEQUENCE_WINDOW_MS, shortcutLabel } =
+const { SCRIPT_SHORTCUT_KEYS, SCRIPT_SEQUENCE_WINDOW_MS, shortcutLabel, walkKeyLabel } =
   await load("agent/scriptShortcutSequence.ts");
 const manifest = JSON.parse(readFileSync(`${ROOT}/public/voice/manifest.json`, "utf8"));
 
@@ -54,7 +54,7 @@ const noAudio = rows.filter((r) => !r.audio);
 const L = [];
 const w = (s = "") => L.push(s);
 
-w("# 小木对话 · 快捷键对应表 v3.2");
+w("# 小木对话 · 快捷键对应表 v3.3");
 w();
 w("> **顺序 = 您给的《小木对话总文案.txt》25 条的顺序 = 剧本 25 轮的顺序**。");
 w("> 演示时**照着序号往下按**就行：按键 → 气泡里逐字「听到」这句话 → 小木按剧本回答 + 页面动起来。");
@@ -64,6 +64,10 @@ w("> · 第 **1–10** 条 → **`Ctrl+B+1`** … **`Ctrl+B+0`**（B 段）");
 w("> · 第 **11–20** 条 → **`Ctrl+Y+1`** … **`Ctrl+Y+0`**（Y 段）");
 w("> · 第 **21–25** 条 → **`Ctrl+M+1`** … **`Ctrl+M+5`**（M 段）");
 w(`> 两次按键之间要在 **${SCRIPT_SEQUENCE_WINDOW_MS / 1000} 秒**内完成（先按住 Ctrl 按段前缀 B/Y/M，再按数字）。`);
+w(">");
+/* 「一条龙」组合键：用户口径 2026-09-17「专门搞一个组合键用于完整走完流程…按一下播放一个」 */
+w(`> ▶ **完整走一遍不用记上面这些键位**：按 **\`${walkKeyLabel()}\`** —— 按一下走一条，`);
+w(`> 第 1 条 → 第 ${rows.length} 条循环（气泡头部会显示「一条龙 3/${rows.length}」，一眼看到走到哪了）。`);
 w(">");
 w("> ⚠ `Ctrl+Q+L`（建工单）是**另一条**序列，与本表不冲突。");
 w(`> 生成时间：${new Date().toLocaleString("zh-CN", { hour12: false })}`);

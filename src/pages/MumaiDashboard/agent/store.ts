@@ -78,6 +78,15 @@ export type AgentStoreState = {
   voiceOn: boolean;
   /** ASR 通道说明（真实 / 脚本降级） */
   asrNote: string;
+  /**
+   * 「一条龙」走到哪了：`{ index, total }`（下标 0 起），没在走时为 null。
+   *
+   * 用户口径 2026-09-17：「专门搞一个组合键用于完整走完流程。ctrl加shift加z，
+   * 25个对话循环播放，按一下播放一个」。按一下走一条时，**必须让人看见走到第几条**——
+   * 否则按了没反应（比如那一条正好在思考）就不知道是"没按上"还是"已经在走"。
+   * 放在 store 而不是 hook 的 ref 里，是因为它要显示在气泡头部。
+   */
+  walk: { index: number; total: number } | null;
 };
 
 let state: AgentStoreState = {
@@ -97,6 +106,7 @@ let state: AgentStoreState = {
   interactionId: "",
   voiceOn: true,
   asrNote: "等待选择输入方式",
+  walk: null,
 };
 
 const listeners = new Set<() => void>();

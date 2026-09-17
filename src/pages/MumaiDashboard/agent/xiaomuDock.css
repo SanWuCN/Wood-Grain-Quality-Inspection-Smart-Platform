@@ -968,6 +968,19 @@
   font-size: 11px;
 }
 
+/*
+  「一条龙」组合键那一行（Ctrl+Shift+Z 按一下走一条）：
+  它是**不用记 25 个键位**的那条路，所以比普通提示稍显眼一点 —— 换个颜色 + 左侧一道竖线，
+  但仍是一行小字，不跟 25 条键位表抢注意力。
+*/
+.xd__note--walk {
+  color: var(--accent, #4ea8ff);
+  border-left: 2px solid var(--accent, #4ea8ff);
+  padding-left: 7px;
+  margin-left: 12px;
+  line-height: 1.5;
+}
+
 /* 高风险确认：醒目但不能盖住页面 */
 .xd__confirm {
   margin: 10px 12px 0;

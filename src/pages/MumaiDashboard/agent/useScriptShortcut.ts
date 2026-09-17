@@ -32,6 +32,11 @@
  * 2026-09-17 要的"1–10 用 B、11–20 用 Y、21–25 用 M"）；`Ctrl+Q+L` 是建单
  * （`useWorkOrderShortcut.ts`），`Alt+W/E/R/M` 是气泡开关与重播。
  * 两条序列各自只对自己关心的键做判定，互不干扰（两边都不认识的键一律不动）。
+ *
+ * 另外有一个**「一条龙」组合键** `Ctrl+Shift+Z`：按一下走一条，25 条循环
+ * （用户口径 2026-09-17：「专门搞一个组合键用于完整走完流程…按一下播放一个」）。
+ * 它与三段键位共用同一个游标（`lastPlayedRef`）：手动按了某一条之后，
+ * 再按一条龙键会接着那一条往下走，不会跳回去。
  */
 import { useCallback, useEffect, useRef } from "react";
 
@@ -41,6 +46,8 @@ import { setAgent } from "./store";
 import {
   advanceSequence,
   initialSequenceState,
+  isWalkKey,
+  nextScriptIndex,
   type KeyLike,
   type SequenceState,
 } from "./scriptShortcutSequence";
@@ -176,6 +183,23 @@ export function useScriptShortcut({
   const byKey = useRef(new Map<string, ScriptShortcutEntry>());
   byKey.current = new Map(entries.map((entry) => [entry.key, entry]));
 
+  /**
+   * 条目表的当前版本（「一条龙」游标要用它取"下一条"）。
+   *
+   * 为什么要 ref：`trigger` 被按键 effect 依赖，若把 `entries` 写进依赖数组，
+   * 每次渲染都会重建 `trigger` → 重建监听器；用 ref 就能保持 `trigger` 稳定。
+   */
+  const entriesRef = useRef<readonly ScriptShortcutEntry[]>(entries);
+  entriesRef.current = entries;
+
+  /**
+   * 「一条龙」的游标：**最近播过的那一条**的下标（null = 还没播过）。
+   *
+   * 与"按键"共用同一个游标，是为了让现场混着用也不跳：
+   * 先手动按 `Ctrl+Y+3` 演了第 13 条，再按一条龙键就接着演第 14 条。
+   */
+  const lastPlayedRef = useRef<number | null>(null);
+
   /** 串行队列：一次模拟跑完再跑下一条，避免两轮回答交叉 */
   const queue = useRef<Promise<void>>(Promise.resolve());
 
@@ -247,7 +271,17 @@ export function useScriptShortcut({
   }, [onSubmit]);
 
   const trigger = useCallback(
-    (entry: ScriptShortcutEntry) => {
+    (entry: ScriptShortcutEntry, position?: { index: number; total: number }) => {
+      /* 游标跟着"最近播过的那一条"走（无论是按键命中的还是「一条龙」走到的） */
+      const list = entriesRef.current;
+      const index = list.findIndex((item) => item.key === entry.key);
+      if (index >= 0) lastPlayedRef.current = index;
+      /* 走一条龙时把"第几条 / 共几条"写进气泡，演示人一眼知道走到哪了；
+         手动按单条键位时清掉它 —— 那说明已经不是"一条龙"在走了 */
+      const note = position
+        ? `一条龙 ${position.index + 1}/${position.total} · ${entry.label}`
+        : `剧本快捷键：${entry.label}`;
+      setAgent({ walk: position ? { index: position.index, total: position.total } : null });
       queue.current = queue.current.then(async () => {
         /*
           ⚠ 空文本也要能触发（历史坑）。
@@ -268,7 +302,7 @@ export function useScriptShortcut({
         */
         if (plan.kind === "proactive") {
           pendingRef.current = null;
-          setAgent({ open: true, stateNote: `剧本快捷键：${entry.label}`, finalText: "", partial: "" });
+          setAgent({ open: true, stateNote: note, finalText: "", partial: "" });
           const run =
             onProactive ?? ((roundNo: string, rt: Runtime) => speakProactive(roundNo, rt));
           await run(plan.roundNo, runtimeRef.current, entry);
@@ -278,7 +312,7 @@ export function useScriptShortcut({
         const input = simulateRef.current;
         if (!input) return;
         pendingRef.current = entry;
-        setAgent({ stateNote: `剧本快捷键：${entry.label}`, finalText: "", partial: "" });
+        setAgent({ stateNote: note, finalText: "", partial: "" });
         input.simulate(plan.text);
       });
     },
@@ -290,6 +324,21 @@ export function useScriptShortcut({
     if (!enabled) return undefined;
     let state: SequenceState = initialSequenceState;
     const onKeyDown = (event: KeyboardEvent) => {
+      /* ── ①「一条龙」组合键：Ctrl+Shift+Z 按一下走一条（25 条循环）────────
+         用户口径 2026-09-17：「专门搞一个组合键用于完整走完流程。ctrl加shift加z，
+         25个对话循环播放，按一下播放一个」。
+         先判它（而不是塞进下面的序列判定）：它不是"段前缀 + 数字"那种两段式序列，
+         没有等待窗口，一次按键就是一整条。 */
+      if (isWalkKey(event as unknown as KeyLike)) {
+        event.preventDefault();
+        state = initialSequenceState;
+        const list = entriesRef.current;
+        if (!list.length) return;
+        const index = nextScriptIndex(lastPlayedRef.current, list.length);
+        trigger(list[index], { index, total: list.length });
+        return;
+      }
+
       const verdict = advanceSequence(event as unknown as KeyLike, state, performance.now());
       state = verdict.state;
       if (verdict.kind === "ignore") return;

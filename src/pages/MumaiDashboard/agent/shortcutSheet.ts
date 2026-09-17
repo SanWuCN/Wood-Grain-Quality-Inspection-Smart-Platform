@@ -19,7 +19,7 @@
  */
 import { SCRIPT_ROUNDS, mainLineOf } from "./script";
 import { SCRIPT_SHORTCUT_ENTRIES } from "./scriptShortcutEntries";
-import { shortcutLabel } from "./scriptShortcutSequence";
+import { shortcutLabel, walkKeyLabel } from "./scriptShortcutSequence";
 
 /** 一条要显示的行（纯数据，便于单测；不依赖 DOM） */
 export type ShortcutSheetRow = {
@@ -42,6 +42,17 @@ export type ShortcutSheetRow = {
  */
 export function keyLabel(id: string): string {
   return shortcutLabel(id);
+}
+
+/**
+ * 「一条龙」组合键那一行的说明（键位文本仍来自唯一实现 `walkKeyLabel()`）。
+ *
+ * 用户口径 2026-09-17：「专门搞一个组合键用于完整走完流程。ctrl加shift加z，
+ * 25个对话循环播放，按一下播放一个」—— 它是**不用记 25 个键位**的那条路，
+ * 所以放在一览表最上面一行，而不是混在 25 条里。
+ */
+export function walkShortcutNote(total: number): string {
+  return `${walkKeyLabel()} 按一下走一条（1 → ${total} 循环，不用记上面的键位）`;
 }
 
 /**

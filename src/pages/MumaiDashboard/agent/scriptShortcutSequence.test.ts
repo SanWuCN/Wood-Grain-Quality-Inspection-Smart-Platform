@@ -26,11 +26,15 @@ import {
   SCRIPT_SEQUENCE_WINDOW_MS,
   SCRIPT_SHORTCUT_GROUPS,
   SCRIPT_SHORTCUT_KEYS,
+  SCRIPT_WALK_KEY,
   advanceSequence,
   initialSequenceState,
+  isWalkKey,
+  nextScriptIndex,
   parseShortcutId,
   shortcutId,
   shortcutLabel,
+  walkKeyLabel,
   type KeyLike,
 } from "./scriptShortcutSequence.ts";
 
@@ -109,6 +113,22 @@ test("修饰键不合规就不命中，并清掉半截序列", () => {
   assert.equal(afterBad.state.armedPrefix, null);
 });
 
+test("按住 Shift 一律不算本序列的键（否则会吃掉浏览器自己的 Ctrl+Shift+* ）", () => {
+  /*
+    2026-09-17 用真实输入通道实测查出：`event.key` 在按住 Shift 时是**大写**，
+    旧判定 `toLowerCase()` 之后照样比对段前缀 —— 于是 `Ctrl+Shift+B` 把 1–10 段
+    "待命"并 `preventDefault()`，**把浏览器"显示/隐藏书签栏"吃掉了**（实测可视高度不再变化）。
+    现在按住 Shift 直接不算：不吃浏览器的组合，「一条龙」Ctrl+Shift+Z 另走 `isWalkKey`。
+  */
+  assert.equal(advanceSequence(key("b", { shiftKey: true }), initialSequenceState, 0).kind, "ignore");
+  assert.equal(advanceSequence(key("B", { shiftKey: true }), initialSequenceState, 0).kind, "ignore");
+  const state = arm("b", 0);
+  assert.equal(advanceSequence(key("1", { shiftKey: true }), state, 100).kind, "ignore");
+  assert.equal(advanceSequence(key("B", { shiftKey: true }), state, 100).kind, "ignore");
+  /* 松开 Shift 之后照常能用（不是把序列搞哑了） */
+  assert.equal(advanceSequence(key("b"), initialSequenceState, 0).kind, "armed");
+});
+
 test("长按产生的 repeat 与输入法组字期间不参与", () => {
   const state = arm("b", 0);
   assert.equal(advanceSequence(key("1", { repeat: true }), state, 50).kind, "ignore");
@@ -172,15 +192,15 @@ test("段前缀不许撞浏览器自己的 Ctrl 组合（用户为这件事换�
       「找个没冲突的替代j」—— Ctrl+J = 下载页。
     所以"键位不许和浏览器撞"必须是**能跑的判据**，而不是一句记住的话：
     以后有人把段前缀改成 H（历史）、D（收藏）、S（另存为）这类键，这条用例当场红。
+    （名单口径 = Chrome / Edge；`b` 不在名单里，因为它在这两个浏览器里没有动作，
+      书签栏开关是 Ctrl+Shift+B —— 已由 `tools/验收-浏览器不吃键位.mjs` 用真实按键验过。）
   */
-  const allowlisted = new Set(["b"]); // 唯一豁免：1–10 段在用 Ctrl+B（只切书签栏，拦得住）
   for (const prefix of SCRIPT_SEQUENCE_PREFIX_KEYS) {
     assert.equal(
       BROWSER_RESERVED_CTRL_KEYS.includes(prefix),
       false,
       `Ctrl+${prefix.toUpperCase()} 是浏览器保留键，页面 preventDefault 也拦不住，绝不许当段前缀`,
     );
-    if (allowlisted.has(prefix)) continue;
     assert.equal(
       BROWSER_OWNED_CTRL_KEYS.includes(prefix),
       false,
@@ -245,4 +265,58 @@ test("与建单快捷键的窗口常量保持一致（两条序列一套口径�
     SCRIPT_SEQUENCE_WINDOW_MS,
     "两条序列的窗口必须一致：一个 1.5 秒、一个 2 秒会让讲解人按不准",
   );
+});
+
+/* ── 「一条龙」组合键（用户 2026-09-17：ctrl加shift加z，25个对话循环播放，按一下播放一个）── */
+
+test("一条龙键 = Ctrl+Shift+Z：修饰键差一个都不认", () => {
+  const walk = (extra: Partial<KeyLike> = {}) => ({ key: "z", ctrlKey: true, shiftKey: true, ...extra });
+  assert.equal(isWalkKey(walk()), true, "Ctrl+Shift+Z 就是一条龙键");
+  assert.equal(walkKeyLabel(), "Ctrl+Shift+Z", "给人看的写法只有这一处实现");
+  assert.equal(isWalkKey(walk({ shiftKey: false })), false, "没按 Shift 不算（那是单条键位的地盘）");
+  assert.equal(isWalkKey(walk({ ctrlKey: false })), false, "没按 Ctrl 不算（裸 Z 是普通输入）");
+  assert.equal(isWalkKey(walk({ altKey: true })), false, "多按 Alt 不算，免得撞 Alt+W/E/R/M");
+  assert.equal(isWalkKey(walk({ metaKey: true })), false);
+  assert.equal(isWalkKey(walk({ key: "x" })), false, "别的字母不算");
+  assert.equal(isWalkKey(walk({ repeat: true })), false, "长按 repeat 不参与（否则一路自己走完 25 条）");
+  assert.equal(isWalkKey(walk({ isComposing: true })), false, "输入法组字期间不参与");
+  /* 输入框里 Ctrl+Shift+Z 是原生"重做"，不许被抢 */
+  assert.equal(isWalkKey(walk({ target: { tagName: "INPUT" } })), false);
+  assert.equal(isWalkKey(walk({ target: { tagName: "TEXTAREA" } })), false);
+  assert.equal(isWalkKey(walk({ target: { tagName: "DIV", isContentEditable: true } })), false);
+});
+
+test("一条龙键不落在浏览器保留的 Ctrl+Shift 组合里（拦不住的键不能用）", () => {
+  /*
+    `Ctrl+Shift+N`（无痕窗口）、`Ctrl+Shift+T`（重开刚关掉的标签）、`Ctrl+Shift+W`（关窗口）
+    都是浏览器**保留键**，页面 preventDefault 也拦不住 —— 两次换键位的教训见实现里的名单。
+    `Ctrl+Shift+Z` 只有编辑类动作（输入框里的"重做"），不是浏览器级动作，所以可以用。
+  */
+  for (const reserved of ["n", "t", "w"]) {
+    assert.notEqual(SCRIPT_WALK_KEY.key, reserved, `Ctrl+Shift+${reserved.toUpperCase()} 是浏览器保留键`);
+  }
+  assert.equal(SCRIPT_WALK_KEY.ctrl, true);
+  assert.equal(SCRIPT_WALK_KEY.shift, true);
+  /* 一条龙键也不能与三段键位的段前缀混为一谈：它不参与"段前缀 + 数字"的判定 */
+  assert.equal(SCRIPT_SEQUENCE_PREFIX_KEYS.includes(SCRIPT_WALK_KEY.key), false);
+});
+
+test("一条龙游标：按一下走一条，走到第 25 条回到第 1 条", () => {
+  assert.equal(nextScriptIndex(null, 25), 0, "还没播过 → 第 1 条");
+  assert.equal(nextScriptIndex(0, 25), 1);
+  assert.equal(nextScriptIndex(12, 25), 13);
+  assert.equal(nextScriptIndex(24, 25), 0, "第 25 条之后回到第 1 条（用户口径「循环播放」）");
+  assert.equal(nextScriptIndex(25, 25), 0, "越界当没播过，从头开始而不是跳到不存在的一条");
+  assert.equal(nextScriptIndex(-1, 25), 0);
+  assert.equal(nextScriptIndex(1.5, 25), 0, "非法下标不许算出下一条");
+  assert.equal(nextScriptIndex(3, 0), 0, "没有条目时也不许抛错");
+  /* 连按 25 下正好把 25 条各走一遍，第 26 下回到第 1 条 */
+  const seen: number[] = [];
+  let cursor: number | null = null;
+  for (let i = 0; i < 25; i += 1) {
+    cursor = nextScriptIndex(cursor, 25);
+    seen.push(cursor);
+  }
+  assert.deepEqual(seen, [...Array(25).keys()], "一条龙必须按文档顺序走完 25 条，不重不漏");
+  assert.equal(nextScriptIndex(cursor, 25), 0, "第 26 次按回到第 1 条");
 });

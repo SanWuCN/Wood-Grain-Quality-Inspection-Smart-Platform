@@ -30,7 +30,7 @@ import { stableNote, wakeErrorHint, WAKE_REPLY_TEXT } from "./degrade";
 import { useAgentNavigate, useAgentSession } from "./agentSession";
 import { getAgentState, resolveConfirm, setAgent, subscribeAgent } from "./store";
 import { microphoneSupported } from "./asr";
-import { shortcutSheetRows } from "./shortcutSheet";
+import { shortcutSheetRows, walkShortcutNote } from "./shortcutSheet";
 import { wakeChannel, type WakeSnapshot } from "./wakeChannel";
 import { buildReplyView, latestBotTurn, latestUserText, type ReplyView } from "./replyView";
 import { VoiceOutput } from "./tts";
@@ -740,6 +740,17 @@ export default function XiaomuDock() {
               */}
               {queueDepth > 0 ? `待处理 ${queueDepth} 条` : reply?.intentId ?? (listening ? "常驻唤醒已开" : "待命")}
             </span>
+            {/*
+              「一条龙」走到第几条（用户口径 2026-09-17：「ctrl加shift加z，25个对话循环播放，
+              按一下播放一个」）。这一格只在用一条龙键走流程时出现：
+              按一下就走一条，走到第几条必须看得见 —— 否则那一条正在思考时，
+              演示人分不清"没按上"还是"已经在走"。
+            */}
+            {agent.walk ? (
+              <span className="xd__walk" title="一条龙：按一下走一条，走完 25 条回到第 1 条">
+                一条龙 {agent.walk.index + 1}/{agent.walk.total}
+              </span>
+            ) : null}
             <button type="button" className="xd__icon-btn" onClick={close} aria-label="关闭小木（Esc）" title="关闭（Esc）">
               ×
             </button>
@@ -916,6 +927,12 @@ export default function XiaomuDock() {
             >
               快捷键一览 · {sheetRows.length} 条（Ctrl+B/Y/M）{keysOpen ? "▾" : "▸"}
             </button>
+            {/*
+              一条龙：完整走一遍流程时**不用记 25 个键位**（用户口径 2026-09-17：
+              「专门搞一个组合键用于完整走完流程。ctrl加shift加z，25个对话循环播放，
+              按一下播放一个」）。键位文本来自唯一实现，页面上不手写一行字。
+            */}
+            <p className="xd__note xd__note--walk">{walkShortcutNote(sheetRows.length)}</p>
             {wake.state === "error" ? (
               /*
                 ── 唤醒出错时，把**原因和怎么办**写在气泡里 ──────────────────
