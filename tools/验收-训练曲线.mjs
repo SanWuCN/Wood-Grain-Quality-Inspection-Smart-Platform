@@ -305,6 +305,113 @@ try {
   );
   await shot("训练曲线-失败案例");
 
+  /* ---------- ④ 回放过程：曲线从左往右长，结论不提前剧透 ---------- */
+  /* 先切回成功案例（上一步切到了失败案例） */
+  await evaluate(`(() => {
+    const label = [...document.querySelectorAll('.fw-training__switch')].pop();
+    const input = label?.querySelector('input');
+    if (input && input.checked) input.click();
+    return Boolean(input);
+  })()`);
+  await sleep(800);
+
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll('.tech-panel button')].find((el) => el.textContent.trim() === '运行');
+    if (btn) btn.click();
+    return Boolean(btn);
+  })()`);
+
+  const samples = [];
+  for (let i = 0; i < 120; i += 1) {
+    const snap = await evaluate(`(() => {
+      const panel = document.querySelector('.tw-chart')?.closest('.tech-panel');
+      const epochText = panel?.querySelector('.tech-panel__extra .muted')?.textContent.replace(/\\s+/g, '') ?? '';
+      const kpi = [...document.querySelectorAll('.tw-kpi li')].map((li) => ({
+        key: li.querySelector('small')?.textContent.trim() ?? '',
+        value: li.querySelector('b')?.textContent.replace(/\\s+/g, ' ').trim() ?? '',
+        note: li.querySelector(':scope > span')?.textContent.replace(/\\s+/g, ' ').trim() ?? '',
+      }));
+      const stop = kpi.find((item) => item.key.includes('早停规则')) ?? { value: '', note: '' };
+      const val = kpi.find((item) => item.key.includes('验证损失')) ?? { value: '', note: '' };
+      return { epochText, stop, val };
+    })()`);
+    const epoch = Number((snap?.epochText.match(/epoch(\d+)\//) ?? [])[1] ?? -1);
+    samples.push({ epoch, stop: snap?.stop.note ?? "", val: snap?.val.note ?? "", value: snap?.val.value ?? "" });
+    if (samples.length > 3 && epoch >= 30) break;
+    await sleep(300);
+  }
+
+  /* 从**同一帧的文案**里解析进度（epoch 那格是 NumberAnimation，动画中间值不可比） */
+  const mid = samples
+    .filter((item) => /已回放 \d+\/30 轮/.test(item.stop))
+    .map((item) => ({
+      k: Number((item.stop.match(/已回放 (\d+)\/30/) ?? [])[1] ?? NaN),
+      minEpoch: Number((item.val.match(/（第 (\d+) 轮）/) ?? [])[1] ?? NaN),
+      stop: item.stop,
+      val: item.val,
+    }));
+
+  check(
+    "点「运行」后曲线跟着回放从左往右长（不是一进来就 30/30）",
+    mid.length > 0 && mid.some((item) => item.k < 30),
+    `采样到的轮次：${[...new Set(samples.map((item) => item.epoch))].join(" → ")}`,
+  );
+  check(
+    "回放没走完时，早停那一格写的是「已回放 k/30 轮」，不摆结论",
+    mid.length > 0 && mid.every((item) => Number.isFinite(item.k) && item.k < 30 && !/第 30 轮停止/.test(item.stop)),
+    mid.slice(0, 4).map((item) => item.stop).join(" ／ "),
+  );
+  check(
+    "回放中「最低验证损失」只算已回放范围（最低点 = min(已回放轮次, 最优轮次)）",
+    mid.length > 0 && mid.every((item) => item.minEpoch === Math.min(item.k, 24)),
+    mid.slice(0, 4).map((item) => `k=${item.k}：${item.val}`).join(" ／ "),
+  );
+  const done = samples.filter((item) => item.epoch >= 30);
+  check(
+    "跑完后早停那一格变成结论：第 30 轮停止 · 距最低点（第 24 轮）6 轮，与规则一致",
+    done.length > 0 && /第 30 轮停止 · 距最低点（第 24 轮）6 轮，与规则一致/.test(done[done.length - 1].stop),
+    done.length ? done[done.length - 1].stop : "回放没跑到 30 轮（可能超时）",
+  );
+
+  /* ---------- 脚本任务不进这条轮次轴：跑「全量重训」时归档曲线保持整条 ---------- */
+  /* 先等上一轮真的跑完（epoch 到 30 时计划可能还剩几步，running 仍为 true） */
+  for (let i = 0; i < 60; i += 1) {
+    const idle = await evaluate(`[...document.querySelectorAll('.tech-panel button')].some((el) => el.textContent.trim() === '运行')`);
+    if (idle) break;
+    await sleep(300);
+  }
+  /* 上一轮回放跑完会自动切到「新旧对比」，再切回训练曲线视图（曲线面板才在 DOM 里） */
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll('button')].find((el) => el.textContent.trim() === '训练曲线');
+    if (btn) btn.click();
+    return Boolean(btn);
+  })()`);
+  await sleep(800);
+  await evaluate(`(() => {
+    const job = [...document.querySelectorAll('.tech-panel button')].find((el) => el.textContent.trim().startsWith('全量重训'));
+    if (job) job.click();
+    return Boolean(job);
+  })()`);
+  await sleep(600);
+  const scriptStarted = await evaluate(`(() => {
+    const btn = [...document.querySelectorAll('.tech-panel button')].find((el) => el.textContent.trim() === '运行');
+    if (btn) btn.click();
+    return Boolean(btn);
+  })()`);
+  await sleep(2500);
+  const duringScript = await evaluate(`(() => {
+    const panel = document.querySelector('.tw-chart')?.closest('.tech-panel');
+    return {
+      epoch: panel?.querySelector('.tech-panel__extra .muted')?.textContent.replace(/\\s+/g, '') ?? '',
+      running: [...document.querySelectorAll('.tech-panel button')].some((el) => el.textContent.trim().startsWith('运行中')),
+    };
+  })()`);
+  check(
+    "跑脚本任务时归档曲线保持整条（脚本进度不画进这条轮次轴）",
+    scriptStarted === true && duringScript.running === true && duringScript.epoch === "epoch30/30",
+    `点击成功=${scriptStarted}，脚本运行中=${duringScript.running}，曲线=${duringScript.epoch}`,
+  );
+
   /* ---------- 投屏页：同一份曲线（原来那张手画 SVG 连刻度都没有） ---------- */
   await evaluate(`location.hash = '#/firmware?tab=training&view=curve'`);
   await sleep(600);

@@ -506,6 +506,14 @@ type PlaybackStep = {
   replace: boolean;
   /** 归档包任务的日志自带时间戳；两个脚本任务没有，用运行时钟 */
   at?: string;
+  /**
+   * 这一步对应的训练轮次（只有归档实验包的日志有）。
+   *
+   * 损失曲线与执行节点占用要按"已经跑到第几轮"画，就得让播放计划的每一步知道
+   * 自己是第几轮 —— 原来拼计划时把 epoch 丢掉了，曲线只好另开一个回放器自己数，
+   * 于是两个进度源各走各的（按「运行」时日志在滚、曲线一动不动）。
+   */
+  epoch?: number;
 };
 
 /** 控制台可跑的三个任务 */
@@ -878,8 +886,8 @@ function LossPanel({ experiment, drawn, dominant = false }: { experiment: Experi
             <NumberAnimation value={valStats.last} digits={4} group={false} />
           </b>
           <span>
-            最低 <NumberAnimation value={valStats.min} digits={4} group={false} />（第{" "}
-            <NumberAnimation value={valStats.minEpoch} group={false} /> 轮）
+            {/* 损失值是量、走动效；轮次是标识（像位号一样），写死 —— 一起补间会跳数 */}
+            最低 <NumberAnimation value={valStats.min} digits={4} group={false} />（第 {valStats.minEpoch} 轮）
           </span>
         </li>
         <li className={vsBaseline >= 0 ? "is-ok" : "is-warn"}>
@@ -1518,8 +1526,6 @@ export function TrainingTab() {
 
   /** 配置草稿：只存改动过的项，没改的跟着实验包走 */
   const [draft, setDraft] = useState<Record<string, number>>({});
-  /** 已装载的日志行数。归档包默认整段铺满，不做「先隐藏再播放」 */
-  const [visible, setVisible] = useState(experiment.log.length);
   const [running, setRunning] = useState(false);
   /**
    * 数据包清单。导入的包就地插到最前面并标为「待审核」——
@@ -1540,10 +1546,9 @@ export function TrainingTab() {
   };
   useEffect(() => stopTimer, []);
 
-  /** 切换案例时整页回到「已装载」状态：日志铺满、无回放、配置恢复 */
+  /** 切换案例时整页回到「已装载」状态：无回放、配置恢复（日志铺满由 [plan] 那个 effect 负责） */
   useEffect(() => {
     stopTimer();
-    setVisible(experiment.log.length);
     setRunning(false);
     setDraft({});
     setRunStarted(false);
@@ -1570,69 +1575,6 @@ export function TrainingTab() {
         .map((field) => field.key),
     [draft, experiment],
   );
-
-  const progress = Math.round((visible / Math.max(experiment.log.length, 1)) * 100);
-
-  const tracking = useMemo(
-    () =>
-      buildTrainingTracking(experiment, {
-        started: runStarted,
-        running,
-        visibleLogCount: visible,
-        updatedAt: runtimeUpdatedAt,
-      }),
-    [experiment, runStarted, running, visible, runtimeUpdatedAt],
-  );
-
-  /** 当前回放到的轮次：取已显示日志里最后一个带 epoch 的行 */
-  const cursor = useMemo(() => {
-    let epoch = 0;
-    for (const line of experiment.log.slice(0, visible)) {
-      if (line.epoch !== undefined) epoch = line.epoch;
-    }
-    return epoch;
-  }, [experiment, visible]);
-
-  /**
-   * 曲线画到第几轮。
-   *
-   * 与执行节点占用、控制台日志共用同一个 epoch 轴：回放时跟着往前画，
-   * 回放结束（或还没开始时）画满整轮。取 `Math.max(reached, 1)` 是因为
-   * 第一行日志的 epoch 是 0，画 0 个点会让曲线整个消失。
-   */
-  const drawnEpochs = useMemo(() => Math.max(cursor, 1), [cursor]);
-
-  const totalEpochs = experiment.curveTrain.points.length;
-
-  const replay = () => {
-    stopTimer();
-    setVisible(0);
-    setRunStarted(true);
-    setRuntimeUpdatedAt(new Date().toLocaleString("zh-CN", { hour12: false }).replace(/\//g, "-"));
-    setRunning(true);
-    // 开跑就切回曲线视图并展开日志：这时候要看的是训练过程本身
-    setView("curve");
-    setLogOpen(true);
-    let index = 0;
-    timer.current = window.setTimeout(() => {
-      timer.current = window.setInterval(() => {
-        index += 1;
-        setVisible(index);
-        setRuntimeUpdatedAt(new Date().toLocaleString("zh-CN", { hour12: false }).replace(/\//g, "-"));
-        if (index >= experiment.log.length) {
-          stopTimer();
-          setRunning(false);
-          /*
-           * 跑完自动切到新旧对比、把日志收起来。
-           * 评审 §3.6 要的是「完成后自动切到新旧模型对比」——
-           * 这一步不能靠用户自己想起去点页签。
-           */
-          setView("compare");
-          setLogOpen(false);
-        }
-      }, LINE_INTERVAL_MS);
-    }, QUEUE_DELAY_MS);
-  };
 
   /* ---- 三个任务在同一个控制台里跑 ---------------------------------- */
 
@@ -1693,6 +1635,8 @@ export function TrainingTab() {
       dwellMs: LINE_INTERVAL_MS,
       replace: false,
       at: line.at,
+      /* 归档日志的轮次：曲线/占用要按"已跑到第几轮"画，就得让每一步知道自己是第几轮 */
+      epoch: line.epoch,
     }));
   }, [job, scripts, experiment]);
 
@@ -1716,6 +1660,53 @@ export function TrainingTab() {
     return out;
   };
 
+  /**
+   * 已装载的日志行数：**由控制台的 `step` 推出来**（全页只有一个进度源）。
+   * 归档包每条计划步骤对应一行日志，所以两者相等；脚本任务的步骤比归档日志多，
+   * 截到日志长度即可（那些步骤本来就不在这条轮次轴上）。
+   */
+  const visible = Math.min(step, experiment.log.length);
+
+  /** 配置面板上的总进度：与日志、曲线同一个进度源 */
+  const progress = Math.round((Math.min(step, plan.length) / Math.max(plan.length, 1)) * 100);
+
+  const tracking = useMemo(
+    () =>
+      buildTrainingTracking(experiment, {
+        started: runStarted,
+        running,
+        visibleLogCount: visible,
+        updatedAt: runtimeUpdatedAt,
+      }),
+    [experiment, runStarted, running, visible, runtimeUpdatedAt],
+  );
+
+  /**
+   * 当前回放到的轮次：取**已回放的计划步骤**里最后一个带 epoch 的。
+   *
+   * 归档任务跟着日志一步步往前；脚本任务（全量重训 / 蒸馏）不属于这条轮次轴，
+   * 直接按归档记录整条铺满。
+   */
+  const cursor = useMemo(() => {
+    if (job !== "archive") return experiment.log.at(-1)?.epoch ?? 0;
+    let epoch = 0;
+    for (const item of plan.slice(0, step)) {
+      if (item.epoch !== undefined) epoch = item.epoch;
+    }
+    return epoch;
+  }, [job, experiment, plan, step]);
+
+  /**
+   * 曲线画到第几轮。
+   *
+   * 与执行节点占用、控制台日志共用同一个 epoch 轴：回放时跟着往前画，
+   * 回放结束（或还没开始时）画满整轮。取 `Math.max(reached, 1)` 是因为
+   * 第一行日志的 epoch 是 0，画 0 个点会让曲线整个消失。
+   */
+  const drawnEpochs = useMemo(() => Math.max(cursor, 1), [cursor]);
+
+  const totalEpochs = experiment.curveTrain.points.length;
+
   /** 切换任务：直接把该任务的输出铺满（与归档包任务一致，不做「先空后播」） */
   useEffect(() => {
     stopTimer();
@@ -1731,12 +1722,23 @@ export function TrainingTab() {
     setLines([]);
     setStep(0);
     setRunning(true);
+    /* 起跑就记账并切回曲线视图展开日志：运行时要看的是过程本身 */
+    setRunStarted(true);
+    setRuntimeUpdatedAt(new Date().toLocaleString("zh-CN", { hour12: false }).replace(/\//g, "-"));
+    setView("curve");
+    setLogOpen(true);
     let index = 0;
     let acc = 0;
     const advance = () => {
       if (index >= plan.length) {
         stopTimer();
         setRunning(false);
+        /*
+          跑完自动切到新旧对比、把日志收起来（评审 §3.6：完成后自动切对比，
+          不能靠用户自己想起去点页签）。
+        */
+        setView("compare");
+        setLogOpen(false);
         return;
       }
       const item = plan[index];
@@ -1758,7 +1760,8 @@ export function TrainingTab() {
 
   const submit = () => {
     if (invalid.length > 0) return;
-    replay();
+    /* 与「运行」同一个回放器：提交之后曲线、占用、任务追踪、控制台一起走 */
+    runConsole();
     const changed = experiment.config.filter(
       (field) => draft[field.key] !== undefined && draft[field.key] !== field.value,
     ).length;
