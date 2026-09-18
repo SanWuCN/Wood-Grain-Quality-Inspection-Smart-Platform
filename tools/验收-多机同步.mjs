@@ -9,7 +9,11 @@
  *   ③ 第二台**不出声**（跟随只跟随画面与文字；多台机器同时放音会互相打架）；
  *   ④ 跟随开关关掉后**不再跟随**，本机自己说话也不受影响；
  *   ⑤ 业务数据本来就是服务端权威：A 写的任务卡 / 工单 / 投屏状态在 B 上读得到；
- *   ⑥ **没有回声死循环**：一轮广播只产生一条留痕（B 不会把跟来的那一轮再广播出去）。
+ *   ⑥ **没有回声死循环**：一轮广播只产生一条留痕（B 不会把跟来的那一轮再广播出去）；
+ *   ⑦ 三类业务数据的**跨机交接**都成立（目标里点名的）：
+ *        · 环境读数：A 录入 → B 读得到，且 B 的**环境记录页**上看得到同一组数；
+ *        · 自主巡航任务：A 派发 → B 读得到，并且 **B（具身）能接受**（剧本：shi 派发、ma 接受）；
+ *        · 场景关键帧：A 打一帧 → B 读得到那条帧（打完收工删掉，不留痕）。
  *
  * 用法（仓库根目录）：
  *   node --import ./tools/test-resolve-ts.mjs tools/验收-多机同步.mjs
@@ -32,7 +36,9 @@ const check = (name, ok, detail = "") => {
 };
 
 const A = new Machine({ name: "multi-a", port: 9561, base: BASE, account: "shi" });
-const B = new Machine({ name: "multi-b", port: 9562, base: BASE, account: "shen" });
+/** 第二台机器的账号：**这台机器代表"另一边的人"**（跟随、读数据、接受任务都以它为准） */
+const B_ACCOUNT = "shen";
+const B = new Machine({ name: "multi-b", port: 9562, base: BASE, account: B_ACCOUNT });
 let createdOrderId = null;
 
 /** A 说一轮（与现场说法一致：真发小木命令） */
@@ -139,7 +145,13 @@ try {
     return (snapshot?.json?.entities?.taskCard ?? []).filter((item) => item.data.orderId === orderId).length;
   };
   await askOnA("同步工单任务", "06");
-  await sleep(4000);
+  /*
+    ⚠ 等**这一轮真的跑完**再数卡片：小木的 ask 是排队的（前面几轮的思考与播报还在队列里），
+    固定 4 秒会数到"还没生成"的空档 —— 第一版就是因为这个把 0 张当成了"同步坏了"。
+    这一轮的页面落点是 /workbench，等页面到那儿是最直接的信号。
+  */
+  await waitHash(A, "/workbench", 25_000);
+  await sleep(1500);
   const cardsA = await cardsForOrder(A);
   const cardsB = await cardsForOrder(B);
   check(
@@ -186,6 +198,142 @@ try {
     Boolean(presented),
     presented ? `holder=${presented.holder} 视图=${presented.view} 焦点Z04=${presented.focus}` : "投屏页没渲染出来",
   );
+
+  /* ---------- ⑦ 三类业务数据的跨机交接 ---------- */
+  /*
+    这三条是目标里点名的"所有业务数据都要在多主机上同样可见"：
+    环境读数、自主巡航任务、场景关键帧 —— 全部走服务端，验收要证明**另一台机器真能读到**，
+    而不是"同一台机器刷新后还在"。都挂在临时工单上，收工随工单一起清掉。
+  */
+  const newestOrderId = createdOrderId ?? orderId;
+
+  /* ⑦-a 环境读数：A 录入 → B 读得到，且 B 的环境记录页上看得到 */
+  /*
+    ⚠ `GET /api/work-orders/:id` **直接返回详情对象**（不是 `{ok, detail}`）——
+    第一版按 `json.detail` 取，读到的是 undefined，于是 expectedRevision 传了 0、
+    orderNo 也传成了 null（巡航任务因此 422 NO_ORDER_NO）。判据没错，是取数路径错了。
+  */
+  const orderDetail = (await A.call("GET", `/api/work-orders/${newestOrderId}`))?.json ?? null;
+  const envBefore = orderDetail?.environment ?? null;
+  const orderNo = orderDetail?.order?.orderNo ?? null;
+  const measuredAt = new Date().toISOString().slice(0, 16);
+  const draft = await A.call("PUT", `/api/work-orders/${newestOrderId}/environment-draft`, {
+    inputs: { airTempC: 22, relativeHumidityPct: 58, windSpeedMs: 0.6, atmosphericPressureHpa: null },
+    pressure: { value: 101, unit: "kPa" },
+    instruments: [],
+    position: "四柱区域入口（跨机交接验收）",
+    measuredAt,
+    expectedRevision: envBefore?.draftRevision ?? 0,
+  });
+  const draftOk = draft?.status === 200;
+  const envOnB = (await B.call("GET", `/api/work-orders/${newestOrderId}`))?.json?.environment ?? null;
+  check(
+    "A 录入环境读数 → **B 读到同一组数**",
+    draftOk && envOnB?.inputs?.airTempC === 22 && envOnB?.inputs?.relativeHumidityPct === 58 && envOnB?.inputs?.windSpeedMs === 0.6,
+    draftOk
+      ? `B 读到 温度${envOnB?.inputs?.airTempC} 湿度${envOnB?.inputs?.relativeHumidityPct} 风速${envOnB?.inputs?.windSpeedMs}`
+      : `录入失败：HTTP ${draft?.status} ${JSON.stringify(draft?.json)?.slice(0, 120)}`,
+  );
+  await B.evaluate(`location.hash = '#/hardware?tab=env'`);
+  const envPageOnB = await B.waitFor(
+    `(() => {
+      const text = document.body.innerText || '';
+      return text.includes('22') && text.includes('58') && text.includes('四柱区域入口') ? true : null;
+    })()`,
+    { timeoutMs: 10_000 },
+  );
+  check("  ↳ **B 的环境记录页上也显示这组读数**", Boolean(envPageOnB), envPageOnB ? "22 / 58 / 位置都在" : "B 的页面上没读到");
+
+  /* ⑦-b 自主巡航任务：A 派发 → B 读得到 + B 能接受（剧本：shi 派发、ma 接受） */
+  const dispatched = await A.call("POST", "/api/commands", {
+    sessionId: "demo-01",
+    commandId: `multi-cruise-${Date.now().toString(36)}`,
+    action: "mission.create",
+    entityId: null,
+    payload: {
+      orderId: newestOrderId,
+      orderNo,
+      robotId: "mumai-car-01",
+      mapVersion: "MAP-SH-06",
+      speedProfile: "0.2 m/s",
+      speedMps: 0.2,
+      laps: 1,
+      componentIds: ["Z01", "Z02", "Z03", "Z04"],
+      waypoints: [{ id: "P1", label: "起点", componentId: null, cell: [20, 24] }],
+      plannedPath: [[20, 24], [20, 20]],
+    },
+  });
+  const missionId = dispatched?.json?.result?.taskNo ?? null;
+  const missionOnB = missionId
+    ? ((await B.call("GET", "/api/sessions/demo-01/snapshot"))?.json?.entities?.mission ?? []).find((item) => item.id === missionId) ?? null
+    : null;
+  check(
+    "A 派发自主巡航任务 → **B 读得到这条任务**",
+    Boolean(missionId) && Boolean(missionOnB) && missionOnB.data.orderId === newestOrderId,
+    missionId ? `${missionId} · B 侧状态 ${missionOnB?.data?.state ?? "—"}` : `派发失败：HTTP ${dispatched?.status}`,
+  );
+  const acked = missionOnB
+    ? await B.call("POST", "/api/commands", {
+        sessionId: "demo-01",
+        commandId: `multi-ack-${Date.now().toString(36)}`,
+        action: "mission.ack",
+        entityId: missionId,
+        expectedRevision: missionOnB.revision,
+        payload: {},
+      })
+    : null;
+  /*
+    ⚠ 判据是"**在 B 这台机器上接受成功，且接受人记成 B 的账号**"，而不是写死 `ma`：
+    剧本里的分工（shi 派发 → ma 接受）由谁上台决定，验收要证的是**跨机交接**本身 ——
+    派发发生在 A，接受发生在 B，服务端把接受人记成 B 那台的登录账号（这里是 B_ACCOUNT）。
+    写死 `ma` 会把"换个人来操作"误判成失败（第一版就是这么红的）。
+  */
+  check(
+    "  ↳ **B 能接受这条任务**（跨机派发→接受，接受人记成 B 那台的账号）",
+    acked?.status === 200 && acked?.json?.entity?.data?.acceptedBy === B_ACCOUNT,
+    acked ? `HTTP ${acked.status} · 接受人 ${acked.json?.entity?.data?.acceptedBy ?? "—"}（期望 ${B_ACCOUNT}）` : "没拿到任务，跳过",
+  );
+
+  /* ⑦-c 场景关键帧：A 打一帧 → B 读得到（收工删掉） */
+  const sceneEntity = ((await A.call("GET", "/api/sessions/demo-01/snapshot"))?.json?.entities?.scene ?? [])[0] ?? null;
+  let keyframeId = null;
+  if (sceneEntity) {
+    const added = await A.call("POST", "/api/commands", {
+      sessionId: "demo-01",
+      commandId: `multi-kf-${Date.now().toString(36)}`,
+      action: "scene.keyframe.add",
+      entityId: sceneEntity.id,
+      expectedRevision: sceneEntity.revision,
+      payload: {
+        componentId: "Z04",
+        label: "跨机同步验收机位",
+        pose: { azimuth: 0.9, polar: 1.2, distance: 3.4, focus: { x: 0, y: 1.2, z: 0 } },
+      },
+    });
+    keyframeId = added?.json?.entity?.data?.keyframes?.at(-1)?.id ?? null;
+    const sceneOnB = ((await B.call("GET", "/api/sessions/demo-01/snapshot"))?.json?.entities?.scene ?? []).find(
+      (item) => item.id === sceneEntity.id,
+    );
+    const frameOnB = (sceneOnB?.data?.keyframes ?? []).find((frame) => frame.id === keyframeId) ?? null;
+    check(
+      "A 在场景上打一帧 → **B 读得到这一帧**",
+      Boolean(keyframeId) && Boolean(frameOnB) && frameOnB.label === "跨机同步验收机位",
+      keyframeId ? `${keyframeId} · ${frameOnB?.label ?? "B 没读到"}` : `打帧失败：HTTP ${added?.status}`,
+    );
+    /* 收工删掉这一帧：验收不该给演示场景留痕 */
+    if (keyframeId) {
+      await A.call("POST", "/api/commands", {
+        sessionId: "demo-01",
+        commandId: `multi-kfrm-${Date.now().toString(36)}`,
+        action: "scene.keyframe.remove",
+        entityId: sceneEntity.id,
+        expectedRevision: (await A.call("GET", "/api/sessions/demo-01/snapshot"))?.json?.entities?.scene?.find((item) => item.id === sceneEntity.id)?.revision ?? sceneEntity.revision,
+        payload: { keyframeId },
+      });
+    }
+  } else {
+    check("A 在场景上打一帧 → B 读得到这一帧", false, "会话里没有 scene 实体，跳过");
+  }
 
   const shot = await B.shot("多机同步-B屏");
   if (shot) console.log(`  截图（第二台机器）：${shot}`);
