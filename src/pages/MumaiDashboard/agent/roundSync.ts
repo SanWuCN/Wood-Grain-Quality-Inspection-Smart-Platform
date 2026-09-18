@@ -79,6 +79,20 @@ export type RoundAnnouncement = {
   roundNo: string;
   text: string;
   nav: Record<string, unknown> | null;
+  /**
+   * 这一轮**实际解析出来的**工单 id（只有工单页轮次有，其余传 null）。
+   *
+   * ── 为什么 nav 之外还要带上它（2026-09-30）─────────────────────────
+   * `nav` 是**声明**（`order: "bound"`），不是结果：它说的是"打开显式绑定的那张"，
+   * 而"哪一张"是发起端那一刻才算出来的（`commissionBinding` 是本机状态，
+   * 不跟着事件走）。跟随端拿到 `nav` 只能自己再算一次 —— 它没有那份绑定，
+   * 于是 `scriptEntities()` 退回"列表最新那张"，**两台机器落到不同的工单上**。
+   *
+   * 现场这一处最刺眼：史在他那台点「工单识别」（读的是屏幕上那张单），
+   * 项目经理那台却跳到"最新的一张"；两张单不是同一张时，两块屏各说一套。
+   * 把解析结果一起广播出去，跟随端就有了同一张单的唯一答案。
+   */
+  orderId?: string | null;
 };
 
 /**
@@ -103,6 +117,13 @@ export async function announceRound(payload: RoundAnnouncement): Promise<void> {
 export type RemoteRound = {
   roundNo: string;
   text: string;
+  /**
+   * 发起端解析出来的工单 id（没有就 null）。
+   *
+   * 跟随端要在跑这一轮之前 `commissionBinding.bind()` 它 —— 否则两台机器的
+   * 工单页会各开一张（原因见 `RoundAnnouncement.orderId`）。
+   */
+  orderId: string | null;
   /** 发起端（用于界面上写"由另一台演示机发起"） */
   hostId: string | null;
   by: string | null;
@@ -125,6 +146,9 @@ export function remoteRoundOf(
   const text = typeof payload.text === "string" ? payload.text : "";
   if (!roundNo || !text) return null;
   const hostId = typeof payload.hostId === "string" ? payload.hostId : null;
+  /* 解析出来的工单：**没有就当 null**（非工单轮次、或旧版载荷都没有它），
+     绝不能拿它去猜一张单 —— 空值走跟随端原有的"列表最新"口径 */
+  const orderId = typeof payload.orderId === "string" && payload.orderId ? payload.orderId : null;
   /* ① 自己的回声不跟（否则两台机器互相跟随 → 页面来回跳） */
   if (hostId && hostId === options.selfHostId) return null;
   /* ② 旧事件不跟（断线重连会按序补发历史事件） */
@@ -132,7 +156,14 @@ export function remoteRoundOf(
   const at = Date.parse(String(event.at ?? ""));
   const now = options.now ?? Date.now();
   if (Number.isFinite(at) && now - at > fresh) return null;
-  return { roundNo, text, hostId, by: typeof event.actorId === "string" ? event.actorId : null, seq: event.seq };
+  return {
+    roundNo,
+    text,
+    orderId,
+    hostId,
+    by: typeof event.actorId === "string" ? event.actorId : null,
+    seq: event.seq,
+  };
 }
 
 /**

@@ -27,6 +27,7 @@ import { Panel } from "../Panel";
 import { useOrderReveal } from "../ordersReveal";
 import { WORK_ORDER_STATUS_TONE } from "./overview.constants";
 import { Btn, DataTable, KV, Modal, SourceTag, StateBlock, StatusChip } from "../ui";
+import { recognizeEntry, recognizeOrder } from "./orders/orderRecognize";
 import { AssignmentPanel } from "./orders/AssignmentPanel";
 import { TaskScopePanel } from "./orders/TaskScopePanel";
 import { EnvironmentPanel } from "./orders/EnvironmentPanel";
@@ -137,6 +138,16 @@ export function WorkOrderDetail({
   const [requirementsOpen, setRequirementsOpen] = useState(false);
   /** 删除确认：不可恢复的动作必须再问一次 */
   const [deleteOpen, setDeleteOpen] = useState(false);
+  /**
+   * 「工单识别」点了却没演起来时的可恢复提示（正常情况下恒为 null）。
+   *
+   * 为什么要有它：小木那一轮要靠条目表 + 事件通道才能跑起来，任何一环缺失
+   * （列表还没拉回来、条目被改坏）都只会**静默不动**。按钮点了没反应是现场
+   * 最难查的一类问题，所以宁可在页面留一行字，也不要让讲解人对着屏幕猜。
+   */
+  const [recognizeHint, setRecognizeHint] = useState<string | null>(null);
+  /** 剧本 §9 括号里那句（唯一来源 = 条目表，见 orders/orderRecognize.ts） */
+  const recognizeLine = recognizeEntry()?.text ?? "";
 
   const window =
     order.plannedStart && order.plannedEnd && order.plannedStart !== order.plannedEnd
@@ -175,6 +186,35 @@ export function WorkOrderDetail({
 
         {/* 状态动作随当前账号与状态变化，不适用就不出现（§5.1 / §8.1） */}
         <div className="wop-actions">
+          {/*
+            ── 工单识别（剧本 §9：史点击工单识别）───────────────────────────
+            文档原文：「（史点击工单识别；小木读取当前工单与附件索引，生成任务卡和
+            装备核对清单，未填字段标为待补。）」此前平台上没有这个按钮，
+            剧本要求"点"的地方只能用快捷键代替。现在它就是真的点击：
+            按下 → 把**这张**工单绑给小木 → 第②轮播报 + 工单页逐组展开
+            （展开的四组正好是摘要 / 委托与主体 / 任务范围与出发清单 / 待确认信息）。
+
+            未指派到此工单时按钮置灰：这一档只给摘要，委托正文与附件索引不展示，
+            小木也就不该"读出"它 —— 与下面「单位原始要求」的空态同一口径。
+          */}
+          <Btn
+            tone="primary"
+            disabled={busy || restricted}
+            title={
+              restricted
+                ? "尚未指派到此工单，委托正文与附件不展示"
+                : `小木读取这份工单${recognizeLine ? `：${recognizeLine}` : ""}`
+            }
+            onClick={() => {
+              setRecognizeHint(
+                recognizeOrder(order.id)
+                  ? null
+                  : "小木暂时读不到这张工单（列表未就绪或剧本条目缺失），请刷新页面后重试",
+              );
+            }}>
+            工单识别
+          </Btn>
+          {recognizeHint ? <span className="muted">{recognizeHint}</span> : null}
           {STATUS_ACTIONS.filter((item) => capabilities[item.capability]).map((item) => (
             <Btn
               key={item.action}

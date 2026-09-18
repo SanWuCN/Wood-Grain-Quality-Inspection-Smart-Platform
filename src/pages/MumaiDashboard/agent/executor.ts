@@ -388,7 +388,19 @@ function replyScript(
     ⚠ 只有**发起端**广播；跟随端走 `applyRemoteRound()`，它不经过这里 ——
       否则两台机器会互相广播，来回跟随（死循环）。
   */
-  void announceRound({ roundNo: round.roundNo, text: turn.text, nav: round.nav ?? null });
+  void announceRound({
+    roundNo: round.roundNo,
+    text: turn.text,
+    nav: round.nav ?? null,
+    /*
+      ── 把**解析出来的**工单一起广播（2026-09-30）────────────────────
+      工单页轮次的 `nav.order` 是声明（`"bound"` / `"current"`），"哪一张"要在这里
+      算一次才算得出。不算就等于让跟随端自己再猜一次，而它手里没有那份绑定 ——
+      现场表现是"史点工单识别读 A 单，另一台机器跳到最新那张 B 单"，两块屏各说一套。
+      非工单轮次传 null（`remoteRoundOf` 会把它读成"没有指定"，跟随端退回原有口径）。
+    */
+    orderId: round.nav?.route === "order" ? (scriptEntities().order ?? null) : null,
+  });
   /**
    * 剧本轮次**也要执行该轮声明的动作**。
    *
@@ -423,8 +435,24 @@ function replyScript(
  *   跟随端自动跟上，不需要在两处各写一遍（写两遍必然有一遍先过期）。
  *   它里面的写操作（例如 ⑥⑮ 生成任务卡）都是幂等的，跟随端重复执行无副作用。
  */
-export function applyRemoteRound(roundNo: string, text: string, runtime: Runtime): void {
+export function applyRemoteRound(
+  roundNo: string,
+  text: string,
+  runtime: Runtime,
+  orderId: string | null = null,
+): void {
   const round = SCRIPT_ROUNDS.find((item) => item.roundNo === roundNo) ?? null;
+  /*
+    ── 跟随端也要落到**同一张工单**（2026-09-30）─────────────────────
+    发起端把解析结果随事件带过来了（见 `RoundAnnouncement.orderId`）。这里照它绑定
+    一次，下面那次 `applyScriptAction` 里的 `scriptEntities()` 才会取到同一张单。
+    不绑的后果是"两台机器各开一张工单"，而这正是本机没有那份 `commissionBinding`
+    时唯一能退回的口径（列表最新）。
+
+    ⚠ 绑定只在本机内存里、不会回调广播出去（跟随端本来就不广播），所以不存在
+      "两台机器互相把对方的绑定抄来抄去"的来回。
+  */
+  if (orderId) commissionBinding.bind(orderId);
   const turn = botTurnBase({
     text,
     intentName: round ? `剧本 ${round.roundNo} · ${round.title}` : `剧本 ${roundNo}`,

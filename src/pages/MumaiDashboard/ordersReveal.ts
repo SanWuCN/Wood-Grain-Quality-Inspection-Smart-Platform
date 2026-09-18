@@ -282,13 +282,33 @@ function clearPlan(): void {
 }
 
 /**
+ * 两份分组声明是否完全一样（顺序也算：顺序即播报顺序）。
+ *
+ * 用来判断"这次登记是不是同一次播报的重复登记"，见 `beginOrderReveal` 里的说明。
+ */
+function sameSections(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((key, index) => key === b[index]);
+}
+
+/**
  * 登记一次揭示计划（agent 在"要念这张工单"时调用）。
  *
  * 刚登记时**一组都不揭示**：第一组要等第一句念出来才亮，
  * 否则会出现"人还没开口、摘要已经在了"。
+ *
+ * ── 同一张单、同一组声明：**保留原计划**，不重来一遍（2026-09-30）────
+ * 工单页的「工单识别」按钮会**先**登记一次同样的计划（理由见 `pages/orders/
+ * orderRecognize.ts`：点下去那几秒页面应该只显示第一组，而不是整页铺开），
+ * 紧接着第②轮开讲时 `startOrderDetailReveal` 又登记一次。
+ * 旧写法每次都 `clearPlan()`：已经亮过的组会被清掉、页面塌回"一组都没有"，
+ * 再重新亮 —— 观众看到的是"内容闪了一下"。声明完全相同时保留即可：
+ * 已亮的继续亮，后面的拍点照常推进（`advanceOrderReveal` 本来就是幂等的），
+ * 兜底 TTL 也仍然从**第一次**登记那一刻算起（够覆盖整段播报）。
  */
 export function beginOrderReveal(orderId: string, sections: readonly string[]): void {
   if (!orderId || sections.length === 0) return;
+  const current = currentPlan();
+  if (current && current.orderId === orderId && sameSections(current.sections, sections)) return;
   clearPlan();
   setPlan({
     orderId,

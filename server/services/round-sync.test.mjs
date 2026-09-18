@@ -8,7 +8,9 @@
  *   ② **事件载荷里必须有台词**（第一版漏了：实体写进去了，但跟随端拿到的 payload 没有 text，
  *      于是"页面上一点反应都没有"而服务端看起来一切正常 —— 这条就是那次事故的回归锁）；
  *   ③ 事件里带发起端 hostId（跟随端据此忽略自己的回声，否则两台机器互相跟随）；
- *   ④ 同一会话里**任何账号**都能广播（四个角色都可能站在演示机前说话），但没登录不行。
+ *   ④ **工单页轮次要带出解析好的 `orderId`**（2026-09-30：只有 `nav` 声明时，
+ *      跟随端没有那份绑定 → 退回"列表最新那张"，两块屏各开一张工单）；
+ *   ⑤ 同一会话里**任何账号**都能广播（四个角色都可能站在演示机前说话），但没登录不行。
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -118,6 +120,30 @@ test("小木回合广播：留痕、事件带台词与发起端、未登录被�
       turns.every((item) => item.data.text && item.data.hostId),
       "每条留痕都要有台词与发起端",
     );
+
+    /* ---------- ⑦ 工单页轮次：解析好的 `orderId` 要落库、也要进事件载荷 ---------- */
+    const withOrder = await announce(shi, {
+      roundNo: "②",
+      text: "已整理为四项任务：现场建档、风险初筛、重点精扫和复核交付。",
+      nav: { route: "order", order: "bound" },
+      hostId: "host-presenter",
+      orderId: "wo-round-sync-1",
+    });
+    assert.equal(withOrder.status, 200, `带工单的广播失败：${JSON.stringify(withOrder.json)}`);
+    assert.equal(withOrder.json.entity.data.orderId, "wo-round-sync-1", "留痕里要能看出这一轮读的是哪张单");
+    const eventsWithOrder = await call(shi, "GET", "/api/events?sessionId=demo-01&afterSeq=0");
+    const orderEvent = eventsWithOrder.json.events.filter((item) => item.type === "xiaomu.round").at(-1);
+    assert.equal(
+      orderEvent.payload.orderId,
+      "wo-round-sync-1",
+      "载荷里不放 orderId，跟随端就只能退回“列表最新那张”（两块屏各开一张工单）",
+    );
+    /* 没带 orderId 的轮次读成 null，不许变成空串或 undefined（跟随端按 null 走原口径） */
+    const plainEvent = eventsWithOrder.json.events.filter((item) => item.type === "xiaomu.round")[0];
+    assert.equal(plainEvent.payload.orderId, null, "非工单轮次应当是 null");
+    const emptyOrder = await announce(shi, { ...payload, orderId: "" });
+    assert.equal(emptyOrder.status, 200);
+    assert.equal(emptyOrder.json.entity.data.orderId, null, "空串不是一张工单");
   } finally {
     await service.close?.();
   }

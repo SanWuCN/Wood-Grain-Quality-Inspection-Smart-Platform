@@ -117,6 +117,38 @@ test("全部揭示完 → 计划解除，页面回到完整可见", () => {
   assert.equal(revealSectionsFor("wo-1"), null, "揭示完毕必须解除计划（null = 完整显示）");
 });
 
+/*
+  ── 同一张单、同一份声明：第二次登记**不许把已亮的清掉**（2026-09-30）────
+  场景：工单页「工单识别」按钮先登记一次（好让页面在小木开口前只显示第一拍），
+  紧接着第②轮开讲时 executor 又登记一次。若每次都重来，页面会塌回"一组都没有"
+  再重新亮 —— 台上看到的是"内容闪了一下"。
+*/
+test("同单同声明的重复登记：保留已揭示的组，不把页面清空重来", () => {
+  resetAll();
+  beginOrderReveal("wo-1", ["order", "scope", "tasks", "pending"]);
+  advanceOrderReveal("wo-1", ["order"]);
+  /* 第二轮登记（同单、同声明、顺序也相同） */
+  beginOrderReveal("wo-1", ["order", "scope", "tasks", "pending"]);
+  assert.deepEqual(revealSectionsFor("wo-1"), ["order"], "已亮的组必须还在（不能闪回空白）");
+  /* 后续拍点照常推进，最后正常解除 */
+  advanceOrderReveal("wo-1", ["scope", "tasks", "pending"]);
+  assert.equal(revealSectionsFor("wo-1"), null);
+});
+
+test("换了工单或换了声明：必须重来一份计划（旧计划的进度不能带过去）", () => {
+  resetAll();
+  beginOrderReveal("wo-1", ["order", "scope", "tasks", "pending"]);
+  advanceOrderReveal("wo-1", ["order", "scope"]);
+  /* ① 换工单 */
+  beginOrderReveal("wo-2", ["order", "scope", "tasks", "pending"]);
+  assert.deepEqual(revealSectionsFor("wo-2"), [], "新工单要从头开始");
+  assert.equal(revealSectionsFor("wo-1"), null, "旧工单不再受计划约束");
+  /* ② 同工单但声明不同（顺序变了） */
+  advanceOrderReveal("wo-2", ["order", "scope"]);
+  beginOrderReveal("wo-2", ["scope", "order", "tasks", "pending"]);
+  assert.deepEqual(revealSectionsFor("wo-2"), [], "声明不同就是另一次登记，从零开始");
+});
+
 test("主动取消 → 立刻恢复完整可见（不能把页面留在半展开）", () => {
   resetAll();
   beginOrderReveal("wo-1", ["order", "scope", "tasks", "pending"]);

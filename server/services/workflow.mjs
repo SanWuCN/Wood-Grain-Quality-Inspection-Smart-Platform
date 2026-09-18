@@ -569,12 +569,20 @@ const HANDLERS = {
    *     否则两台机器会互相跟随、来回跳页（这条不加就是死循环）；
    *   · **只记"说过什么"**：实体里存轮次号、台词、页面落点与发起人，
    *     便于事后核对"哪台机器在哪一轮讲了什么"（面向结果展示也要留痕）。
+   *
+   * ── 2026-09-30 增补：`orderId`（发起端**解析出来**的那张工单）──────────
+   * `nav` 是声明（"打开显式绑定的那张"），"哪一张"是发起端那一刻才算得出的本机状态。
+   * 只带 `nav` 时跟随端得自己再算一遍，而它没有那份绑定 → 退回"列表最新那张"，
+   * 于是史点「工单识别」读的是 A 单、另一台机器跳到 B 单，两块屏各说一套。
+   * 现在把解析结果原样带过去（没有就 null），跟随端据此绑同一张单。
    */
   "xiaomu.round": (ctx, payload) => {
     const roundNo = String(payload.roundNo ?? "").trim();
     const text = String(payload.text ?? "").trim();
     if (!roundNo || !text) throw new WorkflowError(422, "BAD_ROUND", "回合广播要带轮次号与台词");
     const hostId = payload.hostId ? String(payload.hostId) : null;
+    /** 发起端解析出来的工单 id（非工单轮次没有）；空串一律当没有，不让它变成一张"空工单" */
+    const orderId = payload.orderId ? String(payload.orderId) : null;
     const used =
       ctx.db
         .prepare("SELECT COUNT(*) AS n FROM entities WHERE session_id=? AND kind='agentTurn'")
@@ -586,6 +594,8 @@ const HANDLERS = {
       text,
       /** 这一轮的页面落点（原样带过去，跟随端照着跳，不自己猜） */
       nav: payload.nav ?? null,
+      /** 这一轮实际读的那张工单（跟随端要绑同一张，见上面的增补说明） */
+      orderId,
       hostId,
       by: ctx.actorId,
       at: nowIso(),
@@ -603,8 +613,9 @@ const HANDLERS = {
             跟随端是拿 WS 事件直接跟随的（`agent/roundSync.ts` 的 `remoteRoundOf`），
             它不查快照 —— 事件里只有 roundNo、text 为空时那一轮会被判成"不是有效回合"，
             于是页面不跳、气泡不显示，而服务端这边看起来一切正常（实体写进去了）。
+            `orderId` 同理：**载荷里不放，跟随端就拿不到**（这条是同一类坑）。
           */
-          payload: { turnId: id, roundNo, text, hostId, by: ctx.actorId, nav: data.nav },
+          payload: { turnId: id, roundNo, text, hostId, by: ctx.actorId, nav: data.nav, orderId },
         },
       ],
     };

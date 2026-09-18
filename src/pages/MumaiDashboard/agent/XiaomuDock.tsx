@@ -213,12 +213,14 @@ export default function XiaomuDock() {
    * 「项目就是面向结果展示的，但得做到内网多主机内容同步」。
    * 演示机每讲一轮都会广播（`executor.ts` 的 `announceRound`），本机收到就：
    *   · 气泡显示同一句台词（不出声 —— 多台机器同时放音会互相打架）；
-   *   · 页面按同一份 `nav` 走、揭示与浮层按同一轮触发（`applyRemoteRound`）。
+   *   · 页面按同一份 `nav` 走、揭示与浮层按同一轮触发（`applyRemoteRound`）；
+   *   · 工单页轮次还带着发起端**解析好的工单 id**，本机据此绑同一张单
+   *     （不带的话本机只能退回"列表最新那张"，两块屏可能各开一张工单）。
    * 忽略自己的回声与过期事件这两条判据都在 `roundSync.ts`（有单测）。
    */
   useRoundFollow(
     useCallback((round) => {
-      applyRemoteRound(round.roundNo, round.text, runtimeRef.current);
+      applyRemoteRound(round.roundNo, round.text, runtimeRef.current, round.orderId);
     }, []),
   );
 

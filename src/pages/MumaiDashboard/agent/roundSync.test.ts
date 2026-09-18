@@ -22,6 +22,8 @@ function roundEvent(overrides: {
   text?: string;
   hostId?: string | null;
   type?: string;
+  orderId?: string | null;
+  nav?: Record<string, unknown> | null;
 } = {}): StreamEvent {
   const at = overrides.at ?? new Date().toISOString();
   return {
@@ -37,7 +39,8 @@ function roundEvent(overrides: {
       text: overrides.text ?? "清洗完成，待审核记录已列出，数据集已按物理样本分组。",
       hostId: overrides.hostId === undefined ? "host-other" : overrides.hostId,
       by: "shi",
-      nav: { route: "/firmware", tab: "dataset" },
+      nav: overrides.nav === undefined ? { route: "/firmware", tab: "dataset" } : overrides.nav,
+      ...(overrides.orderId === undefined ? {} : { orderId: overrides.orderId }),
     },
     at,
   };
@@ -51,6 +54,35 @@ test("正常的远程回合会被跟随，台词与轮次号都带出来", () =>
   assert.equal(round.hostId, "host-other");
   assert.equal(round.by, "shi");
   assert.equal(round.seq, 101);
+  assert.equal(round.orderId, null, "非工单轮次没有工单 id");
+});
+
+/*
+  ── 工单页轮次要带"发起端解析好的那张单"（2026-09-30）───────────────
+  史在他那台点「工单识别」读的是屏幕上那张单，而 `nav` 里只有声明（"bound"），
+  跟随端没有那份绑定、只能退回"列表最新"。所以载荷里必须带上解析结果；
+  这条断言就是钉住"带出来了、而且跟随端读得到"。
+*/
+test("工单页轮次带出解析好的工单 id，跟随端据此绑同一张单", () => {
+  const event = roundEvent({ roundNo: "②", nav: { route: "order", order: "bound" }, orderId: "wo-abc" });
+  const round = remoteRoundOf(event, { selfHostId: "host-self" });
+  assert.ok(round);
+  assert.equal(round.orderId, "wo-abc");
+});
+
+test("工单 id 缺失或空串一律读成 null（不许拿它去猜一张单）", () => {
+  /* 旧版载荷（没有这个字段）：跟随端退回"列表最新那张"，与本机口径一致 */
+  assert.equal(remoteRoundOf(roundEvent(), { selfHostId: "host-self" })?.orderId, null);
+  assert.equal(
+    remoteRoundOf(roundEvent({ orderId: "" }), { selfHostId: "host-self" })?.orderId,
+    null,
+    "空串不是一张工单",
+  );
+  assert.equal(
+    remoteRoundOf(roundEvent({ orderId: null }), { selfHostId: "host-self" })?.orderId,
+    null,
+    "服务端写成 null 时也一样",
+  );
 });
 
 test("自己的回声不跟随（否则两台机器互相跟随 → 页面来回跳）", () => {
