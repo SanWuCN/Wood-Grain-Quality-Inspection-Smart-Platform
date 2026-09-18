@@ -52,6 +52,7 @@ import {
 } from "../workbenchReveal";
 import { advanceTwinReveal, beginTwinReveal, cancelTwinReveal, twinMounted } from "../twinReveal";
 import { commissionBinding } from "../commissionBinding";
+import { announceRound } from "./roundSync";
 import { useWorkOrderStore } from "../store/workOrders";
 import { ensureTaskCards } from "../store/taskCards";
 import { understand, SEMANTIC_THRESHOLDS, type MatchResult } from "./matcher";
@@ -375,6 +376,19 @@ function replyScript(
   });
   pushTurn(turn);
   const spoken = runtime.speak(turn.text);
+  /*
+    ── 广播这一轮（**内网多主机内容同步**，用户 2026-09-23）──────────────
+    「项目就是面向结果展示的，但得做到内网多主机内容同步」。
+    小木这一层原先全在浏览器本地：只有演示机看得到台词、页面落点与浮层；
+    第二台机器屏幕上什么都没有。这里在**开讲的同时**把这一轮写给服务端，
+    其它机器收到事件后跟随显示与页面动作（不出声，见 `roundSync.ts`）。
+
+    ⚠ 位置刻意放在 `runtime.speak()` **旁边而不是之后**：跟随端要与演示机同时动，
+      等播完再广播就成了"演示机讲完、别的机器才开始跳页"。
+    ⚠ 只有**发起端**广播；跟随端走 `applyRemoteRound()`，它不经过这里 ——
+      否则两台机器会互相广播，来回跟随（死循环）。
+  */
+  void announceRound({ roundNo: round.roundNo, text: turn.text, nav: round.nav ?? null });
   /**
    * 剧本轮次**也要执行该轮声明的动作**。
    *
@@ -394,6 +408,46 @@ function replyScript(
    */
   void applyScriptAction(round, runtime, spoken);
   return turn;
+}
+
+/**
+ * 跟随另一台演示机的回合（内网多主机内容同步的**接收端**）。
+ *
+ * 与 `replyScript` 的区别只有两点，都是刻意的：
+ *   ① **不出声**：多台机器同时放音会互相打架，展示机才是有人听的那一台；
+ *   ② **不广播**：它已经是从广播来的，再广播就是死循环。
+ * 其余（气泡显示同一句台词、页面按同一份 `nav` 走、揭示与浮层按同一轮触发）
+ * 与演示机完全一致 —— 这就是"内容同步"要的效果：两台机器屏幕上看到的是同一件事。
+ *
+ * ⚠ 页面动作走的是**同一个** `applyScriptAction`：新增一轮的页面行为时，
+ *   跟随端自动跟上，不需要在两处各写一遍（写两遍必然有一遍先过期）。
+ *   它里面的写操作（例如 ⑥⑮ 生成任务卡）都是幂等的，跟随端重复执行无副作用。
+ */
+export function applyRemoteRound(roundNo: string, text: string, runtime: Runtime): void {
+  const round = SCRIPT_ROUNDS.find((item) => item.roundNo === roundNo) ?? null;
+  const turn = botTurnBase({
+    text,
+    intentName: round ? `剧本 ${round.roundNo} · ${round.title}` : `剧本 ${roundNo}`,
+    type: "RESPONSE",
+    confidence: 1,
+    level: "rule",
+    rule: "内网跟随（另一台机器发起）",
+    facts: [],
+    entities: [{ name: "来源", value: "内网另一台机器" }],
+    steps: [],
+    voice: "（跟随，不播报）",
+    note: "内网多主机内容同步：本机只跟随显示与页面动作，不重复出声、不再广播。",
+  });
+  pushTurn(turn);
+  setAgent({ open: true, agentState: "EXECUTING", stateNote: `跟随讲解机 · 第 ${roundNo} 轮`, finalText: text, partial: "" });
+  if (round) {
+    /* 没有 spoken：揭示按台词字数估算走（跟随端听不到那台机器的播报 Promise） */
+    void applyScriptAction(round, runtime).finally(() => {
+      setAgent({ agentState: "FINISHED", stateNote: "" });
+    });
+  } else {
+    setAgent({ agentState: "FINISHED", stateNote: "" });
+  }
 }
 
 /**

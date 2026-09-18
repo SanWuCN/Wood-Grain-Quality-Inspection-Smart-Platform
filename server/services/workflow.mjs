@@ -550,6 +550,66 @@ const HANDLERS = {
     };
   },
 
+  /**
+   * 小木回合广播（**内网多主机内容同步**，用户 2026-09-23：
+   * 「实际上项目就是面向结果展示的，但得做到内网多主机内容同步」）。
+   *
+   * ── 为什么需要它 ──────────────────────────────────────────────────
+   * 小木这一层（回合、台词、页面落点、揭示节奏、浮层）原先全跑在**浏览器本地**：
+   * agent store 在内存里、页面跳转走本地路由、浮层靠 window 事件。
+   * 于是只有"演示机"那一台看得到，第二台机器屏幕上什么都没有 ——
+   * 业务数据（工单 / 环境读数 / 任务卡）是同步的，**讲解过程不同步**。
+   *
+   * 现在把"这一轮开讲了"写成一条服务端事件：演示机发 `xiaomu.round`，
+   * 其它机器在自己的 WS 事件流里收到后**跟随显示与页面动作**（不出声，见前端 `roundSync.ts`）。
+   *
+   * ── 三条口径 ──────────────────────────────────────────────────────
+   *   · **幂等性不做**：同一轮再讲一次就该再广播一次（现场会重讲），每条是一回合；
+   *   · **带 hostId**：发起方的浏览器 id。跟随端据此**忽略自己发的**回声，
+   *     否则两台机器会互相跟随、来回跳页（这条不加就是死循环）；
+   *   · **只记"说过什么"**：实体里存轮次号、台词、页面落点与发起人，
+   *     便于事后核对"哪台机器在哪一轮讲了什么"（面向结果展示也要留痕）。
+   */
+  "xiaomu.round": (ctx, payload) => {
+    const roundNo = String(payload.roundNo ?? "").trim();
+    const text = String(payload.text ?? "").trim();
+    if (!roundNo || !text) throw new WorkflowError(422, "BAD_ROUND", "回合广播要带轮次号与台词");
+    const hostId = payload.hostId ? String(payload.hostId) : null;
+    const used =
+      ctx.db
+        .prepare("SELECT COUNT(*) AS n FROM entities WHERE session_id=? AND kind='agentTurn'")
+        .get(ctx.sessionId)?.n ?? 0;
+    const id = `TURN-${String(used + 1).padStart(4, "0")}`;
+    const data = {
+      id,
+      roundNo,
+      text,
+      /** 这一轮的页面落点（原样带过去，跟随端照着跳，不自己猜） */
+      nav: payload.nav ?? null,
+      hostId,
+      by: ctx.actorId,
+      at: nowIso(),
+    };
+    const entity = writeEntity(ctx.db, ctx.sessionId, "agentTurn", id, data);
+    return {
+      entityKind: "agentTurn",
+      entity,
+      result: { turnId: id, roundNo, hostId, by: ctx.actorId },
+      events: [
+        {
+          type: "xiaomu.round",
+          /*
+            ⚠ **台词必须进事件载荷**（第一版漏了，现场表现为"跟随端一点反应都没有"）：
+            跟随端是拿 WS 事件直接跟随的（`agent/roundSync.ts` 的 `remoteRoundOf`），
+            它不查快照 —— 事件里只有 roundNo、text 为空时那一轮会被判成"不是有效回合"，
+            于是页面不跳、气泡不显示，而服务端这边看起来一切正常（实体写进去了）。
+          */
+          payload: { turnId: id, roundNo, text, hostId, by: ctx.actorId, nav: data.nav },
+        },
+      ],
+    };
+  },
+
   "map.save": (ctx, payload) => {
     // 只生成地图版本，**不碰 Mission**（评审 F03：保存地图不能把任务改成已完成）
     const id = payload.mapVersionId ?? `MAP-${Date.now().toString(36).toUpperCase()}`;

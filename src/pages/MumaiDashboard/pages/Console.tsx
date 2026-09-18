@@ -31,6 +31,7 @@ import { isOnline, useSharedStore } from "../store/shared";
 import { useMumai } from "../context";
 import { actorName } from "../api/accounts";
 import { addressGroups, endRows, hostOf, isLocalHost, probeVerdict, recommendedUrl, serverLine } from "./collabLogic";
+import { followEnabled, setFollowEnabled } from "../agent/roundSync";
 
 /** 内网端数多久读一次：它是本页唯一会"自己变"的读数（别人开关页面） */
 const PEERS_POLL_MS = 10000;
@@ -84,6 +85,8 @@ export default function Console() {
   /** 最近一次同步实测的结论（端回执是异步的，追到齐或超时为止） */
   const [probe, setProbe] = useState<SyncProbe | null>(null);
   const [probing, setProbing] = useState(false);
+  /** 本机是否跟随讲解机（存本地；初值现场读，默认开） */
+  const [following, setFollowing] = useState(() => followEnabled());
   /** 最近谁从哪台机器写了什么 */
   const [writeLog, setWriteLog] = useState<WriteLogPage | null>(null);
   const probeTimer = useRef(0);
@@ -486,6 +489,31 @@ export default function Console() {
               <span>
                 {online ? "正常 · 新工单与调度会自己出现，无需刷新" : "未连接共享服务"}
                 {peers ? `（会话 ${peers.sessionId}）` : ""}
+              </span>
+            </li>
+            {/*
+              跟随演示机（用户 2026-09-23：「项目就是面向结果展示的，但得做到内网多主机内容同步」）。
+              开关存每台机器自己的 localStorage（**默认开**：新机器打开就能跟着看），
+              讲小木那一轮时本机会同屏显示同一句台词、并把页面带到同一页；**不出声**。
+              哪台机器要自己演示，就在这里关掉它（关掉后本机只做自己的操作，不跟随别人）。
+            */}
+            <li>
+              <b>跟随讲解机</b>
+              <span>
+                <Btn
+                  tone={following ? "primary" : "default"}
+                  onClick={() => {
+                    const next = !following;
+                    setFollowEnabled(next);
+                    setFollowing(next);
+                  }}>
+                  {following ? "已开启 · 点一下关闭" : "已关闭 · 点一下开启"}
+                </Btn>{" "}
+                <em className="cs-lan__hint">
+                  {following
+                    ? "本机会跟着讲解机的小木讲解同步切页，并显示同一句台词（不出声）；本机自己说话不受影响。"
+                    : "本机不跟随任何其它机器：只显示自己在平台上的操作与数据同步。"}
+                </em>
               </span>
             </li>
             <li>

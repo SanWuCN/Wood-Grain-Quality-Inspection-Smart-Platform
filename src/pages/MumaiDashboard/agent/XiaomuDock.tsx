@@ -24,7 +24,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import XiaomuFace from "./XiaomuFace";
-import { ask, type Runtime } from "./executor";
+import { applyRemoteRound, ask, type Runtime } from "./executor";
+import { useRoundFollow } from "./roundSync";
 import { closeAgent, hasForeignModal, nextInteractionId } from "./api";
 import { stableNote, wakeErrorHint, WAKE_REPLY_TEXT } from "./degrade";
 import { useAgentNavigate, useAgentSession } from "./agentSession";
@@ -166,6 +167,20 @@ export default function XiaomuDock() {
   );
   const runtimeRef = useRef(runtime);
   runtimeRef.current = runtime;
+
+  /**
+   * ── 内网多主机内容同步：跟随另一台演示机（用户 2026-09-23）─────────
+   * 「项目就是面向结果展示的，但得做到内网多主机内容同步」。
+   * 演示机每讲一轮都会广播（`executor.ts` 的 `announceRound`），本机收到就：
+   *   · 气泡显示同一句台词（不出声 —— 多台机器同时放音会互相打架）；
+   *   · 页面按同一份 `nav` 走、揭示与浮层按同一轮触发（`applyRemoteRound`）。
+   * 忽略自己的回声与过期事件这两条判据都在 `roundSync.ts`（有单测）。
+   */
+  useRoundFollow(
+    useCallback((round) => {
+      applyRemoteRound(round.roundNo, round.text, runtimeRef.current);
+    }, []),
+  );
 
   /**
    * 语音命令入口（供 wakeChannel 与串口通道调用）。

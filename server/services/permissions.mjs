@@ -34,6 +34,13 @@ export const ACTION_PERMISSION = {
   "task.save": "task:manage",
   "task.ack": "task:execute",
 
+  /*
+    小木回合广播（内网多主机内容同步）：**谁都能讲**——四个角色都可能站在演示机前
+    对小木说话，这一条只是把"我这一轮开讲了"告诉同一局域网里的其它机器。
+    它不写业务数据（只记一条回合留痕），所以不设角色门槛。
+  */
+  "xiaomu.round": "*",
+
   "map.save": "map:save",
 
   /*

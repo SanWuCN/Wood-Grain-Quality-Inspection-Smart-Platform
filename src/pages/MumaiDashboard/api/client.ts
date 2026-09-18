@@ -171,6 +171,26 @@ export type TaskCardEntity = {
   ackNote?: string | null;
 };
 
+/**
+ * 小木回合留痕（服务端 `agentTurn` 实体；内网多主机内容同步用）。
+ *
+ * 演示机每讲一轮就往服务端写一条：轮次号、台词、页面落点、发起端 id。
+ * 作用有两个：
+ *   · **事件源**：其它机器在自己的 WS 事件流里收到 `xiaomu.round` 后跟随显示与页面动作
+ *     （前端 `agent/roundSync.ts`；发起端 id 用来忽略自己的回声）；
+ *   · **留痕**：事后能核对"哪台机器在哪一轮讲了什么"。
+ */
+export type AgentTurnEntity = {
+  id: string;
+  roundNo: string;
+  text: string;
+  nav: Record<string, unknown> | null;
+  /** 发起端的浏览器 id（每台机器/每个标签页一个）；跟随端据此忽略自己发的 */
+  hostId: string | null;
+  by: string | null;
+  at: string;
+};
+
 export type MapVersionEntity = {
   id: string;
   label: string;

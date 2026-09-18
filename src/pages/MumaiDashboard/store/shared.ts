@@ -24,6 +24,7 @@ import {
   type Actor,
   type ApiError,
   type ArchiveItemEntity,
+  type AgentTurnEntity,
   type ArtifactEntity,
   type CommandResult,
   type EnvironmentEntity,
@@ -269,6 +270,15 @@ export function archiveItems(state: SharedState): SharedEntity<ArchiveItemEntity
  */
 export function taskCards(state: SharedState): SharedEntity<TaskCardEntity>[] {
   return entitiesOf<TaskCardEntity>(state, "taskCard");
+}
+
+/**
+ * 小木回合留痕（`agentTurn`）：哪台机器在第几轮讲了什么。
+ *
+ * 内网多主机内容同步靠它留痕，页面（内网协同面板）可以列出"最近几轮是谁讲的"。
+ */
+export function agentTurns(state: SharedState): SharedEntity<AgentTurnEntity>[] {
+  return entitiesOf<AgentTurnEntity>(state, "agentTurn");
 }
 
 /** 是否连得上共享服务：连不上时所有写操作都要禁用并说明原因 */
