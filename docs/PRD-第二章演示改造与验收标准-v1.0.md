@@ -155,6 +155,11 @@
 **现状**
 设备网关命令白名单含 `prepare_update`（`server/services/device-gateway.mjs:685`），手持终端侧**已实现接收**（`woodpulse/app.py:1294 _cmd_prepare_update` → `UpdateState.RECEIVED`），但**平台全仓无调用方**；现有设备命令按钮仅 `query_status` / `request_upload`。
 
+> **实施状态（2026-09-28 更新）**：本节已落地。入口在 `src/pages/MumaiDashboard/pages/DeliveryCenter.tsx` 的「下发到设备」弹窗（已发布产物行按钮 → 选设备 → 确认下发 → 回执三态），端到端验收见
+> `docs/验收-剧本待测试四处-v1.0.md`（工装 `tools/验收-更新包下发.mjs`，19/19 通过）。
+> C2 的"设备端 `UpdateState` 变为 RECEIVED"这一半**仍待真机在线的复验**：终端注册只在开机时做一次，
+> 远端重启不是工装能做的事；本轮用真令牌开的设备通道验了平台侧全部路径。
+
 **需求**
 1. 在 `#/firmware?tab=delivery` 的「已发布产物」行增加「**下发到设备**」按钮。
 2. 点击后弹出目标设备选择（列出 `GET /api/devices` 中在线的设备），确认后发送 `prepare_update` 命令，载荷含 `artifactId`、`version`、`downloadUrl`、`sha256`。

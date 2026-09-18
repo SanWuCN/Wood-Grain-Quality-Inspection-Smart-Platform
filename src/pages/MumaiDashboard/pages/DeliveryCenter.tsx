@@ -19,7 +19,7 @@
  * 目标载体与回退方式都不一样，混成一张表就只能比大小了。
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import { Btn, Modal, StateBlock, StatusChip } from "../ui";
@@ -29,6 +29,8 @@ import type { DeliveryTarget } from "../seed/types";
 import { ACCOUNT_NAME } from "../api/accounts";
 import { api, isApiError, type ArtifactEntity, type SharedEntity } from "../api/client";
 import { artifacts as artifactsOf, isOnline, useSharedStore } from "../store/shared";
+import { useDeviceLink } from "../device/useDeviceLink";
+import type { DeviceCommand, DeviceLedgerEntry } from "../device/types";
 import { buildDistillScript, buildTrainScript } from "./terminalScripts";
 import {
   buildDeliveryWorkflow,
@@ -316,6 +318,289 @@ function ReceiveModal({
 }
 
 /* ------------------------------------------------------------------ *
+ * 下发到设备（PRD-第二章演示改造与验收标准 PR-03 / K-5）
+ *
+ * 剧本 S18 那句「更新包已下发，请接收」原来在平台上**没有入口**：
+ * 设备命令白名单里有 `prepare_update`，但全仓没有一处调用它（盘点文档 B-21）。
+ * 这里补的就是那一步：选设备 → 带产物编号 / 版本 / 下载地址 / 摘要下发 → 看回执。
+ *
+ * 三条口径（照抄设备网关与 PRD，不自己发明）：
+ *   · `accepted ≠ executed`：下发成功只写「已下发」，剩下的等设备回执；
+ *   · 回执是**设备报上来的**：页面从 `/api/devices/{id}/hardware` 的
+ *     `recentCommands` 读，读不到就如实写「等待」——不替设备宣布执行完成；
+ *   · 下载地址给**绝对地址**：设备在另一台机器上，收不到相对的 `/api/...`。
+ * ------------------------------------------------------------------ */
+
+/** 命令状态 → 页面措辞。终端词典（queued/sent/accepted/executed/failed） */
+const COMMAND_STATE_LABEL: Record<string, string> = {
+  queued: "排队中",
+  sent: "已下发",
+  accepted: "设备已接收",
+  executed: "设备已执行",
+  failed: "设备报错",
+};
+
+/** 命令动作 → 设备上发生的事。页面上让人看懂这条命令让终端做了什么 */
+const COMMAND_ACTION_LABEL: Record<string, string> = {
+  prepare_update: "接收更新包",
+  query_status: "回报状态快照",
+  request_upload: "上传当前批次",
+  assign_task: "绑定工单",
+  apply_config: "应用配置",
+  pause_capture: "暂停采集",
+};
+
+function commandTone(state: string): "ok" | "info" | "warn" | "danger" | "muted" {
+  if (state === "executed") return "ok";
+  if (state === "accepted") return "info";
+  if (state === "sent" || state === "queued") return "warn";
+  if (state === "failed") return "danger";
+  return "muted";
+}
+
+function DispatchModal({
+  artifact,
+  online,
+  canDispatch,
+  onClose,
+  onDispatched,
+}: {
+  artifact: SharedEntity<ArtifactEntity>;
+  online: boolean;
+  canDispatch: boolean;
+  onClose: () => void;
+  onDispatched: (info: { deviceId: string; commandId: string }) => void;
+}) {
+  const { toast, pushEvent } = useMumai();
+  const [ledger, setLedger] = useState<DeviceLedgerEntry[] | null>(null);
+  const [deviceId, setDeviceId] = useState("");
+  const [busy, setBusy] = useState(false);
+  /** 本次下发的命令号：回执按它读，避免拿到上一次同类型命令的状态 */
+  const [issued, setIssued] = useState<{ deviceId: string; commandId: string } | null>(null);
+
+  /** 设备名录来自共享服务（换台电脑打开看到的是同一份） */
+  useEffect(() => {
+    let disposed = false;
+    const load = async () => {
+      try {
+        const result = await api.deviceLedger();
+        if (!disposed) setLedger(result.devices);
+      } catch {
+        /* 取不到就显示「读不到设备名录」——不假装有设备可发 */
+        if (!disposed) setLedger([]);
+      }
+    };
+    void load();
+    const timer = window.setInterval(load, 5000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const link = useDeviceLink(issued?.deviceId ?? deviceId, { enabled: Boolean(issued?.deviceId ?? deviceId) });
+  const receipt: DeviceCommand | null =
+    issued && link.view
+      ? link.view.recentCommands.find((item) => item.commandId === issued.commandId) ?? null
+      : null;
+
+  /** 能收命令的设备：链路在线（6 秒内有上报）。命令通道另标一行，不拿它当门槛 */
+  const ready = (ledger ?? []).filter((item) => item.link?.state === "online");
+  const selected = ready.find((item) => item.deviceId === deviceId) ?? null;
+  const artifactFile = artifact.data.files[0] ?? null;
+
+  /**
+   * 下发。
+   *
+   * `args` 里的四个字段就是 PRD PR-03 点名的：产物编号 / 版本 / 下载地址 / 摘要；
+   * 同一份载荷再进 `payload` —— 设备网关把 `args` 与业务体分开给终端，
+   * 只给一份时真机会读不到（`device-gateway.mjs:685` 的注释记着这个坑）。
+   */
+  const dispatch = async () => {
+    if (!selected || !artifactFile) return;
+    setBusy(true);
+    try {
+      const downloadUrl = new URL(api.downloadUrl(artifactFile.fileId), window.location.origin).toString();
+      const payload = {
+        artifactId: artifact.id,
+        name: artifact.data.name,
+        version: artifact.data.modelVersion,
+        downloadUrl,
+        sha256: artifact.data.sha256,
+        sizeText: artifact.data.sizeText,
+      };
+      const result = await api.deviceCommand(selected.deviceId, "prepare_update", payload);
+      setIssued({ deviceId: selected.deviceId, commandId: result.command.commandId });
+      onDispatched({ deviceId: selected.deviceId, commandId: result.command.commandId });
+      toast(result.hint, result.pushed ? "info" : "warn");
+      pushEvent(
+        `更新包 ${artifact.data.name} 下发到 ${selected.deviceId}：${COMMAND_STATE_LABEL[result.command.state] ?? result.command.state}`,
+        result.pushed ? "ok" : "warn",
+      );
+    } catch (error) {
+      toast(isApiError(error) ? error.message : "下发失败", "danger");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const receiptLabel = receipt ? COMMAND_STATE_LABEL[receipt.state] ?? receipt.state : "等待设备回执";
+  const at = (value: string | null) => (value ? `${value.slice(11, 19)}` : "—");
+
+  return (
+    <Modal
+      title="下发到设备"
+      subtitle={<span>{artifact.data.name} · {artifact.data.modelVersion} · {artifact.data.target}</span>}
+      onClose={onClose}
+      footer={
+        <>
+          <span className="muted">
+            {!canDispatch
+              ? permissionHint("scan:capture")
+              : !online
+                ? "连接不上共享服务"
+                : !artifactFile
+                  ? "这份产物没有登记文件，没有可下载的地址"
+                  : (ledger ?? []).length === 0
+                    ? "还没有设备接入"
+                    : issued
+                      ? `已下发命令 ${issued.commandId}`
+                      : "确认后把产物编号、版本、下载地址与摘要一起发给设备"}
+          </span>
+          <Btn onClick={onClose}>关闭</Btn>
+          <Btn
+            tone="primary"
+            disabled={busy || !canDispatch || !online || !artifactFile || !selected || Boolean(issued)}
+            onClick={() => void dispatch()}>
+            {issued ? "已下发" : "确认下发"}
+          </Btn>
+        </>
+      }>
+      <div className="dispatch">
+        <dl className="dispatch__pkg">
+          <div>
+            <dt>产物编号</dt>
+            <dd>{artifact.id}</dd>
+          </div>
+          <div>
+            <dt>版本</dt>
+            <dd>{artifact.data.modelVersion}</dd>
+          </div>
+          <div>
+            <dt>摘要</dt>
+            <dd>{artifact.data.sha256 ? `${artifact.data.sha256.slice(0, 16)}…` : "—"}</dd>
+          </div>
+          <div>
+            <dt>下载地址</dt>
+            <dd>{artifactFile ? `${window.location.origin}/api/files/…` : "—"}</dd>
+          </div>
+        </dl>
+
+        <h4 className="sub">目标设备</h4>
+        {/*
+          ⚠ 这里的判据是「名录里有没有设备」，**不是**「有没有在线的设备」。
+          写成 `ready.length === 0 ? <空状态/> : <列表/>` 踩过一个坑：设备列表是 5 秒
+          轮询的，某一次刷新恰好在"设备掉线"的窗口里，列表就被空状态替掉，
+          但 state 里 `deviceId` 还记着那台设备 —— 于是底部按钮可点、上面的设备却没了，
+          点下去对着一个已经不显示的设备发命令。空状态只在**确实一台都没有**时出现。
+        */}
+        {ledger === null ? (
+          <p className="note">正在读设备名录…</p>
+        ) : (ledger ?? []).length === 0 ? (
+          <StateBlock
+            kind="offline"
+            title="还没有设备接入"
+            hint="设备接入后（树莓派终端启动并上报）才会出现在这里。设备不在线时命令只会排在队列里，现场看不出「发没发出去」。"
+          />
+        ) : (
+          <>
+            <ul className="dispatch__devices">
+              {(ledger ?? []).map((item) => {
+                const online = item.link?.state === "online";
+                return (
+                  <li key={item.deviceId}>
+                    <button
+                      type="button"
+                      className={item.deviceId === deviceId ? "is-active" : ""}
+                      onClick={() => setDeviceId(item.deviceId)}
+                      disabled={Boolean(issued)}>
+                      <b>{item.deviceId}</b>
+                      <span>
+                        {/*
+                          `host` 在类型上是 `Record<string, unknown>`（终端报什么就存什么），
+                          渲染前统一过一遍 String()：直接塞 unknown 进 JSX 编译不过，
+                          也不会因为设备换了一台就崩。
+                        */}
+                        {String(item.hardware?.model ?? item.host?.hostname ?? "设备")}
+                        {item.host?.hostname ? ` · ${String(item.host.hostname)}` : ""}
+                      </span>
+                      <em>
+                        {online ? "在线" : item.link?.state === "stale" ? "延迟" : "离线"}
+                        {" · "}
+                        当前版本 {item.modelVersion ?? "—"}
+                        {" · "}
+                        {item.link?.socketConnected ? "命令通道已连接" : "命令通道未连接（下发后排队）"}
+                      </em>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            {ready.length === 0 ? (
+              <p className="note">
+                名录里的设备现在都不在线（6 秒内没有上报）。选离线的设备也能发，命令会排在队列里等它上线。
+              </p>
+            ) : null}
+          </>
+        )}
+
+        {issued && selected ? (
+          <>
+            <h4 className="sub">下发回执</h4>
+            <ul className="dispatch__receipt">
+              <li data-cmd={issued.commandId}>
+                <span>命令</span>
+                <b>{issued.commandId}</b>
+                <em>
+                  {(COMMAND_ACTION_LABEL[receipt?.action ?? "prepare_update"] ?? "下发产物")} ·{" "}
+                  {receipt?.action ?? "prepare_update"}
+                </em>
+              </li>
+              <li>
+                <span>状态</span>
+                <StatusChip text={receiptLabel} tone={commandTone(receipt?.state ?? "sent")} dot />
+                <em>
+                  {receipt
+                    ? `下发 ${at(receipt.createdAt)} · 送达 ${at(receipt.sentAt)} · 接收 ${at(receipt.acceptedAt)} · 执行 ${at(receipt.executedAt)}`
+                    : "命令已发出，等设备回报"}
+                </em>
+              </li>
+              <li>
+                <span>版本</span>
+                <b>
+                  {selected.modelVersion ?? "—"} → {artifact.data.modelVersion}
+                </b>
+                <em>目标版本是这份产物登记的版本；设备回报的版本以设备为准</em>
+              </li>
+              {receipt?.reason ? (
+                <li>
+                  <span>设备说明</span>
+                  <b>{receipt.reason}</b>
+                  <em>{receipt.errorCode ?? ""}</em>
+                </li>
+              ) : null}
+            </ul>
+            {receipt?.state === "failed" ? (
+              <p className="receive-alert">设备回报失败：{receipt.reason ?? receipt.errorCode ?? "未给原因"}</p>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * 页签
  * ------------------------------------------------------------------ */
 
@@ -325,6 +610,15 @@ export function DeliveryTab() {
   const [selectedId, setSelectedId] = useState<string>("");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [receiveId, setReceiveId] = useState<string | null>(null);
+  /** 正在下发的产物 id（「下发到设备」弹窗对着哪一份产物） */
+  const [dispatchId, setDispatchId] = useState<string | null>(null);
+  /**
+   * 本次会话下发过谁：产物 id → 命令号。
+   *
+   * 只记在页面上，**不落库**：设备命令的真相在设备台账里（`recentCommands`），
+   * 这里只是「我刚发的是哪一条」，刷新页面后由设备页那份台账回答，不另造一份状态。
+   */
+  const [dispatched, setDispatched] = useState<Record<string, { deviceId: string; commandId: string }>>({});
 
   /**
    * 已发布产物来自共享服务，不再来自本地 useState。
@@ -372,6 +666,13 @@ export function DeliveryTab() {
   const failed = useMemo(() => selectedChecks.filter((check) => !check.pass), [selectedChecks]);
 
   const canSubmit = can("package:deliver");
+  /**
+   * 下发到设备的权限。
+   *
+   * 与后端同源：`POST /api/devices/{id}/commands` 认的是 `scan:capture` 或
+   * `console:admin`（`server/api/http.mjs:423`）。前端这里照抄，不让按钮先亮后灰。
+   */
+  const canDispatch = can("scan:capture") || can("console:admin");
 
   /** 提交走服务端命令，只有服务端返回后才显示发布成功 */
   const submit = async (artifact: SharedEntity<ArtifactEntity>) => {
@@ -569,6 +870,7 @@ export function DeliveryTab() {
     [current, scriptFor],
   );
   const receiveArtifact = receiveId ? sharedArtifacts.find((item) => item.id === receiveId) ?? null : null;
+  const dispatchArtifact = dispatchId ? sharedArtifacts.find((item) => item.id === dispatchId) ?? null : null;
 
   return (
     <div className="delivery">
@@ -752,6 +1054,29 @@ export function DeliveryTab() {
                     onClick={() => setReceiveId(item.id)}>
                     打开接收台
                   </Btn>
+                  {/*
+                    下发到设备（PRD PR-03）。
+                    按钮一直可见，但没有权限时置灰并写明缺哪条权限 —— 藏掉按钮
+                    会让人以为平台没这个功能（这正是这次要补的那一步）。
+                  */}
+                  <Btn
+                    tone="primary"
+                    disabled={!canDispatch || !online || busy !== null}
+                    title={
+                      !canDispatch
+                        ? permissionHint("scan:capture")
+                        : online
+                          ? "把这个更新包发给手持终端（记录下发与回执）"
+                          : "连接不上共享服务，无法下发"
+                    }
+                    onClick={() => setDispatchId(item.id)}>
+                    下发到设备
+                  </Btn>
+                  {dispatched[item.id] ? (
+                    <em className="muted" title={`命令 ${dispatched[item.id].commandId}`}>
+                      已发 {dispatched[item.id].deviceId} · {dispatched[item.id].commandId.slice(-6)}
+                    </em>
+                  ) : null}
                 </span>
               </li>
             ))
@@ -811,6 +1136,16 @@ export function DeliveryTab() {
           onClose={() => setReceiveId(null)}
           onDownload={download}
           onVerify={verify}
+        />
+      ) : null}
+
+      {dispatchArtifact ? (
+        <DispatchModal
+          artifact={dispatchArtifact}
+          online={online}
+          canDispatch={canDispatch}
+          onClose={() => setDispatchId(null)}
+          onDispatched={(info) => setDispatched((current) => ({ ...current, [dispatchArtifact.id]: info }))}
         />
       ) : null}
     </div>

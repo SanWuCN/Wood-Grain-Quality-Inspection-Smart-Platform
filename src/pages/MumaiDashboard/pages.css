@@ -9025,6 +9025,139 @@
   color: var(--primary);
 }
 
+/* ---- 下发到设备（PRD PR-03）：产物摘要 / 设备选择 / 回执 ------------------ */
+
+.dispatch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* 产物四要素（编号 / 版本 / 摘要 / 下载地址）——要发给设备的就是这四个 */
+.dispatch__pkg {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
+.dispatch__pkg > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dispatch__pkg dt {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.dispatch__pkg dd {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-data-mixed);
+  font-size: var(--fs-table);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 可选设备：一台一行，选中态与用途选择保持同一套视觉 */
+.dispatch__devices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dispatch__devices button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-left-width: 2px;
+  background: var(--fill-weak);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dispatch__devices button:hover:not(:disabled) {
+  border-color: var(--border-hover);
+}
+
+.dispatch__devices button.is-active {
+  border-color: var(--primary);
+  border-left-color: var(--primary);
+  background: var(--fill-soft);
+}
+
+.dispatch__devices button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.dispatch__devices b {
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 600;
+}
+
+.dispatch__devices span,
+.dispatch__devices em {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 回执：命令 / 状态 / 版本三行，每行「标签 · 值 · 说明」 */
+.dispatch__receipt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0 0 0 var(--space-3);
+  border-left: 1px solid var(--border-subtle);
+  list-style: none;
+}
+
+.dispatch__receipt li {
+  display: grid;
+  grid-template-columns: 72px 156px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-aux);
+}
+
+.dispatch__receipt li > span {
+  color: var(--text-tertiary);
+}
+
+.dispatch__receipt b {
+  color: var(--text-primary);
+  font-family: var(--font-data-mixed);
+  font-weight: 600;
+}
+
+.dispatch__receipt em {
+  color: var(--text-tertiary);
+  font-style: normal;
+}
+
+/* 已发提示跟在两个按钮后面，不挤掉按钮的点击区 */
+.art-row__act em {
+  align-self: center;
+  white-space: nowrap;
+}
+
 /* ------------------------------------------------------------------
    数字孪生 · 高斯泼溅主视图
    ------------------------------------------------------------------ */
