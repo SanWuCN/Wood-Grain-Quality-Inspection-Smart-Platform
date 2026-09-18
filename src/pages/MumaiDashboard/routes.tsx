@@ -31,6 +31,8 @@ const Console = lazy(() => import("./pages/Console"));
     PRD 2.2 的一级导航固定八项，工作台由小木带路与工单页入口进入。
 */
 const Workbench = lazy(() => import("./pages/Workbench"));
+/* 素材质检（剧本 ⑩）：全栈电脑侧的素材检查页，同样「有路由、不进一级导航」 */
+const Materials = lazy(() => import("./pages/Materials"));
 
 export default function RoutesTree() {
   return (
@@ -56,6 +58,8 @@ export default function RoutesTree() {
         <Route path="/present" element={<Present />} />
         {/* 执行工作台（剧本 ⑥ ⑮）：任务卡草稿 / 核对保存 / 执行人回执 */}
         <Route path="/workbench" element={<Workbench />} />
+        {/* 素材质检（剧本 ⑩）：全景素材清单 + 需重看的画面 + 切片与重建前检查 */}
+        <Route path="/materials" element={<Materials />} />
         {/* 排练控制台（PRD §11）：管理员新建会话与恢复阶段快照 */}
         <Route path="/console" element={<Console />} />
         {/*

@@ -638,11 +638,13 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     voicePack: null,
     intentId: null,
     /*
-      页面落点（v2 小木带路）：「检查这批重建素材，列出缺失文件和需要重看的画面」——数字孪生（场景版本与机位关键帧）。
-      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+      页面落点（v2 小木带路）：「检查这批重建素材，列出缺失文件和需要重看的画面」——**素材质检**（/materials）。
+      这一页与 /workbench 同一种做法：有路由、不进一级导航（PRD 2.2 固定八项），
+      由小木带路与数字孪生页「场景版本」右上角的入口进入。
+      路径由 `scriptNav.test.ts` 对着 routes.tsx 核对。
     */
     nav: {
-      route: "/twin",
+      route: "/materials",
     },
   },
   {

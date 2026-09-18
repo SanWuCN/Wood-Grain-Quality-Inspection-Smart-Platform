@@ -174,6 +174,26 @@ try {
         check(`  ↳ 写明「采集时间各自独立记录」`, content.independent);
       }
     }
+
+    /* 素材质检页：素材清单 + 两处低清晰度标记 + 切片检查，三块都要真的渲染出来 */
+    if (nav.route === "/materials") {
+      const content = await machine.waitFor(
+        `(() => {
+          const text = document.body.innerText || '';
+          const need = ['3840×1920', '214', '00:43', '02:17', '缺失文件'];
+          const hit = need.filter((k) => text.includes(k));
+          return hit.length === need.length
+            ? { hits: hit.length, marks: /需要重看的画面/.test(text), checks: /切片与重建前检查/.test(text), origin: /预置结果/.test(text) }
+            : null;
+        })()`,
+        { timeoutMs: 6000 },
+      );
+      check(`  ↳ 素材质检页内容`, Boolean(content), content ? "分辨率 / 关键帧 / 两处标记 / 缺失文件都在" : "素材清单没渲染出来");
+      if (content) {
+        check(`  ↳ 需重看的画面与切片检查两块都在`, content.marks && content.checks);
+        check(`  ↳ 标明检查结论来自「预置结果」`, content.origin);
+      }
+    }
   }
 
   if (skipped.length) console.log(`\n  跳过（非语音触发）：${skipped.join("、")}`);

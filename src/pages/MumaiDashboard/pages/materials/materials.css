@@ -1,0 +1,122 @@
+/*
+ * 素材质检页（`/materials`）
+ *
+ * 与环境记录 / 数据接收 / 执行工作台同一套观感：细边框 + 弱填充 + 状态色只在 chip
+ * 与标记点上出现，不引入新色板。
+ */
+
+.mt-panel + .mt-panel {
+  margin-top: var(--space-3);
+}
+
+.mt-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-aux);
+}
+
+.mt-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.mt-summary li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--fill-weak);
+}
+
+.mt-summary li.is-missing {
+  border-color: var(--danger);
+}
+
+.mt-summary small {
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+}
+
+.mt-summary b {
+  color: var(--text-primary);
+  font-family: var(--font-data);
+  font-size: var(--fs-kpi);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.mt-marks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mt-marks li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--warning);
+  border-radius: 6px;
+  background: var(--fill-weak);
+}
+
+.mt-marks time {
+  flex: 0 0 auto;
+  color: var(--text-warn);
+  font-family: var(--font-data);
+  font-size: var(--fs-kpi);
+  font-variant-numeric: tabular-nums;
+}
+
+.mt-marks div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mt-marks b {
+  color: var(--text-primary);
+  font-size: var(--fs-body);
+}
+
+.mt-marks span {
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+}
+
+.mt-advice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mt-advice li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+}
+
+@media (max-width: 1440px) {
+  .mt-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

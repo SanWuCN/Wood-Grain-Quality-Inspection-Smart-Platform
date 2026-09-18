@@ -303,6 +303,8 @@ export const ROUTE_READ: Record<string, readonly string[]> = {
     这一页刻意**不进一级导航**（PRD 2.2 固定八项），由小木带路与工单页的入口进入。
   */
   "/workbench": ["shen", "shi", "rao", "ma"],
+  /* 素材质检（剧本 ⑩）：饶是素材的产出方，沈/史看检查结论，马配合复核视角覆盖 */
+  "/materials": ["shen", "shi", "rao", "ma"],
 };
 
 /** 取某个角色的可执行操作集合 */

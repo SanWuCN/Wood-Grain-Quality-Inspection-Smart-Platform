@@ -933,6 +933,14 @@ const TOUR_INTERVAL_MS = 5200;
               online ? (
                 <span className="muted">
                   <NumberAnimation value={sceneRows.filter((row) => row.orderId === orderId).length} /> 个 · 本工单
+                  {/*
+                    通往「素材质检」（剧本 ⑩：检查重建素材、低清晰度标记）的入口。
+                    那一页不进一级导航（PRD 2.2 固定八项），所以这里留一个手动入口 ——
+                    现场漏触发小木那一轮时，人也能自己走过去看素材清单与需重看的画面。
+                  */}
+                  <Btn tone="ghost" onClick={() => (window.location.hash = "#/materials")}>
+                    素材质检
+                  </Btn>
                 </span>
               ) : (
                 <StatusChip text="未连接共享服务" tone="warn" />
