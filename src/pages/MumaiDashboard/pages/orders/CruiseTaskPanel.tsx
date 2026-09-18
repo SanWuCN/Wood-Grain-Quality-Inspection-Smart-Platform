@@ -157,7 +157,7 @@ export function CruiseTaskPanel({
 
   return (
     <Panel
-      className={className}
+      className={`${className} cruise-panel`}
       title="自主巡航任务"
       icon="biz-inspection-cart"
       extra={

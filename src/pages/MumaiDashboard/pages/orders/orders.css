@@ -375,6 +375,16 @@
   color: var(--ma-text-1);
 }
 
+/*
+  任务编号与时间列不许折行：`CR-20260918-01` 被拆成三行（"CR-"/"20260918-"/"01"）
+  现场就没法念了（实测截图里就是这样）。表格其余列照常参与压缩。
+*/
+.cruise-panel table td:first-child,
+.cruise-panel table td:nth-child(5),
+.cruise-panel table td:nth-child(6) {
+  white-space: nowrap;
+}
+
 /* ------------------------------------------------------------------ *
  * 「随播报逐步加载」（agent 念工单时逐段揭示）
  *
