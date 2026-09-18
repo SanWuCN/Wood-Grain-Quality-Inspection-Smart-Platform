@@ -129,6 +129,28 @@ function pickVoice(synth: SpeechSynthesisLike): SpeechSynthesisVoice | null {
   return zh.find((voice) => voice.localService) ?? zh[0];
 }
 
+/**
+ * 看门狗窗口：有真实音频时长就按它 + 余量，没有才按文本估（不短于 2.5 秒）。
+ *
+ * ── 为什么必须能按真实时长算（2026-09-18 实测踩到）──────────────────────
+ * 原来只有"字数 × 260ms"这一个口径。第④轮台词换成短句
+ * 「收到，已启用同步备份。」（11 字 → 2.86 秒）而**录音本身有 3.12 秒**：
+ * 看门狗先到点，把音频 `pause()` 掉 —— 于是 `ended` 永远不来，
+ * `playAudio()` 那个 Promise **永远不兑现**，而 `executor` 正等着它
+ * （「念完才弹同步备份小窗」、工单详情的逐组展开都挂在同一个 Promise 上）。
+ * 现象：小木念完了，但小窗/展开再也不动。
+ *
+ * 所以：时长能读到就以它为准（录音比估时慢是常态，短句尤其明显），
+ * 读不到（`loadedmetadata` 没来）才退回文本估时 —— 但**两条路都必须兑现 Promise**。
+ */
+export function watchdogMsFor(text: string, audioDurationSec?: number | null): number {
+  const fromAudio =
+    typeof audioDurationSec === "number" && Number.isFinite(audioDurationSec) && audioDurationSec > 0
+      ? audioDurationSec * 1000 + 1200
+      : null;
+  return Math.max(2500, fromAudio ?? text.length * 260);
+}
+
 export class VoiceOutput {
   private muted = false;
   private speaking = false;
@@ -282,17 +304,38 @@ export class VoiceOutput {
          * `speaking` 仍然是 true —— 因为那次走的正是 <audio> 这条：
          * `onended` / `onerror` 都可能永远不来（文件被缓存层截断、
          * 标签页被节流、`play()` 永远挂起），于是状态卡在"正在说话"。
-         * 两条路都必须有兜底，窗口同一个口径（按文本估时 + 余量，不短于 2.5s）。
+         * 两条路都必须有兜底。
+         *
+         * ⚠ 2026-09-18 修的两处（第④轮短句暴露出来的）：
+         *   ① **看门狗必须兑现 Promise**：原来只 `pause()` + 清状态，
+         *      等 `speak()` 的那些调用方（`executor` 的"念完才弹小窗"、工单详情逐组展开）
+         *      会**永远挂住**——录像里就是"话念完了，界面再也不动"。
+         *      所以到点就 `finish(true)`：当作这一段已说完，安静收场。
+         *   ② 窗口口径改成 `watchdogMsFor()`：**优先用音频真实时长**（+1.2 秒余量），
+         *      读不到时长才退回"字数 × 260ms"。11 字录音 3.12 秒 > 估时 2.86 秒，
+         *      旧口径必然在看门狗处把音频掐掉。
          */
-        if (text) {
-          const watchdogMs = Math.max(2500, text.length * 260);
+        const armWatchdog = (ms: number) => {
+          this.clearWatchdog();
           this.watchdog = window.setTimeout(() => {
             if (token !== this.generation) return;
-            if (this.current === audio) this.current = null;
-            try { audio.pause(); } catch { /* 已经停了 */ }
-            this.setSpeaking(false);
-          }, watchdogMs);
-        }
+            try {
+              audio.pause();
+            } catch {
+              /* 已经停了 */
+            }
+            /* 兑现挂起的 Promise：只清状态不兑现，等它的人就再也醒不过来 */
+            finish(true);
+          }, ms);
+        };
+        if (text) armWatchdog(watchdogMsFor(text));
+        /* 元数据到了就按真实时长重排一次看门狗（本地小文件，毫秒级就到） */
+        audio.onloadedmetadata = () => {
+          if (token !== this.generation) return;
+          if (Number.isFinite(audio.duration) && audio.duration > 0) {
+            armWatchdog(watchdogMsFor(text, audio.duration));
+          }
+        };
         audio.onended = () => finish(true);
         audio.onerror = () => finish(false);
         void audio.play().catch(() => finish(false));
@@ -342,7 +385,7 @@ export class VoiceOutput {
        * 窗口取"按文本长度估的时长 + 余量"，并且**不短于 2.5s**：
        * 太短会在正常朗读中被误判成结束，反而把状态提前放掉。
        */
-      const watchdogMs = Math.max(2500, text.length * 260);
+      const watchdogMs = watchdogMsFor(text);
       this.watchdog = window.setTimeout(() => {
         if (token !== this.generation) return;
         this.setSpeaking(false);
