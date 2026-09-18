@@ -102,11 +102,12 @@ test("§6.2 小木标准播报逐字冻结（含全部四个数字）", () => {
  * 3. 其余关键数据（§6.3）
  * ------------------------------------------------------------------ */
 
-test("§6.3 现场环境五项（含测点相对 Z04 的位置）", () => {
+test("§6.3 现场环境五项（含测点相对 Z04 的位置）—— 2026-09-23 起跟剧本口播", () => {
   const env = DEMO_SCENARIO_V3.siteEnv;
-  assert.equal(env.airTempC, 26.4);
-  assert.equal(env.relativeHumidityPct, 78);
-  assert.equal(env.windSpeedMs, 1.6);
+  /* 剧本第 71 行：22 ℃ / 58 %RH / 0.6 m/s（用户 2026-09-23 要求与录入预设一致） */
+  assert.equal(env.airTempC, 22);
+  assert.equal(env.relativeHumidityPct, 58);
+  assert.equal(env.windSpeedMs, 0.6);
   assert.equal(env.distanceToZ04M, 2.4);
   assert.equal(env.heightAboveGroundM, 1.1);
 });

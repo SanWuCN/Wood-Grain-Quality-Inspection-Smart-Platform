@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 木脉智检 · 演示种子（PRD 16 素材种子清单）
  *
  * 全部页面从这一份种子取数：
@@ -204,11 +204,19 @@ export const DEMO_SCENARIO_V3 = Object.freeze({
       "建议优先检查柱脚返潮、屋面排水、漆层起翘和迎风面连接，现场结论以实测为准。",
   }),
 
-  /** 现场环境（§6.3） */
+  /**
+   * 现场环境（§6.3）
+   *
+   * ⚠ 2026-09-23 跟着**剧本**改过一次：用户要求「把录入读数预备数据改成当前温度22摄氏度，
+   *   相对湿度58%，风速0.6米每秒，大气压强101千帕」（《木脉智检.docx》第 71 行沈的口播）。
+   *   这一组同时被 ⑧ 那一轮的浮层卡片（`siteEnv.*`）与工单环境读数（`envPreset.ts`）显示，
+   *   两处必须是同一组数，否则沈念 22/58/0.6、屏幕上却有一格写着 26.4/78/1.6。
+   *   归档单的 `ENV_RECORD` / `CONFIG_DIFF`（CFG-02）是**另一条记录**，未跟着改。
+   */
   siteEnv: Object.freeze({
-    airTempC: 26.4,
-    relativeHumidityPct: 78,
-    windSpeedMs: 1.6,
+    airTempC: 22,
+    relativeHumidityPct: 58,
+    windSpeedMs: 0.6,
     /** 测点相对重点构件的位置 —— 必须说清对象与距离（§11.10） */
     distanceToZ04M: 2.4,
     heightAboveGroundM: 1.1,

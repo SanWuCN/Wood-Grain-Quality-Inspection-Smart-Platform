@@ -12,7 +12,7 @@
  *      `server/services/work-orders.mjs` 的 `INSTRUMENT_CATALOG` 与 `validate()`，
  *      不从服务端 import —— 那会让前端测试依赖 .mjs，期望值本来就该在这里再写一遍）；
  *   5. 不填 1013.25（§7.1 L218 / O3 / AC-15）；
- *   6. 气压步骤把单位一起给成 hPa（否则 kPa 下 1008.6 会被换算成 10086 hPa）；
+ *   6. 气压步骤把单位一起给成 kPa（值 101 是 kPa 口径的；给成 hPa 会变成 10.1 kPa 必判红）；
  *   7. 测量时间不写死日期、不晚于当前、分钟精度（改回固定日期就红）。
  */
 import { test } from "node:test";
@@ -30,14 +30,14 @@ import {
 } from "./envPreset.ts";
 
 /* ------------------------------------------------------------------ *
- * 逐字期望（PRD §9.2「示例包字段」原文）
+ * 逐字期望（剧本第 71 行沈的口播；用户 2026-09-23 拍板以剧本为准）
  * ------------------------------------------------------------------ */
 
 const EXPECTED_READINGS = {
-  airTempC: "26.4",
-  relativeHumidityPct: "78",
-  windSpeedMs: "1.2",
-  atmosphericPressureHpa: "1008.6",
+  airTempC: "22",
+  relativeHumidityPct: "58",
+  windSpeedMs: "0.6",
+  atmosphericPressureHpa: "101",
 } as const;
 
 const EXPECTED_POSITION = "示例寺院内四根木柱检测区域";
@@ -164,12 +164,21 @@ test("纯空白算没填（与组件判空口径一致，不拿 Number('') 当 0
  * 4. 数值过得了服务端校验
  * ------------------------------------------------------------------ */
 
+/**
+ * 气压换算（与 `server/services/work-orders.mjs` 的 §7.1 同一口径）：
+ * 1 hPa = 100 Pa、1 kPa = 10 hPa。**必须按预设值自己的单位换算再比量程** ——
+ * 量程 300–1100 是 hPa 口径，而预设现在是 `101 kPa`（= 1010 hPa）。
+ */
+const HPA_PER_UNIT: Record<string, number> = { hPa: 1, kPa: 10, Pa: 0.01 };
+
 test("四项读数落在缺省量程与字段硬边界内（照抄服务端 validate 的判据）", () => {
   for (const [key, range] of Object.entries(DEFAULT_RANGES)) {
-    const value = Number(ENV_PRESET_READINGS[key as keyof typeof ENV_PRESET_READINGS]);
+    const raw = Number(ENV_PRESET_READINGS[key as keyof typeof ENV_PRESET_READINGS]);
+    const value =
+      key === "atmosphericPressureHpa" ? raw * (HPA_PER_UNIT[ENV_PRESET_PRESSURE_UNIT] ?? 1) : raw;
     assert.ok(
       value >= range.min && value <= range.max,
-      `${key} = ${value} 超出量程 ${range.min}–${range.max}，按 Enter 后校验会判红`,
+      `${key} = ${raw} ${key === "atmosphericPressureHpa" ? ENV_PRESET_PRESSURE_UNIT : ""}（${value} hPa）超出量程 ${range.min}–${range.max}，按 Enter 后校验会判红`,
     );
   }
   assert.ok(Number(ENV_PRESET_READINGS.windSpeedMs) >= 0, "风速非负");
@@ -188,7 +197,7 @@ test("不填 1013.25（恒压标准大气压不是现场实测值）", () => {
  * 5. 气压：值与单位绑定
  * ------------------------------------------------------------------ */
 
-test("气压那一步连单位一起给 hPa（避免 kPa 下 1008.6 被换算成 10086 hPa）", () => {
+test("气压那一步连单位一起给 kPa（值 101 是 kPa 口径的）", () => {
   const { steps } = pressEnter(6, NOW);
   const pressure = steps.find((step) => step.key === "atmosphericPressureHpa");
   assert.ok(pressure, "顺序表里必须有气压项");
@@ -197,7 +206,13 @@ test("气压那一步连单位一起给 hPa（避免 kPa 下 1008.6 被换算成
     ENV_PRESET_PRESSURE_UNIT,
     "气压步骤必须带上单位",
   );
-  assert.equal(ENV_PRESET_PRESSURE_UNIT, "hPa", "预设值 1008.6 是 hPa 口径的，单位只能是 hPa");
+  assert.equal(ENV_PRESET_PRESSURE_UNIT, "kPa", "预设值 101 是 kPa 口径的（剧本念的是「101千帕」），单位只能是 kPa");
+  /* 换算到 hPa 必须落在量程内：101 kPa = 1010 hPa */
+  assert.equal(
+    Number(ENV_PRESET_READINGS.atmosphericPressureHpa) * HPA_PER_UNIT[ENV_PRESET_PRESSURE_UNIT],
+    1010,
+    "101 kPa 应当换算成 1010 hPa（服务端按这个值落库与校验）",
+  );
 });
 
 test("其余三项读数不带单位（单位由字段标签给出，输入框里只放数字）", () => {
