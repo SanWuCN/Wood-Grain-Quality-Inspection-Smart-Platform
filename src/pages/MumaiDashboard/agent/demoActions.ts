@@ -142,11 +142,12 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     roundNo: "④",
     /*
       ⚠ 这一轮有两处可见动作，**都不在浮层里**：
-        ① 工单详情页按三段台词逐组展开（`script.ts` 的 reveal 声明）；
-        ② 播报收尾由 executor 派发 `mumai:sync-backup` 弹出同步备份小窗。
+        ① 工单详情页按台词逐组展开（`script.ts` 的 reveal 声明）；
+        ② 播报收尾由 executor 派发 `mumai:sync-backup` 弹出**同步备份小窗**
+           （用户 2026-09-18 口径：「小木：收到，已启用同步备份，然后展开一个动态备份窗口做显示」）。
       所以标 revealOnly（不叠演示浮层），否则就是"页面 + 浮层 + 小窗"三层打架。
     */
-    title: "平台服务可访问，三类数据通道分别核对",
+    title: "启用同步备份，弹出动态备份小窗",
     surface: "order",
     revealOnly: true,
     dataKeys: ["components.codes", "mission.id", "map.version"],

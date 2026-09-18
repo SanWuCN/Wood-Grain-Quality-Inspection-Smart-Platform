@@ -97,16 +97,17 @@ test("语音编号格式合法且不冲突（编号随录音交付增加，不�
 test("含备用播报的轮次已登记，且备用台词不参与主播报", () => {
   /*
     ⚠ 这条原来断言"只有 ③ ⑮ 两轮有多行"，后来变成 4 轮。2026-09-17 剧本按文档
-    重排后只剩 **2 轮**有多行，而且**成员换了**：
+    重排后只剩 **2 轮**是"备用播报"（⑤ 与 ⑰ 之外还多了一个第 ④ 轮，但那是
+    **讲解人台词**、不是备用播报 —— 见下）。当前多行的轮次与成员：
+      · ④ 同步备份 —— `role: "host"`：文档第 4 条后半句，**由讲解人自己说**
+        （用户 2026-09-18 口径），小木只念「收到，已启用同步备份。」；
       · ⑥ 任务顺序同步（重排前的 ④）—— 稿子标「等待时选用」的备用播报；
       · ⑰ 数据清洗与人工审核（重排前的 ⑮）—— `role: "audit"` 的人工审核清单。
-    旧名单里的 ③（开工清单核对）与 ④（同步备份）已不再有多行：段15 那句
-    「收到，已启用同步备份」被用户文档第 4 条的完整回答取代，见 `script.ts` 的注释。
-    **本意不变**：多行只能是非 main 的备用句，且它们的内容绝不能混进主播报
-    （否则现场会把"等待中的话"当成结论念出来）。
+    **本意不变**：多行里的每一句都不能混进主播报
+    （否则现场会把"等待中的话"或"讲解人的话"当成小木的结论念出来）。
   */
   const withExtra = SCRIPT_ROUNDS.filter((r) => r.lines.length > 1);
-  assert.deepEqual(withExtra.map((r) => r.roundNo), ["⑥", "⑰"]);
+  assert.deepEqual(withExtra.map((r) => r.roundNo), ["④", "⑥", "⑰"]);
   for (const round of withExtra) {
     const extras = round.lines.filter((l) => l.role !== "main");
     assert.equal(
@@ -117,10 +118,19 @@ test("含备用播报的轮次已登记，且备用台词不参与主播报", ()
     for (const extra of extras) {
       assert.ok(
         !mainLineOf(round).includes(extra.text),
-        `第 ${round.roundNo} 轮的备用句混进了主播报：${extra.text.slice(0, 18)}…`,
+        `第 ${round.roundNo} 轮的附加句混进了主播报：${extra.text.slice(0, 18)}…`,
       );
     }
   }
+  /* 第 ④ 轮的那句是讲解人的（host），不是备用播报 —— 两者不能混为一谈 */
+  const r4 = roundByNo("④");
+  assert.ok(r4);
+  assert.equal(r4.lines[1].role, "host");
+  assert.deepEqual(
+    r4.lines.filter((l) => l.role === "waiting" || l.role === "audit").length,
+    0,
+    "第 ④ 轮没有备用播报，只有一句讲解人台词",
+  );
   const r17 = roundByNo("⑰");
   assert.ok(r17);
   assert.equal(r17.lines[1].role, "audit");

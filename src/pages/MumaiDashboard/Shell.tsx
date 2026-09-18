@@ -62,7 +62,8 @@ import { CommissionPreview } from "./pages/orders/CommissionPreview";
 */
 import { DemoSurface } from "./agent/demoSurface";
 /*
-  同步备份小窗（第④轮「同步备份」说完「平台服务可访问，任务已建立。…」后弹出）。
+  同步备份小窗（第④轮「同步备份」：小木说「收到，已启用同步备份。」之后弹出，
+  用户 2026-09-18 口径 = "小木回一句 → 展开动态备份窗口做显示"）。
   与演示表面分开：它的生命周期由自己的时长控制，且位置在右上角。
 */
 import { SyncBackupPanel } from "./agent/SyncBackupPanel";
@@ -851,7 +852,7 @@ export default function Shell() {
       ) : null}
 
       {/*
-        同步备份小窗：第④轮「同步备份」小木说完「平台服务可访问，任务已建立。…」之后，executor 派发
+        同步备份小窗：第④轮「同步备份」小木说完「收到，已启用同步备份。」之后，executor 派发
         `mumai:sync-backup` 打开它，列出真实工单附件与本地语音包，到点（时长按条数算）
         自动收起。位置在右上角，与左下角的演示表面、右下角的小木气泡互不遮挡。
       */}

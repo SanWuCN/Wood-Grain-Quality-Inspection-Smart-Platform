@@ -329,7 +329,15 @@ function replyScript(
   const requested =
     lineOverride != null && round.lines.some((l) => l.text === lineOverride) ? lineOverride : null;
   const line = requested ?? mainLineOf(round);
+  /*
+    `main` 之外的句子一律**不念**，但要说清是哪一类：
+      · `waiting` / `audit` 是备用播报（在对应时机才播）；
+      · `host` 是**讲解人自己说的**（第 ④ 轮文档后半句，用户 2026-09-18 口径）——
+        它既不是小木的备用句，也不会被播报，所以不能混进"备用播报"那句说明里。
+  */
   const extras = round.lines.filter((l) => l.role !== "main");
+  const waiting = extras.filter((l) => l.role === "waiting" || l.role === "audit");
+  const hostLines = extras.filter((l) => l.role === "host");
 
   const turn = botTurnBase({
     text: line,
@@ -351,10 +359,11 @@ function replyScript(
     voice: round.voicePack ?? "（未标注语音编号，走 TTS）",
     note:
       `剧本命中：${match.reason}` +
-      (extras.length
-        ? ` · 另有 ${extras.length} 句"等待时选用"的备用播报（${extras.map((l) => l.role).join("/")}），` +
+      (waiting.length
+        ? ` · 另有 ${waiting.length} 句"等待时选用"的备用播报（${waiting.map((l) => l.role).join("/")}），` +
           "在对应时机才播，此处不念。"
-        : ""),
+        : "") +
+      (hostLines.length ? ` · 另有 ${hostLines.length} 句由**讲解人自己说**（不播报）。` : ""),
   });
   pushTurn(turn);
   const spoken = runtime.speak(turn.text);
@@ -483,22 +492,25 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
   window.dispatchEvent(new CustomEvent("mumai:demo-surface", { detail: { roundNo: round.roundNo } }));
 
   /*
-    ── 同步备份小窗（用户口径 2026-09-16；2026-09-17 拆轮后编号不变）────
-    第④轮「同步备份」小木说完「平台服务可访问，任务已建立。…」之后，
-    弹出小窗列出**真实**的备份对象（当前工单的附件清单 + 本地播报语音包段数），
-    过一段时间自动收起。
+    ── 同步备份小窗（用户口径 2026-09-16；2026-09-17 拆轮；2026-09-18 改台词）─
+    第④轮「同步备份」小木说完「收到，已启用同步备份。」之后弹出小窗，
+    列出**真实**的备份对象（当前工单的附件清单 + 本地播报语音包段数），
+    过一段时间自动收起。文档第 4 条后半句（平台服务可访问…）由讲解人自己说，
+    登记在 `script.ts` 的 `role: "host"` 行里 —— 不播报、也不进这段小窗。
 
-    ⚠ 2026-09-17 剧本按《小木对话总文案.txt》重排：原第④轮（开工清单核对）
-    变成第③轮，「同步备份」独立成第④轮 —— 判据 `roundNo === "④"` 仍然指向
-    "同步备份"这一轮，所以这里不用改；改的是上面那句台词的引用。
+    ⚠ 判据是 `roundNo === "④"`：2026-09-17 剧本按《小木对话总文案.txt》重排时
+    原第④轮（开工清单核对）变成第③轮、「同步备份」独立成第④轮，编号仍指向这一轮；
+    2026-09-18 用户把台词改成短句后，这里依旧不用改（只改了每轮念什么，没改哪一轮弹窗）。
 
     ── 为什么必须**等播报结束**再弹（实测出来的坑）─────────────────────
-    第一版是立刻派发，小窗的自动收起到点即关。结果：小木这句要念约 7 秒，
+    第一版是立刻派发，小窗的自动收起到点即关。结果：小木那句念了约 7 秒，
     而小窗的计时从派发那一刻就开始跑（8 行 × 620ms ≈ 5 秒），
     于是**话还没念完，窗就关了** —— 现场观感就是"刚出来就没了"。
     现在与 `startOrderDetailReveal` 用同一套办法：拿到播报 Promise 就等它 resolve
     （`VoiceOutput.speak()` 本来就是 Promise，有看门狗兜底）；注入的是同步实现
     （拿不到 Promise）时直接派发，退回"立刻显示"。
+    ⚠ 台词改短（2026-09-18）之后这里更要按"播报完再弹"，不能改成固定延时：
+      短句约 2 秒、长句约 7 秒，固定延时必然在其中一种情况下错位。
 
     ── 为什么语音段数要 await ──────────────────────────────────────
     这个数字要从语音包清单里数出来（真实 64 段），拿不到就传 0 ——
