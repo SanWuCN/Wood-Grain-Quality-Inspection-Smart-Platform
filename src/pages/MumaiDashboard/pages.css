@@ -3978,6 +3978,15 @@
   box-shadow: inset 2px 0 0 0 var(--primary);
 }
 
+/*
+  关键帧一行：**主按钮独占一行**，操作按钮（改名/更新机位/删除）另起一行。
+  ⚠ 原来是 `1fr auto`（主按钮 + 删除并排）——加上三个按钮之后，窄侧栏里
+  主按钮那一列被挤成几个像素，帧号与读数**一个字一行**地竖着排（截图里就是那样）。
+*/
+.keyframe-list li {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .keyframe-list__rename,
 .keyframe-list__ops {
   display: flex;
@@ -3986,8 +3995,9 @@
   gap: var(--space-1);
 }
 
-/* 改名那一行占满整行（输入框要够长，帧号与读数留在上一行） */
-.keyframe-list__rename {
+/* 改名与操作按钮都占满整行 */
+.keyframe-list__rename,
+.keyframe-list__ops {
   grid-column: 1 / -1;
 }
 
