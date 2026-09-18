@@ -4011,6 +4011,57 @@
   font-size: var(--fs-aux);
 }
 
+/*
+  这一帧的画面（打帧那一刻的截图，用户 2026-09-18：「右侧应该显示相应的图」）。
+  96×54 的小图：右栏只有 360px，图再大就把帧号与读数挤下去 ——
+  要看清就点它开大图（弹窗里等比铺满）。
+*/
+.keyframe-list__shot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-page);
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+  text-align: left;
+  cursor: pointer;
+}
+
+.keyframe-list__shot img {
+  display: block;
+  width: 96px;
+  height: 54px;
+  /* 缩略图只求"一眼看出拍到了哪根柱子"：等比装满，不留黑边也不变形 */
+  object-fit: cover;
+  background: var(--bg-page);
+}
+
+.keyframe-list__shot:hover {
+  border-color: var(--border-default);
+  color: var(--text-secondary);
+}
+
+/* 这一帧没存图（截图失败 / 加图之前打的老帧）：不能显示成一个裂图，写明「无图」 */
+.keyframe-list__shot.is-missing {
+  display: block;
+  padding: 4px 8px;
+  border-style: dashed;
+  cursor: default;
+}
+
+/* 大图：等比缩在弹窗里，最高 62vh（超出就自己缩，不要把弹窗撑破） */
+.keyframe-shot-full {
+  display: block;
+  width: 100%;
+  max-height: 62vh;
+  object-fit: contain;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-page);
+}
+
 /* ------------------------------------------------------------------
    硬件详情 · 异常排查（/hardware?tab=triage）
    异常事件列表 + 详情弹窗 + 设备日志。

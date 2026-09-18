@@ -17,14 +17,14 @@
  *   3. 238 万点的排序开销不能每帧全量重来，靠 Spark 的 LoD（`lod`）压住。
  */
 
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
 import { Box3, Euler, MathUtils, Vector3 } from "three";
 import { useFrame } from "@react-three/fiber";
 import NumberAnimation from "@/components/numberAnimation";
 import { SPLAT_BOUNDS, SPLAT_TRANSFORM, type SplatCamera, type SplatTransform } from "./splat";
-import { poseFromView, posePositionText, poseReadout, lookAheadFor, type SplatPose } from "./splatPose";
+import { FRAME_BLACK_LUMA, poseFromView, posePositionText, poseReadout, lookAheadFor, type SplatPose } from "./splatPose";
 
 function SplatCameraRig({
   target,
@@ -155,6 +155,145 @@ function SplatPoseTracker({
     const text = `${poseReadout(pose)} · ${posePositionText(pose)}`;
     /* 只在变了才写：每帧写 DOM 虽然便宜，但会让开发者工具里的 DOM 断点没法用 */
     if (node.textContent !== text) node.textContent = text;
+  });
+
+  return null;
+}
+
+/**
+ * 3D 画面的出口：**打帧时截一张图**，同时回答一个更要紧的问题 ——**画面到底画出来了没有**。
+ *
+ * ── 为什么需要"画出来了没有"这个信号（2026-09-18 实测）────────────────
+ * `SplatMesh.onLoad`（页面据此撤掉加载覆盖层、放开「打关键帧」按钮）只代表
+ * **文件解析完**，不代表**画面上有东西**：示例寺那份 6.4MB 产物在无头实测里解析完
+ * 还要 6~10 秒才出第一帧，MAY 那份 58MB 的 95 秒都没出画。这段时间 3D 区是纯黑，
+ * 而按钮已经能点 —— 现场于是"点一下打关键帧，画面是黑的，也不知道这一帧记的是哪儿"。
+ * 所以这里每 400ms 把画布缩到 32×20 采一次亮度，**真的出现非背景像素**才上报 `onPainted`。
+ * 阈值与"打帧时这一张图算不算全黑"是同一条（`FRAME_BLACK_LUMA`，在 `splatPose.ts`）。
+ *
+ * ── 为什么截图必须开 `preserveDrawingBuffer` ─────────────────────────
+ * WebGL 默认在合成后丢掉绘制缓冲，`toDataURL()` / `drawImage(canvas)` 拿到的会是
+ * 一张**全黑图**（这就是"图黑掉"的经典陷阱）。所以 `Canvas` 的 gl 上开了它：
+ * 代价是每帧多一次拷贝（1070×621 ≈ 0.66MP），相对 238 万点的排序可忽略，
+ * 换来截图与亮度探测都能拿到**当前这一帧**。
+ */
+export type SplatShot = {
+  /** JPEG dataURL（已缩到宽 ≤1280：上传成文件时别把 1872px 的原图塞进去） */
+  dataUrl: string;
+  /** 画面里最亮的像素（0~255）：约等于背景值就说明什么都没画出来 */
+  maxLuma: number;
+};
+
+export type SplatCapture = { snapshot: () => SplatShot | null };
+
+/** 截图的最大宽度：够看清构件，又不至于每次打帧都传几百 KB */
+const SHOT_MAX_WIDTH = 1280;
+/** 探测频率：一次 1:1 中心块读取，400ms 一次对帧率没影响 */
+const PROBE_INTERVAL_MS = 400;
+/**
+ * 探测读的是**画面正中 1:1 的一块**（不重采样）。
+ *
+ * ⚠ 这里踩过一个坑（2026-09-18 实测，值得留着）：最早把整帧缩到 32×20 再采样，
+ * 结果**永远是背景色** —— 细高的木柱在 1070×621 里只占约 0.5%，
+ * 默认的双线性缩放在 33 像素一步的采样里直接把它跳过去了。同一块画布三种读法：
+ *   `32×20 默认` = 9（全黑）、`¼ 尺寸 + imageSmoothingQuality:"high"` = 219、`中心 1:1` = 230。
+ * 所以探测**不做缩放**（取景后模型就在画面中心），少一层重采样就少一个假黑。
+ */
+const PROBE_W = 360;
+const PROBE_H = 240;
+
+function SplatCanvasProbe({
+  captureRef,
+  onPainted,
+  active,
+  armed,
+}: {
+  captureRef?: MutableRefObject<SplatCapture | null>;
+  onPainted?: () => void;
+  active: boolean;
+  /**
+   * 文件解析完了才开始探测。
+   *
+   * 两个理由：① 解析完成前画面上**不可能**有东西，探测只是白花一次全画布回读
+   * （软件渲染下每次回读都要等当前帧画完，实测很贵）；② 探测报"画出来了"就等于
+   * 放开按钮 —— 这个信号必须来自**真的出画**，不是"等得够久"。
+   */
+  armed: boolean;
+}) {
+  const gl = useThree((state) => state.gl);
+  const painted = useRef(false);
+  const lastProbe = useRef(0);
+  const probeCanvas = useRef<HTMLCanvasElement | null>(null);
+
+  /** 把画面正中一块**按 1:1** 读成像素（开了 preserveDrawingBuffer 才拿得到真画面） */
+  const readCenter = useCallback(
+    (wantW: number, wantH: number) => {
+      const source = gl.domElement;
+      if (!source || source.width < 8 || source.height < 8) return null;
+      const width = Math.min(wantW, source.width);
+      const height = Math.min(wantH, source.height);
+      const sx = Math.floor((source.width - width) / 2);
+      const sy = Math.floor((source.height - height) / 2);
+      const canvas = (probeCanvas.current ??= document.createElement("canvas"));
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return null;
+      ctx.drawImage(source, sx, sy, width, height, 0, 0, width, height);
+      return ctx.getImageData(0, 0, width, height).data;
+    },
+    [gl],
+  );
+
+  /** 一组像素里最亮的那个（0~255） */
+  const peakLuma = (data: Uint8ClampedArray) => {
+    let max = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const luma = (data[i] + data[i + 1] + data[i + 2]) / 3;
+      if (luma > max) max = luma;
+    }
+    return max;
+  };
+
+  /* 打帧时调用：这一帧的图 + 它有多亮（全黑说明模型没画出来，调用方据此拒收） */
+  useEffect(() => {
+    if (!captureRef) return undefined;
+    captureRef.current = {
+      snapshot: () => {
+        const source = gl.domElement;
+        if (!source || source.width < 8 || source.height < 8) return null;
+        const scale = Math.min(1, SHOT_MAX_WIDTH / source.width);
+        const width = Math.max(8, Math.round(source.width * scale));
+        const height = Math.max(8, Math.round(source.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return null;
+        /* 高 dpi 画布（dpr 1.75）会被缩到 1280：用高质量重采样，别把细构件缩没了 */
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(source, 0, 0, width, height);
+        const data = ctx.getImageData(0, 0, width, height).data;
+        return { dataUrl: canvas.toDataURL("image/jpeg", 0.82), maxLuma: peakLuma(data) };
+      },
+    };
+    return () => {
+      captureRef.current = null;
+    };
+  }, [captureRef, gl]);
+
+  useFrame(() => {
+    if (painted.current || !active || !armed) return;
+    const now = performance.now();
+    if (now - lastProbe.current < PROBE_INTERVAL_MS) return;
+    lastProbe.current = now;
+    const data = readCenter(PROBE_W, PROBE_H);
+    if (!data) return;
+    if (peakLuma(data) > FRAME_BLACK_LUMA) {
+      painted.current = true;
+      onPainted?.();
+    }
   });
 
   return null;
@@ -534,6 +673,8 @@ export function SplatStage({
   fitNonce,
   poseRef,
   cameraNonce,
+  captureRef,
+  onPainted,
   active = true,
   onUserInput,
 }: {
@@ -554,6 +695,10 @@ export function SplatStage({
    * 同一个机位再点一次也要重新飞：`camera` 的字段没变时靠这个 nonce 触发动画。
    */
   cameraNonce?: number;
+  /** 截图的出口（打关键帧把它存成文件；见 `SplatCanvasProbe`） */
+  captureRef?: MutableRefObject<SplatCapture | null>;
+  /** **画面真的画出来了**（不是"文件解析完了"）：按钮据此才放开 */
+  onPainted?: () => void;
   /**
    * 是否正在显示。切到低模示意时传 false：
    * Canvas 必须**保持挂载**（只停渲染），原因见文件末尾关于卸载异常的说明。
@@ -594,8 +739,14 @@ export function SplatStage({
       <Canvas
         // 隐藏时停掉渲染循环：238 万点的排序不能白跑
         frameloop={active ? "always" : "never"}
-        // Spark 明确建议关掉 MSAA：对高斯泼溅没有收益，且明显掉帧
-        gl={{ antialias: false }}
+        /*
+         * Spark 明确建议关掉 MSAA：对高斯泼溅没有收益，且明显掉帧。
+         *
+         * `preserveDrawingBuffer` 必须开：打关键帧要把"这一帧的画面"截下来存成图，
+         * 而 WebGL 默认在合成后就丢掉绘制缓冲 —— 不开的话 toDataURL 拿到的是一张
+         * **全黑图**（见 `SplatCanvasProbe` 的说明）。代价是每帧一次 0.66MP 的拷贝。
+         */
+        gl={{ antialias: false, preserveDrawingBuffer: true }}
         dpr={[1, 1.75]}
         /*
        * 取景：SOG 的包围盒约 ±3.5，斜对角约 12。fov 50° 下可视高度 ≈ 0.93×距离，
@@ -630,6 +781,12 @@ export function SplatStage({
         <SplatCameraRig target={camera} nonce={cameraNonce} onArrived={() => setFlyArrived((value) => value + 1)} />
         {/* 当前机位读数（打关键帧要用，也让讲解人知道自己站在哪） */}
         <SplatPoseTracker poseRef={poseRef} lookAhead={lookAheadFor(flyScale)} textRef={poseTextRef} />
+        {/*
+          截图的出口 + "画面画出来了没有"的探测。
+          `key={url}`：换工单/换模型是一个新产物，探测要重新来一遍（否则上一份的
+          "已出画"会被沿用到新模型上，按钮又变成"黑着也能打帧"）。
+        */}
+        <SplatCanvasProbe key={url} captureRef={captureRef} onPainted={onPainted} active={active} armed={loaded} />
       </Canvas>
 
       {loaded ? (

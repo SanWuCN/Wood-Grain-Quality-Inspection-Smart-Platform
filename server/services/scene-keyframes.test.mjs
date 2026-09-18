@@ -281,6 +281,99 @@ test("机位关键帧：按构件编号、进书签、发布后不回退、换�
     assert.equal(updateMissing.status, 404);
     assert.equal((await updateMissing.json()).code, "NO_KEYFRAME");
 
+    /* ---- ⑧ 配图：帧上只存 fileId（图走文件库，不进实体）---- */
+    /*
+     * 用户 2026-09-18：「打关键帧右侧应该显示相应的图，然后我给他打标签，就是 Z01 那种」。
+     * 页面的顺序是：先截当前 3D 画面 → `POST /api/files?dir=keyframes` → 再把 fileId 带进打帧。
+     * 这一组验的是**引用与校验**（不是图像内容），所以用 1×1 的 JPEG 就够：
+     *   · 存下来的是 fileId，不是 base64（快照每台端都要收一遍，图塞进实体会被反复重传）；
+     *   · 文件不存在 / 不是图片 → 当场 422，不许挂成"机位画面"；
+     *   · 更新机位时图跟着换；显式传空串 = 把图摘掉（图与机位对不上比没有图更坏）。
+     */
+    const uploadFile = async (name, mediaType, bytes) => {
+      const response = await fetch(
+        `${base}/api/files?name=${encodeURIComponent(name)}&dir=keyframes&sessionId=demo-01`,
+        {
+          method: "POST",
+          headers: { authorization: `Bearer ${shi}`, "content-type": mediaType },
+          body: bytes,
+        },
+      );
+      assert.equal(response.status, 200, `${name} 上传失败`);
+      return response.json();
+    };
+    const onePixelJpeg = Buffer.from(
+      "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwcJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPDIzNP/AABEIAAEAAQMBIgACEQEDEQH/xAAfAAABBQEBAQEBAQAAAAAAAAABAgMEBQYHCAkKC//EALUQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+v/aAAwDAQACEQMRAD8A/v4//9k=",
+      "base64",
+    );
+    const shotFile = await uploadFile("KF-Z01-02.jpg", "image/jpeg", onePixelJpeg);
+    assert.equal(shotFile.mediaType, "image/jpeg");
+    const notImageFile = await uploadFile("not-a-picture.sog", "application/octet-stream", Buffer.from("not an image"));
+
+    const withImage = await command(shi, {
+      commandId: "kf-add-with-image",
+      action: "scene.keyframe.add",
+      entityId: sceneId,
+      expectedRevision: repointedEntity.revision,
+      payload: { componentId: "Z01", label: "Z01 柱脚近景", pose: pose(-1), imageFileId: shotFile.fileId },
+    });
+    assert.equal(withImage.status, 200, "带图打帧要能成");
+    const withImageEntity = (await withImage.json()).entity;
+    const shotFrame = withImageEntity.data.keyframes.find((item) => item.id === "KF-Z01-02");
+    assert.equal(shotFrame.imageFileId, shotFile.fileId, "帧上存的是文件库的 id");
+    assert.equal(shotFrame.imageName, "KF-Z01-02.jpg", "名字从文件库那条记录取（不是前端说了算）");
+    assert.equal(
+      Object.keys(shotFrame).some((key) => /base64|dataUrl/i.test(key)),
+      false,
+      "图不许进实体：场景快照每台端都要收一遍，塞进去等于每次刷新重传所有图",
+    );
+
+    const missingImage = await command(shi, {
+      commandId: "kf-add-image-missing",
+      action: "scene.keyframe.add",
+      entityId: sceneId,
+      expectedRevision: withImageEntity.revision,
+      payload: { componentId: "Z01", pose: pose(-1), imageFileId: "file-不存在的图" },
+    });
+    assert.equal(missingImage.status, 422, "引用一个不存在的文件要拒（否则右栏是一张裂图）");
+    assert.equal((await missingImage.json()).code, "NO_IMAGE_FILE");
+
+    const wrongImage = await command(shi, {
+      commandId: "kf-add-image-not-image",
+      action: "scene.keyframe.add",
+      entityId: sceneId,
+      expectedRevision: withImageEntity.revision,
+      payload: { componentId: "Z01", pose: pose(-1), imageFileId: notImageFile.fileId },
+    });
+    assert.equal(wrongImage.status, 422, "不是图片的文件不许挂成机位画面");
+    assert.equal((await wrongImage.json()).code, "NOT_IMAGE");
+
+    const reshotFile = await uploadFile("KF-Z01-02-again.jpg", "image/jpeg", onePixelJpeg);
+    const reshot = await command(shi, {
+      commandId: "kf-update-image",
+      action: "scene.keyframe.update",
+      entityId: sceneId,
+      expectedRevision: withImageEntity.revision,
+      payload: { keyframeId: "KF-Z01-02", pose: pose(-3), imageFileId: reshotFile.fileId },
+    });
+    assert.equal(reshot.status, 200, "更新机位时换图要能成");
+    const reshotEntity = (await reshot.json()).entity;
+    const reshotFrame = reshotEntity.data.keyframes.find((item) => item.id === "KF-Z01-02");
+    assert.deepEqual(reshotFrame.pose, pose(-3), "机位换成新的");
+    assert.equal(reshotFrame.imageFileId, reshotFile.fileId, "图必须跟着机位一起换（否则缩略图是上一版机位拍的）");
+
+    const dropped = await command(shi, {
+      commandId: "kf-update-image-drop",
+      action: "scene.keyframe.update",
+      entityId: sceneId,
+      expectedRevision: reshotEntity.revision,
+      payload: { keyframeId: "KF-Z01-02", imageFileId: "" },
+    });
+    assert.equal(dropped.status, 200);
+    const droppedFrame = (await dropped.json()).entity.data.keyframes.find((item) => item.id === "KF-Z01-02");
+    assert.equal(droppedFrame.imageFileId, undefined, "显式传空串 = 把图摘掉（截图失败时页面就这么用）");
+    assert.deepEqual(droppedFrame.pose, pose(-3), "摘图不许动机位");
+
   } finally {
     await service.close?.();
   }

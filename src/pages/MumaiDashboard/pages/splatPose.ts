@@ -146,6 +146,15 @@ export type TwinKeyframe = {
   componentId: string | null;
   label: string;
   pose: SplatPose;
+  /**
+   * 这一帧的配图（打帧那一刻 3D 画面的截图，用户 2026-09-18 口径）。
+   *
+   * 存的是**文件库里的 id**，不是图片本身：场景快照每台端都要收一遍，
+   * 把上百 KB 的 base64 塞进实体等于每次刷新都在内网重传所有帧的图。
+   * 老帧（这个字段之前打的）没有它 —— 所以是可选的，缺了就显示"无图"。
+   */
+  imageFileId?: string;
+  imageName?: string;
   addedBy: string;
   addedAt: string;
   /** 最后一次改名 / 覆盖机位的人与时间（服务端在 update 时写；打帧时没有） */
@@ -185,11 +194,15 @@ export function readKeyframes(data: unknown): TwinKeyframe[] {
     const id = String(frame.id ?? "").trim();
     const pose = parsePose(frame.pose);
     if (!id || !pose) continue;
+    /* 配图是可选字段：只认"非空字符串"，半个 fileId（空串/null）按没有图处理 */
+    const imageFileId = String(frame.imageFileId ?? "").trim();
+    const imageName = String(frame.imageName ?? "").trim();
     out.push({
       id,
       componentId: frame.componentId ? String(frame.componentId) : null,
       label: String(frame.label ?? "").trim() || id,
       pose,
+      ...(imageFileId ? { imageFileId, imageName: imageName || `${id}.jpg` } : {}),
       addedBy: String(frame.addedBy ?? ""),
       addedAt: String(frame.addedAt ?? ""),
       ...(frame.updatedBy ? { updatedBy: String(frame.updatedBy) } : {}),
@@ -201,6 +214,23 @@ export function readKeyframes(data: unknown): TwinKeyframe[] {
 
 /** 关键帧标签上限（与服务端 `scene.keyframe.update` 的 40 字一致） */
 export const KEYFRAME_LABEL_MAX = 40;
+
+/**
+ * 「这一帧的画面是不是全黑」的判据（0~255 的最亮像素）。
+ *
+ * 场景背景是 `#05080d`（亮度约 9）。实测：`SplatMesh` 的加载回调（页面据此撤掉
+ * 加载覆盖层、放开「打关键帧」按钮）只代表**文件解析完**，画面还要等 6~10 秒
+ * （6.4MB 产物）甚至更久（58MB 产物）才出第一帧 —— 这段时间整块画布就是背景色。
+ * 现场现象是"点一下打关键帧，3D 区是黑的，也不知道这一帧记的是哪儿"。
+ *
+ * 所以这个阈值有两个用处（口径必须一致，所以放在这里给两端共用）：
+ *   · 渲染舞台每 400ms 探一次画面，亮过它就报「画出来了」→ 按钮才放开；
+ *   · 打帧时对**截下来的那一张图**再判一次，全黑就拒收（宁可当场说清楚，不记黑帧）。
+ *
+ * 取 24：比背景（9）高出一截，又远低于木构件在画面里的亮度（实测 150~220），
+ * 不至于因为产物偏暗就永远打不了帧。
+ */
+export const FRAME_BLACK_LUMA = 24;
 
 /**
  * 规范化用户输入的标签（纯函数，前后端同一条口径）。

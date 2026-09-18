@@ -205,3 +205,21 @@ test("读帧：带上「改于谁、什么时候」，老数据没有这两个�
   assert.equal(frames[0].updatedBy, "rao");
   assert.equal(frames[1].updatedBy, undefined, "没改过的帧不会凭空多出「改于」");
 });
+
+test("读帧的配图：有图才带字段，空串 / 缺字段 / 非字符串都按「无图」处理（老帧不该显示一个裂图）", () => {
+  const pose = { azimuth: 10, polar: 90, distance: 2, focus: { x: 0, y: 0, z: 0 } };
+  const frames = readKeyframes({
+    keyframes: [
+      { id: "KF-Z01-01", componentId: "Z01", label: "有图", pose, addedBy: "shi", addedAt: "2026-09-18T03:00:00.000Z", imageFileId: "file-abc", imageName: "KF-Z01-01.jpg" },
+      { id: "KF-Z01-02", componentId: "Z01", label: "截图失败", pose, addedBy: "shi", addedAt: "2026-09-18T03:01:00.000Z", imageFileId: "", imageName: "" },
+      { id: "KF-Z01-03", componentId: "Z01", label: "老帧", pose, addedBy: "shi", addedAt: "2026-09-17T03:01:00.000Z" },
+      { id: "KF-Z01-04", componentId: "Z01", label: "半个字段", pose, addedBy: "shi", addedAt: "2026-09-18T03:02:00.000Z", imageFileId: "file-def" },
+    ],
+  });
+  assert.equal(frames.length, 4);
+  assert.equal(frames[0].imageFileId, "file-abc");
+  assert.equal(frames[0].imageName, "KF-Z01-01.jpg");
+  assert.equal(frames[1].imageFileId, undefined, "空串 = 没有图");
+  assert.equal(frames[2].imageFileId, undefined, "老帧没有这个字段");
+  assert.equal(frames[3].imageName, "KF-Z01-04.jpg", "只有 id 没有名字时兜一个带扩展名的默认名（地址里要靠它给 content-type）");
+});

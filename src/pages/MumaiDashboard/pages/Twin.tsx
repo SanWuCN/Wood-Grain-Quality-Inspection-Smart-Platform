@@ -25,6 +25,7 @@ import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
 import { Btn, Modal, PermNote, StateBlock, StatusChip, Toolbar, WaveChart } from "../ui";
 import {
+  FRAME_BLACK_LUMA,
   KEYFRAME_LABEL_MAX,
   keyframeTimeText,
   nextTourIndex,
@@ -36,7 +37,13 @@ import {
   type SplatPose,
   type TwinKeyframe,
 } from "./splatPose";
+/*
+ * 渲染舞台的**类型**只导入（`import type`）：编译后被抹掉，不会把那个 4.85MB 的
+ * 分包拉进主包 —— 上面"按需加载"的理由对类型同样成立。
+ */
+import type { SplatCapture } from "./SplatStage";
 import {
+  COMPONENTS,
   CURRENT_RISKS,
   HISTORIC_ORDERS,
   HISTORY_RISKS,
@@ -142,6 +149,16 @@ const CONTROLS: { keys: string[]; label: string }[] = [
 /** 上传界面接受的模型格式：Spark 直接认这两种，其它格式不做转换、也不假装能看 */
 const MODEL_EXTENSIONS = [".sog", ".spz"];
 
+/**
+ * 「模型文件解析完」之后还等多久就放开「打关键帧」（毫秒）。
+ *
+ * 正常路径不用等：渲染舞台探到画面里出现东西（`stagePainted`）当场放开按钮。
+ * 这个计时是兜底 —— 产物本身很暗、或软件渲染下探测一直不亮时，不能让按钮永远点不了。
+ * 放开之后打帧那一刻**还会再判一次全黑**（`FRAME_BLACK_LUMA`），所以不会静默记下黑帧，
+ * 最坏情况是屏幕上多说一句"画面还是黑的，没有记帧"。
+ */
+const PAINT_WAIT_MS = 12000;
+
 export default function Twin() {
   const [params, setParams] = useSearchParams();
   const selected = params.get("component") ?? "Z04";
@@ -155,6 +172,19 @@ export default function Twin() {
     next.set("order", id);
     setParams(next, { replace: true });
   };
+  /**
+   * 选构件（= 这一帧的标签，用户 2026-09-18：「然后我给他打标签，就是 Z01 那种」）。
+   *
+   * 为什么要"打帧前"选：帧号是 `KF-<构件>-NN`（按构件各自编号），而服务端把
+   * **帧号与构件的绑定定为不可改**（帧号是讲稿与对照表的锚点）—— 事后改标签等于换帧号。
+   * 所以标签在打帧这一刻就定下来；同时它决定右栏「热点详情」看哪根柱子。
+   */
+  const setComponent = (id: string) => {
+    const next = new URLSearchParams(params);
+    next.set("component", id);
+    setParams(next, { replace: true });
+  };
+  const componentIds = useMemo(() => COMPONENTS.map((item) => item.id), []);
 
   const sceneRows = useSceneRows();
   /** 当前工单绑定的场景（一份工单一份成果；重复上传统一替换到这一条） */
@@ -171,9 +201,26 @@ export default function Twin() {
   const [fitNonce, setFitNonce] = useState(0);
   const [splatError, setSplatError] = useState<string | null>(null);
   const [sceneBusy, setSceneBusy] = useState<string | null>(null);
+  /** 模型文件解析完（加载覆盖层撤掉）——**还不代表画面画出来了** */
+  const [stageReady, setStageReady] = useState(false);
+  /** 画面里真的出现东西了（渲染舞台探到的）：这才是"打关键帧"该等的信号 */
+  const [stagePainted, setStagePainted] = useState(false);
+  /** 兜底：产物很暗时探测永远不亮，等够时间仍然放开按钮（按钮文案写明风险） */
+  const [paintFallback, setPaintFallback] = useState(false);
 
-  /* 换工单要把「加载失败」清掉：否则上一个工单的失败会挂在新工单上 */
-  useEffect(() => setSplatError(null), [orderId, orderScene?.assetFileId]);
+  /*
+    换工单/换模型要把这几个状态清掉：
+      · 「加载失败」—— 否则上一个工单的失败会挂在新工单上；
+      · `stageReady` / `stagePainted` —— 否则**旧产物的"已就绪"会被新模型沿用**，
+        新模型还没画出来「打关键帧」就已经能点（实测就是这样打出一帧全黑机位的）；
+      · 兜底计时 —— 同上，新产物重新计时。
+  */
+  useEffect(() => {
+    setSplatError(null);
+    setStageReady(false);
+    setStagePainted(false);
+    setPaintFallback(false);
+  }, [orderId, orderScene?.assetFileId]);
 
   const sharedScenes = useSharedStore(scenesOf);
   const online = useSharedStore(isOnline);
@@ -266,8 +313,11 @@ const TOUR_INTERVAL_MS = 5200;
      所以内网任何一台机器、任何一个账号看到的是同一份，不是各存各的。
      换算与容错都在 `splatPose.ts`（纯函数 + 单测），这里只管交互。 */
   const poseRef = useRef<SplatPose | null>(null);
-  const [stageReady, setStageReady] = useState(false);
+  /** 3D 画面的出口：打帧时用它截下"这一刻的画面"（见 SplatStage 的 SplatCanvasProbe） */
+  const captureRef = useRef<SplatCapture | null>(null);
   const [keyframeBusy, setKeyframeBusy] = useState<string | null>(null);
+  /** 点缩略图看大图的那一帧 */
+  const [shotFrame, setShotFrame] = useState<TwinKeyframe | null>(null);
   const [flyTo, setFlyTo] = useState<{ pose: SplatPose; nonce: number } | null>(null);
   const [flying, setFlying] = useState<string | null>(null);
   /*
@@ -281,6 +331,51 @@ const TOUR_INTERVAL_MS = 5200;
   const [confirming, setConfirming] = useState<string | null>(null);
   const keyframes = useMemo(() => readKeyframes(currentSceneEntity?.data), [currentSceneEntity]);
 
+  /**
+   * 「打关键帧」什么时候才能点：**画面真的画出来了**，不是"文件解析完"。
+   *
+   * 实测（2026-09-18，真实浏览器）：`SplatMesh` 的加载回调触发时页面会撤掉加载覆盖层，
+   * 但那一刻画布还是纯背景色 —— 6.4MB 的产物要再等 6~10 秒才出第一帧，58MB 的要 95 秒以上。
+   * 原来按钮等的就是那个回调，于是现场"点一下打关键帧，3D 区是黑的，也不知道记的是哪儿"，
+   * 打出来的还是一帧黑机位。所以改等渲染舞台探到的 `stagePainted`，
+   * `paintFallback` 只作兜底（见 `PAINT_WAIT_MS`）。
+   */
+  const canShoot = hasModel && Boolean(currentSceneEntity) && (stagePainted || paintFallback);
+  useEffect(() => {
+    if (!stageReady || stagePainted) return undefined;
+    const timer = window.setTimeout(() => setPaintFallback(true), PAINT_WAIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [stageReady, stagePainted]);
+
+  /**
+   * 把"这一刻的 3D 画面"存成服务端的图（用户 2026-09-18：「打关键帧右侧应该显示相应的图」）。
+   *
+   * 顺序是**先截图 → 再传文件 → 最后写帧**：反过来的话存进库的图就不是打帧那一刻的画面了。
+   * 三种结果分开返回，让调用方各自决定怎么说：
+   *   · `black`：画布还是背景色（模型没渲染出来）—— 这一帧**不能记**，记了就是黑帧；
+   *   · `failed`：截图/上传出错（断网、文件过大）—— 机位照记，只是这一帧没有图；
+   *   · 成功：拿到文件库里的 fileId。
+   * 图**不进实体**（场景快照每台端都要收一遍，塞进去等于每次刷新重传所有图），
+   * 帧里只存 fileId，右栏用带令牌的内联地址取字节；服务端 `normalizeKeyframeImage` 校验。
+   */
+  const captureFrameImage = useCallback(async (): Promise<
+    { ok: true; fileId: string; size: number } | { ok: false; reason: "black" | "failed" }
+  > => {
+    try {
+      const shot = captureRef.current?.snapshot() ?? null;
+      if (!shot) return { ok: false, reason: "black" };
+      /* 先判黑再上传：黑帧没有记的必要，也不该占一份文件字节 */
+      if (shot.maxLuma <= FRAME_BLACK_LUMA) return { ok: false, reason: "black" };
+      const blob = await (await fetch(shot.dataUrl)).blob();
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
+      const file = new File([blob], `KF-${selected}-${stamp}.jpg`, { type: "image/jpeg" });
+      const uploaded = await api.upload(file, useSharedStore.getState().sessionId, "keyframes");
+      return { ok: true, fileId: uploaded.fileId, size: uploaded.size };
+    } catch {
+      return { ok: false, reason: "failed" };
+    }
+  }, [selected]);
+
   const addKeyframe = useCallback(async () => {
     const entity = currentSceneEntity;
     const pose = poseRef.current;
@@ -291,21 +386,42 @@ const TOUR_INTERVAL_MS = 5200;
     }
     setKeyframeBusy("add");
     try {
+      /*
+       * 打帧前**必须**确认画面是画出来的。按钮已经按这个置灰了，这里再挡一次：
+       * 点击到执行之间模型可能刚好被换走、或第一帧还没出来 —— 那样记下来的就是
+       * 一帧"画面全黑"的机位（用户 2026-09-18 报的正是这个）。
+       */
+      const image = await captureFrameImage();
+      if (!image.ok && image.reason === "black") {
+        toast("这一帧的画面还是黑的（模型还没渲染出来），没有记帧 —— 等木柱显示出来再点一次", "warn");
+        pushEvent("打关键帧被拦下：3D 画面还是黑的（模型未出画）", "warn");
+        return;
+      }
       const result = await useSharedStore.getState().send({
         action: "scene.keyframe.add",
         entityId: entity.id,
         expectedRevision: entity.revision,
-        payload: { componentId: selected, pose },
+        payload: {
+          componentId: selected,
+          pose,
+          ...(image.ok ? { imageFileId: image.fileId } : {}),
+        },
       });
       const id = String(result.result.keyframeId ?? "");
-      toast(`已记录机位关键帧 ${id}（${selected}）`, "ok");
-      pushEvent(`打关键帧 ${id}：${selected} · ${poseReadout(pose)}`, "ok");
+      toast(
+        image.ok ? `已记录机位关键帧 ${id}（${selected}，含画面图）` : `已记录机位关键帧 ${id}（${selected}，图没传上去）`,
+        image.ok ? "ok" : "warn",
+      );
+      pushEvent(
+        `打关键帧 ${id}：${selected} · ${poseReadout(pose)}${image.ok ? ` · 图 ${Math.round(image.size / 1024)} KB` : " · 无图"}`,
+        "ok",
+      );
     } catch (error) {
       toast(isApiError(error) ? error.message : "打关键帧失败", "danger");
     } finally {
       setKeyframeBusy(null);
     }
-  }, [currentSceneEntity, pushEvent, selected, toast]);
+  }, [captureFrameImage, currentSceneEntity, pushEvent, selected, toast]);
 
   /** 用户自己动了镜头：高亮要清掉，否则「已回到该机位」会一直挂着骗人；巡场也跟着暂停 */
   const handleUserInput = useCallback(() => {
@@ -361,21 +477,42 @@ const TOUR_INTERVAL_MS = 5200;
       }
       setKeyframeBusy(frame.id);
       try {
+        const image = await captureFrameImage();
+        if (!image.ok && image.reason === "black") {
+          toast("画面还是黑的（模型没渲染出来），机位没有更新", "warn");
+          return;
+        }
         await useSharedStore.getState().send({
           action: "scene.keyframe.update",
           entityId: entity.id,
           expectedRevision: entity.revision,
-          payload: { keyframeId: frame.id, pose },
+          payload: {
+            keyframeId: frame.id,
+            pose,
+            /*
+             * 图必须跟着机位一起换：只换机位不换图，右栏那张缩略图就变成**上一版机位**
+             * 拍的画面（图与机位对不上，比没有图更坏）。传空串 = 显式把旧图摘掉。
+             */
+            imageFileId: image.ok ? image.fileId : "",
+          },
         });
-        toast(`${frame.id} 的机位已更新为当前镜头`, "ok");
-        pushEvent(`更新关键帧机位 ${frame.id}：${poseReadout(pose)}`, "info");
+        toast(
+          image.ok
+            ? `${frame.id} 的机位与画面图都已更新为当前镜头`
+            : `${frame.id} 的机位已更新；这张图没传上去，旧图已摘掉（免得图和机位对不上）`,
+          image.ok ? "ok" : "warn",
+        );
+        pushEvent(
+          `更新关键帧机位 ${frame.id}：${poseReadout(pose)}${image.ok ? " · 换图" : " · 摘图"}`,
+          "info",
+        );
       } catch (error) {
         toast(isApiError(error) ? error.message : "更新机位失败", "danger");
       } finally {
         setKeyframeBusy(null);
       }
     },
-    [currentSceneEntity, pushEvent, toast],
+    [captureFrameImage, currentSceneEntity, pushEvent, toast],
   );
 
   /** 走到第 index 帧（巡场与「上一帧 / 下一帧」共用） */
@@ -476,16 +613,32 @@ const TOUR_INTERVAL_MS = 5200;
             ))}
           </select>
         </label>
+        {/* 构件 = 这一帧的标签（帧号按构件编号，打帧前必须定下来；见 setComponent 的说明） */}
+        <label className="twin-order">
+          <span>构件</span>
+          <select
+            value={selected}
+            onChange={(event) => setComponent(event.target.value)}
+            aria-label="选择构件（这一帧的标签）">
+            {COMPONENTS.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.id} · {item.part}
+              </option>
+            ))}
+            {/* URL 里带来一个没登记的构件号时也要显示出来，不能让选择框显示成空白 */}
+            {componentIds.includes(selected) ? null : <option value={selected}>{selected}（未登记）</option>}
+          </select>
+        </label>
         <Btn disabled={!hasModel} onClick={() => setFitNonce((value) => value + 1)} title="把镜头重新对准模型">
           适应视图
         </Btn>
         {/*
-          打关键帧这个操作点：把当前机位连同「当前选中的构件」记一帧。
-          置灰条件是**说得出原因**的：没有模型 / 模型还没就绪 / 正忙。
+          打关键帧这个操作点：把当前机位连同「当前选中的构件」与**这一刻的画面图**记一帧。
+          置灰条件是**说得出原因**的：没有模型 / 模型还没就绪 / 画面还没画出来（黑的）/ 正忙。
         */}
         <Btn
           tone="primary"
-          disabled={!hasModel || !stageReady || !currentSceneEntity || keyframeBusy !== null}
+          disabled={!canShoot || keyframeBusy !== null}
           title={
             !hasModel
               ? "该工单还没有模型文件，先上传"
@@ -493,7 +646,11 @@ const TOUR_INTERVAL_MS = 5200;
                 ? "该工单还没有场景版本，先上传模型"
                 : !stageReady
                   ? "模型还在加载，加载完就能打帧"
-                  : `把当前机位记成一帧（构件 ${selected}），内网所有人都能看到`
+                  : !stagePainted && !paintFallback
+                    ? "模型文件已就绪，但 3D 画面还没渲染出来（区域是黑的）—— 等木柱显示出来再打帧"
+                    : paintFallback && !stagePainted
+                      ? `画面里一直没探到模型（已等 ${PAINT_WAIT_MS / 1000} 秒）：3D 区若确实还是黑的，打帧会被拦下并说明原因`
+                      : `把当前机位记成一帧（构件 ${selected}），连同这一刻的画面图，内网所有人都能看到`
           }
           onClick={() => void addKeyframe()}>
           {keyframeBusy === "add" ? "记录中…" : "打关键帧"}
@@ -524,6 +681,9 @@ const TOUR_INTERVAL_MS = 5200;
                   cameraNonce={flyTo?.nonce ?? 0}
                   poseRef={poseRef}
                   onUserInput={handleUserInput}
+                  /* 打帧时截"这一刻的画面"（captureRef）；画面真出画了才放开按钮（onPainted） */
+                  captureRef={captureRef}
+                  onPainted={() => setStagePainted(true)}
                   fitNonce={fitNonce}
                   onLoaded={() => setStageReady(true)}
                   onError={(message) => {
@@ -656,6 +816,31 @@ const TOUR_INTERVAL_MS = 5200;
                       <span className="keyframe-list__pose">{posePositionText(frame.pose)}</span>
                     </button>
 
+                    {/*
+                      这一帧的画面图（用户 2026-09-18：「打关键帧右侧应该显示相应的图」）。
+                      `img` 加不了 Authorization 头，所以走**带令牌的内联地址** ——
+                      与模型同一条路由（服务端 `/api/files/:id/model/:name` 只按扩展名给
+                      content-type）：图存在服务端文件库里，帧里只有 fileId，内网共享。
+                    */}
+                    {frame.imageFileId ? (
+                      <button
+                        type="button"
+                        className="keyframe-list__shot"
+                        title={`看大图 · ${frame.id} 打帧时的画面`}
+                        onClick={() => setShotFrame(frame)}>
+                        <img
+                          src={api.modelUrl(frame.imageFileId, frame.imageName)}
+                          alt={`${frame.id} 打帧时的 3D 画面`}
+                          loading="lazy"
+                        />
+                        <span>看大图</span>
+                      </button>
+                    ) : (
+                      <span className="keyframe-list__shot is-missing" title="这一帧没有存图（打帧时截图失败）">
+                        无图
+                      </span>
+                    )}
+
                     {renaming?.id === frame.id ? (
                       <span className="keyframe-list__rename">
                         <input
@@ -719,7 +904,7 @@ const TOUR_INTERVAL_MS = 5200;
               <StateBlock
                 kind="empty"
                 title="还没有机位关键帧"
-                hint="把镜头拉近要讲的构件（Z01–Z04），点工具条上的「打关键帧」。帧存在平台上，内网其他人打开这一页也能点回同一个机位。"
+                hint="先在工具条上选构件（Z01–Z04，它就是这一帧的标签，帧号按它编号），把镜头拉近要讲的构件，等画面出来再点「打关键帧」。每一帧都会连同**打帧那一刻的画面图**一起存到平台上，内网其他人打开这一页既能看到图，也能点回同一个机位。"
               />
             )}
             {!hasModel ? (
@@ -840,6 +1025,31 @@ const TOUR_INTERVAL_MS = 5200;
           </Panel>
         </div>
       </div>
+
+      {/*
+        帧的大图：缩略图只有 96px，讲解前要看清楚"这一帧到底拍到了什么"
+        （也是判断"记的机位对不对"最直接的一眼）。
+      */}
+      {shotFrame ? (
+        <Modal
+          wide
+          title={`${shotFrame.id} · 打帧时的画面`}
+          subtitle={`${shotFrame.componentId ?? "场景"} · ${poseReadout(shotFrame.pose)} · ${posePositionText(shotFrame.pose)} · ${actorShortName(shotFrame.addedBy)} ${keyframeTimeText(shotFrame.addedAt)}`}
+          onClose={() => setShotFrame(null)}
+          footer={
+            <Btn tone="primary" onClick={() => setShotFrame(null)}>
+              关闭
+            </Btn>
+          }>
+          {shotFrame.imageFileId ? (
+            <img
+              className="keyframe-shot-full"
+              src={api.modelUrl(shotFrame.imageFileId, shotFrame.imageName)}
+              alt={`${shotFrame.id} 打帧时的 3D 画面`}
+            />
+          ) : null}
+        </Modal>
+      ) : null}
 
       {uploadOpen ? (
         <UploadModelModal

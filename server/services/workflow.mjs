@@ -253,6 +253,40 @@ export function normalizeKeyframePose(input) {
 }
 
 /**
+ * 关键帧配图（用户 2026-09-18：「打关键帧右侧应该显示相应的图，然后我给他打标签 Z01」）。
+ *
+ * ── 图为什么不进实体 ──────────────────────────────────────────────
+ * 一张 1070×621 的 JPEG 上百 KB，而场景快照是**每台端都收一遍**的：图塞进
+ * `keyframes[]` 等于每次刷新都在内网重传所有帧的图。所以图走既有的文件库 ——
+ * 前端打帧时先把截图 `POST /api/files`（`dir=keyframes`），帧里只存 `imageFileId`；
+ * 右栏用**带令牌的内联地址**取字节（`/api/files/:id/model/:name?token=…`，
+ * 与模型同一条路由：`<img>` 同样加不了 Authorization 头）。
+ *
+ * ── 为什么必须校验 ────────────────────────────────────────────────
+ * 不校验的话，任何已登记的 fileId 都能被挂成"机位画面"：挂一个 .sog 会让
+ * 右栏出现一行乱码，挂一个几 MB 的 PNG 会让每次打开这一页都要下好几 MB。
+ * 所以三条：文件必须在库里、必须是图片、体积有上限。
+ */
+const KEYFRAME_IMAGE_MAX_BYTES = 1.5 * 1024 * 1024;
+
+export function normalizeKeyframeImage(db, input) {
+  const fileId = String(input ?? "").trim();
+  if (!fileId) return null;
+  const file = getFile(db, fileId);
+  if (!file) {
+    throw new WorkflowError(422, "NO_IMAGE_FILE", `关键帧配图 ${fileId} 不在文件库里（截图要先上传）`);
+  }
+  if (!String(file.media_type ?? "").startsWith("image/")) {
+    throw new WorkflowError(422, "NOT_IMAGE", `关键帧配图 ${fileId} 不是图片（${file.media_type ?? "未知类型"}）`);
+  }
+  if (Number(file.size) > KEYFRAME_IMAGE_MAX_BYTES) {
+    const mb = (Number(file.size) / 1024 / 1024).toFixed(1);
+    throw new WorkflowError(422, "IMAGE_TOO_BIG", `关键帧配图 ${mb}MB 超过上限 ${KEYFRAME_IMAGE_MAX_BYTES / 1024 / 1024}MB`);
+  }
+  return { imageFileId: file.id, imageName: file.name };
+}
+
+/**
  * 下一个帧号：`KF-<构件>-NN`，**按构件各自编号**（Z04 的第 1 帧是 `KF-Z04-01`）。
  *
  * 为什么按构件分：现场说的就是"Z04 柱脚这个机位"，讲解与对照表都按构件找；
@@ -505,6 +539,8 @@ const HANDLERS = {
     const target = requireEntity(ctx, "scene");
     const pose = normalizeKeyframePose(payload.pose);
     const componentId = String(payload.componentId ?? "").trim() || null;
+    /* 配图可缺（截图失败也要能把机位记下来），但给了就必须是真图片 */
+    const image = normalizeKeyframeImage(ctx.db, payload.imageFileId);
     const frames = [...(target.data.keyframes ?? [])];
     const id = nextKeyframeId(frames, componentId);
     const frame = {
@@ -514,6 +550,7 @@ const HANDLERS = {
         String(payload.label ?? "").trim() ||
         `${componentId ?? "场景"} · 机位 ${frames.filter((item) => item.componentId === componentId).length + 1}`,
       pose,
+      ...(image ?? {}),
       addedBy: ctx.actorId,
       addedAt: nowIso(),
     };
@@ -542,7 +579,7 @@ const HANDLERS = {
    * （删了重打会换帧号，讲稿上的 KF-Z04-02 就对不上了）。
    *
    * 口径：帧号（id）与构件绑定**不可改**（编号是讲稿与对照表的锚点）；
-   * 只允许改 label 与 pose，并记下是谁在什么时候改的（现场会问"这帧谁改的"）。
+   * 只允许改 label、pose 与配图，并记下是谁在什么时候改的（现场会问"这帧谁改的"）。
    */
   "scene.keyframe.update": (ctx, payload) => {
     const target = requireEntity(ctx, "scene");
@@ -565,6 +602,21 @@ const HANDLERS = {
     }
     if (payload.pose !== undefined) {
       next.pose = normalizeKeyframePose(payload.pose);
+    }
+    /*
+     * 配图跟着机位走：`更新机位` 是"镜头微调后不用删了重打"，如果只换机位不换图，
+     * 右栏那张缩略图就变成了**上一版机位**拍的画面（图与机位对不上，比没有图更坏）。
+     * 页面在更新机位时会重新截一张传上来；显式传空串 = 把图摘掉。
+     */
+    if (payload.imageFileId !== undefined) {
+      const image = normalizeKeyframeImage(ctx.db, payload.imageFileId);
+      if (image) {
+        next.imageFileId = image.imageFileId;
+        next.imageName = image.imageName;
+      } else {
+        delete next.imageFileId;
+        delete next.imageName;
+      }
     }
     next.updatedBy = ctx.actorId;
     next.updatedAt = nowIso();
