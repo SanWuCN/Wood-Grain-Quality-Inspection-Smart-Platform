@@ -521,10 +521,9 @@ export type PlatformServerResource = {
   storage: { totalTb: number | null; usedTb: number | null; freeTb: number | null; ratio: number | null };
   memory: { totalGib: number | null; usedGib: number | null; ratio: number | null };
   gpu: {
-    model: string;
+    /** 无型号：CON1..CONn 是映射单元，不宣称每台装了哪张卡（主机实测卡名见 mappingExplain.gpuName） */
     percent: number | null;
     load: LoadState;
-    vramTotalGib: number;
     vramUsedGib: number | null;
     vramRatio: number | null;
   };
@@ -536,8 +535,8 @@ export type PlatformMappingExplain = {
   note: string;
   storageTotalTB: number;
   memoryTotalGiB: number;
-  gpuModel: string;
-  vramTotalGiB: number;
+  /** 逐台显存总量的分母 = 主机实测显存（采样不到 GPU 时为 null，界面显示「—」） */
+  vramTotalGiB: number | null;
   powerRangeW: [number, number];
   networkScale: number;
   mappingVersion: string;
@@ -565,6 +564,8 @@ export type PlatformResources = {
   serverCount: number;
   /** 一个有效卷都没识别到时给原因；界面据此显示「未识别存储卷」 */
   noVolumeReason: string | null;
+  /** 显存展示总量的分母（GiB，主机实测显存）；读不到就是 null */
+  gpuVramTotalGib: number | null;
   /** 验收夹具标识；真实采集时为 null。界面会把它标出来，不让夹具冒充实测 */
   fixture: { name: string; label: string } | null;
   summary: {

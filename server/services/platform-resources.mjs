@@ -19,7 +19,7 @@
  *   m         = (mem_total - mem_available) / mem_total
  *   M_used    = 672 GiB × m ；M_i = 672 GiB / N
  *   g_i       = clamp(g × (1 + ε_gpu_i), 0, 100)
- *   v_i       = clamp(v × (1 + ε_vram_i), 0, 1) ；V_i_used = 24 GiB × v_i
+ *   v_i       = clamp(v × (1 + ε_vram_i), 0, 1) ；V_i_used = V_total × v_i（V_total = 后端主机实测显存）
  *   P_i       = 600 + 500 × g_i / 100 ；P_total = Σ P_i
  *   net_up    = 实际发送速率 × 300 ；net_down = 实际接收速率 × 300（集群只乘一次）
  */
@@ -37,9 +37,17 @@ export const POWER_MIN_W = 600;
 export const POWER_MAX_W = 1100;
 /** 网络展示倍率 */
 export const NETWORK_SCALE = 300;
-/** GPU 展示配置（演示配置，不是本机实测型号，见 §9.4 / RES-13） */
-export const GPU_MODEL = process.env.MUMAI_GPU_MODEL ?? "NVIDIA GeForce RTX 4090";
-export const VRAM_TOTAL_GIB = 24;
+/**
+ * 显存展示总量（GiB）：**后端主机实测值**，不是预置型号。
+ *
+ * 这里不写任何 GPU 型号，也不预置 24 GiB —— 逐台显存是「主机实测显存 × 映射比例」，
+ * 分母跟着真主机走（`MUMAI_VRAM_TOTAL_GIB` 只在确需固定展示总量时覆盖）。
+ * 用哪张卡的实测显存在「映射说明」里可追溯（`gpuName` / `gpuVramTotalGib`）。
+ */
+export const VRAM_TOTAL_GIB_OVERRIDE = (() => {
+  const value = Number(process.env.MUMAI_VRAM_TOTAL_GIB);
+  return Number.isFinite(value) && value > 0 ? value : null;
+})();
 /** 节点动态浮动幅度：**相对值** ±12%，不是 ±12 个百分点（§2 / RES-14） */
 export const JITTER_RATIO = 0.12;
 /** 扰动时间桶：6 秒（§9.4） */
@@ -133,6 +141,7 @@ export function jitterAt(hostId, serverId, metric, atMs, override) {
  * @param {Array}  input.volumes    固定卷原始样本：{ id, label, totalBytes, freeBytes }
  * @param {object} input.memory     物理内存：{ totalBytes, availableBytes } | null
  * @param {object} input.gpu        选中 GPU：{ utilizationPct, memoryUsedBytes, memoryTotalBytes } | null
+ * @param {number} [input.vramTotal] 显存展示总量（GiB，默认取主机实测显存）；逐台 V_i_used = 该值 × v_i
  * @param {object} input.network    { uploadBytesPerSec, downloadBytesPerSec } | null
  * @param {object} input.quality    各指标质量：fresh | stale | unavailable
  * @param {object} input.sampledAt  各指标采样时刻（毫秒）
@@ -144,6 +153,7 @@ export function mapPlatformResources(input) {
     volumes = [],
     memory = null,
     gpu = null,
+    vramTotal,
     network = null,
     quality = {},
     sampledAt = {},
@@ -212,6 +222,13 @@ export function mapPlatformResources(input) {
     : null;
   /* 显存按容量比算，不用 utilization.memory（§9.4 / RES-16） */
 
+  /*
+   * 逐台显存总量的分母：主机实测显存 → 环境覆盖 → 读不到就是未知。
+   * 不预置 24 GiB：预置值会让「后端主机按实测比例映射」这句话在界面上自相矛盾。
+   */
+  const hostVramTotalGib = gpu && num(gpu.memoryTotalBytes) > 0 ? num(gpu.memoryTotalBytes) / GIB_BYTES : null;
+  const vramTotalGib = num(vramTotal) ?? VRAM_TOTAL_GIB_OVERRIDE ?? hostVramTotalGib;
+
   /* ---- 网络（§9.7）：集群只乘一次，不乘服务器数 ---- */
   const upload = network ? num(network.uploadBytesPerSec) : null;
   const download = network ? num(network.downloadBytesPerSec) : null;
@@ -229,7 +246,7 @@ export function mapPlatformResources(input) {
     const vramFactor = 1 + jitterAt(hostId, id, "vram", at, override.vram);
     const gpuPercent = !gpuUsable || gpuBasePercent === null ? null : clamp(gpuBasePercent * gpuFactor, 0, 100);
     const vramRatio = !gpuUsable || vramRatioBase === null ? null : clamp(vramRatioBase * vramFactor, 0, 1);
-    const vramUsedGib = vramRatio === null ? null : VRAM_TOTAL_GIB * vramRatio;
+    const vramUsedGib = vramRatio === null || vramTotalGib === null ? null : vramTotalGib * vramRatio;
 
     /* 功耗用该台未舍入的 g_i 计算（§9.6） */
     const powerW = gpuPercent === null ? null : POWER_MIN_W + (POWER_MAX_W - POWER_MIN_W) * (gpuPercent / 100);
@@ -249,10 +266,9 @@ export function mapPlatformResources(input) {
         ratio: memoryRatio,
       },
       gpu: {
-        model: GPU_MODEL,
+        /* 逐台不写型号：CON1..CONn 是映射单元，头上没有任何一张实际安装的卡 */
         percent: gpuPercent,
         load: loadState(gpuPercent, gpuQualityFinal),
-        vramTotalGib: VRAM_TOTAL_GIB,
         vramUsedGib,
         vramRatio,
       },
@@ -281,6 +297,8 @@ export function mapPlatformResources(input) {
     serverCount,
     /* N=0：配置容量仍然给出，其余为未知，绝不虚构 CON1（RES-09） */
     noVolumeReason: serverCount === 0 ? "未识别存储卷" : null,
+    /* 显存展示总量的分母（主机实测显存 / 环境覆盖）；读不到就是 null，界面显示「—」 */
+    gpuVramTotalGib: vramTotalGib,
     summary: {
       storageTotalTB: STORAGE_TOTAL_TB,
       storageUsedTB: storageUsedTb,

@@ -109,11 +109,9 @@ export default function ResourceModal({
       onClose={onClose}
       footer={
         <>
-          <span className="muted">
-            {/* GPU 型号与每台显存是映射配置（常量，不是轮询指标），保持静止 */}
-            资源按后端主机实测比例映射，服务器采用预置配置（{data?.mappingExplain.gpuModel ?? "NVIDIA GeForce RTX 4090"} ·{" "}
-            {data?.mappingExplain.vramTotalGiB ?? 24} GiB 显存/台）
-          </span>
+          {/* 映射口径只写一句：型号、容量、采集源都在「映射说明」里（页脚没有它们的版面）。
+              2026-09-18 实测截图：页脚塞进 GPU 型号后整行换行溃散，按钮被挤成一列单字 */}
+          <span className="modal__foot-note">资源按后端主机实测值等比映射 · 服务器为展示单元，不是主机物理规格</span>
           <Btn tone="ghost" onClick={() => setExplainOpen((open) => !open)} aria-expanded={explainOpen}>
             映射说明
           </Btn>
@@ -338,8 +336,12 @@ function GpuTab({ data, servers, page, pageCount, onPage }: TabProps) {
           </dd>
         </div>
         <div>
-          <dt>展示型号</dt>
-          <dd>{data.mappingExplain.gpuModel}</dd>
+          <dt>实测显存</dt>
+          <dd>
+            {/* 分母是主机实测显存（同一份 2s 快照），随采集变化；因此这行也走动效 */}
+            <NumberAnimation value={data.gpuVramTotalGib} format={gib} />
+            <em> · 逐台按比例映射</em>
+          </dd>
         </div>
         <div>
           <dt>GPU 质量</dt>
@@ -348,21 +350,21 @@ function GpuTab({ data, servers, page, pageCount, onPage }: TabProps) {
       </dl>
       <p className="note">
         主机基准是后端主机实测的 GPU 利用率；下表每台按 ±12% 相对浮动映射，
-        所以与基准不相等是正常的。显存占用率取「已用容量 / 总容量」。
+        所以与基准不相等是正常的。逐台显存是「主机实测显存 × 映射比例」，
+        不预置型号与容量 —— 采集来源与卡名在「映射说明」里可追溯。
       </p>
       <div className="rm-table">
-        <div className="rm-table__head">
+        <div className="rm-table__head rm-table__head--flex">
           <span>服务器</span>
-          <span>型号</span>
           <span>GPU 占用</span>
-          <span>显存已用 / 总</span>
+          <span>显存占用</span>
           <span>负载</span>
         </div>
-        {/* 逐台 GPU：占用率、显存「已用 / 总」都随 2s 快照变；型号是名称、`server.id` 是标识，保持静止 */}
+        {/* 逐台 GPU：占用率、显存占用比例都随 2s 快照变；`server.id` 是标识，保持静止。
+            这里不列型号：CON1..CONn 是映射单元，头上没有一张实际安装的卡 */}
         {servers.map((server) => (
-          <div key={server.id} className="rm-table__row">
+          <div key={server.id} className="rm-table__row rm-table__row--flex">
             <span className="rm-id">{server.id}</span>
-            <span>{server.gpu.model}</span>
             <span className="rm-cell">
               <b>
                 <NumberAnimation value={server.gpu.percent} format={percent} />
@@ -371,8 +373,7 @@ function GpuTab({ data, servers, page, pageCount, onPage }: TabProps) {
             </span>
             <span className="rm-cell">
               <b>
-                <NumberAnimation value={server.gpu.vramUsedGib} format={gib} /> /{" "}
-                <NumberAnimation value={server.gpu.vramTotalGib} /> GiB
+                <NumberAnimation value={server.gpu.vramRatio} format={ratioPercent} />
               </b>
               <Bar ratio={server.gpu.vramRatio} />
             </span>
@@ -594,6 +595,10 @@ function MappingExplain({ data }: { data: PlatformResources }) {
             {explain.gpuSource ?? DASH}
             {explain.gpuName ? ` · ${explain.gpuName}` : ""}
           </dd>
+        </div>
+        <div>
+          <dt>实测显存</dt>
+          <dd>{explain.vramTotalGiB === null || explain.vramTotalGiB === undefined ? DASH : `${gib(explain.vramTotalGiB)} · 逐台显存映射的分母`}</dd>
         </div>
         <div>
           <dt>映射配置</dt>

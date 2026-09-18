@@ -48,7 +48,8 @@ section("F1 单服务器、半占用");
   check("内存已用 GiB", s.memoryUsedGiB, 336, 1e-9);
   check("GPU 基准", s.gpuBasePercent, 50);
   check("负载", s.loadState, "medium");
-  check("CON1 显存已用", snapshot.servers[0].gpu.vramUsedGib, 12, 1e-9);
+  check("CON1 显存已用（主机实测 8 GiB × 50%）", snapshot.servers[0].gpu.vramUsedGib, 4, 1e-9);
+  check("显存分母即主机实测（不是预置 24 GiB）", snapshot.gpuVramTotalGib, 8, 1e-9);
   check("CON1 功耗", snapshot.servers[0].powerW, 850, 1e-9);
   check("集群功耗", s.powerTotalW, 850, 1e-9);
   check("平台上行 B/s", s.uploadBytesPerSec, 300_000_000, 1e-3);
@@ -91,7 +92,7 @@ section("F2 四个卷 + 确定性扰动");
   const gpuPercents = snapshot.servers.map((server) => Number(server.gpu.percent.toFixed(4)));
   check("逐台 GPU 44 / 48 / 52 / 56", JSON.stringify(gpuPercents), JSON.stringify([44, 48, 52, 56]));
   const vram = snapshot.servers.map((server) => Number(server.gpu.vramUsedGib.toFixed(2)));
-  check("逐台显存 10.56 / 13.44 / 12 / 11.52", JSON.stringify(vram), JSON.stringify([10.56, 13.44, 12, 11.52]));
+  check("逐台显存 3.52 / 4.48 / 4 / 3.84（8 GiB × 比例）", JSON.stringify(vram), JSON.stringify([3.52, 4.48, 4, 3.84]));
   const power = snapshot.servers.map((server) => Number(server.powerW.toFixed(4)));
   check("逐台功耗 820 / 840 / 860 / 880", JSON.stringify(power), JSON.stringify([820, 840, 860, 880]));
   check("集群功耗 3400 W", s.powerTotalW, 3400, 1e-6);
@@ -135,7 +136,7 @@ section("F3 阈值与极值");
     jitter: { CON1: { gpu: 0.12, vram: 0.12 } },
   });
   check("100% 封顶 100", full.servers[0].gpu.percent, 100);
-  check("显存封顶 24 GiB", full.servers[0].gpu.vramUsedGib, 24);
+  check("显存封顶 = 主机实测 8 GiB", full.servers[0].gpu.vramUsedGib, 8);
   check("100% 功耗 1100 W", full.servers[0].powerW, POWER_MAX_W);
 
   const invalid = mapPlatformResources({
@@ -149,6 +150,20 @@ section("F3 阈值与极值");
   check("越界原始值 → 负载未知", invalid.summary.loadState, "unknown");
   check("越界原始值 → 功耗不可用", invalid.servers[0].powerW, null);
   check("存储不受 GPU 影响", Number(invalid.summary.storageUsedTB.toFixed(2)), 12.18);
+
+  /* 显存分母只有「显式传入」才可能不是主机实测值；不传就是主机实测（这里是 8 GiB） */
+  const explicitVram = mapPlatformResources({
+    config: baseConfig,
+    volumes: [{ id: "v", label: "C:", totalBytes: 100 * GiB, freeBytes: 50 * GiB }],
+    memory: { totalBytes: 32 * GiB, availableBytes: 16 * GiB },
+    gpu: { utilizationPct: 50, memoryUsedBytes: 4 * GiB, memoryTotalBytes: 8 * GiB },
+    vramTotal: 24,
+    network: null,
+    /* 固定扰动为 0：这里要验的是分母，不是抖动 */
+    jitter: { CON1: { gpu: 0, vram: 0 } },
+  });
+  check("显式显存总量才覆盖分母", explicitVram.gpuVramTotalGib, 24);
+  check("显式分母逐台算值", explicitVram.servers[0].gpu.vramUsedGib, 12, 1e-9);
 }
 
 /* ---------------- F4：网络差分 ---------------- */

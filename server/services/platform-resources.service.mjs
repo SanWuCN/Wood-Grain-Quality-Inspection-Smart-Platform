@@ -18,12 +18,14 @@ import {
   POWER_MAX_W,
   POWER_MIN_W,
   STORAGE_TOTAL_TB,
-  VRAM_TOTAL_GIB,
-  GPU_MODEL,
+  VRAM_TOTAL_GIB_OVERRIDE,
   mapPlatformResources,
 } from "./platform-resources.mjs";
 
 const GiB = 1024 ** 3;
+/** 逐台显存总量的分母：主机实测显存（GiB）→ 环境覆盖 → null（界面显示「—」） */
+const vramTotalOf = (bytes) =>
+  Number.isFinite(bytes) && bytes > 0 ? bytes / GiB : VRAM_TOTAL_GIB_OVERRIDE;
 /** 夹具里的「500 G 盘」按 Windows 口径算 GiB（验收清单 F1 写的是 GiB） */
 const FIXTURE_VOLUME = (label, totalGib, usedGib) => ({
   id: `fixture-${label}`,
@@ -101,6 +103,8 @@ export function createPlatformResources() {
         volumes: fixture.volumes,
         memory: fixture.memory,
         gpu: fixture.gpu,
+        /* 夹具的显存总量就是夹具 GPU 自己的总容量，不另立一套展示常量 */
+        vramTotal: vramTotalOf(fixture.gpu.memoryTotalBytes),
         network: fixture.network,
         quality: { gpu: "fresh", memory: "fresh", storage: "fresh", network: "fresh" },
         sampledAt: { gpu: now, memory: now, storage: now, network: now },
@@ -115,8 +119,7 @@ export function createPlatformResources() {
         note: "验收夹具输入，不是真实主机采集",
         storageTotalTB: STORAGE_TOTAL_TB,
         memoryTotalGiB: MEMORY_TOTAL_GIB,
-        gpuModel: GPU_MODEL,
-        vramTotalGiB: VRAM_TOTAL_GIB,
+        vramTotalGiB: vramTotalOf(fixture.gpu.memoryTotalBytes),
         powerRangeW: [POWER_MIN_W, POWER_MAX_W],
         networkScale: NETWORK_SCALE,
         mappingVersion: MAPPING_VERSION,
@@ -127,16 +130,17 @@ export function createPlatformResources() {
     const input = sampler.snapshotInput();
     const snapshot = mapPlatformResources({
       ...input,
+      /* 显存分母 = 被采集那张卡自己的实测显存（不再预置 24 GiB） */
+      vramTotal: vramTotalOf(input.gpu?.memoryTotalBytes),
       snapshotId: `${sampler.hostId}:${input.epoch}:${++snapshotCounter}`,
     });
     snapshot.fixture = null;
     snapshot.mappingExplain = {
       hostId: sampler.hostId,
-      note: "资源按后端主机实测比例映射，服务器为演示配置",
+      note: "资源按后端主机实测比例映射，服务器与容量是展示单元，不是主机物理规格",
       storageTotalTB: STORAGE_TOTAL_TB,
       memoryTotalGiB: MEMORY_TOTAL_GIB,
-      gpuModel: GPU_MODEL,
-      vramTotalGiB: VRAM_TOTAL_GIB,
+      vramTotalGiB: vramTotalOf(input.gpu?.memoryTotalBytes),
       powerRangeW: [POWER_MIN_W, POWER_MAX_W],
       networkScale: NETWORK_SCALE,
       mappingVersion: MAPPING_VERSION,
