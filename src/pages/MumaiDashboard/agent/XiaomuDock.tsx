@@ -32,6 +32,8 @@ import { useAgentNavigate, useAgentSession } from "./agentSession";
 import { getAgentState, resolveConfirm, setAgent, subscribeAgent } from "./store";
 import { microphoneSupported } from "./asr";
 import { shortcutSheetRows, walkShortcutNote } from "./shortcutSheet";
+import { SCRIPT_SHORTCUT_ENTRIES } from "./scriptShortcutEntries";
+import { KEYWORD_FIRE_EVENT, browserStore, keywordHintVisible, setKeywordHintVisible } from "./keywordHint";
 import { wakeChannel, type WakeSnapshot } from "./wakeChannel";
 import { bubbleUserText, buildReplyView, latestBotTurn, latestUserText, type ReplyView } from "./replyView";
 import { VoiceOutput } from "./tts";
@@ -126,6 +128,44 @@ export default function XiaomuDock() {
    */
   const [micOk, setMicOk] = useState(true);
   useEffect(() => setMicOk(microphoneSupported()), []);
+
+  /**
+   * 「关键词提示」是否显示（默认关，见 `keywordHint.ts` 的说明）。
+   *
+   * 首帧先按"关"渲染，挂载后再读这台机器的偏好 —— 与 `micOk` 同一套写法：
+   * 直接在 `useState` 初始化里读 `localStorage`，首帧与之后的树会不一致
+   * （当初 `micOk` 就是因为这个会"闪一下"）。代价只是打开过的机器上
+   * 首帧少一个按钮，比闪一下好。
+   *
+   * `hintRef` 是同一份真值的同步镜像，给下面 `toggleKeywordHint` 用（见那里的说明）。
+   */
+  const [hintOpen, setHintOpen] = useState(false);
+  const hintRef = useRef(false);
+  useEffect(() => {
+    const visible = keywordHintVisible(browserStore());
+    hintRef.current = visible;
+    setHintOpen(visible);
+  }, []);
+
+  /**
+   * 开关这一次点击（用户口径 2026-09-28：「我点开能看到」）。
+   *
+   * ⚠ 这里刻意**不**写 `setHintOpen((current) => { …写存储…; return next; })`：
+   * updater 必须是纯函数（StrictMode 下会被调用两次），把"写 localStorage"
+   * 塞进去会写两遍，而且 `current` 是 React 的、不是这次点击那一刻的真实值。
+   * 用 ref 同步镜像真值：连点两下不会因为 state 还没提交而只生效一次。
+   */
+  const toggleKeywordHint = useCallback(() => {
+    const next = !hintRef.current;
+    hintRef.current = next;
+    setHintOpen(next);
+    /* 写不进去（隐私模式 / 配额满）就按**真实状态**回退，不假装记住了 */
+    const stored = setKeywordHintVisible(next, browserStore());
+    if (stored !== next) {
+      hintRef.current = stored;
+      setHintOpen(stored);
+    }
+  }, []);
 
   useEffect(() => wakeChannel().subscribe(setWake), []);
 
@@ -954,6 +994,36 @@ export default function XiaomuDock() {
               按一下播放一个」）。键位文本来自唯一实现，页面上不手写一行字。
             */}
             <p className="xd__note xd__note--walk">{walkShortcutNote(sheetRows.length)}</p>
+            {/*
+              ── 关键词提示开关（用户口径 2026-09-28）────────────────────────
+              「平台内置一个比较隐蔽的小木关键词显示开关，我点开能看到，原来在气泡里的太明显了」。
+
+              说的是每一行第三条"照着说什么"（`row.how`）。25 行关键词一起铺出来，
+              观众一眼就看见"原来照着念就行"，所以**默认关**，由讲解的人自己打开；
+              打开后每行多一条，点它直接走该轮（走 `mumai:script-fire` → Shell 里的
+              同一个快捷键钩子，不另起一条播报路径）。
+
+              "隐蔽"落在两层：① 这一行只在**一览展开之后**才存在（气泡收起时整块 UI
+              都不渲染，屏幕上不会多出一个可点的东西）；② 提示语刻意只写成
+              「关键词提示 关 / 开」，不解释它能干什么 —— 看得懂的人自然点得到。
+            */}
+            <div className="xd__hint-line">
+              <button
+                type="button"
+                className="xd__hint-toggle"
+                aria-pressed={hintOpen}
+                title={
+                  hintOpen
+                    ? "收起每行的关键词（屏幕上少一行提示）"
+                    : "在每行下面显示「照着说什么」，点关键词可直接走该轮"
+                }
+                onClick={toggleKeywordHint}>
+                关键词提示 {hintOpen ? "开" : "关"}
+              </button>
+              <span className="xd__hint-tip">
+                {hintOpen ? "点关键词可直接走该轮" : "默认不显示（现场更干净）"}
+              </span>
+            </div>
             {wake.state === "error" ? (
               /*
                 ── 唤醒出错时，把**原因和怎么办**写在气泡里 ──────────────────
@@ -972,14 +1042,44 @@ export default function XiaomuDock() {
               </p>
             ) : null}
             {keysOpen ? (
-              <ol className="xd__keys">
-                {sheetRows.map((row) => (
-                  <li key={row.index}>
-                    <b>{row.keys}</b>
-                    <span className="xd__keys-round">{row.round}</span>
-                    <span className="xd__keys-how">{row.how}</span>
-                  </li>
-                ))}
+              <ol className={`xd__keys${hintOpen ? " is-hint-open" : ""}`}>
+                {sheetRows.map((row) => {
+                  /*
+                    这一行"照着说什么"能不能点：主动发起的轮次（⑬⑳ 那一类）
+                    `how` 写的是「按钮触发，不用说话」，它不是一句可以念的话，
+                    点它没有意义 —— 所以只有语音轮才给按钮。
+                  */
+                  const proactiveHow = SCRIPT_SHORTCUT_ENTRIES[row.index - 1]?.proactive === true;
+                  return (
+                    <li key={row.index}>
+                      <b>{row.keys}</b>
+                      <span className="xd__keys-round">{row.round}</span>
+                      {hintOpen ? (
+                        proactiveHow ? (
+                          <span className="xd__keys-how">{row.how}</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="xd__keys-how xd__keys-how--tap"
+                            title={`点一下直接走这一轮（${row.keys} 也可以）`}
+                            onClick={() =>
+                              window.dispatchEvent(
+                                new CustomEvent(KEYWORD_FIRE_EVENT, {
+                                  detail: { index: row.index - 1 },
+                                }),
+                              )
+                            }>
+                            {row.how}
+                          </button>
+                        )
+                      ) : (
+                        /* 关着的时候**不在 DOM 里**（不是 CSS 藏起来）：屏幕、选中、
+                           复制、Elements 面板里都看不到这 25 条关键词 */
+                        null
+                      )}
+                    </li>
+                  );
+                })}
               </ol>
             ) : null}
           </div>

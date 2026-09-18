@@ -175,7 +175,19 @@ export function useScriptShortcut({
   onSubmit,
   onProactive,
   enabled = true,
-}: UseScriptShortcutOptions) {
+}: UseScriptShortcutOptions): {
+  /**
+   * 按条目**直接**演一条（等价于按下它的快捷键）。
+   *
+   * ── 为什么要把这个入口交出去（用户口径 2026-09-28）──────────────────
+   * 气泡里那张一览表打开「关键词提示」之后，每行多一条"照着说什么"；
+   * 点它就该直接走该轮 —— 否则提示只是给人看的，现场还得自己念一遍或按一遍键。
+   * 气泡挂在另一棵树里，钩子挂在 `Shell` 上，所以这里把入口交出去，
+   * 而不是让气泡自己再写一套 `ask()`：那会绕开本钩子的串行队列
+   * （两轮回答交叉）、也会长出第二条播报路径（历史踩过：气泡自己调合成音）。
+   */
+  fire: (entry: ScriptShortcutEntry) => void;
+} {
   const runtimeRef = useRef(runtime);
   runtimeRef.current = runtime;
 
@@ -369,4 +381,11 @@ export function useScriptShortcut({
       window.removeEventListener("blur", reset);
     };
   }, [enabled, trigger]);
+
+  /*
+    交出去的入口：只暴露 `trigger` 本身，不额外包一层。
+    包一层（例如顺手记游标、顺手改 state）会让"点关键词"与"按键"两条路
+    在游标与队列上出现第二套语义 —— 它们本来就该是同一条路。
+  */
+  return { fire: trigger };
 }

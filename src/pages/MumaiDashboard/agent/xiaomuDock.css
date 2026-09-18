@@ -1172,3 +1172,70 @@
   color: var(--text-tertiary, #70849c);
   line-height: 1.35;
 }
+
+/* ------------------------------------------------------------------
+   关键词提示开关（用户口径 2026-09-28）
+   「平台内置一个比较隐蔽的小木关键词显示开关，我点开能看到，
+     原来在气泡里的太明显了」
+
+   这一行只在「快捷键一览」展开之后才存在，所以样式刻意做成**一行小字**：
+   · 按钮按"状态标签"画（不是按钮）—— 开着写着「关键词提示 开」，关着写「关」，
+     点一下就切；颜色比正文弱一档，观众扫一眼不会停在它上面；
+   · 右边那句解释只在悬停时是可读的辅助，不抢注意力。
+------------------------------------------------------------------ */
+
+.xd__hint-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.xd__hint-toggle {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px dashed var(--border-subtle, rgba(78, 168, 255, 0.18));
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-tertiary, #70849c);
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.xd__hint-toggle:hover {
+  border-color: var(--border-hover, rgba(78, 168, 255, 0.4));
+  color: var(--text-secondary, #aabbd0);
+}
+
+.xd__hint-toggle[aria-pressed="true"] {
+  border-style: solid;
+  border-color: var(--text-accent, #70c4ff);
+  color: var(--text-accent, #70c4ff);
+}
+
+.xd__hint-tip {
+  overflow: hidden;
+  color: var(--text-tertiary, #70849c);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/*
+  开启后每行的关键词是**按钮**（点了直接走该轮），所以要把 <button> 的默认外观
+  抹掉、只留文字排版 —— 否则气泡里会冒出一排灰色小按钮，比原来的纯文本更显眼，
+  正好与"太明显了"这个诉求相反。
+*/
+.xd__keys-how--tap {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.xd__keys-how--tap:hover {
+  color: var(--text-accent, #70c4ff);
+  text-decoration: underline;
+}

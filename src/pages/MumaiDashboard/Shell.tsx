@@ -76,6 +76,8 @@ import type { SyncBackupStream } from "./agent/syncBackup";
 */
 import { useScriptShortcut } from "./agent/useScriptShortcut";
 import { SCRIPT_SHORTCUT_ENTRIES } from "./agent/scriptShortcutEntries";
+/* 气泡里「关键词提示」那条通道的事件名（唯一实现，见 keywordHint.ts） */
+import { KEYWORD_FIRE_EVENT } from "./agent/keywordHint";
 import { VoiceOutput } from "./agent/tts";
 import { useAgentNavigate, useAgentSession } from "./agent/agentSession";
 import type { Runtime } from "./agent/executor";
@@ -275,7 +277,32 @@ export default function Shell() {
     }),
     [shortcutNavigate, shortcutSession],
   );
-  useScriptShortcut({ entries: SCRIPT_SHORTCUT_ENTRIES, runtime: scriptShortcutRuntime });
+  const scriptShortcut = useScriptShortcut({ entries: SCRIPT_SHORTCUT_ENTRIES, runtime: scriptShortcutRuntime });
+
+  /**
+   * 气泡里「关键词提示」那一行点了之后走这里（用户口径 2026-09-28）。
+   *
+   * 为什么走事件而不是把 `fire` 当 prop 传给气泡：气泡在 Shell 之外的另一棵树里
+   * （`XiaomuDock` 由 AppShell 渲染），而"点了关键词要播哪一轮"这件事的
+   * **唯一实现**是本组件手里这个钩子。事件是本仓既有的跨树约定
+   * （`mumai:xiaomu-ask` / `mumai:sync-backup` / `mumai:demo-surface` 都这样），
+   * 再引一层 context 只是把同一条线拉长。
+   *
+   * 载荷只认**下标**，不认文本：文本可能与某几轮的触发说法重名，走下标的
+   * "第 N 行 = 第 N 轮"才是与一览表同一套口径（`shortcutSheet.test.ts` 钉着这条）。
+   */
+  useEffect(() => {
+    const onFire = (event: Event) => {
+      const index = Number((event as CustomEvent<{ index?: number }>).detail?.index);
+      if (!Number.isInteger(index)) return;
+      const entry = SCRIPT_SHORTCUT_ENTRIES[index];
+      /* 越界就当没发生：宁可什么都不演，也不要演错一轮 */
+      if (!entry) return;
+      scriptShortcut.fire(entry);
+    };
+    window.addEventListener(KEYWORD_FIRE_EVENT, onFire);
+    return () => window.removeEventListener(KEYWORD_FIRE_EVENT, onFire);
+  }, [scriptShortcut]);
 
   useEffect(() => {
     const onSync = (event: Event) => {

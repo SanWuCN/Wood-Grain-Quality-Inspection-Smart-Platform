@@ -628,6 +628,15 @@ try {
      所以气泡里必须有一张从剧本生成的表，且内网 http 打开时要如实说明麦克风用不了。
   */
   const isLoopback = /^(127\.0\.0\.1|localhost)$/i.test(new URL(PAGE).hostname);
+  /*
+    「语音轮的关键词可点」这条判据里的**期望条数不写死**：主动发起的轮次
+    （⑬⑳⑮…）表里写的是「按钮触发，不用说话」，它不是一句可以念的话，
+    所以不给按钮。条数直接从条目表算 —— 剧本里再加一条主动发起，这里自动跟上。
+  */
+  const { SCRIPT_SHORTCUT_ENTRIES: SHORTCUT_ENTRIES } = await import(
+    "../src/pages/MumaiDashboard/agent/scriptShortcutEntries.ts"
+  );
+  const expectedClickable = SHORTCUT_ENTRIES.filter((entry) => !entry.proactive).length;
   const openedSheet = await evaluate(`(() => {
     /* 面板没开就先点形象展开（前面几段结束时应该还开着，这里只做兜底） */
     if (!document.querySelector('.xd__panel')) {
@@ -725,6 +734,169 @@ try {
   }
   await shot(send, "5-气泡里的快捷键一览");
 
+  /* ---------- ⑦c 「关键词提示」隐蔽开关（用户口径 2026-09-28）----------
+     原话：「平台内置一个比较隐蔽的小木关键词显示开关，我点开能看到，
+            原来在气泡里的太明显了」。
+
+     这一条要证四件事，每条都能证伪：
+       ① **默认关**：一览展开着，但每行的"照着说什么"在 DOM 里**根本不存在**
+          （不是 CSS 藏起来 —— 藏起来的话屏幕上看不到、选中复制与 Elements 里还在）；
+       ② 开关**隐蔽但点得到**：它只在"一览展开之后"存在，文案是「关键词提示 关」；
+       ③ 点一下 → 25 条关键词全出来（逐行与条目表同源）；
+       ④ 关键词**可直接点**：点一下等于走该轮（气泡打开、逐字说出那一句、小木回话），
+          走的是与快捷键同一条链路，不是另画一个提示。
+  */
+  const hintDefault = await evaluate(`(() => {
+    const list = document.querySelector('.xd__keys');
+    const toggle = document.querySelector('.xd__hint-toggle');
+    return {
+      sheetOpen: Boolean(list),
+      rows: list ? list.querySelectorAll('li').length : 0,
+      keywordsInDom: document.querySelectorAll('.xd__keys-how').length,
+      toggle: toggle ? (toggle.textContent || '').trim() : null,
+      pressed: toggle ? toggle.getAttribute('aria-pressed') : null,
+      stored: localStorage.getItem('mumai.hint.keywords'),
+      /* 一览收起时这块 UI 应当整块不存在（"隐蔽"的第一层） */
+      wrapHiddenWhenFolded: (() => {
+        const btn = [...document.querySelectorAll('.xd__fold-btn')].find((b) =>
+          (b.textContent || '').includes('快捷键一览'),
+        );
+        if (!btn || btn.getAttribute('aria-expanded') !== 'true') return null;
+        return true;
+      })(),
+    };
+  })()`);
+  check(
+    "默认不显示关键词：一览开着也一条都不在 DOM 里（原来太明显了）",
+    hintDefault?.sheetOpen === true && hintDefault?.keywordsInDom === 0 && hintDefault?.stored !== "on",
+    `列表 ${hintDefault?.rows ?? 0} 行 · DOM 里关键词 ${hintDefault?.keywordsInDom ?? "?"} 条 · 存储=${hintDefault?.stored ?? "（未设置）"}`,
+  );
+  check(
+    "隐蔽开关在（一览展开后才存在）：文案「关键词提示 …」",
+    typeof hintDefault?.toggle === "string" && hintDefault.toggle.includes("关键词提示"),
+    `按钮=「${hintDefault?.toggle ?? "（没有）"}」`,
+  );
+
+  /* 点开开关 → 关键词全出来 */
+  const turnedOn = await evaluate(`(() => {
+    const toggle = document.querySelector('.xd__hint-toggle');
+    if (!toggle) return null;
+    if (toggle.getAttribute('aria-pressed') !== 'true') toggle.click();
+    return true;
+  })()`);
+  await sleep(400);
+  const hintOn = await evaluate(`(() => {
+    const list = document.querySelector('.xd__keys');
+    const rows = list ? [...list.querySelectorAll('li')] : [];
+    const keywords = [...document.querySelectorAll('.xd__keys-how')];
+    return {
+      count: keywords.length,
+      first: (keywords[0]?.textContent || '').trim(),
+      clickable: keywords.filter((el) => el.tagName === 'BUTTON').length,
+      toggle: (document.querySelector('.xd__hint-toggle')?.textContent || '').trim(),
+      stored: localStorage.getItem('mumai.hint.keywords'),
+    };
+  })()`);
+  check("点一下开关，关键词提示打开（并记住这台机器）", turnedOn === true && hintOn?.stored === "on", `存储=${hintOn?.stored ?? "?"}　按钮=「${hintOn?.toggle ?? "?"}」`);
+  check(
+    "25 条关键词全出来，且与一览表逐行同源（第 1 条 = 第①轮的触发说法）",
+    hintOn?.count === 25 && /巡检|风险|统计/.test(String(hintOn?.first)),
+    `${hintOn?.count ?? 0} 条 · 第一条=「${hintOn?.first ?? "（没有）"}」`,
+  );
+  check(
+    "语音轮的关键词是可点的（主动发起那类只写「按钮触发」不装作能念）",
+    hintOn?.clickable === expectedClickable,
+    `可点 ${hintOn?.clickable ?? 0} 条 · 应当 ${expectedClickable} 条（主动发起 ${25 - expectedClickable} 条）`,
+  );
+
+  /* 点第一条关键词 = 直接走该轮 */
+  await evaluate(`(() => {
+    const el = [...document.querySelectorAll('.xd__keys-how--tap')][0];
+    if (el) el.click();
+    return true;
+  })()`);
+  /*
+    ⚠ 这一轮会**跳页面**（第①轮的落点是知识库检索页），跳转可能把注入的
+    `window.__probe` 一起带走（实测踩到：`window.__probe is not a function`）。
+    所以这里两条判据都直接读 DOM，并且只认"这一轮真的开演了"：
+    气泡里的用户那句话 + 小木的回答。
+  */
+  /*
+    ⚠ 判据要**等到那一句真的敲进去**再下结论，不能"气泡里一有字就判"：
+    那句话是**逐字**累积的，第一次采到只有「小」一个字（实测踩到：判据红、
+    实际整句正在敲）。所以这里分两拍：先等气泡开演，再等这句话的前缀出现。
+  */
+  const keywordPrefix = String(hintOn?.first ?? "").slice(0, 3);
+  let keywordFired = null;
+  for (let i = 0; i < 40; i += 1) {
+    await sleep(300);
+    const probe = await evaluate(`(() => {
+      const texts = [...document.querySelectorAll('.xd__panel .xd__user')]
+        .map((el) => (el.textContent || '').trim())
+        .filter(Boolean);
+      const answer = (document.querySelector('.xd__panel .xd__answer')?.textContent || '').trim();
+      return texts.length || answer ? { userTexts: texts, answer } : null;
+    })()`);
+    if (probe) {
+      keywordFired = probe;
+      break;
+    }
+  }
+  /* 第二拍：等前缀真的敲出来（最长 15 秒；敲字速度由页面控制，不在这里猜） */
+  for (let i = 0; i < 50; i += 1) {
+    const typed = String((keywordFired?.userTexts ?? []).join(""));
+    if (typed.includes(keywordPrefix)) break;
+    await sleep(300);
+    const probe = await evaluate(`(() => {
+      const texts = [...document.querySelectorAll('.xd__panel .xd__user')]
+        .map((el) => (el.textContent || '').trim())
+        .filter(Boolean);
+      const answer = (document.querySelector('.xd__panel .xd__answer')?.textContent || '').trim();
+      return { userTexts: texts, answer };
+    })()`);
+    if (probe) keywordFired = { ...keywordFired, ...probe, userTexts: probe.userTexts.length ? probe.userTexts : (keywordFired?.userTexts ?? []) };
+  }
+  check(
+    "点关键词 = 直接走该轮（气泡里逐字说出这一句）",
+    Boolean(keywordFired) && String((keywordFired?.userTexts ?? []).join("")).includes(keywordPrefix),
+    keywordFired
+      ? `气泡=「${String((keywordFired.userTexts ?? []).join(" / ")).slice(0, 44)}…」`
+      : "12 秒内没等到气泡里的那句话",
+  );
+
+  /* 小木的回复出现即可（就地轮询 `.xd__answer`，与本脚本其他段落同一口径） */
+  let keywordReply = keywordFired?.answer ?? "";
+  for (let i = 0; i < 60 && keywordReply.length <= 10; i += 1) {
+    await sleep(300);
+    keywordReply = await evaluate(
+      `(document.querySelector('.xd__panel .xd__answer')?.textContent || '').trim()`,
+    );
+  }
+  check(
+    "小木按这一轮回话（走的是与快捷键同一条链路）",
+    keywordReply.length > 10,
+    keywordReply ? `回复「${keywordReply.slice(0, 34)}…」` : "没等到小木的回复",
+  );
+
+  /* 收工把开关关回去：这个 profile 是复用的，别把"显示关键词"留给下一次 */
+  const turnedOff = await evaluate(`(() => {
+    const toggle = document.querySelector('.xd__hint-toggle');
+    if (!toggle) return null;
+    if (toggle.getAttribute('aria-pressed') === 'true') toggle.click();
+    return localStorage.getItem('mumai.hint.keywords');
+  })()`);
+  await sleep(300);
+  const hintClosed = await evaluate(`(() => ({
+    keywordsInDom: document.querySelectorAll('.xd__keys-how').length,
+    toggle: (document.querySelector('.xd__hint-toggle')?.textContent || '').trim(),
+  }))()`);
+  check(
+    "再点一下关掉：关键词立刻从 DOM 里消失（开关是双向的）",
+    turnedOff === "off" && hintClosed?.keywordsInDom === 0,
+    `存储=${turnedOff ?? "?"} · DOM 里剩 ${hintClosed?.keywordsInDom ?? "?"} 条 · 按钮=「${hintClosed?.toggle ?? "?"}」`,
+  );
+  await shot(send, "5b-气泡关键词开关");
+
   /* ---------- ⑧ 第⑤轮天气：台词里的数据必须与屏幕上的天气面板**同一份** ----------
      用户口径 2026-09-17：「第5个对话，天气那个，小木的回答带上较为真实的数据，
      与平台不穿帮，没音频去网站合成」。
@@ -797,6 +969,20 @@ try {
   check("第⑤轮没有回退到浏览器合成音", (audio5?.synth ?? 0) === 0, `speechSynthesis.speak 调用 ${audio5?.synth ?? 0} 次`);
   await shot(send, "6-第⑤轮天气（台词与面板同一组数字）");
 } finally {
+  /*
+    收工把「关键词提示」关回去。
+    这个浏览器 profile 是复用的（`mumai-shortcut-bubble-profile`），留着 "on"
+    会让下一次跑验收时"默认不显示关键词"那条自己红 —— 那是工装自己留下的脏状态。
+    中间的段落已经关过一次，这里再兜一次（前面某条挂了也保证关得掉）。
+  */
+  try {
+    await evaluate(`(() => {
+      localStorage.setItem('mumai.hint.keywords', 'off');
+      return true;
+    })()`);
+  } catch {
+    /* 页面已经关了，忽略 */
+  }
   chrome.kill();
 }
 
