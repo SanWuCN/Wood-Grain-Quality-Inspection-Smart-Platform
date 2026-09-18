@@ -33,6 +33,20 @@ import { WebSocket } from "ws";
 
 /** 小车状态约 2 Hz 推送；超过这个年龄没有新状态就按文档 §2 判为断线 */
 const STALE_AFTER_MS = 3000;
+/**
+ * 状态静默多久就认为这条连接已经「假活」（2026-09-18 实测踩到）。
+ *
+ * 现场结结实实遇到过一次：小车的状态 WS 半开 —— TCP 那头不发了，本端既不报错
+ * 也不触发 `close`，`link` 一直写着 `online`，而页面上的「数据延迟」从 128 秒
+ * 一路涨到 253 秒，运动操作全被禁用，看着就像"小车坏了"。同一时刻小车自己的
+ * `/api/state` 与摄像头都是好的（2 Hz 推得好好的），说明只是这条连接烂在半路。
+ *
+ * 小车是 2 Hz 推状态，所以 8 秒一条都没有就已经不正常；发现后**主动 terminate**
+ * 把它推回 `close → 退避重连` 这条已经验过的路上去（和浏览器端 45 秒失联自检同一套思路）。
+ */
+const QUIET_AFTER_MS = 8000;
+/** 静默自检的节拍：比阈值小一个档，恢复得快一点 */
+const QUIET_CHECK_MS = 3000;
 /** 重连退避：1、2、4…最大 15 秒（文档 §2 要求客户端自行退避重连） */
 const RECONNECT_MIN_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
@@ -147,6 +161,8 @@ export function createCartService({ logger = console } = {}) {
   let lastError = null;
   let lastAttemptAt = 0;
   let socket = null;
+  /** 这条连接最近一次收到**任何**消息的时刻：静默自检按它判断"是不是假活" */
+  let lastMessageAt = 0;
   let reconnectDelay = RECONNECT_MIN_MS;
   let reconnectTimer = null;
   let disposed = false;
@@ -238,6 +254,7 @@ export function createCartService({ logger = console } = {}) {
     socket.on("open", () => {
       link = "online";
       lastError = null;
+      lastMessageAt = now();
       reconnectDelay = RECONNECT_MIN_MS;
       emit({ type: "link" });
     });
@@ -249,6 +266,8 @@ export function createCartService({ logger = console } = {}) {
       } catch {
         return; // 坏帧丢掉，不打断这条流
       }
+      /* 任何一帧都算"这条连接还活着"：不只是 state，小车别的消息也证明对端在 */
+      lastMessageAt = now();
       if (message?.type !== "state" || !message.payload) return;
       state = message.payload;
       stateAt = now();
@@ -276,6 +295,29 @@ export function createCartService({ logger = console } = {}) {
       }
     });
   }
+
+  /**
+   * 静默自检：连着但很久没有消息 → 主动断开，走退避重连。
+   *
+   * 只在 `link === "online"` 时判：`offline` 本来就在重连，`connecting` 还没连上，
+   * 拿它们开刀只会把正常流程打断。
+   */
+  const quietTimer = setInterval(() => {
+    if (disposed || link !== "online") return;
+    const quietMs = lastMessageAt ? now() - lastMessageAt : 0;
+    if (!quietMs || quietMs <= QUIET_AFTER_MS) return;
+    lastError = `小车状态已静默 ${Math.round(quietMs / 1000)} 秒（连接看着还在，其实已经不通），正在重连`;
+    link = "offline";
+    emit({ type: "link" });
+    try {
+      /* terminate 而不是 close：半开的连接上 close 会等握手，terminate 直接把它推回 close 事件 */
+      socket?.terminate();
+    } catch {
+      /* 已经烂掉的 socket，terminate 抛错也无所谓：下面的 close 会兜住重连 */
+    }
+  }, QUIET_CHECK_MS);
+  // 只是自检计时器，不该拖住进程退出
+  quietTimer.unref?.();
 
   /* ---------------- HTTP ---------------- */
 
@@ -595,6 +637,7 @@ export function createCartService({ logger = console } = {}) {
     },
     stop() {
       disposed = true;
+      clearInterval(quietTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       reconnectTimer = null;
       try {
