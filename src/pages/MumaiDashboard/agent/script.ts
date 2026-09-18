@@ -531,12 +531,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     voicePack: null,
     intentId: null,
     /*
-      页面落点（v2 小木带路）：「我按设备编号核对数据来源，确认平台显示的是本次设备数据，不串数据」——采集作业（批次与设备编号）。
+      页面落点（v2 小木带路）：「我按设备编号核对数据来源，确认平台显示的是本次设备数据，不串数据」——**数据接收**（三路通道 + 本单接收清单）。
       路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
     */
     nav: {
       route: "/hardware",
-      tab: "capture",
+      tab: "receive",
     },
   },
   {
@@ -819,12 +819,12 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     voicePack: null,
     intentId: null,
     /*
-      页面落点（v2 小木带路）：「对照采样计划检查接收清单，把缺的列出」——采集作业（接收清单与样本编号）。
+      页面落点（v2 小木带路）：「对照采样计划检查接收清单，把缺的列出」——**数据接收**（按样本编号核对的路径记录与补采清单）。
       路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
     */
     nav: {
       route: "/hardware",
-      tab: "capture",
+      tab: "receive",
     },
   },
   {

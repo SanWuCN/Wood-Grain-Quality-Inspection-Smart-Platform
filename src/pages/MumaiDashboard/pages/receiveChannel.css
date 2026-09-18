@@ -1,0 +1,170 @@
+/*
+ * 数据接收页（`/hardware?tab=receive`）
+ *
+ * 与「环境记录」「执行工作台」同一套观感：细边框 + 弱填充 + 状态色只出现在
+ * 左侧色条与 chip 上；不使用新色板。
+ */
+
+.rc-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-aux);
+}
+
+.rc-channels {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.rc-channel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--text-tertiary);
+  border-radius: 6px;
+  background: var(--fill-weak);
+}
+
+.rc-channel.is-ok {
+  border-left-color: var(--success);
+}
+
+.rc-channel.is-warn {
+  border-left-color: var(--warning);
+}
+
+.rc-channel.is-fail {
+  border-left-color: var(--danger);
+}
+
+.rc-channel.is-checking {
+  border-left-color: var(--info);
+}
+
+.rc-channel > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.rc-channel > header b {
+  color: var(--text-title);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+}
+
+.rc-channel dl {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.rc-channel dl > div {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.rc-channel dt {
+  flex: 0 0 56px;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.rc-channel dd {
+  flex: 1 1 auto;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+}
+
+.rc-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: var(--space-3) 0 0;
+  padding-left: 18px;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.rc-batch + .rc-batch {
+  margin-top: var(--space-4);
+}
+
+.rc-batch > header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: 6px;
+}
+
+.rc-batch > header b {
+  color: var(--text-title);
+  font-family: var(--font-data);
+  font-size: var(--fs-sub);
+}
+
+.rc-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rc-issue {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-warn);
+  font-size: 11px;
+}
+
+.rc-time {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.rc-paths {
+  font-family: var(--font-mono, var(--font-data));
+  font-size: 11px;
+}
+
+.rc-follow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rc-follow li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.rc-follow code {
+  color: var(--text-primary);
+  font-family: var(--font-data);
+}
+
+.rc-follow em {
+  color: var(--text-warn);
+  font-style: normal;
+}
+
+@media (max-width: 1280px) {
+  .rc-channels {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

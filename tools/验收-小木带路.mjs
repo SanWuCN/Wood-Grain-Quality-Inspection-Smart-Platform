@@ -149,6 +149,31 @@ try {
         check(`  ↳ 没有「标签缺失」`, !content.missingLabel);
       }
     }
+
+    /* 数据接收页：三路通道 + 接收清单 + 按样本编号核对，三块都要真的渲染出来 */
+    if (nav.route === "/hardware" && nav.tab === "receive") {
+      const content = await machine.waitFor(
+        `(() => {
+          const text = document.body.innerText || '';
+          const channels = ['小车数据通道', '手持设备通道', '场景文件网络通道'].filter((k) => text.includes(k));
+          return channels.length === 3
+            ? {
+                channels: channels.length,
+                manifest: /本单接收清单/.test(text),
+                samples: /按样本编号核对/.test(text),
+                independent: /采集时间各自独立记录/.test(text),
+                notLinked: /设备编号/.test(text),
+              }
+            : null;
+        })()`,
+        { timeoutMs: 6000 },
+      );
+      check(`  ↳ 数据接收页内容`, Boolean(content), content ? "三路通道齐全" : "三路通道没渲染出来");
+      if (content) {
+        check(`  ↳ 接收清单与样本编号核对两块都在`, content.manifest && content.samples);
+        check(`  ↳ 写明「采集时间各自独立记录」`, content.independent);
+      }
+    }
   }
 
   if (skipped.length) console.log(`\n  跳过（非语音触发）：${skipped.join("、")}`);

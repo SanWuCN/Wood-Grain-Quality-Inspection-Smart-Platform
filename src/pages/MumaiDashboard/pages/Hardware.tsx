@@ -41,6 +41,7 @@ import { CaptureTab } from "./CaptureRun";
 import { TriageTab } from "./TriageLog";
 import { DeviceAccessTab } from "./DeviceAccess";
 import { SiteEnvironmentTab } from "./SiteEnvironment";
+import { ReceiveChannelsTab } from "./ReceiveChannels";
 import { api } from "../api/client";
 import { useDeviceLink, useDevicePreview, type DeviceLink } from "../device/useDeviceLink";
 import { BATCH_STATE_LABEL, HANDHELD_DEVICE_ID, toScanBatch, type DeviceReport } from "../device/types";
@@ -66,6 +67,12 @@ const TABS = [
     只读页 —— 录入与校验仍然只有工单详情页那一个入口。
   */
   { key: "env", label: "环境记录", icon: "biz-multimodal" },
+  /*
+    数据接收（剧本：「到达现场后我会分别检查小车数据通道、手持设备通道和场景文件网络通道。
+    三类数据使用同一工单编号，采集时间各自独立记录」）：三路通道现状 + 本单接收清单 +
+    按样本编号核对的路径记录与补采清单。只读页 —— 接收是设备侧推送、平台侧落盘的动作。
+  */
+  { key: "receive", label: "数据接收", icon: "asset-folder" },
   { key: "triage", label: "异常排查", icon: "status-warning" },
   { key: "monitor", label: "硬件监看", icon: "identity-agent" },
   /*
@@ -993,9 +1000,11 @@ export default function Hardware() {
                     ? "归档采集记录"
                     : tab === "env"
                       ? "归档天气档案 + 工单环境记录"
-                      : tab === "access"
-                        ? "自检结论"
-                        : "归档回放"
+                      : tab === "receive"
+                        ? "三路通道自检 + 本单接收清单"
+                        : tab === "access"
+                          ? "自检结论"
+                          : "归档回放"
               }
             />
             <span>当前批次 {batch}</span>
@@ -1006,6 +1015,8 @@ export default function Hardware() {
                 "归档采集记录已加载"
               ) : tab === "env" ? (
                 "按工单绑定地点与日期 · 未启用联网查询"
+              ) : tab === "receive" ? (
+                "三类数据同一工单编号 · 采集时间各自独立记录"
               ) : tab === "monitor" ? (
                 <>
                   {/* 设备号是标识（不动），后面的链路状态里带活的秒数（动） */}
@@ -1026,7 +1037,7 @@ export default function Hardware() {
       </Toolbar>
 
       {/* 冻结横幅讲的是「本批次的病害结论」，与设备接入的自检、环境记录页都无关：那两屏不挂它 */}
-      {frozen && tab !== "capture" && tab !== "access" && tab !== "env" ? (
+      {frozen && tab !== "capture" && tab !== "access" && tab !== "env" && tab !== "receive" ? (
         <StateBlock
           kind="partial"
           title="该批次已冻结诊断输出"
@@ -1043,6 +1054,7 @@ export default function Hardware() {
       <div className={`adapt-body${tab === "triage" ? " adapt-body--fixed" : ""}`}>
         {tab === "capture" ? <CaptureTab /> : null}
         {tab === "env" ? <SiteEnvironmentTab /> : null}
+        {tab === "receive" ? <ReceiveChannelsTab /> : null}
         {tab === "triage" ? <TriageTab /> : null}
         {tab === "monitor" ? (
           <MonitorTab link={link} deviceId={deviceId} batchId={batch} />
