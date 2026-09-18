@@ -179,6 +179,16 @@ try {
     const snapshot = await machine.call("GET", "/api/sessions/demo-01/snapshot");
     return (snapshot?.json?.entities?.taskCard ?? []).filter((item) => item.data.orderId === orderId).length;
   };
+  /*
+    ⚠ 先说⑥之前**让 A 的工单列表真的加载过**（2026-09-30 修工装）：
+    ⑥ 的卡片是按"当前工单"生成的，而 `entities.order` 取的是**页面 store 里**的最新工单
+    （`executor.scriptEntities()`）。这台机器整轮验收都没打开过工单页时，store 是空的 ——
+    于是接口上有单、卡却一张都不生成，看起来像"内网同步坏了"。
+    现场不会这样（史要么在工单页上、要么小木刚建完单），工装得自己走到那一步。
+  */
+  await A.evaluate(`location.hash = '#/orders'`);
+  await A.waitFor(`Boolean(document.querySelector('.page--orders'))`, { timeoutMs: 15_000 });
+  await sleep(800);
   await askOnA("同步工单任务", "06");
   /*
     ⚠ 等**这一轮真的跑完**再数卡片：小木的 ask 是排队的（前面几轮的思考与播报还在队列里），
