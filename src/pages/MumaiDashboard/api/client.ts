@@ -135,6 +135,42 @@ export type MissionEntity = {
   cancelReason: string | null;
 };
 
+/**
+ * 执行工作台的任务卡（服务端 `taskCard` 实体；剧本 ⑥ ⑭ ⑮）。
+ *
+ * 一张卡 = 一件要有人做的事，带执行人（按岗位分工预填）、输入与完成条件；
+ * 状态只有三个，**没有"已完成"** —— 剧本明令「小木创建任务草稿……不直接把任务标成已完成」，
+ * 服务端也不给这个状态（`server/services/workflow.mjs` 的 `TASK_NEXT`）。
+ * 回执记的是"谁在什么时候接了这活"，与巡航任务的 `acceptedBy` 同一口径。
+ */
+export type TaskCardEntity = {
+  id: string;
+  orderId: string;
+  orderNo: string | null;
+  /** 批次标识：同一张工单的同一批次只生成一次（服务端幂等） */
+  batchKey: string;
+  /** 批次内序号（页面按它排，不按 id 的字典序） */
+  seq: number;
+  title: string;
+  ownerAccountId: string;
+  ownerLabel: string;
+  /** 岗位文案（展示用，取自 `seed/scenario.ts` 的 MEMBERS）；判权限一律按 `ownerAccountId` */
+  ownerRole: string | null;
+  inputs: string[];
+  doneCondition: string;
+  note: string | null;
+  /** 谁生成的：小木（剧本里由小木生成草稿）或人工 */
+  source: string;
+  state: "draft" | "saved" | "accepted";
+  createdBy: string | null;
+  createdAt: string;
+  savedBy: string | null;
+  savedAt: string | null;
+  ackedBy: string | null;
+  ackedAt: string | null;
+  ackNote?: string | null;
+};
+
 export type MapVersionEntity = {
   id: string;
   label: string;

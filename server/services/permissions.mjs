@@ -22,6 +22,18 @@ export const ACTION_PERMISSION = {
   "mission.cancel": "mission:monitor",
   "mission.complete": "mission:dispatch",
 
+  /*
+    执行工作台的任务卡（剧本 ⑥ ⑭ ⑮）。
+      task:manage  生成任务卡草稿、核对后保存 —— 架构师（小木的调用人）与项目经理
+      task:execute 执行人回执 —— 全栈工程师与具身智能工程师各拿一条（见 ROLE_PERMISSIONS）
+
+    ⚠ 没有 `task:done` 这个权限，服务端也没有 `done` 状态：剧本明令
+      「小木创建任务草稿……不直接把任务标成已完成」，完成与否由后续工单/验收环节表达。
+  */
+  "task.create": "task:manage",
+  "task.save": "task:manage",
+  "task.ack": "task:execute",
+
   "map.save": "map:save",
 
   /*
@@ -177,6 +189,8 @@ export const ROLE_PERMISSIONS = {
     "deployment:receive",
     "sample:review",
     "training:submit",
+    /* 执行工作台：全栈工程师是「补采」那张卡的执行人，回执要他自己点（剧本 ⑮） */
+    "task:execute",
     "knowledge:search",
     // 饶负责导入与核对资料（PRD §13：导入 / 更新资产用 knowledge:manage + data:upload）
     "knowledge:read",
@@ -190,6 +204,8 @@ export const ROLE_PERMISSIONS = {
     "sample:review",
     "sample:collect",
     "revisit:plan",
+    /* 执行工作台：具身智能工程师是「样本与测区核对」那张卡的执行人（剧本 ⑮） */
+    "task:execute",
     /*
       马只读数据与知识中心。
       PRD §13 明确「证据检索 knowledge:search 给沈、史、饶；马本期仍按现有权限控制，

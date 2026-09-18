@@ -18,8 +18,15 @@
  *   node --import ./tools/test-resolve-ts.mjs tools/验收-小木带路.mjs
  *   node --import ./tools/test-resolve-ts.mjs tools/验收-小木带路.mjs --url http://192.168.1.5:8000
  *   … --only ⑤,⑰,⑲     只跑指定轮次（排查时用）
+ *   … --keep-cards       保留 ⑥⑮ 生成的任务卡（默认收工会清掉，见下面的说明）
+ *
+ * ── 为什么默认要清任务卡（收工那一段）──────────────────────────────
+ * ⑥⑮ 两轮的自动操作会在服务端生成任务卡（`taskCard` 实体，幂等）。走一遍 25 轮
+ * 就会把演示库里的那两批卡生成出来 —— 而演示现场恰恰要看到"卡片跟着台词一张张出现"。
+ * 所以默认收工把它清掉；要看卡片就加 `--keep-cards`。
  */
 
+import { DatabaseSync } from "node:sqlite";
 import { Machine, sleep } from "./browser-harness.mjs";
 
 const args = process.argv.slice(2);
@@ -33,6 +40,8 @@ const only = argOf("only", "")
   .map((s) => s.trim())
   .filter(Boolean);
 const ACCOUNT = argOf("account", "shi");
+/** 演示库：工装收尾清任务卡用（卡片没有删除接口，随工单级联清理） */
+const DB_FILE = "server/data/mumai.db";
 
 const { SCRIPT_ROUNDS } = await import("../src/pages/MumaiDashboard/agent/script.ts");
 const { routeUtterance } = await import("../src/pages/MumaiDashboard/agent/scriptMatch.ts");
@@ -143,6 +152,25 @@ try {
   }
 
   if (skipped.length) console.log(`\n  跳过（非语音触发）：${skipped.join("、")}`);
+
+  /*
+    收工：清掉 ⑥⑮ 这一轮在服务端生成的任务卡。
+    卡片是幂等生成的（同一批只生成一次），留在库里会让演示现场看不到"卡片一张张出现"，
+    而且上一轮验收留下的"已保存 / 已回执"状态会与新台词矛盾。默认清掉，`--keep-cards` 保留。
+    只删 kind='taskCard' 的行 —— 服务端没有删除动作（卡片随工单级联清理），
+    这里直接动库是验收工装的收尾，不是产品路径。
+  */
+  if (!args.includes("--keep-cards")) {
+    try {
+      const db = new DatabaseSync(DB_FILE);
+      const removed = db.prepare("DELETE FROM entities WHERE kind='taskCard'").run();
+      db.close();
+      console.log(`\n  收工：清掉本轮生成的任务卡 ${removed.changes} 张（--keep-cards 可保留）`);
+    } catch (error) {
+      console.log(`\n  收工：任务卡清理失败（${String(error?.message ?? error)}）—— 演示前请手动清一次`);
+    }
+  }
+
   /* 留一张新页面的截图存档（内容判据在上面，截图只给评审看排版） */
   await machine.evaluate(`location.hash = '#/hardware?tab=env'`);
   await sleep(1200);

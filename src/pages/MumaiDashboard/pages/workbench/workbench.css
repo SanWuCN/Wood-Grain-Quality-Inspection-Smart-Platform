@@ -1,0 +1,137 @@
+/*
+ * 执行工作台（`/workbench`）
+ *
+ * 只用既有设计令牌，卡片观感与工单页的 `wo-*`、环境记录页的 `se-*` 同一套：
+ * 细边框 + 弱填充 + 小标题用次要色，状态色只出现在 chip 与左边框上。
+ */
+
+.wb-panel + .wb-panel {
+  margin-top: var(--space-3);
+}
+
+.wb-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-aux);
+}
+
+.wb-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wb-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--text-tertiary);
+  border-radius: 6px;
+  background: var(--fill-weak);
+}
+
+.wb-card.is-saved {
+  border-left-color: var(--info);
+}
+
+.wb-card.is-accepted {
+  border-left-color: var(--success);
+}
+
+.wb-card > header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.wb-card__no {
+  color: var(--text-tertiary);
+  font-family: var(--font-data);
+  font-size: var(--fs-aux);
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-card > header b {
+  flex: 1 1 auto;
+  color: var(--text-title);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+}
+
+.wb-card__owner {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+}
+
+.wb-card__owner b {
+  color: var(--text-primary);
+}
+
+.wb-card__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.wb-card__meta > div {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.wb-card__meta dt {
+  flex: 0 0 56px;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.wb-card__meta dd {
+  flex: 1 1 auto;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+  line-height: var(--lh-aux);
+}
+
+.wb-card__meta dd ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.wb-card__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: auto;
+  font-size: var(--fs-aux);
+}
+
+.wb-card__done {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+}
+
+.wb-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* 窄屏（笔记本投屏副屏）退回单列：两列会把"输入 / 完成条件"挤成两三个字一行 */
+@media (max-width: 1280px) {
+  .wb-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

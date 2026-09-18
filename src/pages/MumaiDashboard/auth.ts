@@ -108,6 +108,15 @@ export type Permission =
   | "dataset:freeze"
   /** 参考样本采集（异常排查完成后的补采任务） */
   | "sample:collect"
+  /**
+   * 执行工作台的任务卡（剧本 ⑥ ⑭ ⑮）。
+   *   task:manage  生成任务卡草稿、核对后保存 —— 架构师（小木的调用人）与项目经理
+   *   task:execute 执行人回执 —— 全栈工程师与具身智能工程师
+   * 与 `server/services/permissions.mjs` 的 `task.*` 三条动作一一对应；
+   * 卡片没有"已完成"这个状态（剧本：不直接把任务标成已完成）。
+   */
+  | "task:manage"
+  | "task:execute"
   /** 排练控制台：新建演示会话、捕获与恢复阶段快照、导出诊断包（PRD §11） */
   | "console:admin";
 
@@ -144,6 +153,8 @@ export const PERMISSION_LABEL: Record<Permission, string> = {
   "sample:review": "样本审核",
   "dataset:freeze": "数据集冻结",
   "sample:collect": "参考样本采集",
+  "task:manage": "任务卡生成与保存",
+  "task:execute": "任务卡回执",
   "console:admin": "排练控制台",
 };
 
@@ -200,6 +211,7 @@ const ROLE_ACTIONS: Record<string, readonly Permission[]> = {
     "sample:review", // PRD 3.5 / S14：饶负责硬件端数据复核（饱和、掉帧）
     "training:submit", // PRD 3.6 / S15：准备部署与恢复版本，提交本次数据集
     "knowledge:search", // PRD 5.1 / S06：文件来源与归档资料核对
+    "task:execute", // 剧本 ⑮：执行工作台「补充参考样本」那张卡由全栈回执
     // 数据与知识中心（PRD §13）：饶负责导入资料、核对来源与绑定对象
     "knowledge:read",
     "knowledge:manage",
@@ -214,6 +226,7 @@ const ROLE_ACTIONS: Record<string, readonly Permission[]> = {
     "sample:review", // PRD 3.5：马查样本来源和位置
     "sample:collect", // PRD 2.1 样本位置复核 / S13：取出参考样块、登记批次
     "revisit:plan", // PRD 2.1 复巡计划 / S22：把 Z04 观察点加入复巡计划
+    "task:execute", // 剧本 ⑮：执行工作台「样本与测区核对」那张卡由具身回执
     /*
       数据与知识中心只读（PRD §13）。
       「证据检索 knowledge:search 给沈、史、饶；马本期仍按现有权限控制，未经调整不开放」——
@@ -284,6 +297,12 @@ export const ROUTE_READ: Record<string, readonly string[]> = {
     页面内部会把没有权限的按钮置灰并说明原因。
   */
   "/knowledge": ["shen", "shi", "rao", "ma"],
+  /*
+    执行工作台（剧本 ⑥ ⑮「我已把工单任务同步到工作台」「任务卡已生成」）。
+    四人都要看得到自己的那张卡：史/沈核对后保存，饶/马按卡回执。
+    这一页刻意**不进一级导航**（PRD 2.2 固定八项），由小木带路与工单页的入口进入。
+  */
+  "/workbench": ["shen", "shi", "rao", "ma"],
 };
 
 /** 取某个角色的可执行操作集合 */

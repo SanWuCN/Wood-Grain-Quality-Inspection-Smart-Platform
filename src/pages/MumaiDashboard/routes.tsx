@@ -25,6 +25,12 @@ const Knowledge = lazy(() => import("./pages/Knowledge"));
 const Archive = lazy(() => import("./pages/Archive"));
 const Present = lazy(() => import("./pages/Present"));
 const Console = lazy(() => import("./pages/Console"));
+/*
+  执行工作台（剧本 ⑥ ⑮ 的「工作台 / 任务卡」）。
+  ⚠ 与 `/present`、`/console` 同一种做法：**有路由、不进一级导航** ——
+    PRD 2.2 的一级导航固定八项，工作台由小木带路与工单页入口进入。
+*/
+const Workbench = lazy(() => import("./pages/Workbench"));
 
 export default function RoutesTree() {
   return (
@@ -48,6 +54,8 @@ export default function RoutesTree() {
         <Route path="/knowledge" element={<Knowledge />} />
         <Route path="/archive" element={<Archive />} />
         <Route path="/present" element={<Present />} />
+        {/* 执行工作台（剧本 ⑥ ⑮）：任务卡草稿 / 核对保存 / 执行人回执 */}
+        <Route path="/workbench" element={<Workbench />} />
         {/* 排练控制台（PRD §11）：管理员新建会话与恢复阶段快照 */}
         <Route path="/console" element={<Console />} />
         {/*

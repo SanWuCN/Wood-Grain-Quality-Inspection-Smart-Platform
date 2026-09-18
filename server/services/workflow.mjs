@@ -438,6 +438,118 @@ const HANDLERS = {
     };
   },
 
+  /**
+   * 执行工作台的任务卡（剧本 ⑥ ⑭ ⑮）。
+   *
+   * 剧本原话：
+   *   · ⑥ 小木：「我已把工单任务同步到工作台。环境配置、地图、场景和检测批次将关联本次工单」；
+   *   · ⑭ 小木：「建议核对材种来源与标定范围，补充有来源的参考样本，检查数据质量，并验证候选模型」；
+   *   · ⑮ 小木：「任务卡已生成。补采交全栈执行，样本与测区由具身核对，项目经理审核分组和验证结果，
+   *              平台记录各项回执」+ 夹注「小木创建任务草稿，按本轮岗位分工预填执行人；
+   *              史核对后保存，**不直接把任务标成已完成**」。
+   *
+   * ── 为什么是一批卡而不是一张（`batchKey`）───────────────────────────
+   * 现场是"一次生成四张卡"，而命令总线一次只写一个实体（`CommandResult.entity`
+   * 只有一个）。所以这里一次写 N 条 `taskCard` 实体，并用 `batchKey` 把它们绑成一批：
+   *   · **幂等**：同一张工单的同一个批次只生成一次 —— 连按两次快捷键、两台电脑
+   *     同时触发，都不会出现八张卡（返回 `created:false` 与已有那一批）；
+   *   · 卡片编号 `TK-<工单号日期段>-<两位流水>`，与巡航任务号同一套做法
+   *     （日期取自工单号，不再问时钟；流水在事务里数）。
+   *
+   * ── 状态机（三条，缺一不可）─────────────────────────────────────────
+   *   draft（小木生成的草稿）─task.save→ saved（项目经理/架构师核对后保存）
+   *   ─task.ack→ accepted（执行人回执，记下是谁在什么时候回的）
+   * **没有 `done`**：剧本明令"不直接把任务标成已完成"，服务端干脆不给这个状态，
+   * 免得以后有人顺手加一个按钮就把没做完的活标完成。
+   */
+  "task.create": (ctx, payload) => {
+    const orderId = payload.orderId ?? null;
+    const orderNo = payload.orderNo ?? null;
+    const batchKey = String(payload.batchKey ?? "").trim();
+    const cards = Array.isArray(payload.cards) ? payload.cards : [];
+    if (!orderId) throw new WorkflowError(422, "NO_ORDER", "任务卡要挂在某张工单下：先建单或选中一张工单");
+    if (!batchKey) throw new WorkflowError(422, "NO_BATCH_KEY", "任务卡批次缺少标识（batchKey）");
+    if (cards.length === 0) throw new WorkflowError(422, "NO_CARDS", "没有要生成的任务卡");
+    for (const card of cards) {
+      if (!card?.title || !card?.ownerAccountId || !card?.doneCondition) {
+        throw new WorkflowError(422, "BAD_CARD", "每张任务卡都要有标题、执行人与完成条件");
+      }
+    }
+
+    const sameBatch = listKind(ctx.db, ctx.sessionId, "taskCard").filter(
+      (item) => item.data.orderId === orderId && item.data.batchKey === batchKey,
+    );
+    if (sameBatch.length) {
+      return {
+        entityKind: "taskCard",
+        entity: sameBatch[0],
+        result: {
+          created: false,
+          orderId,
+          batchKey,
+          cardIds: sameBatch.map((item) => item.id),
+          cards: sameBatch.map((item) => item.data),
+        },
+        events: [],
+      };
+    }
+
+    const day = /^WO-(\d{8})-\d+$/.exec(String(orderNo ?? ""))?.[1] ?? null;
+    const prefix = day ? `TK-${day}-` : "TK-";
+    const used =
+      ctx.db
+        .prepare("SELECT COUNT(*) AS n FROM entities WHERE session_id=? AND kind='taskCard' AND id LIKE ?")
+        .get(ctx.sessionId, `${prefix}%`)?.n ?? 0;
+
+    const created = cards.map((card, index) => {
+      const id = `${prefix}${String(used + index + 1).padStart(2, "0")}`;
+      const data = {
+        id,
+        orderId,
+        orderNo,
+        batchKey,
+        /** 批次内的序号（页面按它排，不按 id 的字典序） */
+        seq: index + 1,
+        title: String(card.title),
+        ownerAccountId: String(card.ownerAccountId),
+        ownerLabel: card.ownerLabel ? String(card.ownerLabel) : String(card.ownerAccountId),
+        /* 岗位文案（取自 seed 的 MEMBERS，展示用）；判权限一律按 ownerAccountId */
+        ownerRole: card.ownerRole ? String(card.ownerRole) : null,
+        inputs: Array.isArray(card.inputs) ? card.inputs.map(String) : [],
+        doneCondition: String(card.doneCondition),
+        note: card.note ? String(card.note) : null,
+        source: card.source ? String(card.source) : "小木",
+        state: "draft",
+        createdBy: ctx.actorId,
+        createdAt: nowIso(),
+        savedBy: null,
+        savedAt: null,
+        ackedBy: null,
+        ackedAt: null,
+      };
+      return writeEntity(ctx.db, ctx.sessionId, "taskCard", id, data);
+    });
+
+    return {
+      entityKind: "taskCard",
+      entity: created[0],
+      result: {
+        created: true,
+        orderId,
+        orderNo,
+        batchKey,
+        cardIds: created.map((item) => item.id),
+        cards: created.map((item) => item.data),
+      },
+      events: [
+        {
+          type: "task.created",
+          payload: { orderId, orderNo, batchKey, count: created.length, by: ctx.actorId },
+        },
+      ],
+    };
+  },
+
   "map.save": (ctx, payload) => {
     // 只生成地图版本，**不碰 Mission**（评审 F03：保存地图不能把任务改成已完成）
     const id = payload.mapVersionId ?? `MAP-${Date.now().toString(36).toUpperCase()}`;
@@ -933,6 +1045,65 @@ function missionTransition(action) {
 
 for (const action of ["mission.ack", "mission.pause", "mission.resume", "mission.cancel", "mission.complete"]) {
   HANDLERS[action] = missionTransition(action);
+}
+
+/* ------------------------------------------------------------------ *
+ * 执行工作台的任务卡 · 状态迁移（剧本 ⑥ ⑭ ⑮，见上面 "task.create" 的注释）
+ *
+ * 只有两条迁移，且**没有 `done`**：
+ *   task.save  draft   → saved     （核对后保存）
+ *   task.ack   saved   → accepted  （执行人回执，记下是谁、什么时候）
+ *
+ * 与 mission 的迁移分开写而不是硬塞进同一段：两者的状态名、记的字段、
+ * 事件名都不同，混在一起改一处就会影响另一处（巡航任务那边已经验收过了）。
+ * ------------------------------------------------------------------ */
+
+const TASK_NEXT = {
+  "task.save": { from: ["draft"], to: "saved" },
+  "task.ack": { from: ["saved"], to: "accepted" },
+};
+
+function taskTransition(action) {
+  return (ctx, payload) => {
+    const target = requireEntity(ctx, "taskCard");
+    const rule = TASK_NEXT[action];
+    const current = target.data.state;
+    if (!rule.from.includes(current)) {
+      const label = { draft: "草稿", saved: "已保存", accepted: "已回执" }[current] ?? current;
+      throw new WorkflowError(409, "BAD_TASK_STATE", `任务卡当前是「${label}」，不能执行这一步`);
+    }
+    const nextState = rule.to;
+    const data = {
+      ...target.data,
+      state: nextState,
+      ...(action === "task.save" ? { savedBy: ctx.actorId, savedAt: nowIso() } : {}),
+      ...(action === "task.ack" ? { ackedBy: ctx.actorId, ackedAt: nowIso(), ackNote: payload.note ?? null } : {}),
+    };
+    const entity = writeEntity(ctx.db, ctx.sessionId, "taskCard", target.id, data);
+    return {
+      entityKind: "taskCard",
+      entity,
+      result: { cardId: target.id, state: nextState, from: current, orderId: target.data.orderId ?? null },
+      events: [
+        {
+          type: `task.${nextState}`,
+          payload: {
+            cardId: target.id,
+            orderId: target.data.orderId ?? null,
+            batchKey: target.data.batchKey ?? null,
+            from: current,
+            to: nextState,
+            by: ctx.actorId,
+            ownerAccountId: target.data.ownerAccountId ?? null,
+          },
+        },
+      ],
+    };
+  };
+}
+
+for (const action of Object.keys(TASK_NEXT)) {
+  HANDLERS[action] = taskTransition(action);
 }
 
 /* ------------------------------------------------------------------ *

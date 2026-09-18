@@ -44,8 +44,15 @@ import {
   cancelCleanFlowReveal,
   cleanFlowMounted,
 } from "../cleanFlowReveal";
+import {
+  advanceWorkbenchReveal,
+  beginWorkbenchReveal,
+  cancelWorkbenchReveal,
+  workbenchMounted,
+} from "../workbenchReveal";
 import { commissionBinding } from "../commissionBinding";
 import { useWorkOrderStore } from "../store/workOrders";
+import { ensureTaskCards } from "../store/taskCards";
 import { understand, SEMANTIC_THRESHOLDS, type MatchResult } from "./matcher";
 import { planFacts, planTask, type TaskPlan } from "./planner";
 import {
@@ -509,6 +516,9 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
   } else if (round.reveal?.target === "clean-flow") {
     /* ⑰：数据集页跟着播报逐拍推进（推到「执行清洗」为止，人工核验不替人点） */
     startCleanFlowReveal(round, spoken);
+  } else if (round.reveal?.target === "workbench-cards") {
+    /* ⑥⑮：执行工作台的任务卡跟着播报**逐张铺开**（一句一张，见 script.ts 的 reveal 注释） */
+    startWorkbenchReveal(round, spoken);
   }
 
   /*
@@ -525,6 +535,34 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
     （`actionFor` 查不到就不渲染），所以这里不必再判一次。
   */
   window.dispatchEvent(new CustomEvent("mumai:demo-surface", { detail: { roundNo: round.roundNo } }));
+
+  /*
+    ── 执行工作台的任务卡（剧本 ⑥ ⑮；用户 2026-09-23「小木互动触发的自动操作」）──
+    ⑥ 小木说「我已把工单任务同步到工作台」→ 生成「开工四项」草稿；
+    ⑮ 小木说「任务卡已生成……」→ 生成「异常适配四项」草稿。
+    两条都走服务端 `task.create`（`store/taskCards.ts` 的 `ensureTaskCards`）：
+
+      · **幂等**：同一张工单的同一批只生成一次 —— 连按两次快捷键、两台电脑同时
+        触发都不会出现八张卡（服务端按 `batchKey` 去重）；
+      · **只生成草稿**：保存（核对后）与回执（执行人）都不在这里做 ——
+        剧本明令「不直接把任务标成已完成」，服务端连 `done` 状态都没有；
+      · **不伪造成功**：拿不到工单、服务端失败都只记日志（页面自己会显示空态与原因），
+        绝不补一句"任务卡已生成"糊过去。
+
+    ⚠ 只认 `roundNo`；剧本重排编号时这一条与 `script.ts` 的 nav 一起改
+      （`scriptNav.test.ts` 会核对 ⑥⑮ 落在 /workbench 上）。
+  */
+  if (round.roundNo === "⑥" || round.roundNo === "⑮") {
+    const batchKey = round.roundNo === "⑥" ? "startup" : "adapt";
+    const orderId = entities.order ?? "";
+    if (orderId) {
+      void ensureTaskCards(batchKey, orderId).catch((error) => {
+        console.warn(`[script] 第 ${round.roundNo} 轮的任务卡生成失败：`, error);
+      });
+    } else {
+      console.warn(`[script] 第 ${round.roundNo} 轮要生成任务卡，但拿不到工单 id（列表可能还没拉回来）`);
+    }
+  }
 
   /*
     ── 同步备份小窗（用户口径 2026-09-16；2026-09-17 拆轮；2026-09-18 改台词）─
@@ -649,6 +687,31 @@ function startCleanFlowReveal(round: ScriptRound, spoken?: unknown): void {
     clear: () => cancelCleanFlowReveal(),
     spoken,
     mountReady: cleanFlowMounted,
+  });
+}
+
+/**
+ * ⑥⑮（执行工作台）：任务卡**跟着播报逐张铺开**。
+ *
+ * 剧本 ⑮ 一口气点了四张卡的分工（补采 / 样本与测区 / 分组与验证 / 适配验证），
+ * 所以这一轮按**小句**切段、一句点亮一张；⑥ 是两句话，前一句亮前两张、后一句亮后两张。
+ * 批次键用 `batchKey`（开工四项 / 异常适配四项各登记一次计划，互不顶掉）。
+ *
+ * ⚠ 卡片是异步生成的：探针只等页面挂载（`workbenchMounted` 看 `.wb`），
+ *   不等卡片 —— 等卡片会让计划在卡片到达前就走到"到点补齐"，逐张铺开等于没发生。
+ */
+function startWorkbenchReveal(round: ScriptRound, spoken?: unknown): void {
+  const reveal = round.reveal;
+  if (!reveal || reveal.sections.length === 0) return;
+  const batchKey = round.roundNo === "⑥" ? "startup" : "adapt";
+  beginWorkbenchReveal(batchKey, reveal.sections);
+  runRevealTimeline({
+    segments: splitClauses(mainLineOf(round)),
+    beats: reveal.beats,
+    apply: (slots) => advanceWorkbenchReveal(batchKey, slots),
+    clear: () => cancelWorkbenchReveal(),
+    spoken,
+    mountReady: workbenchMounted,
   });
 }
 /**

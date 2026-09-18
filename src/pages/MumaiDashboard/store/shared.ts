@@ -27,6 +27,7 @@ import {
   type ArtifactEntity,
   type CommandResult,
   type EnvironmentEntity,
+  type TaskCardEntity,
   type MapVersionEntity,
   type MissionEntity,
   type SceneEntity,
@@ -258,6 +259,16 @@ export function missions(state: SharedState): SharedEntity<MissionEntity>[] {
 /** 归档清单：服务端持有登记摘要与真实文件，页面只读它 */
 export function archiveItems(state: SharedState): SharedEntity<ArchiveItemEntity>[] {
   return entitiesOf<ArchiveItemEntity>(state, "archiveItem");
+}
+
+/**
+ * 执行工作台的任务卡（`taskCard`）：服务端留存，内网各端看到的是同一份。
+ *
+ * 与 `missions` 同一条口径：数组引用在快照不变时稳定，可以直接交给
+ * `useSyncExternalStore` 当选择器；按工单/批次派生要放进 `useMemo`。
+ */
+export function taskCards(state: SharedState): SharedEntity<TaskCardEntity>[] {
+  return entitiesOf<TaskCardEntity>(state, "taskCard");
 }
 
 /** 是否连得上共享服务：连不上时所有写操作都要禁用并说明原因 */

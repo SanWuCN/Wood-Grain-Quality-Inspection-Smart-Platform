@@ -17,13 +17,25 @@
  */
 
 import { Panel } from "../../Panel";
-import { DataTable } from "../../ui";
+import { Btn, DataTable } from "../../ui";
 import { DEPARTURE_KIT, FOUR_TASKS, TO_CONFIRM, TO_CONFIRM_MARK } from "./taskScope";
 import "./task-scope.css";
 
 export function TaskScopePanel({ className = "" }: { className?: string }) {
   return (
-    <Panel title="任务范围与出发清单" className={`wop-reveal ${className}`.trim()}>
+    <Panel
+      title="任务范围与出发清单"
+      className={`wop-reveal ${className}`.trim()}
+      /*
+        通往执行工作台的入口（剧本 ⑥「我已把工单任务同步到工作台」）。
+        工作台**不进一级导航**（PRD 2.2 固定八项），所以工单页要留一个手动入口：
+        现场漏触发小木那两轮时，人也能自己走过去看任务卡与回执。
+      */
+      extra={
+        <Btn tone="ghost" onClick={() => (window.location.hash = "#/workbench")}>
+          执行工作台
+        </Btn>
+      }>
       <h4 className="sub">四项任务</h4>
       <DataTable
         head={["序号", "任务", "说明"]}

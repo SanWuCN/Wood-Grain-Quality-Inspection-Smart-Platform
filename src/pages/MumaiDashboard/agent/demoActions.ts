@@ -178,10 +178,16 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
   },
   {
     roundNo: "⑥",
-    title: "工作台生成四张任务卡，第一张进入进行中",
+    /*
+      这一轮的页面动作就是**执行工作台本身**（`/workbench`）：卡片由 ⑥ 幂等生成，
+      并按 `script.ts` 的 `reveal.workbench-cards` 逐张铺开。
+      原先这里还叠一个浮层（标题「工作台生成四张任务卡」）——页面已经跳过去了，
+      旁边再挂一句同样的话就是"两个页面打架"（与 ②③④⑪⑳ 同一处处理）。
+    */
+    title: "执行工作台生成「开工四项」任务卡（执行人 / 输入 / 完成条件）",
     surface: "tasks",
+    revealOnly: true,
     dataKeys: ["components.codes", "components.focus"],
-    button: "在平台上标记已同步",
     simulated: true,
   },
   {
@@ -286,8 +292,14 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
   },
   {
     roundNo: "⑮",
-    title: "生成四张本地任务卡（负责人 / 输入 / 完成条件）",
+    /*
+      同 ⑥：这一轮的可见动作就是**执行工作台**上的四张卡（异常适配那一批），
+      跟着台词一句一张地铺开。卡片存在服务端（`taskCard` 实体），不是"本地卡片"——
+      换台电脑看到的是同一份，所以标题里不再写"本地"。
+    */
+    title: "执行工作台生成「异常适配四项」任务卡（执行人 / 输入 / 完成条件）",
     surface: "tasks",
+    revealOnly: true,
     dataKeys: ["anomaly.batchId", "anomaly.missingFrames", "components.focus"],
     simulated: true,
   },

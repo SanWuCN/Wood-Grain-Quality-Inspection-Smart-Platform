@@ -998,6 +998,12 @@ export function createWorkOrderService({ db, hub = null, devices = null, session
         `orderId` 存在实体的 JSON 里，用 json_extract 精确匹配（不用 LIKE 猜）。
       */
       db.prepare("DELETE FROM entities WHERE kind='mission' AND json_extract(data,'$.orderId') = ?").run(row.id);
+      /*
+        执行工作台的任务卡（`taskCard` 实体，剧本 ⑥ ⑭ ⑮）同理：卡片按工单生成，
+        工单删了就该跟着清 —— 否则工作台上会有一批"执行人还看得见、工单却查不到"的卡，
+        现场点回执时才发现来源工单不存在。
+      */
+      db.prepare("DELETE FROM entities WHERE kind='taskCard' AND json_extract(data,'$.orderId') = ?").run(row.id);
       db.prepare("DELETE FROM work_orders WHERE id = ?").run(row.id);
     });
 

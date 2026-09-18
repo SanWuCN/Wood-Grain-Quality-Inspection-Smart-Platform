@@ -107,11 +107,12 @@ export type ScriptRound = {
   reveal?: {
     /**
      * 揭示目标：
-     *   · `order-detail` —— 工单详情页按「组」逐段展开（①④⑧⑩⑳㉑ 等轮）；
-     *   · `clean-flow`   —— 数据清洗流程页按「阶段」逐拍推进到人工核验（⑰）。
-     * 两者共用 `ordersReveal.runRevealTimeline` 的时间线，只是应用对象不同。
+     *   · `order-detail`    —— 工单详情页按「组」逐段展开（①④⑧⑩⑳㉑ 等轮）；
+     *   · `clean-flow`      —— 数据清洗流程页按「阶段」逐拍推进到人工核验（⑰）；
+     *   · `workbench-cards` —— 执行工作台的任务卡按「槽位」逐张铺开（⑥⑮，位置编号 c1…c4）。
+     * 三者共用 `ordersReveal.runRevealTimeline` 的时间线，只是应用对象不同。
      */
-    target: "order-detail" | "clean-flow";
+    target: "order-detail" | "clean-flow" | "workbench-cards";
     sections: string[];
     beats: string[][];
   };
@@ -491,11 +492,23 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     voicePack: null,
     intentId: null,
     /*
-      页面落点（v2 小木带路）：「我已把工单任务同步到工作台」——任务总览（工作台）。
+      页面落点（v2 小木带路）：「我已把工单任务同步到工作台」——**执行工作台**（/workbench，任务卡页面）。
+      这一页与 /present、/console 同一种做法：有路由、不进一级导航（PRD 2.2 固定八项），
+      由小木带路与工单页入口进入；⑥ 说完由 executor 幂等生成「开工四项」草稿。
       路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
     */
     nav: {
-      route: "/",
+      route: "/workbench",
+    },
+    /*
+      逐张铺开（`workbenchReveal.ts`）：⑥ 两句话 → 先说"已同步到工作台"亮前两张，
+      再说"环境配置、地图、场景和检测批次将关联本次工单"时亮后两张。
+      与工单页的逐组展开共用 `runRevealTimeline`，只是目标是工作台的卡片槽位（位置编号 c1…c4）。
+    */
+    reveal: {
+      target: "workbench-cards",
+      sections: ["c1", "c2", "c3", "c4"],
+      beats: [["c1", "c2"], ["c3", "c4"]],
     },
     precondition: "操作者先说「现场共四根核心古木主体…」（本轮的上一句）",
   },
@@ -767,11 +780,23 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     voicePack: null,
     intentId: null,
     /*
-      页面落点（v2 小木带路）：「任务卡已生成。补采交全栈执行，样本与测区由具身核对」——任务总览（工作台任务卡）。
+      页面落点（v2 小木带路）：「任务卡已生成。补采交全栈执行，样本与测区由具身核对」——**执行工作台**
+      （/workbench）；⑮ 说完由 executor 幂等生成「异常适配四项」草稿，保存与回执留在页面上由人点。
       路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
     */
     nav: {
-      route: "/",
+      route: "/workbench",
+    },
+    /*
+      ⑮ 的台词一口气点了四张卡的分工 —— 用**小句**切段（逗号也切）正好一句一张：
+      「补采交全栈执行」→ 第 1 张、「样本与测区由具身核对」→ 第 2 张、
+      「项目经理审核分组和验证结果」→ 第 3 张、「平台记录各项回执」→ 第 4 张。
+      第一句「任务卡已生成」不点亮任何卡（那一拍是"卡还没出来"的语义）。
+    */
+    reveal: {
+      target: "workbench-cards",
+      sections: ["c1", "c2", "c3", "c4"],
+      beats: [[], ["c1"], ["c2"], ["c3"], ["c4"]],
     },
   },
   {
