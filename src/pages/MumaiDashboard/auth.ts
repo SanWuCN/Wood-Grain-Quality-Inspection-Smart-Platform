@@ -266,8 +266,14 @@ export const ROUTE_PERMISSION: Record<string, readonly Permission[]> = {
  * 保持其余页面原有行为不变 —— 这是一次有针对性的放权，不是把权限模型推倒重来。
  */
 export const ROUTE_READ: Record<string, readonly string[]> = {
-  // 工单是全部交接的上下文：饶要在这里接收环境配置（评审 F04）
-  "/orders": ["shen", "shi", "rao"],
+  /*
+    工单是全部交接的上下文：饶要在这里接收环境配置（评审 F04）；
+    马（2026-09-18 追加）要在这里**接自主巡航任务**——用户口径
+    「这边是 shi 派发的，然后 ma 这边接受任务去建图巡航」。
+    他只读（这一页没有 `order:review`，`isReadOnlyPath` 为真，页面会写明"只读查阅"）；
+    接受任务这一下走的是 `mission:dispatch`，马本来就有。
+  */
+  "/orders": ["shen", "shi", "rao", "ma"],
   // 孪生：马要只读场景并配合测区/样本位置审核（评审 F04）
   "/twin": ["shen", "shi", "rao", "ma"],
   // 数据集与样本审核页签在固件及模型页：马承担「查样本来源和位置」（评审 F04）

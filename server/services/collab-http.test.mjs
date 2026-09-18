@@ -55,8 +55,7 @@ test("多机协同：端明细、同步实测回执、写入来源留痕、实�
 
     /* ---------- ① 服务器身份 + 地址清单 ---------- */
     const peersNoEnd = await call(shi, "GET", "/api/sessions/demo-01/peers");
-    assert.equal(peersNoEnd.status, 200);
-    const info = peersNoEnd.json;
+    assert.equal(peersNoEnd.status, 200);    const info = peersNoEnd.json;
     assert.equal(info.sessionId, "demo-01");
     assert.ok(info.server?.hostname, "要报出这台服务器的主机名");
     assert.equal(info.server.dbFile, ":memory:", "要如实报出数据在哪个库文件里（内存库也照实说）");
@@ -77,6 +76,17 @@ test("多机协同：端明细、同步实测回执、写入来源留痕、实�
       "老字段 lanUrls 必须与新清单里的局域网地址一致",
     );
     assert.deepEqual(info.ends, [], "还没连端时明细必须是空数组");
+
+    /* ---------- ①b 「我现在的令牌是谁」要答得出来（auth:false 的路由得自己解析） ---------- */
+    const me = await call(shi, "GET", "/api/auth/me");
+    assert.equal(me.status, 200);
+    assert.equal(me.json.actor?.id, "shi", `带令牌的 /api/auth/me 要回出是谁，实得 ${JSON.stringify(me.json.actor)}`);
+    assert.ok((me.json.allowedActions ?? []).length > 0, "顺带要把这个账号的权限带出来");
+    const anonymous = await fetch(`${base}/api/auth/me`);
+    const anonymousBody = await anonymous.json();
+    assert.equal(anonymous.status, 200, "没有令牌不是错误（否则每次重启都会在控制台刷 401）");
+    assert.equal(anonymousBody.actor, null);
+    assert.deepEqual(anonymousBody.allowedActions, []);
 
     /* ---------- ② 连上一台端（自报身份）→ 明细里出现它 ---------- */
     socket = new WebSocket(`${base.replace(/^http/, "ws")}/ws?sessionId=demo-01`);

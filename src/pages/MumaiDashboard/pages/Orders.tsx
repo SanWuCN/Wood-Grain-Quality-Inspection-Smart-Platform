@@ -38,8 +38,18 @@ import {
 } from "../seed/scenario";
 import { isApiError } from "../api/client";
 import type { ApiError, WorkOrderAction } from "../api/client";
-import { environmentHistory, isOnline, latestEnvironment, useSharedStore } from "../store/shared";
+import { environmentHistory, isOnline, latestEnvironment, missions, useSharedStore } from "../store/shared";
 import { useWorkOrderStore } from "../store/workOrders";
+import {
+  acceptCruiseMission,
+  activeCruiseMissionOfOrder,
+  cancelCruiseMission,
+  completeCruiseMission,
+  cruiseMissionsOfOrder,
+  cruiseRevisionOf,
+  dispatchCruiseMission,
+  type CruiseDispatchBody,
+} from "../store/cruise";
 import { ORDER_STATUS_TONE, WORK_ORDER_STATUS_TONE } from "./overview.constants";
 import type { EnvRecord, OrderStatus } from "../seed/types";
 
@@ -170,6 +180,19 @@ export default function Orders() {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<ApiError | null>(null);
 
+  /*
+    本单的自主巡航任务（服务端 mission 实体，按 orderId 挑）。
+
+    `entities.mission` 这个数组在快照不变时引用是稳定的，所以可以安全地当
+    `useSyncExternalStore` 的选择器返回值；派生列表一律放进 `useMemo`
+    ——选择器里跑 `.filter().sort()` 每次都返回新数组会触发
+    "getSnapshot should be cached" 的无限重渲染。
+  */
+  const orderIdForCruise = serverDetail?.order.id ?? null;
+  const missionRecords = useSharedStore(missions);
+  const cruiseHistory = useMemo(() => cruiseMissionsOfOrder(missionRecords, orderIdForCruise), [missionRecords, orderIdForCruise]);
+  const currentCruise = useMemo(() => activeCruiseMissionOfOrder(missionRecords, orderIdForCruise), [missionRecords, orderIdForCruise]);
+
   /**
    * 列表加载：首次进入、切换筛选、搜索输入停止 300ms 后各拉一次。
    * 三条路走同一个 effect —— 筛选与搜索都在服务端做，前端不再各写一遍过滤。
@@ -290,8 +313,50 @@ export default function Orders() {
           pushEvent(`删除工单 ${orderNo}`, "warn");
         }, `工单 ${orderNo} 已删除`);
       },
+      /*
+        自主巡航任务（用户 2026-09-18）：下发 / 接受 / 完成 / 撤销。
+        四条都走命令总线，服务端给任务编号、判权限与状态机；这里只负责发命令、
+        报错与一句现场话术。`expectedRevision` 取共享 store 里那条实体的版本 ——
+        两台电脑同时点"接受"只有一台会成功，另一台拿到 409 并据此提示刷新。
+      */
+      dispatchCruise: async (body: CruiseDispatchBody) => {
+        await runAction(async () => {
+          const result = await dispatchCruiseMission(body);
+          pushEvent(`下发自主巡航任务 ${result.taskNo}（工单 ${body.orderNo}）`, "ok");
+        }, "已下发自主巡航任务，等操作员（马）在接受前确认");
+      },
+      acceptCruise: async () => {
+        if (!serverDetail) return;
+        await runAction(async () => {
+          const current = currentCruise;
+          const revision = current ? cruiseRevisionOf(missions(useSharedStore.getState()), current.id) : null;
+          if (!current || revision === null) throw new Error("这条任务已经不在快照里了，刷新后再试");
+          await acceptCruiseMission(current, revision);
+          pushEvent(`接受自主巡航任务 ${current.id}，准备去建图巡航`, "ok");
+        }, "已接受任务：可以去建图巡航控制台作业了");
+      },
+      completeCruise: async () => {
+        if (!serverDetail) return;
+        await runAction(async () => {
+          const current = currentCruise;
+          const revision = current ? cruiseRevisionOf(missions(useSharedStore.getState()), current.id) : null;
+          if (!current || revision === null) throw new Error("这条任务已经不在快照里了，刷新后再试");
+          await completeCruiseMission(current, revision);
+          pushEvent(`自主巡航任务 ${current.id} 标记完成`, "ok");
+        }, "任务已完成");
+      },
+      cancelCruise: async () => {
+        if (!serverDetail) return;
+        await runAction(async () => {
+          const current = currentCruise;
+          const revision = current ? cruiseRevisionOf(missions(useSharedStore.getState()), current.id) : null;
+          if (!current || revision === null) throw new Error("这条任务已经不在快照里了，刷新后再试");
+          await cancelCruiseMission(current, revision, "工单页撤销");
+          pushEvent(`撤销自主巡航任务 ${current.id}`, "warn");
+        }, "任务已撤销（终态，不再接受迁移）");
+      },
     }),
-    [pushEvent, runAction, serverDetail, setParams],
+    [currentCruise, pushEvent, runAction, serverDetail, setParams],
   );
 
   /* ---------------- 演示回放的旧工单 ---------------- */
@@ -529,7 +594,16 @@ export default function Orders() {
         {/* 右：工单详情 */}
         <div className="orders-main">
           {showServerOrder && serverDetail ? (
-            <WorkOrderDetail detail={serverDetail} busy={busy} error={actionError} actions={orderActions} />
+            <WorkOrderDetail
+              detail={serverDetail}
+              busy={busy}
+              error={actionError}
+              actions={orderActions}
+              cruiseMission={currentCruise}
+              cruiseHistory={cruiseHistory}
+              canDispatchCruise={can("mission:dispatch")}
+              canMonitorCruise={can("mission:monitor")}
+            />
           ) : (
             <>
               <Panel

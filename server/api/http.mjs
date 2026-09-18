@@ -30,7 +30,7 @@ import {
   listSessions,
   snapshot,
 } from "../services/session.mjs";
-import { actorFromRequest, login, verifyToken } from "../services/auth.mjs";
+import { actorFromRequest, actorOf, login, verifyToken } from "../services/auth.mjs";
 import { allows, permissionsOf } from "../services/permissions.mjs";
 import { ensureArchive, formatSize } from "../fixtures/archive.mjs";
 import {
@@ -687,11 +687,20 @@ export function createApi({ db, hub, bridge, devices = null, workOrders = null, 
    * Chrome 会把它记成一条 "Failed to load resource: 401"，验收里算 console error。
    * 客户端本来就会在这之后重新登录，所以这里直接回 `actor: null` 让流程安静走完。
    */
-  route("GET", "/api/auth/me", async (ctx) => (
-    ctx.actor
-      ? { actor: ctx.actor, allowedActions: ctx.actions }
-      : { actor: null, allowedActions: [] }
-  ), { auth: false });
+  route("GET", "/api/auth/me", async (ctx) => {
+    /*
+      `auth:false` 的路由**不会**被分发器预先解析 actor（那一步只在 `auth:true` 的分支里做），
+      所以这里必须自己解析一次 —— 这个接口存在的意义就是回答"我现在的令牌是谁"。
+      实测踩到过两件事：① 不自己解析时它对任何令牌都回 `actor: null`，于是前端每次
+      `ensureSession()` / 设备轮询探测都以为令牌过期、白跑一次登录；② actor 的**形状**
+      必须与 `/api/auth/login` 一致（`{id, login, name}`），给裸 id 会让前端拿到
+      "有时是对象有时是字符串"，表现为端明细里账号变成"未登录"。
+    */
+    const accountId = actorFromRequest(ctx.req);
+    return accountId
+      ? { actor: actorOf(accountId), allowedActions: permissionsOf(accountId) }
+      : { actor: null, allowedActions: [] };
+  }, { auth: false });
 
   /* ---- 会话与快照 ---- */
 

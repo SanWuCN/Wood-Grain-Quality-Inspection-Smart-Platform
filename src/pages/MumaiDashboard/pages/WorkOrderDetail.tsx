@@ -19,6 +19,7 @@
 import { useState } from "react";
 import type {
   ApiError,
+  MissionEntity,
   WorkOrderAction,
   WorkOrderDetail as WorkOrderDetailView,
 } from "../api/client";
@@ -30,6 +31,8 @@ import { AssignmentPanel } from "./orders/AssignmentPanel";
 import { TaskScopePanel } from "./orders/TaskScopePanel";
 import { EnvironmentPanel } from "./orders/EnvironmentPanel";
 import { DispatchPanel } from "./orders/DispatchPanel";
+import { CruiseTaskPanel } from "./orders/CruiseTaskPanel";
+import type { CruiseDispatchBody } from "../store/cruise";
 import "./orders/orders.css";
 import "./orders-page.css";
 
@@ -51,6 +54,14 @@ export type WorkOrderDetailActions = {
   setStatus: (action: WorkOrderAction) => Promise<void>;
   /** 删除工单：不可恢复，调用方负责刷列表 */
   remove: () => Promise<void>;
+  /*
+    自主巡航任务（用户 2026-09-18）：下发 / 接受 / 完成 / 撤销。
+    四条都走命令总线（`mission.*`），调用方负责发命令与报错，这一层只负责按钮与预览。
+  */
+  dispatchCruise: (body: CruiseDispatchBody) => Promise<void>;
+  acceptCruise: () => Promise<void>;
+  completeCruise: () => Promise<void>;
+  cancelCruise: () => Promise<void>;
 };
 
 export function WorkOrderDetail({
@@ -58,11 +69,21 @@ export function WorkOrderDetail({
   busy,
   error,
   actions,
+  cruiseMission = null,
+  cruiseHistory = [],
+  canDispatchCruise = false,
+  canMonitorCruise = false,
 }: {
   detail: WorkOrderDetailView;
   busy: boolean;
   error: ApiError | null;
   actions: WorkOrderDetailActions;
+  /** 本单当前该盯的自主巡航任务（未结束优先）；没有就是 null */
+  cruiseMission?: MissionEntity | null;
+  /** 本单的历史巡航任务（最新在前） */
+  cruiseHistory?: MissionEntity[];
+  canDispatchCruise?: boolean;
+  canMonitorCruise?: boolean;
 }) {
   const { order, commission, subjects, logs } = detail;
   /**
@@ -293,6 +314,32 @@ export function WorkOrderDetail({
           }}
         />
       </div>
+
+      {/*
+        自主巡航任务（用户 2026-09-18）：与「扫描仪下发」并排之上单独一块 —— 它有预览与
+        任务编号，横着铺才看得清；揭示门控与其它执行块同一组（念到那一拍才出现）。
+      */}
+      <CruiseTaskPanel
+        className={revealGate("pending")}
+        detail={detail}
+        mission={cruiseMission}
+        history={cruiseHistory}
+        canDispatch={canDispatchCruise}
+        canMonitor={canMonitorCruise}
+        busy={busy}
+        onDispatch={async (body) => {
+          await actions.dispatchCruise(body);
+        }}
+        onAccept={async () => {
+          await actions.acceptCruise();
+        }}
+        onComplete={async () => {
+          await actions.completeCruise();
+        }}
+        onCancel={async () => {
+          await actions.cancelCruise();
+        }}
+      />
 
       {deleteOpen ? (
         <Modal

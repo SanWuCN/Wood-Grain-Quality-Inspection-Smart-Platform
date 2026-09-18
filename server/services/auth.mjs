@@ -55,6 +55,17 @@ export function resolveAccount(input) {
   return byPrefix ? byPrefix[0] : null;
 }
 
+/**
+ * 账号 id → 下发给客户端的 actor 对象。
+ *
+ * ⚠ **只有这一个地方拼这个形状**：`/api/auth/login` 与 `/api/auth/me` 必须给同一个
+ * 形状的对象（`{id, login, name}`）—— 一个给对象、另一个给裸 id，前端拿到的
+ * 就是"有时有 id 有时没有"，表现为端明细里账号变成"未登录"这类怪事（实测踩到过）。
+ */
+export function actorOf(accountId) {
+  return { id: accountId, login: ACCOUNT_LOGIN[accountId], name: accountId };
+}
+
 export function login(account, password) {
   const accountId = resolveAccount(account);
   if (!accountId) return { ok: false, status: 401, code: "UNKNOWN_ACCOUNT", message: "账号不存在" };
@@ -62,7 +73,7 @@ export function login(account, password) {
   return {
     ok: true,
     token: issueToken(accountId),
-    actor: { id: accountId, login: ACCOUNT_LOGIN[accountId], name: accountId },
+    actor: actorOf(accountId),
     allowedActions: permissionsOf(accountId),
   };
 }

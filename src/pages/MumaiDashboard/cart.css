@@ -159,6 +159,69 @@
 }
 
 /* ------------------------------------------------------------------
+   工单派下来的巡航任务（建图巡航页顶部）
+   ------------------------------------------------------------------ */
+
+.cruise-banner {
+  display: grid;
+  gap: 4px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-default);
+  border-left: 3px solid var(--accent, #4ea8ff);
+  background: var(--bg-panel);
+  font-size: var(--fs-aux);
+  color: var(--text-secondary);
+}
+
+/* 从工单页「去建图巡航」跳进来时更醒目一点：一眼看到"就是这一条" */
+.cruise-banner.is-linked {
+  border-left-color: var(--success, #46c07a);
+  background: color-mix(in srgb, var(--success, #46c07a) 8%, var(--bg-panel));
+}
+
+.cruise-banner__main,
+.cruise-banner__meta,
+.cruise-banner__ops {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cruise-banner__tag {
+  padding: 1px 6px;
+  border: 1px solid var(--border-default);
+  color: var(--text-tertiary);
+}
+
+.cruise-banner__no {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text-title);
+  font-size: 13px;
+}
+
+.cruise-banner__order {
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-accent, #4ea8ff);
+  font: inherit;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
+.cruise-banner__order:hover {
+  border-color: var(--border-hover);
+}
+
+.cruise-banner__hint {
+  color: var(--text-tertiary);
+}
+
+.cruise-banner__hint.is-warn {
+  color: var(--warning, #e0a33a);
+}
+
+/* ------------------------------------------------------------------
    主体三栏
    ------------------------------------------------------------------ */
 

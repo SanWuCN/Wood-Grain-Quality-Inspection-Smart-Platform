@@ -243,6 +243,18 @@ export function currentArtifact(state: SharedState): SharedEntity<ArtifactEntity
   return entitiesOf<ArtifactEntity>(state, "artifact")[0] ?? null;
 }
 
+/**
+ * 任务实体（`mission`）：自主巡航任务与通用任务都在这里。
+ *
+ * 快照里 `entities` 是按 kind 分组的 `Record<string, SharedEntity[]>`，data 的类型是
+ * `Record<string, unknown>` —— **收窄只在这一个地方做**（页面不各自 `as` 一遍），
+ * 与上面几个选择器同源。数组引用在快照不变时是稳定的，可以直接交给
+ * `useSyncExternalStore` 当选择器；派生（filter/sort）要放进 `useMemo`。
+ */
+export function missions(state: SharedState): SharedEntity<MissionEntity>[] {
+  return entitiesOf<MissionEntity>(state, "mission");
+}
+
 /** 归档清单：服务端持有登记摘要与真实文件，页面只读它 */
 export function archiveItems(state: SharedState): SharedEntity<ArchiveItemEntity>[] {
   return entitiesOf<ArchiveItemEntity>(state, "archiveItem");

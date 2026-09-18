@@ -991,6 +991,13 @@ export function createWorkOrderService({ db, hub = null, devices = null, session
       ]) {
         db.prepare(`DELETE FROM ${table} WHERE work_order_id = ?`).run(row.id);
       }
+      /*
+        工单下的**自主巡航任务**（`mission` 实体，用户 2026-09-18）也要一起清：
+        它们是共享会话里的实体，不删就成了"指着已删工单的孤儿任务"——
+        建图巡航页的横幅会一直挂着一条来源工单已经不存在的任务。
+        `orderId` 存在实体的 JSON 里，用 json_extract 精确匹配（不用 LIKE 猜）。
+      */
+      db.prepare("DELETE FROM entities WHERE kind='mission' AND json_extract(data,'$.orderId') = ?").run(row.id);
       db.prepare("DELETE FROM work_orders WHERE id = ?").run(row.id);
     });
 

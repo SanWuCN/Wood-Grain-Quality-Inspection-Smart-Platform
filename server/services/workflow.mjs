@@ -377,16 +377,50 @@ const HANDLERS = {
 
   /* ---- 巡检任务：终态不可复活（评审 F03） ---- */
 
+  /**
+   * 建任务。工单页的「下发自主巡航任务」走的就是这一条（用户 2026-09-18 口径：
+   * 「在工单界面添加下发自主巡航任务功能……这边是 shi 派发的，然后 ma 这边接受任务去建图巡航」）。
+   *
+   * ── 任务编号怎么来 ────────────────────────────────────────────────
+   * `CR-<工单号里的日期段>-<两位流水>`：工单 `WO-20260918-0006` 的第 1 次自主巡航是
+   * `CR-20260918-01`。日期段直接取自**工单号**而不是再问一次时钟：
+   * 工单号里的日期已经是现场日期（上海时区，见 work-orders.mjs 的 shanghaiParts），
+   * 再从时钟取一次"今天"就多了一个可能不一致的来源（跨零点、机器时区不同）。
+   * 流水在事务里数（与工单号同一套做法），两次点击不会撞号。
+   *
+   * 与「巡检任务」原有的通用字段保持兼容：老的调用只传 robotId / mapVersion /
+   * speedProfile，照样能用（任务号退化成时间戳式）。
+   */
   "mission.create": (ctx, payload) => {
-    const id = payload.missionId ?? `MS-${Date.now().toString(36).toUpperCase()}`;
+    const orderId = payload.orderId ?? null;
+    const orderNo = payload.orderNo ?? null;
+    if (orderId && !orderNo) {
+      throw new WorkflowError(422, "NO_ORDER_NO", "下发自主巡航任务要带工单号：任务编号按工单号生成");
+    }
+    const id = payload.missionId ?? nextCruiseTaskNo(ctx, orderNo);
+    const laps = Number(payload.laps);
+    const speedMps = Number(payload.speedMps);
     const data = {
       id,
+      /** cruise = 工单下发的自主巡航任务；general = 不带工单的通用任务（旧调用） */
+      kind: orderId ? "cruise" : "general",
+      orderId,
+      orderNo,
+      /** 本次要巡到的构件（Z01—Z04）；页面按它显示"巡检对象" */
+      componentIds: Array.isArray(payload.componentIds) ? payload.componentIds.map(String) : [],
       robotId: payload.robotId ?? "DEMO-R01",
       mapVersion: payload.mapVersion ?? null,
       speedProfile: payload.speedProfile ?? "标准",
+      /** 速度（m/s）：来自小车自报的上限，取不到就是 null —— 不写一个假的默认速度 */
+      speedMps: Number.isFinite(speedMps) && speedMps > 0 ? speedMps : null,
+      laps: Number.isFinite(laps) ? Math.min(5, Math.max(1, Math.round(laps))) : 1,
       state: "queued",
-      waypoints: payload.waypoints ?? [],
+      waypoints: Array.isArray(payload.waypoints) ? payload.waypoints : [],
+      plannedPath: Array.isArray(payload.plannedPath) ? payload.plannedPath : [],
+      createdBy: ctx.actorId,
       createdAt: nowIso(),
+      acceptedBy: null,
+      acceptedAt: null,
       endedAt: null,
       cancelReason: null,
     };
@@ -394,8 +428,13 @@ const HANDLERS = {
     return {
       entityKind: "mission",
       entity,
-      result: { missionId: id, state: "queued" },
-      events: [{ type: "mission.created", payload: { missionId: id, mapVersion: data.mapVersion } }],
+      result: { missionId: id, taskNo: id, state: "queued", orderId, laps: data.laps },
+      events: [
+        {
+          type: "mission.created",
+          payload: { missionId: id, orderId, orderNo, mapVersion: data.mapVersion, createdBy: ctx.actorId },
+        },
+      ],
     };
   },
 
@@ -820,6 +859,23 @@ export function markArtifactDownloaded(db, { sessionId, fileId, actorId }) {
 }
 
 /**
+ * 自主巡航任务号：`CR-<工单号里的日期段>-<两位流水>`。
+ *
+ * 拿不到工单号（通用任务、旧调用）时退回时间戳式编号 —— 编号仍然唯一，
+ * 只是不带日期语义，页面照实显示，不假装它是按天流水。
+ */
+function nextCruiseTaskNo(ctx, orderNo) {
+  const day = /^WO-(\d{8})-\d+$/.exec(String(orderNo ?? ""))?.[1] ?? null;
+  if (!day) return `MS-${Date.now().toString(36).toUpperCase()}`;
+  const prefix = `CR-${day}-`;
+  const used =
+    ctx.db
+      .prepare("SELECT COUNT(*) AS n FROM entities WHERE session_id=? AND kind='mission' AND id LIKE ?")
+      .get(ctx.sessionId, `${prefix}%`)?.n ?? 0;
+  return `${prefix}${String(used + 1).padStart(2, "0")}`;
+}
+
+/**
  * 任务状态迁移。
  *
  * 五个动作共用一段逻辑：目标状态取自 MISSION_NEXT，合法性由 assertMissionTransition
@@ -828,6 +884,9 @@ export function markArtifactDownloaded(db, { sessionId, fileId, actorId }) {
  * 注意 `mission.cancel` 与 `mission.pause` 的区别：暂停可恢复，取消是终态 ——
  * 评审 F03 的现象「取消后约 1.5 秒又变成执行中」在设计上就不可能发生，
  * 因为取消之后任何迁移都会被 assertMissionTransition 拦掉。
+ *
+ * `mission.ack` 额外记下**是谁在什么时候接的**：工单页要显示「马昱天 已接受」，
+ * 现场问"这活谁接的"时不能靠猜（用户 2026-09-18：shi 派发、ma 接受去建图巡航）。
  */
 function missionTransition(action) {
   return (ctx, payload) => {
@@ -837,6 +896,7 @@ function missionTransition(action) {
     const data = {
       ...target.data,
       state: nextState,
+      ...(action === "mission.ack" ? { acceptedBy: ctx.actorId, acceptedAt: nowIso() } : {}),
       ...(nextState === "cancelled"
         ? { endedAt: nowIso(), cancelReason: payload.reason ?? "操作员取消" }
         : {}),
@@ -847,11 +907,23 @@ function missionTransition(action) {
     return {
       entityKind: "mission",
       entity,
-      result: { missionId: target.id, state: nextState, from: target.data.state },
+      result: {
+        missionId: target.id,
+        state: nextState,
+        from: target.data.state,
+        ...(action === "mission.ack" ? { acceptedBy: ctx.actorId } : {}),
+      },
       events: [
         {
           type: `mission.${nextState}`,
-          payload: { missionId: target.id, from: target.data.state, to: nextState, reason: payload.reason ?? null },
+          payload: {
+            missionId: target.id,
+            orderId: target.data.orderId ?? null,
+            from: target.data.state,
+            to: nextState,
+            by: ctx.actorId,
+            reason: payload.reason ?? null,
+          },
         },
       ],
       label,

@@ -21,12 +21,15 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { useMumai } from "../context";
 import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
 import { Btn, Modal, PermNote, StateBlock, StatusChip } from "../ui";
 import { apiRequest, isApiError } from "../api/client";
+import { missions, useSharedStore } from "../store/shared";
+import { acceptCruiseMission, activeCruiseMission, cancelCruiseMission, completeCruiseMission, cruiseRevisionOf } from "../store/cruise";
+import { CruiseTaskBanner } from "./cart/CruiseTaskBanner";
 import MapCanvas, { type MapCanvasMode } from "./cart/MapCanvas";
 import ParameterStrip from "./cart/ParameterStrip";
 import { DEFAULT_VIEW, fitView, missionStateText, type MapView } from "./cart/geometry";
@@ -78,6 +81,7 @@ const SPEED_MAX = 0.35;
 
 export default function Mapping() {
   const { toast, pushEvent, can, sharedSessionId } = useMumai();
+  const navigate = useNavigate();
 
   const cart = useCartLive({ sessionId: sharedSessionId });
   const state = cart.state;
@@ -448,8 +452,63 @@ export default function Mapping() {
   /* ---- 底部参数带的展开 / 收起 ---- */
   const [paramsOpen, setParamsOpen] = useState(true);
 
+  /*
+    工单巡航任务的接受 / 完成 / 撤销：都在 `store/cruise.ts` 里（与工单页同一套命令），
+    这里只负责忙态与报错 —— 页面不自己拼状态，服务端返回什么就显示什么。
+  */
+  const missionRecords = useSharedStore(missions);
+  const cruiseMission = useMemo(() => activeCruiseMission(missionRecords), [missionRecords]);
+  const [cruiseBusy, setCruiseBusy] = useState(false);
+  const cruiseRun = useCallback(
+    async (kind: "accept" | "complete" | "cancel") => {
+      /* 读当前快照用 `missions(getState())`：与上面的选择器同一个收窄点，不各写一遍类型断言 */
+      const records = missions(useSharedStore.getState());
+      const mission = activeCruiseMission(records);
+      if (!mission) {
+        toast("当前没有进行中的工单巡航任务", "warn");
+        return;
+      }
+      const revision = cruiseRevisionOf(records, mission.id);
+      if (revision === null) {
+        toast("这条任务已经不在快照里了，刷新后再试", "danger");
+        return;
+      }
+      setCruiseBusy(true);
+      try {
+        if (kind === "accept") await acceptCruiseMission(mission, revision);
+        else if (kind === "complete") await completeCruiseMission(mission, revision);
+        else await cancelCruiseMission(mission, revision, "建图巡航页撤销");
+        toast(
+          kind === "accept" ? `已接受 ${mission.id}，可以去建图巡航了` : kind === "complete" ? `${mission.id} 已标记完成` : `${mission.id} 已撤销`,
+          kind === "cancel" ? "warn" : "ok",
+        );
+      } catch (error) {
+        toast(isApiError(error) ? error.message : "任务操作失败", "danger");
+      } finally {
+        setCruiseBusy(false);
+      }
+    },
+    [toast],
+  );
+
   return (
     <div className="page page--mapping page--cart">
+      {/*
+        工单派下来的自主巡航任务（用户 2026-09-18）：马从工单页点「去建图巡航」过来时，
+        先看到"我接的是哪条任务、来自哪张工单、现在什么状态"，再往下才是车的控制台。
+        放在最上面（在只读 / 断线提示之前）：它是这一趟作业的来由。
+      */}
+      <CruiseTaskBanner
+        mission={cruiseMission}
+        linkedTaskNo={params.get("task")}
+        canDispatch={can("mission:dispatch")}
+        canMonitor={can("mission:monitor")}
+        busy={cruiseBusy}
+        onAccept={() => cruiseRun("accept")}
+        onComplete={() => cruiseRun("complete")}
+        onCancel={() => cruiseRun("cancel")}
+        onOpenOrder={(orderId) => navigate(`/orders?order=${encodeURIComponent(orderId)}`)}
+      />
       {/*
         下面两条提示是页面可信度的一部分：
           · 没配令牌 → 说明「只能看」，而不是让人对着一排灰按钮猜；

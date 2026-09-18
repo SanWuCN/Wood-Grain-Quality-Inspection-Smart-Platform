@@ -36,7 +36,7 @@
  * 用法：node tools/验收-内网同步-浏览器.mjs [--base http://127.0.0.1:8000]
  *      （B 台地址默认取服务端自报的推荐地址，可用 --peer-base http://… 覆盖）
  */
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { Machine, SHOT_DIR, sleep } from "./browser-harness.mjs";
 
 const argOf = (name, fallback) => {
   const index = process.argv.indexOf(name);
@@ -47,7 +47,6 @@ const SELF_BASE = (argOf("--base", "http://127.0.0.1:8000") ?? "").replace(/\/$/
 /** B 台（队友）地址：默认留空，稍后取服务端自报的推荐地址 */
 const PEER_BASE_ARG = (argOf("--peer-base", "") ?? "").replace(/\/$/, "");
 const PASSWORD = "123456";
-const SHOT_DIR = "D:\\平台\\验收截图";
 
 let pass = 0;
 let fail = 0;
@@ -56,170 +55,6 @@ const check = (name, ok, detail) => {
   if (ok) pass += 1;
   else fail += 1;
 };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function findChrome() {
-  const candidates = [
-    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-    `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
-    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-  ];
-  const hit = candidates.find((p) => existsSync(p));
-  if (!hit) throw new Error("找不到 Chrome / Edge");
-  return hit;
-}
-
-/** 登录用的页面内脚本：登录页两个输入框 = 账号 + 口令 */
-const LOGIN_SCRIPT = (account) => `(async () => {
-  const inputs = [...document.querySelectorAll('input')];
-  if (inputs.length < 2) return false;
-  const setValue = (el, value) => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-    setter.call(el, value);
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-  };
-  setValue(inputs[0], ${JSON.stringify(account)});
-  setValue(inputs[1], ${JSON.stringify(PASSWORD)});
-  const form = inputs[0].closest('form');
-  if (form) form.requestSubmit ? form.requestSubmit() : form.submit();
-  return true;
-})()`;
-
-/** 一台"电脑"：一个独立 profile 的浏览器 + 它的页面会话（令牌、WebSocket 都是它自己的） */
-class Machine {
-  constructor({ name, port, base, account }) {
-    this.name = name;
-    this.port = port;
-    this.base = base;
-    this.account = account;
-    this.profile = `${process.env.TEMP}\\mumai-lan-${name}`;
-    this.chrome = null;
-    this.ws = null;
-    this.id = 0;
-    this.waiting = new Map();
-  }
-
-  async start() {
-    rmSync(this.profile, { recursive: true, force: true });
-    const { spawn } = await import("node:child_process");
-    this.chrome = spawn(
-      findChrome(),
-      [
-        "--headless=new",
-        `--remote-debugging-port=${this.port}`,
-        `--user-data-dir=${this.profile}`,
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-extensions",
-        "--enable-unsafe-swiftshader",
-        "--use-angle=swiftshader",
-        "--mute-audio",
-        "--window-size=1600,1000",
-        `${this.base}/`,
-      ],
-      { stdio: "ignore" },
-    );
-    const want = new URL(this.base);
-    const deadline = Date.now() + 45_000;
-    let page = null;
-    while (Date.now() < deadline) {
-      try {
-        const list = await (await fetch(`http://127.0.0.1:${this.port}/json/list`)).json();
-        page = list.find((t) => t.type === "page" && t.webSocketDebuggerUrl && t.url.startsWith(want.origin));
-        if (page) break;
-      } catch {
-        /* 还没起来 */
-      }
-      await sleep(250);
-    }
-    if (!page) throw new Error(`${this.name}：等不到可调试的页面（${this.base} 通吗？）`);
-    this.ws = new WebSocket(page.webSocketDebuggerUrl);
-    await new Promise((r) => this.ws.addEventListener("open", r, { once: true }));
-    this.ws.addEventListener("message", (e) => {
-      const m = JSON.parse(e.data);
-      if (this.waiting.has(m.id)) {
-        this.waiting.get(m.id)(m);
-        this.waiting.delete(m.id);
-      }
-    });
-    await this.send("Page.enable");
-    await this.send("Runtime.enable");
-  }
-
-  send(method, params = {}) {
-    return new Promise((res) => {
-      const i = ++this.id;
-      this.waiting.set(i, res);
-      this.ws.send(JSON.stringify({ id: i, method, params }));
-    });
-  }
-
-  async evaluate(expr) {
-    const r = await this.send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true });
-    if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description ?? "页面内抛错");
-    return r.result?.result?.value;
-  }
-
-  /** 在**这台机器自己的登录态**下调平台接口：等价于这台机器上的人点了对应的按钮 */
-  async call(method, path, body) {
-    return this.evaluate(`(async () => {
-      const token = localStorage.getItem('mumai.token');
-      const response = await fetch(${JSON.stringify(path)}, {
-        method: ${JSON.stringify(method)},
-        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
-        ${body === undefined ? "" : `body: JSON.stringify(${JSON.stringify(body)}),`}
-      });
-      const text = await response.text();
-      let json = null;
-      try { json = JSON.parse(text); } catch { json = null; }
-      return { status: response.status, json };
-    })()`);
-  }
-
-  async login() {
-    for (let i = 0; i < 80; i += 1) {
-      if (await this.evaluate(`Boolean(document.querySelector('input'))`)) break;
-      await sleep(300);
-    }
-    await this.evaluate(LOGIN_SCRIPT(this.account));
-    for (let i = 0; i < 80; i += 1) {
-      const state = await this.evaluate(
-        `({ hash: location.hash, nav: document.querySelectorAll('nav button, nav a, aside button').length })`,
-      );
-      if (state && !String(state.hash).includes("login") && state.nav > 0) return true;
-      await sleep(300);
-    }
-    return false;
-  }
-
-  async shot(name) {
-    try {
-      const r = await this.send("Page.captureScreenshot", { format: "png" });
-      const data = r?.result?.data;
-      if (!data) return null;
-      mkdirSync(SHOT_DIR, { recursive: true });
-      const file = `${SHOT_DIR}\\内网同步-${name}.png`;
-      writeFileSync(file, Buffer.from(data, "base64"));
-      return file;
-    } catch {
-      return null;
-    }
-  }
-
-  kill() {
-    try {
-      this.ws?.close();
-    } catch {
-      /* 已经断了 */
-    }
-    try {
-      this.chrome?.kill();
-    } catch {
-      /* 已经退了 */
-    }
-  }
-}
 
 /** 本页上的工单列表读数（单号 + 负责人），列表在工单页左侧那一列 */
 const ORDERS_PROBE = `(() => {

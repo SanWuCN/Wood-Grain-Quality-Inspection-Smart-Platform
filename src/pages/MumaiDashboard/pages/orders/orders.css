@@ -306,6 +306,75 @@
   margin: var(--space-3) 0;
 }
 
+/* ------------------------------------------------------------------
+   自主巡航任务（工单页下发 / 接受 / 去建图巡航）
+   ------------------------------------------------------------------ */
+
+.cruise-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* 小车数据与任务预览并排：窄屏自动落成上下两块 */
+.cruise-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-4);
+}
+
+.cruise-col > .sub {
+  margin-top: 0;
+}
+
+.cruise-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cruise-inline em {
+  font-style: normal;
+}
+
+.cruise-note {
+  margin: var(--space-2) 0 0;
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  line-height: 1.6;
+}
+
+.cruise-laps {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-size: var(--fs-aux);
+}
+
+.cruise-laps > span {
+  color: var(--ma-text-3);
+}
+
+/* 「谁派发 · 谁接受」那一行：现场问"这活谁接的"就念它 */
+.cruise-people {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--ma-border);
+  border-radius: 8px;
+  background: var(--ma-surface-2, rgba(255, 255, 255, 0.02));
+  font-size: var(--fs-aux);
+}
+
+.cruise-people > b {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--ma-text-1);
+}
+
 /* ------------------------------------------------------------------ *
  * 「随播报逐步加载」（agent 念工单时逐段揭示）
  *

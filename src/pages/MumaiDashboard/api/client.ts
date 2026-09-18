@@ -87,13 +87,50 @@ export type EnvironmentEntity = {
   ackAt: string | null;
 };
 
+/**
+ * 平台侧任务（服务端 `mission` 实体）。
+ *
+ * 两种来源：
+ *   · `kind: "cruise"` —— **工单页下发的自主巡航任务**（用户 2026-09-18 口径：
+ *     「在工单界面添加下发自主巡航任务功能……shi 派发，ma 接受去建图巡航」）；
+ *     任务编号 `CR-<工单号里的日期段>-<两位流水>`，与工单对得上；
+ *   · `kind: "general"` —— 不带工单的通用任务（旧调用，字段少，页面只显示状态）。
+ *
+ * ⚠ 与小车自己的任务不是一回事：小车状态里的 `mission`（`CartMission`，见 cart/api.ts）
+ * 是车端在执行的那条；这里是**平台侧的任务单据**（谁派发、谁接受、带哪些构件）。
+ * 两者在界面上要分开说，不能拿一个当另一个的证据。
+ */
+export type MissionWaypoint = {
+  id: string;
+  label: string;
+  componentId: string | null;
+  /** 栅格坐标（10 cm/格，口径来自 GRID_MAP.resolutionM） */
+  cell: [number, number];
+};
+
 export type MissionEntity = {
   id: string;
+  kind?: "cruise" | "general";
+  /** 来源工单（自主巡航任务必有） */
+  orderId?: string | null;
+  orderNo?: string | null;
+  /** 本次要巡到的构件编号（Z01—Z04） */
+  componentIds?: string[];
   robotId: string;
   mapVersion: string | null;
   speedProfile: string;
+  /** 速度（m/s）：小车自报的上限；取不到就是 null */
+  speedMps?: number | null;
+  laps?: number;
   state: "queued" | "running" | "paused" | "succeeded" | "failed" | "cancelled";
+  waypoints?: MissionWaypoint[];
+  plannedPath?: [number, number][];
+  /** 派发人 / 派发时刻 */
+  createdBy?: string | null;
   createdAt: string;
+  /** 接受人 / 接受时刻（谁去建图巡航就是谁） */
+  acceptedBy?: string | null;
+  acceptedAt?: string | null;
   endedAt: string | null;
   cancelReason: string | null;
 };
