@@ -20,13 +20,28 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { SCRIPT_ROUNDS } from "./script.ts";
 
 const MANIFEST = fileURLToPath(new URL("../../../../public/voice/manifest.json", import.meta.url));
 const VOICE_DIR = fileURLToPath(new URL("../../../../public/voice", import.meta.url));
+
+/**
+ * 清单里的值必须指向**真实存在、非空**的音频文件。
+ *
+ * ⚠ 这一条是本文件开头写明、代码却一直没实现的那半句（原来只断言"键存在"）：
+ * 键在、文件不在（或 0 字节）时，运行时 `probeAudio()` 会失败并**静默回退浏览器合成音** ——
+ * 现场只是"音色变了"，界面上看不出任何异常，正是这一组测试要防的那种失败。
+ */
+function assertAudioFile(url: string, where: string): void {
+  assert.match(url, /^\/voice\/[\w.-]+\.(mp3|wav)$/, `${where} 的音频路径不合约定：${url}`);
+  const file = join(VOICE_DIR, url.replace(/^\/voice\//, ""));
+  assert.ok(existsSync(file), `${where} 的音频文件不存在：${url}`);
+  assert.ok(statSync(file).size > 0, `${where} 的音频是 0 字节：${url}`);
+}
 
 /** 磁盘上已交付的轮次录音（命名约定 `round-NN.mp3`；01 = ① … 25 = ㉕） */
 function deliveredRoundFiles(): { roundNo: string; file: string }[] {
@@ -49,11 +64,13 @@ test("已交付录音的轮次（磁盘上存在 round-NN.mp3）必须在语音�
     assert.ok(round, `有录音 ${file} 但剧本里找不到第 ${roundNo} 轮`);
     const main = round.lines.find((line) => line.role === "main");
     assert.ok(main, `第 ${roundNo} 轮没有主台词，无法与语音包核对`);
+    const url = manifest[main.text];
     assert.ok(
-      manifest[main.text],
+      url,
       `第 ${roundNo} 轮的录音 ${file} 已在盘上，但语音包里没有它的主台词键：` +
         `「${main.text.slice(0, 24)}…」—— 现场会静默回退浏览器合成音`,
     );
+    assertAudioFile(url, `第 ${roundNo} 轮`);
   }
 });
 
@@ -79,6 +96,7 @@ test("剧本 voicePack 标注与磁盘录音一致（标了的要能核对，没
       最后一条用"其他旁白轮也都为空"来钉：只要不是全空，就说明确实存在"该标而没标"的情形。
     */
     assert.ok(manifest[main.text], `第 ${roundNo} 轮的主台词在语音包里没有键`);
+    assertAudioFile(manifest[main.text], `第 ${roundNo} 轮`);
     if (round.voicePack === null) {
       const voicedElsewhere = SCRIPT_ROUNDS.filter((r) => r.voicePack !== null).length;
       assert.ok(
