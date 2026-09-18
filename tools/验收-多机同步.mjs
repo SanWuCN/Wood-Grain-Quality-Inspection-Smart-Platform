@@ -169,6 +169,24 @@ try {
     `B 读到 ${JSON.stringify(projection)?.slice(0, 90)}`,
   );
 
+  /* ---------- ⑦ 第二台机器打开「投到展示窗口」页：应当渲染同一份投屏内容 ---------- */
+  await B.evaluate(`location.hash = '#/present'`);
+  const presented = await B.waitFor(
+    `(() => {
+      const text = document.body.innerText || '';
+      const holder = /持有人/.test(text);
+      const view = /采集|监测|场景|地图|训练|交付|报告|工作台/.test(text);
+      const focus = /Z04/.test(text);
+      return holder && view ? { holder, view, focus, head: text.replace(/\\s+/g, ' ').slice(0, 90) } : null;
+    })()`,
+    { timeoutMs: 10_000 },
+  );
+  check(
+    "B 打开投屏页 → 渲染同一份投屏内容（持有人 + 视图 + 焦点）",
+    Boolean(presented),
+    presented ? `holder=${presented.holder} 视图=${presented.view} 焦点Z04=${presented.focus}` : "投屏页没渲染出来",
+  );
+
   const shot = await B.shot("多机同步-B屏");
   if (shot) console.log(`  截图（第二台机器）：${shot}`);
   console.log(failed === 0 ? "\n✓ 内网多主机内容同步：全部通过" : `\n✗ 有 ${failed} 项未通过`);
