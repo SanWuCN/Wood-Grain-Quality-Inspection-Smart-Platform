@@ -340,20 +340,37 @@ try {
   );
 
   /* ---------- ③ 打帧：帧号前缀 = 构件，行内带图 ---------- */
+  /*
+   * ⚠ 演示会话是**共享**的：另一个账号（或另一台机器上的工装）可能正在同一个场景上打帧/删帧，
+   * 那会让页面上那份 `expectedRevision` 过期 → 服务端 409（现场表现"点了没反应"）。
+   * 所以这里读一次提示、最多重试 3 次：页面随事件刷新实体会带上新 revision，重试就能成。
+   * 每次都把提示原文记下来，失败时看得出是"被拦（画面黑）"还是"冲突"。
+   */
   const serverBefore = await serverScene("shi");
   const beforeCount = serverBefore.frames.length;
-  await evaluate(`(() => {
-    const btn = [...document.querySelectorAll('button')].find((el) => (el.textContent || '').trim().startsWith('打关键帧'));
-    btn.click();
-    return true;
-  })()`);
+  const attempts = [];
   let after = await pageState();
-  for (let i = 0; i < 60; i += 1) {
-    after = await pageState();
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await evaluate(`(() => {
+      const btn = [...document.querySelectorAll('button')].find((el) => (el.textContent || '').trim().startsWith('打关键帧'));
+      btn.click();
+      return true;
+    })()`);
+    for (let i = 0; i < 40; i += 1) {
+      after = await pageState();
+      if (after.rows.length > beforeCount) break;
+      await sleep(500);
+    }
+    const said = await evaluate(`(document.querySelector('.appshell__toasts')?.textContent || '').trim()`);
+    attempts.push(`第${attempt}次→行数${after.rows.length}${said ? `「${said.slice(0, 36)}」` : ""}`);
     if (after.rows.length > beforeCount) break;
-    await sleep(500);
+    await sleep(1500);
   }
-  check("③ 打帧后右侧多出一行", after.rows.length === beforeCount + 1, `行数 ${beforeCount} → ${after.rows.length}`);
+  check(
+    "③ 打帧后右侧多出一行",
+    after.rows.length === beforeCount + 1,
+    `行数 ${beforeCount} → ${after.rows.length}　${attempts.join(" ｜ ")}`,
+  );
   const row = after.rows[after.rows.length - 1] ?? { id: "", meta: "", img: null };
   check(`③b 帧号前缀就是选中的构件（${COMPONENT}）`, String(row.id).startsWith(`KF-${COMPONENT}-`), `帧号=${row.id}`);
   check(`③c 那一行的标签里有构件号（打的就是这个标签）`, String(row.meta).includes(COMPONENT), `标签行=${row.meta}`);
