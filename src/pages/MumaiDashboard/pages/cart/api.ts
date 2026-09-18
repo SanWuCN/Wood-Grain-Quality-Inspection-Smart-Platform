@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiRequest, isApiError, readToken, type ApiError } from "../../api/client";
+import { randomId } from "../../lib";
 
 /* ------------------------------------------------------------------ *
  * 状态类型（文档 §2 / §8）
@@ -214,8 +215,8 @@ export const cartApi = {
 
 /** 逻辑操作编号：同一件事重试要复用，所以它由**发起动作的地方**决定何时生成 */
 export function newRequestId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
-  return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  /* 生成器统一在 lib.randomId()：内网 http（非安全上下文）下没有 crypto.randomUUID */
+  return randomId("req");
 }
 
 /* ------------------------------------------------------------------ *

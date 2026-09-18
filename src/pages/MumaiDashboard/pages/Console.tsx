@@ -34,6 +34,40 @@ import { addressGroups, endRows, hostOf, isLocalHost, probeVerdict, recommendedU
 
 /** 内网端数多久读一次：它是本页唯一会"自己变"的读数（别人开关页面） */
 const PEERS_POLL_MS = 10000;
+/**
+ * 复制到剪贴板（**内网 http 下也能用**）。
+ *
+ * `navigator.clipboard` 与 `crypto.randomUUID` 一样**只在安全上下文**
+ * （https / localhost）里存在 —— 同事从 `http://<局域网IP>:8000` 打开时它是 undefined，
+ * 原来那句 `navigator.clipboard?.writeText(...)` 于是一个字都复制不到、也不报错
+ * （可选链把失败吞了）。所以退回老办法：临时 textarea + `document.execCommand("copy")`，
+ * 它在非安全上下文里照样工作。
+ */
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* 被拒绝（无手势/权限）就走下面的退路 */
+  }
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.top = "-1000px";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
 /** 同步实测的回执是异步的：开完实测按这个间隔追结论，最多追这么久 */
 const PROBE_POLL_MS = 400;
 const PROBE_DEADLINE_MS = 8000;
@@ -406,12 +440,7 @@ export default function Console() {
                         type="button"
                         className="cs-lan__url"
                         title={`${item.iface} · 点一下复制`}
-                        onClick={() => {
-                          void navigator.clipboard?.writeText(item.url).then(
-                            () => toast(`已复制 ${item.url}`, "ok"),
-                            () => toast("复制失败，请手动选中这段地址", "warn"),
-                          );
-                        }}>
+                        onClick={() => void copyToClipboard(item.url).then((ok) => toast(ok ? `已复制 ${item.url}` : "复制失败，请手动选中这段地址", ok ? "ok" : "warn"))}>
                         {item.url}
                       </button>
                     ))}
@@ -421,12 +450,7 @@ export default function Console() {
                         type="button"
                         className="cs-lan__url cs-lan__url--vpn"
                         title={`${item.iface}（虚拟局域网）· 同在这个虚拟网里的同事用这条 · 点一下复制`}
-                        onClick={() => {
-                          void navigator.clipboard?.writeText(item.url).then(
-                            () => toast(`已复制 ${item.url}`, "ok"),
-                            () => toast("复制失败，请手动选中这段地址", "warn"),
-                          );
-                        }}>
+                        onClick={() => void copyToClipboard(item.url).then((ok) => toast(ok ? `已复制 ${item.url}` : "复制失败，请手动选中这段地址", ok ? "ok" : "warn"))}>
                         {item.url}
                         <em>虚拟局域网</em>
                       </button>

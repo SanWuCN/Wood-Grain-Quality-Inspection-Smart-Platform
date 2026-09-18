@@ -792,3 +792,42 @@ export function seededRandom(seed: number): () => number {
 
 /** 环境记录默认值（供 /orders 环境表单使用） */
 export const DEFAULT_ENV_RECORD: EnvRecord = ENV_RECORD;
+
+/**
+ * 幂等键 / 事件 ID 生成器（**内网 http 下同样可用**）
+ *
+ * ── 为什么不能直接用 `crypto.randomUUID()`（2026-09-18 用户实测报的毛病）──
+ * 用户原话：「我为什么在内网地址上按不了 ctrl 加 q 加 l 的呼出新工单」。
+ * 查下来：`crypto.randomUUID()` **只在安全上下文**（https / localhost）里存在，
+ * 同事从 `http://<局域网IP>:8000` 打开时它是 `undefined` —— 隐藏快捷键那条链路正好
+ * 在这里生成事件 ID，于是抛 `TypeError: crypto.randomUUID is not a function`，
+ * 请求根本没发出去：现象就是"内网地址上按了没反应，本机 localhost 却一切正常"。
+ * 这是现场最难查的一类毛病（只有别人那台才复现），所以修在公共工具里。
+ *
+ * `crypto.getRandomValues()` **不受**安全上下文限制，所以退路用它 + 时间片；
+ * 连它都没有（极老浏览器）才退回 `Math.random`。
+ * 服务端对键的要求只是「唯一 + 重试时复用同一个」（幂等），不要求 UUID 格式。
+ */
+export function randomId(prefix = "id"): string {
+  const webCrypto = typeof globalThis.crypto === "undefined" ? null : globalThis.crypto;
+  if (webCrypto && typeof webCrypto.randomUUID === "function") {
+    return `${prefix}-${webCrypto.randomUUID()}`;
+  }
+  /*
+    退路里再带一个**会话内自增序号**：同一毫秒内连按两次（现场很可能）光靠时间片
+    会撞键 —— 服务端按这个键幂等，撞了就等于"第二次按键被当成第一次的回放"，
+    用户会觉得"我按了没反应"。序号让同一会话里的 id 永远不同。
+  */
+  const seq = (fallbackSeq += 1).toString(36);
+  const bytes = new Uint8Array(16);
+  if (webCrypto && typeof webCrypto.getRandomValues === "function") {
+    webCrypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${prefix}-${Date.now().toString(36)}-${seq}-${hex}`;
+}
+
+/** `randomId` 退路里的会话内序号（模块级，不导出） */
+let fallbackSeq = 0;

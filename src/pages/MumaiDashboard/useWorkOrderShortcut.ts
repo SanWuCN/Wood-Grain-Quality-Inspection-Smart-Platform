@@ -12,9 +12,15 @@
  *   · 一次完整触发只提交一次；请求没回来之前再触发不重复提交；
  *   · 失败不显示成功通知，**沿用原事件 ID 重试**（服务端按事件 ID 幂等，
  *     换 ID 就等于把一次按键变成两张工单）。
+ *
+ * ⚠ 事件 ID 必须用 `lib.ts` 的 `randomId()`，**不要写回 `crypto.randomUUID()`**：
+ *   后者只在安全上下文（https / localhost）里有，同事从 `http://<局域网IP>:8000`
+ *   打开时它是 undefined，按键会抛 TypeError、请求根本不发 ——
+ *   现象就是「内网地址上按 Ctrl+Q+L 没反应，本机却正常」（2026-09-18 用户报的）。
  */
 
 import { useCallback, useEffect, useRef } from "react";
+import { randomId } from "./lib";
 import { useWorkOrderStore } from "./store/workOrders";
 
 /** 按键序列的有效窗口：Q 与 L 之间超过这个时间就不算一次触发（PRD §3.1） */
@@ -101,7 +107,7 @@ export function useWorkOrderShortcut({ onCreated, onFailed }: OrderShortcutHandl
         const store = useWorkOrderStore.getState();
         if (store.triggering) return;
         if (pendingEvent.current) return; // 上一轮还在重试，不重复提交
-        const eventId = `evt-${crypto.randomUUID()}`;
+        const eventId = randomId("evt");
         pendingEvent.current = { eventId, attempts: 0 };
         void submit(eventId);
         return;

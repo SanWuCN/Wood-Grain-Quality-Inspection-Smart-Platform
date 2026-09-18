@@ -17,6 +17,7 @@
 import { useState } from "react";
 import { Panel } from "../../Panel";
 import { Btn, DataTable, KV, StateBlock, StatusChip } from "../../ui";
+import { randomId } from "../../lib";
 import type { DispatchTarget, DispatchView, WorkOrderDetail } from "../../api/client";
 import "./orders.css";
 
@@ -62,14 +63,13 @@ function stamp(value: string | null | undefined): string {
 /**
  * 幂等键：服务端按它去重，网络重发同一键不会多出一条业务命令（PRD §8.2）。
  *
- * 非安全上下文（局域网 http）没有 `crypto.randomUUID`，退回时间戳 + 随机数，
- * 保证任何部署方式下点击都有键可用。
+ * 生成器统一用 `lib.ts` 的 `randomId()`：那里把「**内网 http 不是安全上下文**」
+ * 处理掉了（`crypto.randomUUID` 在 `http://<局域网IP>` 上是 undefined）。
+ * 各自写一份 fallback 迟早漏一处 —— 隐藏快捷键那条链路就漏过（2026-09-18 用户报的
+ * 「内网地址上按 Ctrl+Q+L 没反应」），见 `lib.ts` 里 `randomId` 的注释。
  */
 function makeIdempotencyKey(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `k-${crypto.randomUUID()}`;
-  }
-  return `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return randomId("k");
 }
 
 /**

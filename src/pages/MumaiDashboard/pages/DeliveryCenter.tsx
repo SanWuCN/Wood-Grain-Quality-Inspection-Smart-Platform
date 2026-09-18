@@ -446,10 +446,20 @@ export function DeliveryTab() {
    * PRD §10.3 建议的做法就是 `crypto.subtle.digest` 读 ArrayBuffer 做小文件复核。
    * 这样「摘要一致」是真的算出来的，不是拿服务端自己的值回填一个通过 ——
    * 选错文件就会走失败分支（验收 T11 要的正是这个）。
+   *
+   * ⚠ `crypto.subtle` 与 `crypto.randomUUID` 一样**只在安全上下文**里有：
+   * 同事从 `http://<局域网IP>:8000` 打开时它是 undefined，原来会抛一句
+   * "Cannot read properties of undefined"、界面只显示「回验失败」——
+   * 现场会以为是文件不对。这种情况**不许拿服务端的值凑一个"通过"**
+   * （那就等于自己跟自己比），只能如实说清做不到、以及该在哪台机器上做。
    */
   const verify = async (artifact: SharedEntity<ArtifactEntity>, file: File): Promise<boolean> => {
     setBusy(`verify:${artifact.id}`);
     try {
+      if (!globalThis.crypto?.subtle) {
+        toast("内网 http 地址下浏览器不给算摘要（Web Crypto 只在 https / localhost 可用）：请在平台本机（localhost）做这一步回验", "warn");
+        return false;
+      }
       const buffer = await file.arrayBuffer();
       const digest = await crypto.subtle.digest("SHA-256", buffer);
       const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");

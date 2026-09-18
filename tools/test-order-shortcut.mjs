@@ -49,6 +49,8 @@ function findChrome() {
 const url = arg("url", "http://localhost:5173/#/orders");
 const failures = [];
 const notes = [];
+/** 开跑前已有的工单 id：收尾时用它把"本轮新建的"挑出来删掉 */
+let beforeIds = [];
 const check = (ok, label, detail = "") => {
   if (ok) {
     console.log(`  ✓ ${label}`);
@@ -190,6 +192,14 @@ for (let attempt = 0; attempt < 40; attempt += 1) {
 await sleep(1500);
 
 try {
+  /*
+    跑完不留垃圾：本工具一次会建 3 张单（完整触发 / 第二次触发 / 令牌自愈各一张），
+    演示库不该因此多出幻影工单（现场看到会以为"谁建了单"）。
+    只删**本轮新建的**：先记下开跑前那批 id，收尾时把不在其中的删掉。
+  */
+  beforeIds = await evaluate(`fetch('/api/work-orders?filter=all&q=', { headers: { authorization: 'Bearer ' + localStorage.getItem('mumai.token') } })
+    .then((r) => r.json()).then((j) => (j.orders ?? []).map((o) => o.id)).catch(() => [])`);
+
   /* ---- A01：界面上没有来单入口，也没有快捷键说明 ---- */
   const bodyText = await evaluate("document.body.innerText");
   check(!/Ctrl\s*\+\s*Q/i.test(bodyText), "A01：界面上不出现快捷键说明");
@@ -294,6 +304,22 @@ try {
 
   check(consoleErrors.length === 0, "控制台没有报错", consoleErrors.slice(0, 3).join(" | "));
 } finally {
+  /* 清掉本轮建出来的工单（只删不在开跑前那批里的） */
+  try {
+    const leftovers = await evaluate(`(async () => {
+      const token = localStorage.getItem('mumai.token');
+      const headers = { authorization: 'Bearer ' + token };
+      const list = await (await fetch('/api/work-orders?filter=all&q=', { headers })).json();
+      const mine = (list.orders ?? []).filter((o) => !${JSON.stringify(beforeIds)}.includes(o.id));
+      for (const order of mine) {
+        await fetch('/api/work-orders/' + order.id, { method: 'DELETE', headers });
+      }
+      return mine.map((o) => o.orderNo);
+    })()`);
+    if (leftovers?.length) console.log(`\n已清掉本轮建的 ${leftovers.length} 张工单：${leftovers.join(" / ")}`);
+  } catch {
+    /* 页面已经关了就算了：清场是附加动作，不影响判据 */
+  }
   try {
     ws.close();
   } catch {
