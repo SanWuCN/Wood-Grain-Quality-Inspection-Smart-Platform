@@ -320,10 +320,14 @@ try {
         hints: item.querySelector('.da-hints')?.textContent.replace(/\\s+/g, ' ').trim() ?? '',
       })),
     }));
-    const table = [...document.querySelectorAll('.dtable tbody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent.replace(/\\s+/g, ' ').trim()));
+    const readTable = (table) => [...table.querySelectorAll('tbody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent.replace(/\\s+/g, ' ').trim()));
+    const tables = [...document.querySelectorAll('.dtable')].map(readTable);
+    /* 按内容认表：页面上表格不止一张，按第一列认最稳（加表也不会串） */
+    const table = tables.find((rows) => rows.some((row) => /server\\/data\\//.test(row[0]))) ?? [];
+    const channels = tables.find((rows) => rows.some((row) => row[0] === '智能巡检车')) ?? [];
     const pitfalls = [...document.querySelectorAll('.da-pitfalls li')].map((el) => el.textContent.replace(/\\s+/g, ' ').trim());
     const notes = [...document.querySelectorAll('.note')].map((el) => el.textContent.replace(/\\s+/g, ' ').trim());
-    return { li, sections, table, pitfalls, notes };
+    return { li, sections, table, channels, pitfalls, notes };
   })()`);
 
   check(
@@ -358,6 +362,19 @@ try {
     summary.table.length === 3 && summary.table.every((row) => row.length === 4) && summary.table.some((row) => /server\/data\/cart\.json/.test(row[0])),
     summary.table.map((row) => `${row[0]}=${row[2]}`).join(" · "),
   );
+  check(
+    "画面通道一表说清三路来源与形态（小车两路 MJPEG / 终端逐帧预览 / 树莓派屏幕）",
+    summary.channels.length === 3 &&
+      summary.channels.some((row) => /MJPEG 视频/.test(row[2]) && /stream\/rviz/.test(row[1])) &&
+      summary.channels.some((row) => /JPEG 预览/.test(row[2]) && /不是连续视频/.test(row[2])) &&
+      summary.channels.some((row) => /屏幕画面/.test(row[2])),
+    summary.channels.map((row) => `${row[0]}：${row[2].slice(0, 30)}`).join(" ／ "),
+  );
+  check(
+    "写明平台没有 RTSP / RTMP / WebRTC 入口（别按设备说明书去接）",
+    summary.notes.some((t) => /RTSP/.test(t) && /RTMP/.test(t) && /WebRTC/.test(t)),
+    summary.notes.find((t) => /RTSP/.test(t))?.slice(0, 100) ?? "—",
+  );
   check("三个最容易踩的坑写在页面上", summary.pitfalls.length === 3, summary.pitfalls.map((t) => t.slice(0, 18)).join(" ／ "));
   check(
     "验收命令与文档路径都在页面上（照着敲就能复核）",
@@ -391,6 +408,12 @@ try {
     })()`);
     if (answer?.text) break;
     await sleep(400);
+  }
+
+  /* 气泡头的意图角标在"处理中"显示队列、回复落定后才写意图 —— 单独等它一下 */
+  for (let i = 0; i < 20 && !/device_link_check/.test(answer?.intent ?? ""); i += 1) {
+    await sleep(300);
+    answer = { ...answer, intent: await evaluate(`document.querySelector('.xd__panel .xd__intent')?.textContent.replace(/\\s+/g, ' ').trim() ?? ''`) };
   }
 
   /* 业务事实表默认折叠（渐进披露）：点开再读，否则读到的是空 */

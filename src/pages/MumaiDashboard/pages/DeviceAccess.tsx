@@ -79,6 +79,15 @@ export function DeviceAccessTab() {
 
   const counts = data?.counts;
 
+  /** 某一节的现状色条：把上面那份自检结论里该节的最差一级搬过来（同一份数据，不另算） */
+  const sectionState = (key: string) => {
+    const items = data?.sections.find((section) => section.key === key)?.items ?? [];
+    if (items.length === 0) return <StatusChip text="—" tone="muted" />;
+    if (items.some((item) => item.level === "fail")) return <StatusChip text="未接通" tone="danger" />;
+    if (items.some((item) => item.level === "warn")) return <StatusChip text="部分可用" tone="warn" />;
+    return <StatusChip text="已接通" tone="ok" />;
+  };
+
   return (
     <>
       <Panel
@@ -179,6 +188,67 @@ export function DeviceAccessTab() {
         />
         <p className="note">
           改完任一份都要**重启后端**（三份都是启动时读一次）。占位符（<code>REPLACE_WITH…</code>）没换掉等于没配。
+        </p>
+      </Panel>
+
+      <Panel title="画面通道（谁能把画面传过来）" icon="asset-video">
+        {/*
+          这一屏回答的是「小车 / 精扫设备的画面能不能串到平台」——
+          形态按**代码里真实的通道**写，不按设备说明书的美好说法写；
+          「现状」一列直接取自上面那份自检结论（同一份数据，不另算）。
+        */}
+        <DataTable
+          head={["来源", "通道", "形态", "现状"]}
+          rows={[
+            [
+              <b key="cart">智能巡检车</b>,
+              <>
+                /api/cart/stream/rviz · /api/cart/stream/camera
+                <br />
+                <small>平台代理小车 /api/streams/*.mjpeg</small>
+              </>,
+              <>
+                两路 <b>MJPEG 视频</b>，浏览器 &lt;img&gt; 直接播
+                <br />
+                <small>建图巡航页并排显示（RViz 画面 / 摄像头）</small>
+              </>,
+              sectionState("cart"),
+            ],
+            [
+              <b key="device">手持精扫终端</b>,
+              <>
+                POST /api/devices/&lt;设备号&gt;/preview
+                <br />
+                <small>页面读 /preview/latest</small>
+              </>,
+              <>
+                逐帧 <b>JPEG 预览</b>（页面 1.5s 轮询，不是连续视频）
+                <br />
+                <small>必须终端主动推；平台不拉流、不转码</small>
+              </>,
+              sectionState("device"),
+            ],
+            [
+              <b key="screen">树莓派桌面（可选）</b>,
+              <>
+                /api/capture/screen/stream
+                <br />
+                <small>Pi 上 mumai-screen.service</small>
+              </>,
+              <>
+                MJPEG <b>屏幕画面</b>（采集工作台用）
+                <br />
+                <small>X11 → FFmpeg → MJPEG</small>
+              </>,
+              sectionState("screen"),
+            ],
+          ]}
+        />
+        <p className="note">
+          平台里**没有** RTSP / RTMP / WebRTC / HLS / HTTP-FLV 入口：小车配置里的
+          <code>rviz_rtmp_url</code> / <code>camera_rtmp_url</code> 只在参数栏**显示**（浏览器播不了
+          <code>rtmp://</code>），实际画面走的是上面那两路 MJPEG。要让精扫设备也出**连续视频**，
+          得新增一条通道（终端改推 MJPEG，或平台侧接 RTSP 转封装）—— 那是开发项，不是配置项。
         </p>
       </Panel>
 
