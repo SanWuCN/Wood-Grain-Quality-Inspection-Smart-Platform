@@ -21,7 +21,14 @@
  *   ③ 打帧 → 列表多一行 `KF-Z04-NN`，且这一行的角度读数就是刚才那个机位；
  *   ④ 点「适应视图」把镜头带走 → 点那一行 → 读数**回到**打帧时的值，并标出「已回到该机位」；
  *   ⑤ 饶（另一个账号）打开同一页能看到 `KF-Z04-NN`（服务端共享，不是本机 localStorage）；
- *   ⑥ 删除 → 列表清空，服务端实体里也没有了。
+ *   ⑥ 删除 → 列表清空，服务端实体里也没有了（两段式删除：第一下只是举起来）。
+ *
+ * 「打关键帧功能还需优化」（2026-09-18）之后补的判据：
+ *   ⑦ 每一行有「改名 / 更新机位 / 删除」三个操作点，并给出方位、位置两行读数；
+ *     改名换名字不动帧号，行上标出「改于谁、什么时候」；
+ *   ⑧ 「按顺序巡场」给出控制条（第 n/N 帧 + 上一帧/暂停/下一帧/结束巡场），当前帧在列表里高亮；
+ *     点「下一帧」走到第 2 帧并转为暂停（人在控节奏）；自己动镜头高亮要清掉（原来会一直挂着骗人）；
+ *   ⑨ 巡场要两个机位才成立，所以本工装不够就当场补打一帧，跑完连同 ③ 那一帧一起删掉。
  *
  * 前置：8000 在跑（页面 + API 同一个服务）。用法：
  *   node tools/验收-数字孪生打关键帧.mjs [--url http://127.0.0.1:8000/]
@@ -681,18 +688,67 @@ try {
     renamed.text,
   );
 
-  /* 巡场：控制条 + 当前帧高亮 */
+  /*
+    巡场至少要两个机位（一个机位不叫"按顺序"）——按钮只在两帧以上才出现。
+    上一轮只有一帧，控制条根本没渲染，两条判定冤死在这里；不够就当场再打一帧，
+    这一帧算本轮工装自己造的，⑥ 里跟 frameId 一起清掉（跑完不留垃圾）。
+  */
+  let tourFrameId = "";
+  if (kfPanel.rows.length < 2) {
+    /*
+      这一节是刚从采集页/投屏页跳回来的，模型要重新加载 —— 「打关键帧」在
+      `stageReady` 之前是置灰的，点了也白点（上一轮就是这样，一帧都没打上）。
+      所以先等按钮真的可点，再点，并且确认这一下确实发出去了。
+    */
+    let compose = null;
+    for (let i = 0; i < 100; i += 1) {
+      compose = await evaluate(`(() => {
+        const btn = [...document.querySelectorAll('button')].find((el) => (el.textContent || '').trim().startsWith('打关键帧'));
+        return btn ? { disabled: btn.disabled, title: btn.title } : null;
+      })()`);
+      if (compose && !compose.disabled) break;
+      await sleep(300);
+    }
+    const beforeTour = await readRows();
+    const clicked = await evaluate(`(() => {
+      const btn = [...document.querySelectorAll('button')].find((el) => (el.textContent || '').trim().startsWith('打关键帧'));
+      if (!btn || btn.disabled) return false;
+      btn.click();
+      return true;
+    })()`);
+    for (let i = 0; i < 60; i += 1) {
+      const now = await readRows();
+      const fresh = now.find((row) => !beforeTour.some((old) => old.id === row.id));
+      if (fresh) {
+        tourFrameId = fresh.id;
+        break;
+      }
+      await sleep(400);
+    }
+    if (!tourFrameId) {
+      throw new Error(
+        `巡场要两个机位，第二帧没打上：按钮${compose?.disabled ? "还置灰着" : "已可点"}` +
+          `（disabled=${compose?.disabled}，title=${compose?.title ?? "（没找到按钮）"}，点击发出=${clicked}）`,
+      );
+    }
+  }
+
+  /* 巡场：控制条 + 当前帧高亮（点完要等控制条渲染出来，别抢在渲染前读） */
   await evaluate(`(() => {
     const btn = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === '按顺序巡场');
     btn?.click();
     return Boolean(btn);
   })()`);
-  await sleep(1500);
-  const tourStart = await evaluate(`(() => ({
-    bar: document.querySelector('.keyframe-tour')?.textContent.replace(/\\s+/g, ' ').trim() ?? '',
-    ops: [...document.querySelectorAll('.keyframe-tour__ops button')].map((b) => b.textContent.trim()),
-    active: document.querySelector('.keyframe-list li.is-active .keyframe-list__id')?.textContent.trim() ?? '',
-  }))()`);
+  let tourStart = { bar: "", ops: [], active: "" };
+  for (let i = 0; i < 15; i += 1) {
+    tourStart = await evaluate(`(() => ({
+      bar: document.querySelector('.keyframe-tour')?.textContent.replace(/\\s+/g, ' ').trim() ?? '',
+      ops: [...document.querySelectorAll('.keyframe-tour__ops button')].map((b) => b.textContent.trim()),
+      active: document.querySelector('.keyframe-list li.is-active .keyframe-list__id')?.textContent.trim() ?? '',
+    }))()`);
+    if (tourStart.bar && tourStart.active) break;
+    await sleep(120);
+  }
   check(
     "巡场：控制条给出「第 n/N 帧」与上一帧/暂停/下一帧/结束巡场，当前帧在列表里高亮",
     /巡场 第 1[\/]/.test(tourStart.bar) && tourStart.ops.join(",") === "上一帧,暂停,下一帧,结束巡场" && tourStart.active.includes("1."),
@@ -812,15 +868,15 @@ try {
     工装要按两下：第一下之后帧还在，第二下才真删。第一下"只是举起来"这一条
     在 ④b 里已经单独验过，这里直接连点两下。
   */
-  const clickDelete = () =>
+  const clickDelete = (id) =>
     evaluate(`(() => {
       const rows = [...document.querySelectorAll('.keyframe-list li')];
-      const target = rows.find((li) => (li.querySelector('.keyframe-list__id')?.textContent || '').includes(${JSON.stringify(frameId)}));
+      const target = rows.find((li) => (li.querySelector('.keyframe-list__id')?.textContent || '').includes(${JSON.stringify(id)}));
       const btn = [...(target?.querySelectorAll('button') ?? [])].find((el) => ['删除', '确认删除'].includes((el.textContent || '').trim()));
       if (btn) btn.click();
       return btn ? (btn.textContent || '').trim() : null;
     })()`);
-  const firstClick = await clickDelete();
+  const firstClick = await clickDelete(frameId);
   await sleep(300);
   const armedStillThere = await evaluate(`(() => {
     const rows = [...document.querySelectorAll('.keyframe-list li')];
@@ -831,7 +887,7 @@ try {
     firstClick === "删除" && armedStillThere === true,
     `按钮=${firstClick} · 帧还在=${armedStillThere}`,
   );
-  const secondClick = await clickDelete();
+  const secondClick = await clickDelete(frameId);
   check("第二下才真的删（按钮文字在这两下之间变成了「确认删除」）", secondClick === "确认删除", `按钮=${secondClick}`);
   let afterDelete = raoRows;
   for (let i = 0; i < 60; i += 1) {
@@ -840,11 +896,30 @@ try {
     await sleep(400);
   }
   check("删除之后页面上没有这一帧了", !afterDelete.some((row) => row.id === frameId), `剩 ${afterDelete.length} 帧`);
+
+  /* 巡场那一帧是本轮为了凑两个机位补打的，一样要清掉 */
+  if (tourFrameId) {
+    await clickDelete(tourFrameId);
+    await sleep(300);
+    await clickDelete(tourFrameId);
+    for (let i = 0; i < 60; i += 1) {
+      const left = await readRows();
+      if (!left.some((row) => row.id === tourFrameId)) break;
+      await sleep(400);
+    }
+  }
+  const leftoverIds = [frameId, tourFrameId].filter(Boolean);
+  const finalRows = await readRows();
+  check(
+    "跑完不留垃圾：这一轮打的两帧都清掉了",
+    !finalRows.some((row) => leftoverIds.includes(row.id)),
+    `剩 ${finalRows.length} 帧${finalRows.length ? `：${finalRows.map((row) => row.id).join(" / ")}` : ""}`,
+  );
   const afterServerDelete = await serverKeyframes("shi");
+  const serverLeftover = afterServerDelete.frames.filter((item) => leftoverIds.includes(item.id));
   check(
     "服务端实体里也清掉了（keyframes 与 bookmarkIds 两份都不留）",
-    !afterServerDelete.frames.some((item) => item.id === frameId) &&
-      !afterServerDelete.bookmarks.includes(frameId),
+    serverLeftover.length === 0 && !leftoverIds.some((id) => afterServerDelete.bookmarks.includes(id)),
     `剩 ${afterServerDelete.frames.length} 帧；书签 ${afterServerDelete.bookmarks.join(" / ") || "（空）"}`,
   );
 
