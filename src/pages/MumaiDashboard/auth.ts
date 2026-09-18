@@ -68,9 +68,9 @@ export type Permission =
   /**
    * 场景模型上传（POST /api/files + scene.submit）。
    *
-   * 只有全栈开发工程师（饶）能上传：其他人只能**选择已上传的模型**来显示。
-   * 与 `scene:submit` 分开放，是因为沈 / 史在前端持有 ALL_PERMISSIONS ——
-   * 若沿用 `scene:submit`，项目经理与架构师会一并拿到上传权，与需求不符。
+   * 服务端拦的是 `POST /api/files?dir=scenes` 那一步（按 `scene:submit` 判，
+   * 见 server/api/http.mjs）；前端的「上传模型」按钮读的是这一条，
+   * 所以两边要成对出现 —— 只给 submit 不给 upload，会出现"能上传但按钮不显示"。
    */
   | "scene:upload"
   /** 训练演示（POST /training-jobs） */
@@ -159,27 +159,35 @@ export const ALL_PERMISSIONS: readonly Permission[] = Object.keys(
 /**
  * 四个账号的权限集合。
  *
- * 用户要求「项目经理和人工智能架构师权限最大，所有都可以操作」，
- * 后来（2026-09-17）又明确：「我，shi账号下，应该是有权限填写环境记录与配置校验
- * 录入数据的，你干脆给我 shi 账号权限拉满得了」。
+ * 用户要求「项目经理和人工智能架构师权限最大，所有都可以操作」；2026-09-17
+ * 又明确「我，shi账号下，应该是有权限填写环境记录与配置校验录入数据的，
+ * 你干脆给我 shi 账号权限拉满得了」；2026-09-28 再明确「把我，shi 的权限完全开放，
+ * 所有功能都能直接用」。
  *
- * 因此沈 / 史在前端持有全量权限，例外只有两条**刻意的**：
- *   · `scene:submit` / `scene:upload` —— 高斯模型上传只有饶能做（见下）；
- *   · 指派权不在前端这张表里（它由服务端的 `workorder:assign` 判定，
- *     架构师没有，PRD §6.2 明令）。
- * 新增的 `env:entry`（环境记录录入）加进 `PERMISSION_LABEL` 即自动落到沈 / 史头上，
- * 与「拉满」的口径一致。
+ * 所以：**史 = 全量**（`ALL_PERMISSIONS` 一条不落，含高斯模型上传 `scene:upload`
+ * 与成果提交 `scene:submit`）；沈保留「除场景上传外全量」那一条老口径不动
+ * （上传高斯模型是全栈开发工程师的活，演示动线里也由饶做）。
+ * 服务端同一份判据在 `server/services/permissions.mjs`，那边给史的是
+ * `ALL` + 归档/控制台/知识库 + `workorder:assign`/`workorder:operate` + `env:entry`。
+ *
+ * ⚠ 服务端的 `workorder:assign`（工单指派权）在前端没有对应权限码：
+ * `capabilities.canAssign` 由服务端算好下发，前端只负责显示。
  */
 const ROLE_ACTIONS: Record<string, readonly Permission[]> = {
   /*
-    沈 / 史在前端持有全部权限，但**场景模型上传只给饶**：
-    `scene:submit` 在这个数组里也要拿掉，否则「上传模型」按钮会对他们出现。
-    服务端同样只认 `scene:submit` → 饶（见 server/services/permissions.mjs），
-    前端去掉按钮只是不误导，真正的闸门在服务端。
+   沈 / 史的老分工：沈在前端持有除场景模型上传外的全部权限。
+   `scene:submit` 在这个数组里也要拿掉，否则「上传模型」按钮会对项目经理出现。
+   服务端同样把沈的 `scene:submit` 剔除（见 server/services/permissions.mjs 的
+   `ALL_BUT_UPLOAD`），前端去掉按钮只是不误导，真正的闸门在服务端。
   */
   shen: ALL_PERMISSIONS.filter((item) => item !== "scene:submit" && item !== "scene:upload"),
 
-  shi: ALL_PERMISSIONS.filter((item) => item !== "scene:submit" && item !== "scene:upload"),
+  /**
+   * 史 · 人工智能架构师：**全量**（含模型上传与成果提交）。
+   * 别再按岗位"漏一条"——用户要的就是"所有功能都能直接用"；
+   * 哪天真要收紧，请改这里 + server/services/permissions.mjs，两处同时改。
+   */
+  shi: ALL_PERMISSIONS,
 
   /** 饶 · 全栈开发工程师（PRD 2.1：手持参数确认、原始数据上传、场景成果提交、更新包接收与回验） */
   rao: [

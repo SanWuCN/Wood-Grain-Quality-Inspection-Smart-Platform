@@ -76,9 +76,10 @@ export const ACTION_PERMISSION = {
 
 /** 四个账号 → 权限集合（与 src/pages/MumaiDashboard/auth.ts 的 ROLE_ACTIONS 同源） */
 /*
-  沈 / 史 = 全部动作，但**场景上传除外**：上传高斯模型是饶（全栈开发工程师）的活，
-  另外两个角色只能选择已上传的模型显示。写成显式剔除而不是把 scene.upload
+  沈 = 全部业务动作，但**场景上传除外**：上传高斯模型是饶（全栈开发工程师）的活，
+  项目经理只能选择已上传的模型显示。写成显式剔除而不是把 scene:upload
   从 ALL 里漏掉 —— 漏掉会在下次新增动作时又把它带回来。
+  ⚠ 史（人工智能架构师）自 2026-09-28 起是**真正全量**，见下面 ROLE_PERMISSIONS.shi。
 */
 const ALL = [...new Set(Object.values(ACTION_PERMISSION))].filter((item) => item !== "*");
 const ALL_BUT_UPLOAD = ALL.filter((item) => item !== "scene:upload" && item !== "scene:submit");
@@ -98,12 +99,11 @@ const CONSOLE_PERMISSIONS = ["console:admin"];
 /*
  * 工单指派与扫描仪下发（PRD-工单指派与扫描仪下发-v1.0 §6.2）
  *
- * 这两个权限**故意不放进 `ACTION_PERMISSION`**：那张表的取值会被 `ALL` 收走，
- * 一放进去，人工智能架构师（shi）就跟着拿到指派权了 —— 而 PRD 明令
- * 「人工智能架构师、管理员或小木智能体不能因为现有『全权限』集合而获得指派权」。
- * 所以指派权只按项目经理这一个岗位显式授予：
+ * 这两个权限放在 `ACTION_PERMISSION` **之外**：那张表的取值会被 `ALL` 收走，
+ * 放进去就等于"新增动作时被全量账号自动继承"。留在外面才能一条条显式授予 ——
+ * 谁拿到、什么时候拿到的，看下面 ROLE_PERMISSIONS 的注释。
  *   workorder:assign   指派 / 更换负责人、参与人员与职责
- *   workorder:operate  本期属于项目经理的流程动作：运行环境校验、暂停/恢复/验收/归档
+ *   workorder:operate  流程动作：运行环境校验、暂停/恢复/验收/归档
  * 被指派员工的写权限不在这里 —— 那是**按单**判定的（services/work-orders.mjs 的职责校验）。
  */
 const WORK_ORDER_PERMISSIONS = ["workorder:assign", "workorder:operate"];
@@ -140,23 +140,31 @@ export const ROLE_PERMISSIONS = {
     ]),
   ],
   /*
-    史：人工智能架构师。**除指派权与模型上传外全给**（用户 2026-09-17「拉满」）：
-      · 加上 `workorder:operate` —— 运行环境校验、暂停/恢复/验收/归档这些流程动作，
-        架构师在演示里是实际在操作平台的人（`work-orders.mjs` 的 capabilities
-        按这条权限放行）；
-      · 加上 `env:entry` —— 录环境读数（本次诉求的原话）；
-      · 仍然**不给** `workorder:assign`：PRD §6.2 明令「人工智能架构师、管理员或
-        小木智能体不能因为现有『全权限』集合而获得指派权」，而且演示动线里
-        "别人那边选择人员调度"正是由项目经理做的，给了反而看不到协同。
-      · 仍然**不给** `scene:submit` / `scene:upload`：高斯模型上传只有全栈开发工程师能做。
+    史：人工智能架构师。**全量**（用户 2026-09-28 口径：「把我，shi 的权限完全开放，
+    所有功能都能直接用」）。
+
+    ── 这一条怎么走到全量的（三段时间线，别把前两段当成"现在"）────────────
+    · 2026-09-17 第一次「拉满」：拿到 ALL_BUT_UPLOAD + 归档/控制台/知识库全套
+      + `workorder:operate`（流程动作）+ `env:entry`（录环境读数）；
+    · 当时刻意留了三条不给：`workorder:assign`（PRD §6.2 明令）、
+      `scene:submit` / `scene:upload`（高斯模型上传只给饶）；
+    · 2026-09-28 用户明确要求**连这三条一起给**（原话：「权限完全开放，所有功能都能直接用」），
+      并已确认「PRD 冲突由我担」。于是这里改成从 `ALL` 起手，再补三组不在
+      `ACTION_PERMISSION` 取值里的权限码。
+
+    ⚠ 覆盖 PRD：`docs/PRD-工单指派与扫描仪下发-v1.0.md` §6.2 L191 原文是
+      「人工智能架构师、管理员或小木智能体不能因为现有『全权限』集合而获得指派权」。
+      本条是**用户当面拍板的口径变更**，不是漏改；演示动线里「人员调度」仍可交给沈做。
+    ↩ 回退办法：删掉 `WORK_ORDER_PERMISSIONS` 里的 `workorder:assign`（只留 operate），
+      并把 `ALL` 换成 `ALL_BUT_UPLOAD` —— 即回到 2026-09-17 那一版。
   */
   shi: [
     ...new Set([
-      ...ALL_BUT_UPLOAD,
+      ...ALL,
       ...ARCHIVE_PERMISSIONS,
       ...CONSOLE_PERMISSIONS,
       ...KNOWLEDGE_PERMISSIONS,
-      "workorder:operate",
+      ...WORK_ORDER_PERMISSIONS,
       ...ENV_ENTRY_PERMISSION,
     ]),
   ],

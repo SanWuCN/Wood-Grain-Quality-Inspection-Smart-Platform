@@ -60,6 +60,13 @@ export function startService({
   dbFile = process.env.MUMAI_DB ?? resolve("server/data/mumai.db"),
   staticDir = null,
   sessionId = DEFAULT_SESSION_ID,
+  /*
+    设备令牌：不传就按本机配置（环境变量 + `server/data/device-tokens.json`，见 deviceTokenSpec）。
+    传了就**只用传进来的这份** —— 契约测试要的是"可复现"，而本机那份带真实设备令牌的文件
+    会让测试结果随机器变化：`tools/test-work-orders.mjs` 里 A16/A17（凭 `demo-token` 取包）
+    在装过真机令牌的这台机器上会静默变成 401。测试注入自己的令牌，不再读环境。
+  */
+  deviceTokens = null,
   quiet = false,
 } = {}) {
   const db = openDatabase(dbFile);
@@ -91,7 +98,7 @@ export function startService({
     为了加一台设备去改启动命令，也和 capture-screen / cart 的安装配置一个路子。
     文件不进仓库（server/data/ 已 gitignore）。
   */
-  const devices = createDeviceGateway({ db, sessionId, tokens: parseDeviceTokens(deviceTokenSpec()) });
+  const devices = createDeviceGateway({ db, sessionId, tokens: parseDeviceTokens(deviceTokens ?? deviceTokenSpec()) });
   server.on("upgrade", (request, socket, head) => {
     if (devices.handleUpgrade(request, socket, head)) return;
     /* 语音通道先于事件通道试：`/voice-*` 与 `/ws` 不是同一套协议端点 */

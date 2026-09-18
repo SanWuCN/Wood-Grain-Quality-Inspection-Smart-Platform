@@ -33,7 +33,20 @@ const envelope = (type, payload, messageId = `msg-${randomUUID().slice(0, 8)}`) 
 
 test('工单指派与扫描仪下发：A01—A26 服务端契约', async () => {
   const { startService } = await import('../server/index.mjs');
-  const service = await startService({ port: 0, host: '127.0.0.1', dbFile: ':memory:', quiet: true });
+  /*
+    设备令牌**显式注入**，不读本机配置：本机 `server/data/device-tokens.json` 里装的是
+    真车真机的令牌（handheld-02 → 非 demo-token），而本文件下面的 A16/A17 用的是
+    `demo-token`（终端出厂默认值）。不注入的话，装过真机令牌的这台机器上
+    A16「别的设备不能拿这张包」会先倒在前一步 —— 拿到的是 401 而不是 403，
+    看起来像权限回归，其实是环境差异（2026-09-28 踩到）。
+  */
+  const service = await startService({
+    port: 0,
+    host: '127.0.0.1',
+    dbFile: ':memory:',
+    deviceTokens: DEVICE_TOKEN,
+    quiet: true,
+  });
   const base = service.url;
   try {
     /* ---------------- 身份 ---------------- */
@@ -152,31 +165,54 @@ test('工单指派与扫描仪下发：A01—A26 服务端契约', async () => {
     assert.equal(envEmpty.config, null, 'A09：新单没有配置版本');
     assert.equal(detailA.dispatch.state, 'none', 'A09：新单没有下发记录');
 
-    /* ---------------- A06：指派权限 ---------------- */
-    const assignBody = (leaderAccountId, members = []) => ({
+    /* ---------------- A06：指派权限 ----------------
+       2026-09-28 口径变更：用户要求「shi 权限完全开放，所有功能都能直接用」，
+       人工智能架构师**也拿到指派权**（已确认覆盖 PRD §6.2 L191）。
+       这里让史先指派自己一次，验的是"接口真的 200"而不是"按钮被藏起来"；
+       随后下面 A05 沈的指派接着 revision 1 走 —— 服务端没有"改回未指派"这个动作
+       （`assign` 必须有负责人，见 work-orders.mjs 的 BAD_LEADER），所以指派是单调递增的。
+       普通员工（rao）依旧 403 —— 这条没放开。
+    */
+    const assignBody = (leaderAccountId, members = [], expectedRevision = 0) => ({
       leaderAccountId,
       members,
-      expectedRevision: 0,
+      expectedRevision,
     });
+    const shiDetailBefore = await call('shi', `/api/work-orders/${orderA.orderId}`);
+    assert.equal(
+      shiDetailBefore.body.capabilities.canAssign,
+      true,
+      'A06：架构师的能力位要跟着权限表走（canAssign=true）',
+    );
     const byArchitect = await call('shi', `/api/work-orders/${orderA.orderId}/assignment`, {
       method: 'PUT',
-      body: JSON.stringify(assignBody('rao', [{ accountId: 'rao', duties: ['environment_entry'] }])),
+      body: JSON.stringify(assignBody('shi', [{ accountId: 'ma', duties: ['mapping_patrol'] }])),
     });
-    assert.equal(byArchitect.status, 403, 'A06：人工智能架构师即使有全量业务权限也不能指派');
+    assert.equal(
+      byArchitect.status,
+      200,
+      `A06：架构师现在可以指派（2026-09-28 口径）：${JSON.stringify(byArchitect.body)}`,
+    );
+    assert.equal(byArchitect.body.assignment.revision, 1, 'A06：架构师这次指派要留下自己的 revision');
+    assert.equal(byArchitect.body.assignment.assignedBy, 'shi', 'A06：指派记录里要记下操作者');
     const byStaff = await call('rao', `/api/work-orders/${orderA.orderId}/assignment`, {
       method: 'PUT',
-      body: JSON.stringify(assignBody('rao')),
+      body: JSON.stringify(assignBody('rao', [], 1)),
     });
     assert.equal(byStaff.status, 403, 'A06：普通员工不能自己指派自己');
 
-    /* ---------------- A05：项目经理指派 ---------------- */
+    /* ---------------- A05：项目经理指派（接在架构师那次 revision 1 之后） ---------------- */
     const assigned = await call('shen', `/api/work-orders/${orderA.orderId}/assignment`, {
       method: 'PUT',
       body: JSON.stringify(
-        assignBody('rao', [
-          { accountId: 'rao', duties: ['environment_entry', 'scanner_dispatch', 'capture_upload'] },
-          { accountId: 'ma', duties: ['mapping_patrol'] },
-        ]),
+        assignBody(
+          'rao',
+          [
+            { accountId: 'rao', duties: ['environment_entry', 'scanner_dispatch', 'capture_upload'] },
+            { accountId: 'ma', duties: ['mapping_patrol'] },
+          ],
+          1,
+        ),
       ),
     });
     assert.equal(assigned.status, 200, `指派失败：${JSON.stringify(assigned.body)}`);
@@ -652,10 +688,13 @@ test('工单指派与扫描仪下发：A01—A26 服务端契约', async () => {
     const deleteAgain = await call('shen', `/api/work-orders/${fourthId}`, { method: 'DELETE' });
     assert.equal(deleteAgain.status, 404, '重复删除返回 404，不静默成功');
 
-    /* ---------------- A05/A06：换人后旧账号失权 ---------------- */
+    /* ---------------- A05/A06：换人后旧账号失权 ----------------
+       这次换人接在**架构师那次指派（revision 1）→ 沈那次指派（revision 2）**之后，
+       所以 expectedRevision 是 2。指派版本是单调递增的：服务端没有"改回未指派"的动作。
+    */
     const reassign = await call('shen', `/api/work-orders/${orderA.orderId}/assignment`, {
       method: 'PUT',
-      body: JSON.stringify({ leaderAccountId: 'ma', members: [{ accountId: 'ma', duties: ['environment_entry'] }], expectedRevision: 1 }),
+      body: JSON.stringify({ leaderAccountId: 'ma', members: [{ accountId: 'ma', duties: ['environment_entry'] }], expectedRevision: 2 }),
     });
     assert.equal(reassign.status, 200, `换人失败：${JSON.stringify(reassign.body)}`);
     const raoAfter = await call('rao', `/api/work-orders/${orderA.orderId}/environment-draft`, {
