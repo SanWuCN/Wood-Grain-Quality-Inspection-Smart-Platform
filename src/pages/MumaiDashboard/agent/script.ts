@@ -127,18 +127,46 @@ export type ScriptRound = {
    *   · ⑳ 跳到了字面量 `?order=draft` —— 占位符没人替换，选中不到任何工单。
    * 逐轮验证时这几条全是"跳转失败"。所以把导航**显式声明出来**，
    * 不再依赖"该轮的意图碰巧是导航类"。
+   *
+   * ── v2：从"只有工单页"扩到**每一轮都有自己的页面**（用户 2026-09-23 口径）
+   * 用户原话：「贴合剧本小木以及我（shi，人工智能架构师）的需要，对平台进行页面添加及
+   * 和小木互动时触发的自动操作……操作或展示页面少就添加」。原实现里 `route` 只认
+   * `"order"`，于是 25 轮中只有 8 轮会把页面带走，其余 17 轮"念完停在原地、只弹一个小卡片"——
+   * 观众看到的是"小木只是回了句话"，而剧本里每一轮都发生在某张页面上
+   * （天气档案 / 建图 / 三维场景 / 异常排查 / 数据集 / 训练验证 / 更新交付 / 融合分析…）。
+   * 现在 `route` 取平台已有的页面路径，`tab` / `view` / `component` 是页内定位，
+   * 由 `tools.ts` 的 `navigate_page` 统一执行（**不新增一套跳转实现**）。
+   *
+   * ⚠ 路径必须与 `design.ts` 的 `NAV_ITEMS`（一级页面）或页面自身的页签表一致；
+   *   `scriptNav.test.ts` 会逐轮核对，写错路径直接红 —— 免得小木把用户带进
+   *   「页面不存在」的兜底页（那比不跳还糟）。
    */
   nav?: {
-    /** 目标页面：目前只有工单详情一种 */
-    route: "order";
     /**
-     * 选中哪张工单：
-     *   "bound"   = **显式绑定**的那张（用户点「查看」通知时绑上的）—— 第①轮用这个。
-     *               防幻觉规则 3：不许用 `orders[0]` 猜用户想看哪张；
+     * 目标页面：
+     *   · `"order"` —— 工单详情（选中某一张，见 `order` 字段）；
+     *   · 其余取 `NAV_ITEMS` 的 path（如 `"/hardware"`、`"/firmware"`、`"/twin"`、`"/mapping"`、
+     *     `"/knowledge"`、`"/archive"`、`"/"`），走通用的 `navigate_page`。
+     */
+    route: string;
+    /**
+     * 选中哪张工单（`route === "order"` 时才有意义）：
+     *   "bound"   = **显式绑定优先**（用户点「查看」通知时绑上的那张，防幻觉规则 3）：
+     *               绑定时一律以它为准；**未绑定时退回列表最新那张** —— 与台词取值
+     *               （`executor.ts` 的 `scriptEntities()`）同一条口径，
+     *               免得出现"念的是最新那张工单、页面却停在原地"；
      *   "current" = 列表最新那张（其余轮次的既有口径）；
      *   字符串    = 明确指定。
      */
-    order: "bound" | "current" | string;
+    order?: "bound" | "current" | string;
+    /** 页内页签 key（`/hardware` 与 `/firmware` 用），例如 `env`、`capture`、`dataset`、`fusion` */
+    tab?: string;
+    /** 页内主视图 key，例如训练验证页的 `compare`（新旧对比） */
+    view?: string;
+    /** 构件编号，用于数字孪生页（`/twin?component=Z04`） */
+    component?: string;
+    /** 采集批次号，用于采集页 */
+    batch?: string;
   };
 };
 
@@ -186,6 +214,14 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "（此轮为统计问答，不接其他岗位台词）",
     voicePack: null,
     intentId: null,
+    /*
+      页面落点（v2 小木带路）：「我正在检索RAG知识库，并核对近期巡检工单、风险记录和施工反馈」——知识库检索页。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/knowledge",
+      tab: "search",
+    },
   },
   /* ---------------- 第一幕 · 工单进入与现场部署 ---------------- */
   {
@@ -421,6 +457,14 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     */
     voicePack: "AI语音9",
     intentId: "site_weather",
+    /*
+      页面落点（v2 小木带路）：「已按工单地点建立天气查询」——环境记录页（近三个月天气档案 + 该地风险提示）。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/hardware",
+      tab: "env",
+    },
   },
   {
     roundNo: "⑥",
@@ -446,6 +490,13 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "（等待时选用）进场搬运尚未结束时由小木播报，队员继续整理装备。",
     voicePack: null,
     intentId: null,
+    /*
+      页面落点（v2 小木带路）：「我已把工单任务同步到工作台」——任务总览（工作台）。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/",
+    },
     precondition: "操作者先说「现场共四根核心古木主体…」（本轮的上一句）",
   },
   {
@@ -466,6 +517,14 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "（本轮为新增的设备编号核对，暂未录音）",
     voicePack: null,
     intentId: null,
+    /*
+      页面落点（v2 小木带路）：「我按设备编号核对数据来源，确认平台显示的是本次设备数据，不串数据」——采集作业（批次与设备编号）。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/hardware",
+      tab: "capture",
+    },
   },
   {
     roundNo: "⑧",
@@ -504,6 +563,14 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "饶：收到，正在根据环境数据调整补偿参数。",
     voicePack: null,
     intentId: null,
+    /*
+      页面落点（v2 小木带路）：「我已生成参数对照表……请全栈工程师用参考件复核后下发」——环境记录页的参数建议对照。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/hardware",
+      tab: "env",
+    },
   },
   /* ---------------- 第二幕 · 建图重建与风险初筛 ---------------- */
   {
@@ -524,6 +591,13 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "马：我现在沿四根木柱外侧缓慢移动，再回到已走过的区域。",
     voicePack: null,
     intentId: null,
+    /*
+      页面落点（v2 小木带路）：「已开启通道巡查，我会先查看当前建图效果，然后通过小车视频流分析现场情况」——建图巡航（建图 + 相机流）。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/mapping",
+    },
   },
   {
     roundNo: "⑩",
@@ -550,6 +624,13 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "饶：我们使用 MipMap 软件进行全景影像的高斯场景重建。",
     voicePack: null,
     intentId: null,
+    /*
+      页面落点（v2 小木带路）：「检查这批重建素材，列出缺失文件和需要重看的画面」——数字孪生（场景版本与机位关键帧）。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/twin",
+    },
   },
   {
     roundNo: "⑪",
@@ -600,6 +681,13 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "史：报告项目经理，平台建议优先复核 Z04 下部。",
     voicePack: null,
     intentId: "open_evidence",
+    /*
+      页面落点（v2 小木带路）：「打开你标记的原图，把疑点区域放大」——数字孪生（构件热点与原始证据）。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/twin",
+    },
     precondition: "不得擅自放大定位",
   },
   /* ---------------- 第三幕 · 异常拒判与模型更新 ---------------- */
@@ -620,6 +708,14 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "史：全栈开发工程师，请暂停当前采集，保留设备位置和这批原始数据！",
     voicePack: null,
     intentId: null,
+    /*
+      页面落点（v2 小木带路）：「Z04当前批次触发适用性预警，异常记录已打开，请架构师确认」——异常排查。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/hardware",
+      tab: "triage",
+    },
     precondition:
       "**唯一由小木主动起头的一轮**（工作清单 §8 明文：不接受语音抢触发）。" +
       "触发来源是本地任务事件「任务状态进入巡检前检查」—— 即任务推进到该节点时由平台自动播报，" +
@@ -643,6 +739,14 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "史：小木，把补采、数据审核和适配验证拆成任务卡，关联本次异常批次。",
     voicePack: "AI语音4",
     intentId: "anomaly_summary",
+    /*
+      页面落点（v2 小木带路）：「汇总本次异常证据，并生成补充数据和模型适配的任务清单」——异常排查（证据与结论栏）。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/hardware",
+      tab: "triage",
+    },
   },
   {
     roundNo: "⑮",
@@ -662,6 +766,13 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "沈：启动适配流程。只用提前授权、来源明确的参考样本。",
     voicePack: null,
     intentId: null,
+    /*
+      页面落点（v2 小木带路）：「任务卡已生成。补采交全栈执行，样本与测区由具身核对」——任务总览（工作台任务卡）。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/",
+    },
   },
   {
     roundNo: "⑯",
@@ -682,6 +793,14 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "饶：本轮样本采集结束。原始数据包已提交。",
     voicePack: null,
     intentId: null,
+    /*
+      页面落点（v2 小木带路）：「对照采样计划检查接收清单，把缺的列出」——采集作业（接收清单与样本编号）。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/hardware",
+      tab: "capture",
+    },
   },
   {
     roundNo: "⑰",
@@ -706,6 +825,14 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "沈：我来检查数据划分。同一块木样的连续扫描很相似。",
     voicePack: "AI语音5",
     intentId: "clean_dataset",
+    /*
+      页面落点（v2 小木带路）：「启动数据清洗，列出需要人工审核的记录，生成数据集划分」——数据集（清洗流程逐拍推进）。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/firmware",
+      tab: "dataset",
+    },
     /*
       数据清洗流程：按台词的三小句逐拍推进（选择数据集 → 配置阈值 → 预检查 → 执行清洗）。
       ⚠ 只推到 `cleaned`：**人工核验一步不替人点** —— 核验是人的责任，
@@ -735,6 +862,14 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "史：本次部署使用屏幕上的归档版本，准备执行量化与封装。",
     voicePack: "AI语音6",
     intentId: null,
+    /*
+      页面落点（v2 小木带路）：「跟踪现场任务状态，同时打开归档版本的验证摘要」——训练验证。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/firmware",
+      tab: "training",
+    },
     precondition: "现场任务仍在进行，讲解走归档验证记录，不把归档说成现场已完成",
   },
   {
@@ -765,6 +900,15 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     */
     voicePack: null,
     intentId: "compare_models",
+    /*
+      页面落点（v2 小木带路）：「汇总新旧模型的验证结果，检查部署条件」——训练验证的新旧对比。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/firmware",
+      tab: "training",
+      view: "compare",
+    },
     precondition: "不补写尚未完成的训练成绩",
   },
   {
@@ -817,6 +961,14 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "史：小木，把图像疑点和同测区响应放在一起，列出需要补核的项目。",
     voicePack: "AI语音7",
     intentId: "run_fusion",
+    /*
+      页面落点（v2 小木带路）：「调用本批次分析流程，完成图像标注和雷达分析，再按测区融合结果」——融合分析。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/firmware",
+      tab: "fusion",
+    },
   },
   {
     roundNo: "㉒",
@@ -836,6 +988,13 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     next: "史：多模态融合不能直接把两个置信度相加。",
     voicePack: null,
     intentId: "open_evidence",
+    /*
+      页面落点（v2 小木带路）：「把图像疑点和同测区响应放在一起，列出需要补核的项目」——数字孪生（构件与测区证据对照）。
+      路径与页签 key 由 `scriptNav.test.ts` 对着页面自身的页签表核对。
+    */
+    nav: {
+      route: "/twin",
+    },
   },
   {
     roundNo: "㉓",

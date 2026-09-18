@@ -414,21 +414,32 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
    * 现在把导航写成剧本自己的声明，与 intent 解耦；`nav` 存在时**也不再跑**
    * 那个不相干的 intent 动作，避免"先跳到 A、又被拽去 B"。
    */
-  if (round.nav?.route === "order") {
+  if (round.nav && round.nav.route === "order") {
     /*
       `order` 的三种取值：
-        · "bound"   —— 显式绑定的待读取工单（第①轮，防幻觉规则 3）。取不到就**不导航**，
-                       并给出"重新打开新工单通知"的提示 —— 绝不退回 `orders[0]` 猜一张，
-                       那正是文档禁止的行为；
+        · "bound"   —— **显式绑定优先**（用户点「查看」新工单通知时绑上的那张，
+                       防幻觉规则 3 的落点）。绑定时一律以它为准，绝不因为
+                       "列表里还有更新的"就改念另一张；
         · "current" —— 列表最新那张（其余轮次的既有口径，经 entities 解析）；
         · 其它字符串 —— 明确指定的工单 id。
+      ⚠ v2 起 `order` 是可选字段（非工单页的轮次不写它）：缺省按 "current" 处理。
+
+      ── 未绑定时**退回 current**（2026-09-23 小木带路验收暴露出的静默失手）────
+      原实现是"没绑定就**不导航**"。但**同一轮的台词取值**用的是 `scriptEntities()`
+      = `bound ?? 列表最新`（见本文件下面那个函数）：于是未绑定时会出现"小木照着最新
+      那张工单念完了四组内容，页面却停在原地"——台词与页面各说一套，正是用户抱怨的
+      "念完没有页面动作"。现在两支合成同一条口径（绑定优先、未绑定退回 current），
+      并在退回时留一条 info 日志，排练时一看便知这次靠的是哪张单。
+      没有工单可退（列表为空 / 还没拉回来）时仍然**不导航、不猜**。
     */
-    const wanted =
-      round.nav.order === "bound"
-        ? commissionBinding.get() ?? ""
-        : round.nav.order === "current"
-          ? (entities.order ?? "")
-          : round.nav.order;
+    const want = round.nav.order ?? "current";
+    const bound = want === "bound" ? (commissionBinding.get() ?? "") : "";
+    if (want === "bound" && !bound) {
+      console.info(
+        `[script] 第 ${round.roundNo} 轮没有显式绑定的工单，退回列表最新那张（台词取值本来就是这条口径）`,
+      );
+    }
+    const wanted = want === "bound" ? bound || (entities.order ?? "") : want === "current" ? (entities.order ?? "") : want;
     const tool = toolByName("open_order");
     if (tool && wanted) {
       try {
@@ -437,11 +448,35 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
         console.warn(`[script] 第 ${round.roundNo} 轮的导航失败：`, error);
       }
     } else if (!wanted) {
-      console.warn(
-        round.nav.order === "bound"
-          ? `[script] 第 ${round.roundNo} 轮要打开**已绑定**的工单，但当前没有绑定 —— 不导航、不猜单（防幻觉规则 3）`
-          : `[script] 第 ${round.roundNo} 轮要打开工单，但拿不到工单 id（列表可能还没拉回来）`,
-      );
+      console.warn(`[script] 第 ${round.roundNo} 轮要打开工单，但拿不到工单 id（列表可能还没拉回来）`);
+    }
+  } else if (round.nav) {
+    /*
+      ── 非工单页的页面落点（v2 小木带路，用户 2026-09-23 口径）────────────
+      剧本每一轮都发生在某张页面上（天气档案 / 建图巡航 / 三维场景 / 异常排查 /
+      数据集 / 训练验证 / 更新交付 / 融合分析…）。原先只有工单页那 8 轮会真的跳转，
+      其余轮次"念完停在原地、只弹一个小卡片"，观众看到的是"小木只是回了句话"。
+      现在按该轮声明的 route + tab / view / component / batch 走**既有的** `navigate_page`
+      工具（与自由问答里"打开数据集"走的是同一个工具、同一条 withQuery），
+      不新增第二套跳转实现，也不会出现"两套路由写法各说一套"。
+
+      ⚠ 与上面那支一样：工具失败只记日志，**不补播成功话术**（剧本是排练稿，
+        页面没跳过去时该看见的是现象，不是一句安慰）。
+    */
+    const tool = toolByName("navigate_page");
+    const args: Record<string, string> = { route: round.nav.route };
+    if (round.nav.tab) args.tab = round.nav.tab;
+    if (round.nav.view) args.view = round.nav.view;
+    if (round.nav.component) args.component = round.nav.component;
+    if (round.nav.batch) args.batch = round.nav.batch;
+    if (tool) {
+      try {
+        await runTool(tool, args, runtime, entities, false);
+      } catch (error) {
+        console.warn(`[script] 第 ${round.roundNo} 轮的页面跳转失败（${round.nav.route}）：`, error);
+      }
+    } else {
+      console.warn(`[script] 第 ${round.roundNo} 轮要跳转到 ${round.nav.route}，但 navigate_page 工具没注册`);
     }
   } else if (action) {
     const tool = toolByName(action.tool);

@@ -1,0 +1,205 @@
+/*
+ * 现场环境页（`/hardware?tab=env`）
+ *
+ * 只用既有设计令牌（`--border-subtle` / `--fill-weak` / `--space-*` / `--text-*`），
+ * 与工单页、总览页的卡片保持同一套观感；不引入新的色板或圆角尺度。
+ */
+
+.se-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.se-pick select {
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--fill-weak);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+/* 来源标注：与 `SourceTag` 同一观感（小字、次要色），但不抢面板标题 */
+.se-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+/* ---------- 天气四分类 ---------- */
+
+.se-weather {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.se-weather__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-top: 2px solid var(--primary);
+  border-radius: 6px;
+  background: var(--fill-weak);
+}
+
+/* 四类的顶边按语义分色：降水/湿度偏冷、风/温差偏暖，一眼能分开 */
+.se-weather__card--humidity {
+  border-top-color: var(--info);
+}
+
+.se-weather__card--wind {
+  border-top-color: var(--warning);
+}
+
+.se-weather__card--temperature {
+  border-top-color: var(--danger);
+}
+
+.se-weather__card > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.se-weather__card > header b {
+  color: var(--text-title);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+}
+
+.se-weather__card > header small {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.se-weather__card dl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.se-weather__card dl > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.se-weather__card dt {
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+}
+
+.se-weather__card dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-data);
+  font-size: var(--fs-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.se-risks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.se-risks li {
+  padding: 1px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--panel-surface);
+  color: var(--text-warn);
+  font-size: 11px;
+}
+
+/* ---------- 本次读数 ---------- */
+
+.se-readings {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.se-readings li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--fill-weak);
+}
+
+.se-readings small {
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+}
+
+.se-readings b {
+  color: var(--text-primary);
+  font-family: var(--font-data);
+  font-size: var(--fs-kpi);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 校验结论：通过/告警逐条列出（与工单页 `wo-checks` 同一观感） */
+.se-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.se-checks li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--fs-aux);
+}
+
+.se-checks li.is-bad {
+  color: var(--text-warn);
+}
+
+.se-checks li em {
+  color: var(--text-tertiary);
+  font-style: normal;
+}
+
+.se-tip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+/* 窄屏（投屏副屏、笔记本）退回两列，四列会把数值挤断行 */
+@media (max-width: 1280px) {
+  .se-weather,
+  .se-readings {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

@@ -40,6 +40,7 @@ import { useMumai } from "../context";
 import { CaptureTab } from "./CaptureRun";
 import { TriageTab } from "./TriageLog";
 import { DeviceAccessTab } from "./DeviceAccess";
+import { SiteEnvironmentTab } from "./SiteEnvironment";
 import { api } from "../api/client";
 import { useDeviceLink, useDevicePreview, type DeviceLink } from "../device/useDeviceLink";
 import { BATCH_STATE_LABEL, HANDHELD_DEVICE_ID, toScanBatch, type DeviceReport } from "../device/types";
@@ -59,6 +60,12 @@ import type { Tone } from "../lib";
 */
 const TABS = [
   { key: "capture", label: "采集作业", icon: "nav-capture" },
+  /*
+    环境记录（剧本第一幕史的口播「设备页、**环境记录页**和数据接收页准备完成」）：
+    近三个月天气档案 + 该地风险提示 + 本次环境读数与校验结论 + 补偿参数建议对照。
+    只读页 —— 录入与校验仍然只有工单详情页那一个入口。
+  */
+  { key: "env", label: "环境记录", icon: "biz-multimodal" },
   { key: "triage", label: "异常排查", icon: "status-warning" },
   { key: "monitor", label: "硬件监看", icon: "identity-agent" },
   /*
@@ -984,9 +991,11 @@ export default function Hardware() {
                     : "归档回放"
                   : tab === "capture"
                     ? "归档采集记录"
-                    : tab === "access"
-                      ? "自检结论"
-                      : "归档回放"
+                    : tab === "env"
+                      ? "归档天气档案 + 工单环境记录"
+                      : tab === "access"
+                        ? "自检结论"
+                        : "归档回放"
               }
             />
             <span>当前批次 {batch}</span>
@@ -995,6 +1004,8 @@ export default function Hardware() {
                 "链路自检 · 三份本地配置的落盘状态"
               ) : tab === "capture" ? (
                 "归档采集记录已加载"
+              ) : tab === "env" ? (
+                "按工单绑定地点与日期 · 未启用联网查询"
               ) : tab === "monitor" ? (
                 <>
                   {/* 设备号是标识（不动），后面的链路状态里带活的秒数（动） */}
@@ -1014,8 +1025,8 @@ export default function Hardware() {
         ))}
       </Toolbar>
 
-      {/* 冻结横幅讲的是「本批次的病害结论」，与设备接入的自检无关：那一屏不挂它 */}
-      {frozen && tab !== "capture" && tab !== "access" ? (
+      {/* 冻结横幅讲的是「本批次的病害结论」，与设备接入的自检、环境记录页都无关：那两屏不挂它 */}
+      {frozen && tab !== "capture" && tab !== "access" && tab !== "env" ? (
         <StateBlock
           kind="partial"
           title="该批次已冻结诊断输出"
@@ -1031,6 +1042,7 @@ export default function Hardware() {
       */}
       <div className={`adapt-body${tab === "triage" ? " adapt-body--fixed" : ""}`}>
         {tab === "capture" ? <CaptureTab /> : null}
+        {tab === "env" ? <SiteEnvironmentTab /> : null}
         {tab === "triage" ? <TriageTab /> : null}
         {tab === "monitor" ? (
           <MonitorTab link={link} deviceId={deviceId} batchId={batch} />
