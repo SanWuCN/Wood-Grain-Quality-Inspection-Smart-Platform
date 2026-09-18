@@ -16,13 +16,20 @@
  * （StateBlock 不给 hint 会掉进 ui.tsx 的兜底解释句，所以显式传空串）。
  * 仪表不再由录入人选择（服务端已支持不挂仪表校验），因此弹窗里只有四项读数 +
  * 气压单位 + 测量信息。
+ *
+ * ── 弹窗里的 Enter（现场演练用的提词器）──────────────────────────────
+ * 焦点在任一输入框上时，每按一次 Enter 就按固定顺序填入**下一个还空着的**项：
+ * 四项读数 → 测量位置 → 测量时间，六项填满后 Enter 不再动数据（也不会自动保存）。
+ * 数值全部来自 `envPreset.ts`（PRD §9.2 的已录入示例），一次只填一项、只填空的，
+ * 人打的字一个都不覆盖。弹窗打开时六项仍然**全空** —— 这不是新单默认值（A09）。
  */
 
-import { useState } from "react";
+import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Panel } from "../../Panel";
 import { Icon } from "../../icons";
 import { Btn, KV, Modal, StateBlock, StatusChip } from "../../ui";
 import type { EnvironmentFieldKey, EnvironmentView, WorkOrderDetail } from "../../api/client";
+import { nextEnvPresetFill } from "./envPreset";
 import "./orders.css";
 
 /** 保存草稿的提交体：与服务端 `PUT /api/work-orders/:id/environment-draft` 一一对应 */
@@ -280,6 +287,47 @@ function EnvDraftModal({
 
   const pending = busy || saving;
 
+  /**
+   * 提词器走一步：只填**下一个还空着的**项，返回是否真的填了。
+   *
+   * 三条硬规则（口径与来源见 `envPreset.ts`）：
+   *   · 已有输入就跳过 —— 人打的字永远不被预置值冲掉；
+   *   · 一次一项 —— 现场是"数字自上而下逐个出现"，不是一次灌满整张表；
+   *   · 六项满了返回 false —— 调用方既不拦 Enter，也不替人保存或校验。
+   */
+  const fillNextPreset = (): boolean => {
+    const step = nextEnvPresetFill({ ...values, position, measuredAt });
+    if (!step) return false;
+    if (step.key === "position") {
+      setPosition(step.value);
+    } else if (step.key === "measuredAt") {
+      setMeasuredAt(step.value);
+    } else {
+      setValues((current) => ({ ...current, [step.key]: step.value }));
+      // 气压的值绑着单位：值进来时把单位一起拨回 hPa，
+      // 否则在 kPa 下按 Enter 会把 1008.6 存成 10086 hPa，校验当场判红。
+      if (step.unit) setPressureUnit(step.unit);
+    }
+    return true;
+  };
+
+  /**
+   * 弹窗内的 Enter = 提词器走一步。
+   *
+   * 只认**输入框**上的 Enter（`tagName === "input"`）：焦点在「保存草稿」按钮或
+   * 气压单位下拉上时走各自的原生行为，不被这里截走。长按产生的 repeat 与输入法
+   * 组字期间的 Enter 一律不参与 —— 一次长按不该灌满整张表。
+   */
+  const onFormKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    // `isComposing` 只在原生事件上（React 的合成事件类型没有转发它），组字期间的回车不算数
+    if (event.key !== "Enter" || event.repeat || event.nativeEvent.isComposing) return;
+    const target = event.target as HTMLElement | null;
+    if (!target || target.tagName.toLowerCase() !== "input") return;
+    if (pending) return;
+    if (!fillNextPreset()) return;
+    event.preventDefault();
+  };
+
   const save = async () => {
     const pressureValue = toNumberOrNull(values.atmosphericPressureHpa);
     const unit = pressureUnit.trim();
@@ -344,7 +392,7 @@ function EnvDraftModal({
         </Btn>
       }>
       <h4 className="sub">四项读数</h4>
-      <div className="wo-form">
+      <div className="wo-form" onKeyDown={onFormKeyDown}>
         {numberField("airTempC")}
         {numberField("relativeHumidityPct")}
         {numberField("windSpeedMs")}
