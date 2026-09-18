@@ -14,7 +14,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  KEYFRAME_LABEL_MAX,
   keyframeTimeText,
+  nextTourIndex,
+  normalizeKeyframeLabel,
   lookAheadFor,
   parsePose,
   poseFromView,
@@ -172,4 +175,33 @@ test("位置读数：平移看得见（只报方位/仰角/距离的话，走一
   assert.equal(poseReadout(near), poseReadout(far), "朝向与距离一样，角度读数本来就该一样");
   assert.notEqual(posePositionText(near), posePositionText(far), "位置读数必须区分开");
   assert.equal(posePositionText(near), "位置 0.0, 1.0, 5.0");
+});
+
+test("改名：去掉首尾与多余空白、按 40 字截断，全空白视为取消", () => {
+  assert.equal(normalizeKeyframeLabel("  柱脚虫道入口  "), "柱脚虫道入口");
+  assert.equal(normalizeKeyframeLabel("柱脚\n\t 虫道   入口"), "柱脚 虫道 入口", "换行/制表/多空格都并成一个空格");
+  assert.equal(normalizeKeyframeLabel("   "), null, "全是空白 = 取消，不提交（空名字在列表里没法念）");
+  assert.equal(normalizeKeyframeLabel(""), null);
+  assert.equal(normalizeKeyframeLabel("名".repeat(60))?.length, KEYFRAME_LABEL_MAX, "超长截断，与服务端 40 字上限一致");
+});
+
+test("巡场步进：一帧一帧往下走，到头停下（不绕回第 1 帧）", () => {
+  assert.equal(nextTourIndex(0, 3, 1), 1);
+  assert.equal(nextTourIndex(1, 3, 1), 2);
+  assert.equal(nextTourIndex(2, 3, 1), null, "最后一帧再往下 = 结束（台上绕回会让人以为讲完了又从头开始）");
+  assert.equal(nextTourIndex(0, 3, -1), 0, "第一帧往前夹回第 0 帧，不越界");
+  assert.equal(nextTourIndex(2, 3, 1, true), 0, "需要循环时（wrap）才绕回");
+  assert.equal(nextTourIndex(0, 0, 1), null, "没有帧就没有巡场");
+});
+
+test("读帧：带上「改于谁、什么时候」，老数据没有这两个字段也不影响", () => {
+  const pose = { azimuth: 10, polar: 90, distance: 2, focus: { x: 0, y: 0, z: 0 } };
+  const frames = readKeyframes({
+    keyframes: [
+      { id: "KF-Z04-01", componentId: "Z04", label: "柱脚", pose, addedBy: "shi", addedAt: "2026-09-22T02:00:00.000Z", updatedBy: "rao", updatedAt: "2026-09-22T02:05:00.000Z" },
+      { id: "KF-Z04-02", componentId: "Z04", label: "旧帧", pose, addedBy: "shi", addedAt: "2026-09-22T02:00:00.000Z" },
+    ],
+  });
+  assert.equal(frames[0].updatedBy, "rao");
+  assert.equal(frames[1].updatedBy, undefined, "没改过的帧不会凭空多出「改于」");
 });

@@ -25,7 +25,11 @@ import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
 import { Btn, Modal, PermNote, StateBlock, StatusChip, Toolbar, WaveChart } from "../ui";
 import {
+  KEYFRAME_LABEL_MAX,
   keyframeTimeText,
+  nextTourIndex,
+  normalizeKeyframeLabel,
+  posePositionText,
   poseReadout,
   poseToCamera,
   readKeyframes,
@@ -254,6 +258,9 @@ export default function Twin() {
   }, [waveBatch?.batchId]);
   const [sideBySide, setSideBySide] = useState(true);
 
+/** 巡场每一帧停留多久：飞行动画之外还要留出讲解时间（实测 4.5 秒念不完一句就飞走了） */
+const TOUR_INTERVAL_MS = 5200;
+
   /* ---- 机位关键帧：把镜头拉近木柱 → 打一帧 → 谁都能点回来（用户 2026-09-17 口径）----
      数据存在**服务端**（`scene.keyframes`）：用户明确「所有服务都要让别人也能用」，
      所以内网任何一台机器、任何一个账号看到的是同一份，不是各存各的。
@@ -263,6 +270,15 @@ export default function Twin() {
   const [keyframeBusy, setKeyframeBusy] = useState<string | null>(null);
   const [flyTo, setFlyTo] = useState<{ pose: SplatPose; nonce: number } | null>(null);
   const [flying, setFlying] = useState<string | null>(null);
+  /*
+    巡场（讲解用）：按列表顺序自动一帧一帧飞过去。
+    `paused` 只是停住不往下走，人还能手动点上一帧 / 下一帧；到头**停下**不绕回。
+  */
+  const [tour, setTour] = useState<{ index: number; paused: boolean } | null>(null);
+  /** 正在改名的那一帧 + 草稿 */
+  const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(null);
+  /** 两段式删除：第一下只是「举起来」，再点一下才真删（避免演示中误删） */
+  const [confirming, setConfirming] = useState<string | null>(null);
   const keyframes = useMemo(() => readKeyframes(currentSceneEntity?.data), [currentSceneEntity]);
 
   const addKeyframe = useCallback(async () => {
@@ -291,12 +307,129 @@ export default function Twin() {
     }
   }, [currentSceneEntity, pushEvent, selected, toast]);
 
+  /** 用户自己动了镜头：高亮要清掉，否则「已回到该机位」会一直挂着骗人；巡场也跟着暂停 */
+  const handleUserInput = useCallback(() => {
+    setFlying(null);
+    setTour((current) => (current ? { ...current, paused: true } : current));
+  }, []);
+
   const flyToKeyframe = useCallback((frame: TwinKeyframe) => {
     /* nonce 每次都变：同一个机位连点两次也要重新飞一遍（相机字段没变，靠它触发动画） */
     setFlyTo({ pose: frame.pose, nonce: Date.now() });
     setFlying(frame.id);
     pushEvent(`镜头回到机位关键帧 ${frame.id}（${frame.componentId ?? "场景"}）`, "info");
   }, [pushEvent]);
+
+  /** 改名（帧号不动：它是讲稿与对照表的锚点） */
+  const renameKeyframe = useCallback(
+    async (frame: TwinKeyframe) => {
+      const entity = currentSceneEntity;
+      const label = normalizeKeyframeLabel(renaming?.draft ?? "");
+      if (!entity || !label) {
+        setRenaming(null);
+        return;
+      }
+      setKeyframeBusy(frame.id);
+      try {
+        await useSharedStore.getState().send({
+          action: "scene.keyframe.update",
+          entityId: entity.id,
+          expectedRevision: entity.revision,
+          payload: { keyframeId: frame.id, label },
+        });
+        toast(`${frame.id} 已改名为「${label}」`, "ok");
+        pushEvent(`关键帧改名 ${frame.id} → ${label}`, "info");
+        setRenaming(null);
+      } catch (error) {
+        toast(isApiError(error) ? error.message : "改名失败", "danger");
+      } finally {
+        setKeyframeBusy(null);
+      }
+    },
+    [currentSceneEntity, pushEvent, renaming, toast],
+  );
+
+  /** 用当前机位覆盖这一帧：镜头微调后不用删了重打（重打会换帧号） */
+  const updateKeyframePose = useCallback(
+    async (frame: TwinKeyframe) => {
+      const entity = currentSceneEntity;
+      const pose = poseRef.current;
+      if (!entity) return;
+      if (!pose) {
+        toast("还没读到当前机位：等模型加载完、镜头动一下再更新", "warn");
+        return;
+      }
+      setKeyframeBusy(frame.id);
+      try {
+        await useSharedStore.getState().send({
+          action: "scene.keyframe.update",
+          entityId: entity.id,
+          expectedRevision: entity.revision,
+          payload: { keyframeId: frame.id, pose },
+        });
+        toast(`${frame.id} 的机位已更新为当前镜头`, "ok");
+        pushEvent(`更新关键帧机位 ${frame.id}：${poseReadout(pose)}`, "info");
+      } catch (error) {
+        toast(isApiError(error) ? error.message : "更新机位失败", "danger");
+      } finally {
+        setKeyframeBusy(null);
+      }
+    },
+    [currentSceneEntity, pushEvent, toast],
+  );
+
+  /** 走到第 index 帧（巡场与「上一帧 / 下一帧」共用） */
+  const gotoFrame = useCallback(
+    (index: number) => {
+      const frame = keyframes[index];
+      if (!frame) return false;
+      flyToKeyframe(frame);
+      setTour((current) => (current ? { ...current, index } : current));
+      return true;
+    },
+    [flyToKeyframe, keyframes],
+  );
+
+  const startTour = useCallback(() => {
+    if (!keyframes.length) return;
+    setConfirming(null);
+    setRenaming(null);
+    setTour({ index: 0, paused: false });
+    flyToKeyframe(keyframes[0]);
+    pushEvent(`开始巡场：${keyframes.length} 个机位按顺序走一遍`, "info");
+  }, [flyToKeyframe, keyframes, pushEvent]);
+
+  /** 上一帧 / 下一帧（手动步进时自动暂停：人在控节奏） */
+  const stepTour = useCallback(
+    (delta: number) => {
+      if (!tour) return;
+      const next = nextTourIndex(tour.index, keyframes.length, delta);
+      if (next === null) {
+        setTour(null);
+        pushEvent("巡场结束", "info");
+        return;
+      }
+      gotoFrame(next);
+      setTour({ index: next, paused: true });
+    },
+    [gotoFrame, keyframes.length, pushEvent, tour],
+  );
+
+  /** 巡场自动往下走：每 TOUR_INTERVAL_MS 一帧，走到头停住 */
+  useEffect(() => {
+    if (!tour || tour.paused) return undefined;
+    const timer = window.setTimeout(() => {
+      const next = nextTourIndex(tour.index, keyframes.length, 1);
+      if (next === null) {
+        setTour(null);
+        pushEvent("巡场结束", "info");
+        return;
+      }
+      gotoFrame(next);
+      setTour({ index: next, paused: false });
+    }, TOUR_INTERVAL_MS);
+    return () => window.clearTimeout(timer);
+  }, [gotoFrame, keyframes.length, pushEvent, tour]);
 
   const removeKeyframe = useCallback(
     async (frame: TwinKeyframe) => {
@@ -390,6 +523,7 @@ export default function Twin() {
                   camera={flyTo ? poseToCamera(flyTo.pose) : null}
                   cameraNonce={flyTo?.nonce ?? 0}
                   poseRef={poseRef}
+                  onUserInput={handleUserInput}
                   fitNonce={fitNonce}
                   onLoaded={() => setStageReady(true)}
                   onError={(message) => {
@@ -449,14 +583,55 @@ export default function Twin() {
           <Panel
             title="机位关键帧"
             extra={
-              <span className="muted">
-                {keyframes.length ? `${keyframes.length} 帧 · 本工单所有人共享` : "还没打帧"}
+              <span className="keyframe-head">
+                <span className="muted">
+                  {keyframes.length ? `${keyframes.length} 帧 · 本工单所有人共享` : "还没打帧"}
+                </span>
+                {keyframes.length > 1 && hasModel ? (
+                  <Btn
+                    tone={tour ? "primary" : "ghost"}
+                    title="按列表顺序自动走一遍（讲解用）"
+                    onClick={() => (tour ? setTour(null) : startTour())}>
+                    {tour ? "停止巡场" : "按顺序巡场"}
+                  </Btn>
+                ) : null}
               </span>
             }>
+            {tour ? (
+              <div className="keyframe-tour" role="status">
+                <b>
+                  巡场 第 {tour.index + 1}/{keyframes.length} 帧 · {keyframes[tour.index]?.id ?? "—"}
+                </b>
+                <span className="muted">
+                  {tour.paused ? "已暂停（你自己动了镜头也会暂停）" : "自动往下走"}
+                </span>
+                <span className="keyframe-tour__ops">
+                  <Btn
+                    disabled={tour.index === 0}
+                    title="上一帧"
+                    onClick={() => stepTour(-1)}>
+                    上一帧
+                  </Btn>
+                  <Btn
+                    title={tour.paused ? "继续自动往下走" : "先停在这里"}
+                    onClick={() => setTour((current) => (current ? { ...current, paused: !current.paused } : current))}>
+                    {tour.paused ? "继续" : "暂停"}
+                  </Btn>
+                  <Btn
+                    disabled={tour.index >= keyframes.length - 1}
+                    title="下一帧"
+                    onClick={() => stepTour(1)}>
+                    下一帧
+                  </Btn>
+                  <Btn onClick={() => setTour(null)}>结束巡场</Btn>
+                </span>
+              </div>
+            ) : null}
+
             {keyframes.length ? (
               <ul className="keyframe-list">
-                {keyframes.map((frame) => (
-                  <li key={frame.id}>
+                {keyframes.map((frame, index) => (
+                  <li key={frame.id} className={flying === frame.id ? "is-active" : ""}>
                     <button
                       type="button"
                       className="keyframe-list__main"
@@ -464,20 +639,79 @@ export default function Twin() {
                       title={hasModel ? `镜头回到 ${frame.id}` : "该工单没有模型文件，回放不了"}
                       onClick={() => flyToKeyframe(frame)}>
                       <span className="keyframe-list__id">
+                        {tour && tour.index === index ? `${index + 1}. ` : ""}
                         {frame.id}
                         {flying === frame.id ? " · 已回到该机位" : ""}
                       </span>
                       <span className="keyframe-list__meta">
                         {frame.label} · {actorShortName(frame.addedBy)} · {keyframeTimeText(frame.addedAt)}
+                        {frame.updatedAt
+                          ? ` · 改于 ${keyframeTimeText(frame.updatedAt)}（${actorShortName(frame.updatedBy ?? "")}）`
+                          : ""}
                       </span>
-                      <span className="keyframe-list__pose">{poseReadout(frame.pose)}</span>
+                      <span className="keyframe-list__pose">
+                        {poseReadout(frame.pose)}
+                      </span>
+                      {/* `posePositionText` 自己就带「位置」二字，这里别再拼一个 */}
+                      <span className="keyframe-list__pose">{posePositionText(frame.pose)}</span>
                     </button>
-                    <Btn
-                      disabled={keyframeBusy !== null}
-                      title="删掉这一帧（所有人都不再看到）"
-                      onClick={() => void removeKeyframe(frame)}>
-                      {keyframeBusy === frame.id ? "删除中…" : "删除"}
-                    </Btn>
+
+                    {renaming?.id === frame.id ? (
+                      <span className="keyframe-list__rename">
+                        <input
+                          autoFocus
+                          value={renaming.draft}
+                          maxLength={KEYFRAME_LABEL_MAX}
+                          aria-label={`给 ${frame.id} 改个名字`}
+                          onChange={(event) => setRenaming({ id: frame.id, draft: event.target.value })}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") void renameKeyframe(frame);
+                            if (event.key === "Escape") setRenaming(null);
+                          }}
+                        />
+                        <Btn
+                          tone="primary"
+                          disabled={keyframeBusy !== null || !normalizeKeyframeLabel(renaming.draft)}
+                          onClick={() => void renameKeyframe(frame)}>
+                          保存
+                        </Btn>
+                        <Btn onClick={() => setRenaming(null)}>取消</Btn>
+                      </span>
+                    ) : (
+                      <span className="keyframe-list__ops">
+                        <Btn
+                          title="改个能念出来的名字（帧号不变）"
+                          disabled={keyframeBusy !== null || !hasModel}
+                          onClick={() => setRenaming({ id: frame.id, draft: frame.label })}>
+                          改名
+                        </Btn>
+                        <Btn
+                          title="把这一帧的机位换成当前镜头（帧号不变）"
+                          disabled={keyframeBusy !== null || !hasModel || !stageReady}
+                          onClick={() => void updateKeyframePose(frame)}>
+                          {keyframeBusy === frame.id ? "更新中…" : "更新机位"}
+                        </Btn>
+                        <Btn
+                          tone={confirming === frame.id ? "danger" : "ghost"}
+                          title="删掉这一帧（所有人都不再看到）"
+                          disabled={keyframeBusy !== null}
+                          onClick={() => {
+                            if (confirming !== frame.id) {
+                              setConfirming(frame.id);
+                              window.setTimeout(() => setConfirming((current) => (current === frame.id ? null : current)), 4000);
+                              return;
+                            }
+                            setConfirming(null);
+                            void removeKeyframe(frame);
+                          }}>
+                          {keyframeBusy === frame.id
+                            ? "删除中…"
+                            : confirming === frame.id
+                              ? "确认删除"
+                              : "删除"}
+                        </Btn>
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>

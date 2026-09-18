@@ -616,7 +616,151 @@ try {
         : "；没有找到波形图"),
   );
 
-  /* ---------- ⑤ 服务端共享：换账号（饶）也看得到这一帧 ---------- */
+  /* ---- ④b 面板能力：改名 / 更新机位 / 位置读数 / 两段式删除 / 巡场 ---- */
+  /*
+    上面几节为了验波形，把浏览器带去了采集页与投屏页 —— 先回到孪生页，
+    等列表真的渲染出来再读；否则读到的是空列表，四条结论全都会假红。
+  */
+  await evaluate(`location.hash = "#/twin?order=${ORDER_ID}"`);
+  for (let i = 0; i < 100; i += 1) {
+    if (await evaluate(`Boolean(document.querySelector('.keyframe-list li'))`)) break;
+    await sleep(300);
+  }
+  const renamableId = String(recorded?.id ?? "");
+  const kfPanel = await evaluate(`(() => {
+    const rows = [...document.querySelectorAll('.keyframe-list li')].map((li) => ({
+      id: li.querySelector('.keyframe-list__id')?.textContent.trim() ?? '',
+      poses: [...li.querySelectorAll('.keyframe-list__pose')].map((el) => el.textContent.trim()),
+      ops: [...li.querySelectorAll('.keyframe-list__ops button')].map((b) => b.textContent.trim()),
+    }));
+    return {
+      rows,
+      tourButton: [...document.querySelectorAll('button')].some((b) => b.textContent.trim() === '按顺序巡场'),
+      hasRename: Boolean(document.querySelector('.keyframe-list__ops')),
+    };
+  })()`);
+
+  check(
+    "每一行都能「改名 / 更新机位 / 删除」，并给出方位与位置两行读数",
+    kfPanel.hasRename &&
+      kfPanel.rows.every((row) => row.ops.join(",") === "改名,更新机位,删除") &&
+      kfPanel.rows.every((row) => row.poses.length === 2 && /^位置/.test(row.poses[1])),
+    kfPanel.rows.map((row) => `${row.id}：${row.poses.join(" ／ ")}`).join(" ｜ "),
+  );
+
+  /* 改名：帧号不变、名字真的换了、行上标出"改于谁、什么时候" */
+  const KF_NEW_LABEL = "E2E 改名后的机位";
+  await evaluate(`(() => {
+    const li = [...document.querySelectorAll('.keyframe-list li')].find((el) => el.textContent.includes('${renamableId}'));
+    const btn = [...(li?.querySelectorAll('.keyframe-list__ops button') ?? [])].find((b) => b.textContent.trim() === '改名');
+    btn?.click();
+    return Boolean(btn);
+  })()`);
+  await sleep(400);
+  await evaluate(`(() => {
+    const input = document.querySelector('.keyframe-list__rename input');
+    if (!input) return false;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(input, '${KF_NEW_LABEL}');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const save = [...document.querySelectorAll('.keyframe-list__rename button')].find((b) => b.textContent.trim() === '保存');
+    save?.click();
+    return Boolean(save);
+  })()`);
+  await sleep(1300);
+  const renamed = await evaluate(`(() => {
+    const li = [...document.querySelectorAll('.keyframe-list li')].find((el) => el.textContent.includes('${renamableId}'));
+    return {
+      text: li?.querySelector('.keyframe-list__meta')?.textContent.replace(/\\s+/g, ' ').trim() ?? '',
+      id: li?.querySelector('.keyframe-list__id')?.textContent.trim() ?? '',
+    };
+  })()`);
+  check(
+    "改名生效：名字换了、帧号没动，行上标出「改于谁、什么时候」",
+    renamed.id.startsWith(renamableId) && renamed.text.includes(KF_NEW_LABEL) && /改于 \d{2}:\d{2}/.test(renamed.text),
+    renamed.text,
+  );
+
+  /* 巡场：控制条 + 当前帧高亮 */
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === '按顺序巡场');
+    btn?.click();
+    return Boolean(btn);
+  })()`);
+  await sleep(1500);
+  const tourStart = await evaluate(`(() => ({
+    bar: document.querySelector('.keyframe-tour')?.textContent.replace(/\\s+/g, ' ').trim() ?? '',
+    ops: [...document.querySelectorAll('.keyframe-tour__ops button')].map((b) => b.textContent.trim()),
+    active: document.querySelector('.keyframe-list li.is-active .keyframe-list__id')?.textContent.trim() ?? '',
+  }))()`);
+  check(
+    "巡场：控制条给出「第 n/N 帧」与上一帧/暂停/下一帧/结束巡场，当前帧在列表里高亮",
+    /巡场 第 1[\/]/.test(tourStart.bar) && tourStart.ops.join(",") === "上一帧,暂停,下一帧,结束巡场" && tourStart.active.includes("1."),
+    `${tourStart.bar} ｜ ${tourStart.ops.join(" / ")} ｜ 高亮=${tourStart.active}`,
+  );
+
+  /* 手动点「下一帧」：走到第 2 帧并转为暂停（人在控节奏） */
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll('.keyframe-tour__ops button')].find((b) => b.textContent.trim() === '下一帧');
+    btn?.click();
+    return Boolean(btn);
+  })()`);
+  await sleep(1000);
+  const tourNext = await evaluate(`(() => ({
+    bar: document.querySelector('.keyframe-tour')?.textContent.replace(/\\s+/g, ' ').trim() ?? '',
+    paused: /已暂停/.test(document.querySelector('.keyframe-tour')?.textContent ?? ''),
+  }))()`);
+  check("「下一帧」走到第 2 帧并转为暂停（人在控节奏）", /巡场 第 2[\/]/.test(tourNext.bar) && tourNext.paused, tourNext.bar);
+
+  /* 用户自己动镜头（滚轮）→ 高亮清掉（原来会一直挂着骗人） */
+  await evaluate(`(() => {
+    const canvas = document.querySelector('canvas');
+    const r = canvas.getBoundingClientRect();
+    canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));
+    return true;
+  })()`);
+  await sleep(800);
+  const afterUserMove = await evaluate(`(() => ({
+    active: document.querySelectorAll('.keyframe-list li.is-active').length,
+    back: [...document.querySelectorAll('.keyframe-list__id')].filter((el) => el.textContent.includes('已回到该机位')).length,
+  }))()`);
+  check(
+    "自己动一下镜头之后，「已回到该机位」的高亮不再挂着（原来会一直骗人）",
+    afterUserMove.active === 0 && afterUserMove.back === 0,
+    `高亮行 ${afterUserMove.active} · 带「已回到该机位」的行 ${afterUserMove.back}`,
+  );
+
+  /* 结束巡场 */
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll('.keyframe-tour__ops button')].find((b) => b.textContent.trim() === '结束巡场');
+    btn?.click();
+    return Boolean(btn);
+  })()`);
+  await sleep(500);
+  check("「结束巡场」把控制条收掉", await evaluate(`!document.querySelector('.keyframe-tour')`));
+
+  /* 两段式删除：第一次点只是"举起来"，再点才真删（演示中防误删） */
+  await evaluate(`(() => {
+    const li = [...document.querySelectorAll('.keyframe-list li')].find((el) => el.textContent.includes('${renamableId}'));
+    const btn = [...(li?.querySelectorAll('.keyframe-list__ops button') ?? [])].find((b) => b.textContent.trim() === '删除');
+    btn?.click();
+    return Boolean(btn);
+  })()`);
+  await sleep(400);
+  const armed = await evaluate(`(() => {
+    const li = [...document.querySelectorAll('.keyframe-list li')].find((el) => el.textContent.includes('${renamableId}'));
+    return {
+      exists: Boolean(li),
+      button: [...(li?.querySelectorAll('.keyframe-list__ops button') ?? [])].map((b) => b.textContent.trim()).join(","),
+    };
+  })()`);
+  check(
+    "删除是两段式：第一下只是「确认删除」，帧还在（演示中防误删）",
+    armed.exists && /确认删除/.test(armed.button),
+    `按钮=${armed.button}`,
+  );
+
+/* ---------- ⑤ 服务端共享：换账号（饶）也看得到这一帧 ---------- */
   const asShi = await serverKeyframes("shi");
   check(
     "帧存在服务端（不是本机 localStorage）",
@@ -663,13 +807,32 @@ try {
   );
 
   /* ---------- ⑥ 删帧：两边都没了（跑完不留垃圾） ---------- */
-  await evaluate(`(() => {
+  /*
+    删除是**两段式**（第一下把按钮变成「确认删除」，防演示中误删）——
+    工装要按两下：第一下之后帧还在，第二下才真删。第一下"只是举起来"这一条
+    在 ④b 里已经单独验过，这里直接连点两下。
+  */
+  const clickDelete = () =>
+    evaluate(`(() => {
+      const rows = [...document.querySelectorAll('.keyframe-list li')];
+      const target = rows.find((li) => (li.querySelector('.keyframe-list__id')?.textContent || '').includes(${JSON.stringify(frameId)}));
+      const btn = [...(target?.querySelectorAll('button') ?? [])].find((el) => ['删除', '确认删除'].includes((el.textContent || '').trim()));
+      if (btn) btn.click();
+      return btn ? (btn.textContent || '').trim() : null;
+    })()`);
+  const firstClick = await clickDelete();
+  await sleep(300);
+  const armedStillThere = await evaluate(`(() => {
     const rows = [...document.querySelectorAll('.keyframe-list li')];
-    const target = rows.find((li) => (li.querySelector('.keyframe-list__id')?.textContent || '').includes(${JSON.stringify(frameId)}));
-    const btn = [...(target?.querySelectorAll('button') ?? [])].find((el) => (el.textContent || '').trim().startsWith('删除'));
-    if (btn) btn.click();
-    return true;
+    return rows.some((li) => (li.querySelector('.keyframe-list__id')?.textContent || '').includes(${JSON.stringify(frameId)}));
   })()`);
+  check(
+    "第一下只是「确认删除」：帧还在（两段式删除防误删）",
+    firstClick === "删除" && armedStillThere === true,
+    `按钮=${firstClick} · 帧还在=${armedStillThere}`,
+  );
+  const secondClick = await clickDelete();
+  check("第二下才真的删（按钮文字在这两下之间变成了「确认删除」）", secondClick === "确认删除", `按钮=${secondClick}`);
   let afterDelete = raoRows;
   for (let i = 0; i < 60; i += 1) {
     afterDelete = await readRows();

@@ -43,6 +43,8 @@ export const ACTION_PERMISSION = {
    *   与"别人也能用"正好相反。
    */
   "scene.keyframe.add": "*",
+  /* 改名 / 用当前机位覆盖同一帧：与打帧、删帧同一条口径（谁都能改，改的人记在帧上） */
+  "scene.keyframe.update": "*",
   "scene.keyframe.remove": "*",
 
   "artifact.build": "package:deliver",

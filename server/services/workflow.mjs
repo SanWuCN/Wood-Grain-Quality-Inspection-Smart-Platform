@@ -534,6 +534,54 @@ const HANDLERS = {
     };
   },
 
+  /**
+   * 改一帧：改名 / 用当前机位覆盖。
+   *
+   * 为什么需要它（现场用法）：打帧时是「随手拉近木柱就记一帧」，回头讲解时要的是
+   * 「柱脚虫道入口」这种能直接念出来的名字；镜头微调之后也不想删了重打
+   * （删了重打会换帧号，讲稿上的 KF-Z04-02 就对不上了）。
+   *
+   * 口径：帧号（id）与构件绑定**不可改**（编号是讲稿与对照表的锚点）；
+   * 只允许改 label 与 pose，并记下是谁在什么时候改的（现场会问"这帧谁改的"）。
+   */
+  "scene.keyframe.update": (ctx, payload) => {
+    const target = requireEntity(ctx, "scene");
+    const keyframeId = String(payload.keyframeId ?? "").trim();
+    const frames = [...(target.data.keyframes ?? [])];
+    const index = frames.findIndex((item) => item.id === keyframeId);
+    if (index < 0) {
+      throw new WorkflowError(404, "NO_KEYFRAME", `场景 ${target.id} 上没有机位关键帧 ${keyframeId}`);
+    }
+    const current = frames[index];
+    const next = { ...current };
+
+    if (payload.label !== undefined) {
+      const label = String(payload.label ?? "").trim();
+      if (label.length > 40) {
+        throw new WorkflowError(422, "BAD_LABEL", `关键帧标签最长 40 个字（收到 ${label.length} 个字）`);
+      }
+      /* 清空 = 回到自动标签（不写空串，列表里那一行不能没有名字） */
+      next.label = label || `${current.componentId ?? "场景"} · 机位（未命名）`;
+    }
+    if (payload.pose !== undefined) {
+      next.pose = normalizeKeyframePose(payload.pose);
+    }
+    next.updatedBy = ctx.actorId;
+    next.updatedAt = nowIso();
+    frames[index] = next;
+
+    const entity = writeEntity(ctx.db, ctx.sessionId, "scene", target.id, {
+      ...target.data,
+      keyframes: frames,
+    });
+    return {
+      entityKind: "scene",
+      entity,
+      result: { sceneId: target.id, keyframeId, label: next.label },
+      events: [{ type: "scene.keyframe.updated", payload: { sceneId: target.id, keyframeId } }],
+    };
+  },
+
   "scene.keyframe.remove": (ctx, payload) => {
     const target = requireEntity(ctx, "scene");
     const keyframeId = String(payload.keyframeId ?? "").trim();

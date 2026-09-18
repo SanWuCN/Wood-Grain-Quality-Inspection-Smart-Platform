@@ -210,6 +210,77 @@ test("机位关键帧：按构件编号、进书签、发布后不回退、换�
     });
     assert.equal(missing.status, 404);
     assert.equal((await missing.json()).code, "NO_KEYFRAME");
+
+    /* ---- ⑦ 改帧：能改名、能用当前机位覆盖；帧号与书签不动；坏输入照样拒 ---- */
+    const renamed = await command(shi, {
+      commandId: "kf-rename-1",
+      action: "scene.keyframe.update",
+      entityId: sceneId,
+      expectedRevision: removedEntity.revision,
+      payload: { keyframeId: "KF-Z01-01", label: "Z01 柱脚虫道入口" },
+    });
+    assert.equal(renamed.status, 200, "改名要能成（讲解时要念得出来）");
+    const renamedEntity = (await renamed.json()).entity;
+    const renamedFrame = renamedEntity.data.keyframes.find((item) => item.id === "KF-Z01-01");
+    assert.equal(renamedFrame.label, "Z01 柱脚虫道入口", "标签要真的改了");
+    assert.equal(renamedFrame.componentId, "Z01", "改名不许动构件绑定（帧号是按它编的）");
+    assert.deepEqual(renamedFrame.pose, pose(-1), "只改名时机位不许被碰");
+    assert.equal(renamedFrame.addedBy, "shi", "谁打的帧这条记录不改");
+    assert.equal(renamedFrame.updatedBy, "shi", "改的人要记下来（现场会问这帧谁改的）");
+    assert.match(String(renamedFrame.updatedAt), /^\d{4}-\d{2}-\d{2}T/, "改的时间要记下来");
+    assert.equal(renamedEntity.data.keyframes.length, 3, "改帧不能多出一帧");
+    assert.equal(renamedEntity.data.bookmarkIds.includes("KF-Z01-01"), true, "书签不受影响");
+
+    const repointed = await command(rao, {
+      commandId: "kf-update-pose",
+      action: "scene.keyframe.update",
+      entityId: sceneId,
+      expectedRevision: renamedEntity.revision,
+      payload: { keyframeId: "KF-Z01-01", pose: pose(-2) },
+    });
+    assert.equal(repointed.status, 200, "换个人也能覆盖机位");
+    const repointedEntity = (await repointed.json()).entity;
+    const repointedFrame = repointedEntity.data.keyframes.find((item) => item.id === "KF-Z01-01");
+    assert.deepEqual(repointedFrame.pose, pose(-2), "机位要换成新的");
+    assert.equal(repointedFrame.label, "Z01 柱脚虫道入口", "只换机位时标签不许被清掉");
+    assert.equal(repointedFrame.updatedBy, "rao");
+
+    /* 原来的帧号还是原来的（讲稿上的 KF-Z01-01 不会因为改名/覆盖而变） */
+    assert.deepEqual(
+      repointedEntity.data.keyframes.map((item) => item.id),
+      ["KF-Z04-01", "KF-Z01-01", "KF-Z04-03"],
+      "改帧不许改帧号，也不许调顺序",
+    );
+
+    const badLabel = await command(shi, {
+      commandId: "kf-rename-too-long",
+      action: "scene.keyframe.update",
+      entityId: sceneId,
+      expectedRevision: repointedEntity.revision,
+      payload: { keyframeId: "KF-Z01-01", label: "很长的名字".repeat(20) },
+    });
+    assert.equal(badLabel.status, 422, "标签超长要拒（列表一行放不下）");
+    assert.equal((await badLabel.json()).code, "BAD_LABEL");
+
+    const badPose = await command(shi, {
+      commandId: "kf-update-bad-pose",
+      action: "scene.keyframe.update",
+      entityId: sceneId,
+      expectedRevision: repointedEntity.revision,
+      payload: { keyframeId: "KF-Z01-01", pose: { azimuth: null, polar: 90, distance: 1, focus: { x: 0, y: 0, z: 0 } } },
+    });
+    assert.equal(badPose.status, 422, "覆盖机位时同样不许把 null 当 0 存下来");
+    assert.equal((await badPose.json()).code, "BAD_POSE");
+
+    const updateMissing = await command(shi, {
+      commandId: "kf-update-missing",
+      action: "scene.keyframe.update",
+      entityId: sceneId,
+      payload: { keyframeId: "KF-Z04-99", label: "不存在的帧" },
+    });
+    assert.equal(updateMissing.status, 404);
+    assert.equal((await updateMissing.json()).code, "NO_KEYFRAME");
+
   } finally {
     await service.close?.();
   }

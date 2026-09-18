@@ -3940,6 +3940,67 @@
   }
 }
 
+/* ---- 机位关键帧：巡场控制条 / 当前帧高亮 / 改名与两段式删除 ---- */
+.keyframe-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.keyframe-tour {
+  display: grid;
+  gap: 2px;
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--primary);
+  background: var(--bg-page);
+}
+
+.keyframe-tour b {
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 600;
+}
+
+.keyframe-tour > .muted {
+  font-size: var(--fs-aux);
+}
+
+.keyframe-tour__ops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+/* 当前所在的那一帧：讲解人一眼知道走到哪了 */
+.keyframe-list li.is-active {
+  box-shadow: inset 2px 0 0 0 var(--primary);
+}
+
+.keyframe-list__rename,
+.keyframe-list__ops {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* 改名那一行占满整行（输入框要够长，帧号与读数留在上一行） */
+.keyframe-list__rename {
+  grid-column: 1 / -1;
+}
+
+.keyframe-list__rename input {
+  min-width: 0;
+  flex: 1 1 120px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-size: var(--fs-aux);
+}
+
 /* ------------------------------------------------------------------
    硬件详情 · 异常排查（/hardware?tab=triage）
    异常事件列表 + 详情弹窗 + 设备日志。

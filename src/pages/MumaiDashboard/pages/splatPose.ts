@@ -148,6 +148,9 @@ export type TwinKeyframe = {
   pose: SplatPose;
   addedBy: string;
   addedAt: string;
+  /** 最后一次改名 / 覆盖机位的人与时间（服务端在 update 时写；打帧时没有） */
+  updatedBy?: string;
+  updatedAt?: string;
 };
 
 /**
@@ -189,9 +192,40 @@ export function readKeyframes(data: unknown): TwinKeyframe[] {
       pose,
       addedBy: String(frame.addedBy ?? ""),
       addedAt: String(frame.addedAt ?? ""),
+      ...(frame.updatedBy ? { updatedBy: String(frame.updatedBy) } : {}),
+      ...(frame.updatedAt ? { updatedAt: String(frame.updatedAt) } : {}),
     });
   }
   return out;
+}
+
+/** 关键帧标签上限（与服务端 `scene.keyframe.update` 的 40 字一致） */
+export const KEYFRAME_LABEL_MAX = 40;
+
+/**
+ * 规范化用户输入的标签（纯函数，前后端同一条口径）。
+ *
+ * 返回 `null` = 这次输入不该提交（空白），调用方按"取消"处理 ——
+ * 空串在服务端是"回到自动标签"，在这里先挡住，避免手滑把名字清空。
+ */
+export function normalizeKeyframeLabel(input: string): string | null {
+  const label = String(input ?? "").replace(/\s+/g, " ").trim();
+  if (!label) return null;
+  return label.slice(0, KEYFRAME_LABEL_MAX);
+}
+
+/**
+ * 巡场走到下一帧的下标（纯函数，可单测）。
+ *
+ * 讲解用法是「一帧一帧自动走一遍」：走到头**停下**而不是绕回第 1 帧 ——
+ * 台上绕回会让人以为讲完了又从头开始；`wrap` 留给需要循环的场景。
+ */
+export function nextTourIndex(index: number, total: number, step: number, wrap = false): number | null {
+  if (total <= 0) return null;
+  const next = index + step;
+  if (next < 0) return 0;
+  if (next >= total) return wrap ? 0 : null;
+  return next;
 }
 
 /** 帧上显示的时间：`21:03`（本地时间）；解析不了就写 `—`，不显示 NaN */

@@ -384,7 +384,16 @@ function SplatFitter({
  * 拖动而不是指针锁定：演示时经常要在页面上点别的控件，
  * 指针锁定（Pointer Lock）会把鼠标藏起来还得按 Esc 退出，反而碍事。
  */
-function FirstPersonControls({ scale, syncNonce = 0 }: { scale: number; syncNonce?: number }) {
+function FirstPersonControls({
+  scale,
+  syncNonce = 0,
+  onUserInput,
+}: {
+  scale: number;
+  syncNonce?: number;
+  /** 用户自己动了镜头（拖动 / 滚轮 / WASD）时回调；回放飞行不触发 */
+  onUserInput?: () => void;
+}) {
   const camera = useThree((state) => state.camera);
   const gl = useThree((state) => state.gl);
   const pressed = useRef<Set<string>>(new Set());
@@ -438,17 +447,22 @@ function FirstPersonControls({ scale, syncNonce = 0 }: { scale: number; syncNonc
       angles.current.yaw -= event.movementX * perPixel;
       angles.current.pitch -= event.movementY * perPixel;
       apply();
+      onUserInput?.();
     };
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       moveForward(Math.sign(event.deltaY) * -1 * 0.5);
+      onUserInput?.();
     };
 
     const down = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
       pressed.current.add(event.code);
-      if (["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE"].includes(event.code)) event.preventDefault();
+      if (["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE"].includes(event.code)) {
+        event.preventDefault();
+        onUserInput?.();
+      }
     };
     const up = (event: KeyboardEvent) => pressed.current.delete(event.code);
     const blur = () => {
@@ -481,7 +495,7 @@ function FirstPersonControls({ scale, syncNonce = 0 }: { scale: number; syncNonc
       window.removeEventListener("keyup", up);
       window.removeEventListener("blur", blur);
     };
-  }, [camera, gl, scale]);
+  }, [camera, gl, scale, onUserInput]);
 
   useFrame((_, delta) => {
     const keys = pressed.current;
@@ -521,6 +535,7 @@ export function SplatStage({
   poseRef,
   cameraNonce,
   active = true,
+  onUserInput,
 }: {
   url: string;
   transform?: SplatTransform;
@@ -544,6 +559,11 @@ export function SplatStage({
    * Canvas 必须**保持挂载**（只停渲染），原因见文件末尾关于卸载异常的说明。
    */
   active?: boolean;
+  /**
+   * 用户自己动了镜头（拖动 / 滚轮 / WASD / QE）时回调。
+   * 数字孪生用它清掉「已回到该机位」的高亮 —— 手动转开之后那一行不能还挂着。
+   */
+  onUserInput?: () => void;
 }) {
   /*
    * 加载态自己维护一份：31 MB 的产物不给进度，演示时会被当成卡死。
@@ -606,7 +626,7 @@ export function SplatStage({
         />
         <SplatFitter box={boxRef} nonce={boxNonce + (fitNonce ?? 0) * 1000} fov={50} />
         {/* 第一人称操作：鼠标转视角、WASD 沿朝向走，见 FirstPersonControls 的说明 */}
-        <FirstPersonControls scale={flyScale} syncNonce={syncNonce} />
+        <FirstPersonControls scale={flyScale} syncNonce={syncNonce} onUserInput={onUserInput} />
         <SplatCameraRig target={camera} nonce={cameraNonce} onArrived={() => setFlyArrived((value) => value + 1)} />
         {/* 当前机位读数（打关键帧要用，也让讲解人知道自己站在哪） */}
         <SplatPoseTracker poseRef={poseRef} lookAhead={lookAheadFor(flyScale)} textRef={poseTextRef} />
