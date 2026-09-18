@@ -107,12 +107,13 @@ export type ScriptRound = {
   reveal?: {
     /**
      * 揭示目标：
-     *   · `order-detail`    —— 工单详情页按「组」逐段展开（①④⑧⑩⑳㉑ 等轮）；
+     *   · `order-detail`    —— 工单详情页按「组」逐段展开（②③④⑳㉓㉔㉕）；
      *   · `clean-flow`      —— 数据清洗流程页按「阶段」逐拍推进到人工核验（⑰）；
-     *   · `workbench-cards` —— 执行工作台的任务卡按「槽位」逐张铺开（⑥⑮，位置编号 c1…c4）。
-     * 三者共用 `ordersReveal.runRevealTimeline` 的时间线，只是应用对象不同。
+     *   · `workbench-cards` —— 执行工作台的任务卡按「槽位」逐张铺开（⑥⑮，位置编号 c1…c4）；
+     *   · `twin-components` —— 三维场景顶部的四柱构件条按「构件号」逐柱点亮（⑪，Z01…Z04）。
+     * 四者共用 `ordersReveal.runRevealTimeline` 的时间线，只是应用对象不同。
      */
-    target: "order-detail" | "clean-flow" | "workbench-cards";
+    target: "order-detail" | "clean-flow" | "workbench-cards" | "twin-components";
     sections: string[];
     beats: string[][];
   };
@@ -664,16 +665,23 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     ],
     next: "史：小木，打开你标记的原图，把疑点区域放大。",
     /*
-     * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
-     * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
-     */
+      ── ⑪ 的页面落点与揭示目标（2026-09-23 改）────────────────────────────
+      剧本这一轮演在**三维场景**里：史「现在提交四根木柱对应的原始关键帧……
+      （在三维场景给木柱打标签）」→ 小木报出「当前 Z04 视角可见较明显的表面缺损和
+      孔洞状疑点，建议优先复核 Z04 下部测区」→ 史「我现在跳转到 Z04 观察视角」。
+      原先把页面带到工单详情（按组展开）—— 场地对不上，而用户口径是"每一轮都切到
+      剧本对应的真实页面"。现在改成 /twin，并让顶部的**四柱构件条逐柱点亮**：
+        第 1 句（比较四组标记构件后的结论）→ Z01/Z02/Z03 就位；
+        第 2 句（建议优先复核 Z04 下部测区）→ Z04 点亮，同时打出「建议优先复核」；
+        第 3、4 句是对结论的限定与补充建议，Z04 保持点亮。
+    */
     reveal: {
-      target: "order-detail",
-      sections: ["order", "scope", "pending"],
-      /* 三段节拍：摘要 → 任务范围 → 后续执行模块（与 `ordersReveal.ts` 的组名对齐） */
-      beats: [["order"], ["scope"], ["pending"]],
+      target: "twin-components",
+      sections: ["Z01", "Z02", "Z03", "Z04"],
+      beats: [["Z01", "Z02", "Z03"], ["Z04"], ["Z04"], ["Z04"]],
     },
-    nav: { route: "order", order: "current" },
+    /* 三维场景是要"看"的页：构件号一起带过去，落地就选中 Z04 的视角与热点详情 */
+    nav: { route: "/twin", component: "Z04" },
     voicePack: "AI语音3",
     intentId: "compare_columns",
     precondition: "真实视觉模型未接通时，结果须明确标注为「预置标注记录」",

@@ -175,6 +175,37 @@ try {
       }
     }
 
+    /* 三维场景：四柱构件条要真的渲染出来，且重点构件带「建议优先复核」 */
+    if (nav.route === "/twin") {
+      /*
+        ⚠ 分两步等：先等构件条出现（证明页内定位到了三维场景），
+        再等**最终态**（四根都在 + 重点构件高亮 + 选中 Z04）。
+        为什么不等"中间态"：⑪ 那一轮是**跟着播报逐柱点亮**的，最后一根要等台词念完
+        （88 字约 16 秒）由收尾补拍点亮；6 秒的窗口只能看到前三根。
+      */
+      const first = await machine.waitFor(
+        `(() => { const n = document.querySelectorAll('.twin-col').length; return n > 0 ? n : null; })()`,
+        { timeoutMs: 8000 },
+      );
+      check(`  ↳ 四柱构件条渲染出来`, Boolean(first), first ? `出现 ${first} 根` : "构件条没渲染出来");
+      const content = await machine.waitFor(
+        `(() => {
+          const cols = [...document.querySelectorAll('.twin-col')];
+          const text = document.body.innerText || '';
+          const current = (document.querySelector('.twin-col.is-current .twin-col__id')?.textContent || '').trim();
+          return cols.length === 4 && /建议优先复核/.test(text) && /Z04 下部区域/.test(text) && current === 'Z04'
+            ? { count: cols.length, ids: cols.map((n) => (n.querySelector('.twin-col__id')?.textContent || '').trim()) }
+            : null;
+        })()`,
+        { timeoutMs: 25_000 },
+      );
+      check(
+        `  ↳ 最终四根都在、重点构件带「建议优先复核」、且选中 Z04`,
+        Boolean(content),
+        content ? `${content.count} 根：${content.ids.join(" ")}` : "25 秒内没等到最终态（逐柱点亮的收尾没发生？）",
+      );
+    }
+
     /* 素材质检页：素材清单 + 两处低清晰度标记 + 切片检查，三块都要真的渲染出来 */
     if (nav.route === "/materials") {
       const content = await machine.waitFor(

@@ -1,0 +1,85 @@
+/*
+ * 数字孪生 · 四柱构件条（剧本 ⑪ 的落点）
+ *
+ * 一条横向的四张构件卡：编号 + 名称/部位 + 本轮风险与热点状态；
+ * 当前选中的构件用主色描边，重点构件（数据包里的 `components.focus`）用警示色描边并
+ * 打一行「建议优先复核」。逐柱点亮由 `twinReveal.ts` 控制（未点亮的卡不渲染）。
+ */
+
+.twin-cols {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+}
+
+.twin-col {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 4px var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--text-tertiary);
+  border-radius: 6px;
+  background: var(--fill-weak);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--ease-out), background var(--motion-fast) var(--ease-out);
+}
+
+.twin-col:hover {
+  border-color: var(--border-hover);
+  background: var(--fill-soft);
+}
+
+.twin-col.is-current {
+  border-color: var(--border-active);
+  background: var(--fill-soft);
+}
+
+.twin-col.is-focus {
+  border-left-color: var(--warning);
+}
+
+.twin-col__id {
+  color: var(--text-accent, var(--primary));
+  font-family: var(--font-data);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.twin-col__name {
+  display: flex;
+  flex-direction: column;
+  color: var(--text-primary);
+  font-size: var(--fs-body);
+}
+
+.twin-col__name small {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.twin-col__meta {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.twin-col__focus {
+  grid-column: 1 / -1;
+  color: var(--text-warn);
+  font-size: 11px;
+  font-style: normal;
+}
+
+/* 窄屏（笔记本副屏）两列 —— 四列会把构件名与部位挤成两三个字一行 */
+@media (max-width: 1280px) {
+  .twin-cols {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

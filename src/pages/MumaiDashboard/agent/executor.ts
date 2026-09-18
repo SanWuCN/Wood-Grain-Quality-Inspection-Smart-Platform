@@ -50,6 +50,7 @@ import {
   cancelWorkbenchReveal,
   workbenchMounted,
 } from "../workbenchReveal";
+import { advanceTwinReveal, beginTwinReveal, cancelTwinReveal, twinMounted } from "../twinReveal";
 import { commissionBinding } from "../commissionBinding";
 import { useWorkOrderStore } from "../store/workOrders";
 import { ensureTaskCards } from "../store/taskCards";
@@ -519,7 +520,18 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
   } else if (round.reveal?.target === "workbench-cards") {
     /* ⑥⑮：执行工作台的任务卡跟着播报**逐张铺开**（一句一张，见 script.ts 的 reveal 注释） */
     startWorkbenchReveal(round, spoken);
+  } else if (round.reveal?.target === "twin-components") {
+    /* ⑪：三维场景顶部的四柱构件条跟着播报**逐柱点亮**（Z04 亮起时打出「建议优先复核」） */
+    startTwinReveal(round, entities.order ?? "", spoken);
   }
+  /*
+    四柱构件条是"上一轮讲到哪根"的临时状态：**下一轮开始就交回给人** ——
+    剧本里紧接着的 ⑫（「打开你标记的原图」）要求四根都可见（她刚说完 Z04 是重点，
+    下一页不该把它藏起来）。计划自身还有 30 秒兜底 TTL，这里只是提前结束它。
+    ⚠ 只清孪生这一份，不做"清所有揭示计划"的通杀：另两种揭示（工单页逐组、清洗页逐拍）
+      各有自己的结束语义（见 cleanFlowReveal 里"推完不得解除"那条注释）。
+  */
+  if (round.reveal?.target !== "twin-components") cancelTwinReveal();
 
   /*
     ── 演示表面（工作清单 v1.0 §10 阶段 C/D）──────────────────────────
@@ -712,6 +724,35 @@ function startWorkbenchReveal(round: ScriptRound, spoken?: unknown): void {
     clear: () => cancelWorkbenchReveal(),
     spoken,
     mountReady: workbenchMounted,
+  });
+}
+
+/**
+ * ⑪（三维场景）：四柱构件条**跟着播报逐柱点亮**。
+ *
+ * 剧本这一轮小木报的是"比较四根构件后的结论 + 建议优先复核 Z04"，所以：
+ *   第 1 句 → Z01/Z02/Z03 就位；第 2 句 → Z04 点亮（同时页面上打出「建议优先复核」）。
+ * 按**语义段**切（句号切），不是小句 —— 这一句是结论性长句，逗号处不该换柱。
+ *
+ * ⚠ 键是工单号：三维场景按工单看，换工单时上一轮的计划不该继续点另一张单的构件。
+ */
+function startTwinReveal(round: ScriptRound, orderId: string, spoken?: unknown): void {
+  const reveal = round.reveal;
+  if (!reveal || reveal.sections.length === 0) return;
+  /*
+    ⚠ 只把 `orderId` 当**来源记录**传进去，不参与匹配：数字孪生页的工单选择框用的是
+    `seed/scenario.ts` 的演示工单（`SH-2026-0901` 这类），而这里手里是服务端工单号
+    （`wo-20260918-0001`）—— 第一版按它匹配，结果页面永远匹配不上、一根都不亮。
+    "换工单就交回给人"改由页面在用户切单时 `cancelTwinReveal()` 保证。
+  */
+  beginTwinReveal(reveal.sections, orderId || null);
+  runRevealTimeline({
+    segments: splitSegments(mainLineOf(round)),
+    beats: reveal.beats,
+    apply: (slots) => advanceTwinReveal(slots),
+    clear: () => cancelTwinReveal(),
+    spoken,
+    mountReady: twinMounted,
   });
 }
 /**

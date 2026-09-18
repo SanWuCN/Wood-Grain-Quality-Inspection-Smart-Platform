@@ -45,6 +45,7 @@ import type { SplatCapture } from "./SplatStage";
 import {
   COMPONENTS,
   CURRENT_RISKS,
+  DEMO_SCENARIO_V3,
   HISTORIC_ORDERS,
   HISTORY_RISKS,
   HOTSPOTS,
@@ -53,6 +54,8 @@ import {
   WAVEFORMS,
   WORK_ORDER,
 } from "../seed/scenario";
+import { cancelTwinReveal, useTwinReveal } from "../twinReveal";
+import "./twinColumns.css";
 /**
  * 泼溅渲染舞台（`SplatStage`）**异步加载**。
  *
@@ -168,6 +171,12 @@ export default function Twin() {
   const orderId = params.get("order") ?? ORDERS[0]?.id ?? "";
   const order = ORDERS.find((item) => item.id === orderId) ?? ORDERS[0];
   const setOrderId = (id: string) => {
+    /*
+      人在工单选择框里换单时，**把四柱的揭示计划交回给人**（`cancelTwinReveal`）：
+      计划是全局的一份（见 `twinReveal.ts` 里"键为什么不是工单号"那段），
+      所以"换单就不该继续按剧本点亮"这条保证由这里给 —— 换完看到的是完整四柱。
+    */
+    cancelTwinReveal();
     const next = new URLSearchParams(params);
     next.set("order", id);
     setParams(next, { replace: true });
@@ -274,6 +283,13 @@ export default function Twin() {
 
   /* ---- 热点详情（面板与弹窗共用同一份取数） ---- */
   const component = componentById(selected);
+  /*
+    四柱构件条的揭示状态：计划按**工单**绑（换工单就不该继续点上一张单的柱子）。
+    `null` = 没有计划 → 四根都显示。
+  */
+  const revealed = useTwinReveal();
+  /** 重点构件与重点区域来自数据包（`components.focus` / `focusRegion`），页面不写死 */
+  const focusId = DEMO_SCENARIO_V3.components.focus;
   const hotspot = useMemo(() => HOTSPOTS.find((item) => item.componentId === selected) ?? null, [selected]);
   const risks = useMemo(
     () => CURRENT_RISKS.filter((item) => item.componentId === selected),
@@ -661,6 +677,48 @@ const TOUR_INTERVAL_MS = 5200;
           </Btn>
         ) : null}
       </Toolbar>
+
+      {/*
+        四柱构件条（剧本 ⑪ 的落点）：
+        史在三维场景里「提交四根木柱对应的原始关键帧」，小木「分析比较这四组标记的木构件」，
+        然后报出「当前 Z04 视角可见较明显的表面缺损和孔洞状疑点，建议优先复核 Z04 下部测区」。
+        这一条就是那"四组标记"的可点入口：点一下就切到该构件的视角与热点详情；
+        小木播报时它**跟着台词逐柱点亮**（`twinReveal.ts`），最后在重点构件上打出「建议优先复核」。
+        ⚠ 没有计划时（用户自己点进来、刷新、换工单）四根都在 —— 演示效果不会传染成"页面坏了"。
+      */}
+      <div className="twin-cols" role="tablist" aria-label="四根木柱">
+        {COMPONENTS.filter((item) => (revealed === null ? true : revealed.includes(item.id))).map((item) => {
+          const risks = CURRENT_RISKS.filter((risk) => risk.componentId === item.id);
+          const isFocus = item.id === focusId;
+          const hot = HOTSPOTS.some((spot) => spot.componentId === item.id);
+          return (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={item.id === selected}
+              className={`twin-col${item.id === selected ? " is-current" : ""}${isFocus ? " is-focus" : ""}`}
+              title={`${item.name} · ${item.visibleNote}`}
+              onClick={() => setComponent(item.id)}>
+              <span className="twin-col__id">{item.id}</span>
+              <span className="twin-col__name">
+                {item.name}
+                <small>{item.part}</small>
+              </span>
+              <span className="twin-col__meta">
+                {risks.length ? (
+                  <StatusChip text={`${risks.length} 项风险`} tone={risks.some((risk) => risk.priority === "优先复核") ? "warn" : "info"} />
+                ) : (
+                  <StatusChip text="本轮无异常" tone="muted" />
+                )}
+                {hot ? <StatusChip text="有热点" tone="info" /> : null}
+              </span>
+              {/* 重点构件与重点区域也是数据包里的值（`components.focus` / `focusRegion`），不在这里写死 */}
+              {isFocus ? <em className="twin-col__focus">建议优先复核 · {DEMO_SCENARIO_V3.components.focusRegion}</em> : null}
+            </button>
+          );
+        })}
+      </div>
 
       <div className="twin-layout">
         {/* 主视图：占页面 2/3 以上 */}
