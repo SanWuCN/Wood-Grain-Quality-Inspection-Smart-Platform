@@ -14,6 +14,7 @@
 
 import { WebSocketServer } from "ws";
 import { eventsSince, getSession } from "./session.mjs";
+import { createProbeBook, normalizeClientAddress } from "./collab.mjs";
 
 export function createHub({ server, db, path = "/ws", noServer = false }) {
   /*
@@ -27,6 +28,39 @@ export function createHub({ server, db, path = "/ws", noServer = false }) {
   const matches = (request) => new URL(request.url, "http://localhost").pathname === path;
   /** sessionId → Set<ws> */
   const rooms = new Map();
+  /** 同步实测簿：谁开了实测、哪几台端回了执（多机协同现场排查用） */
+  const probes = createProbeBook();
+  let endSeq = 0;
+
+  /**
+   * 每个端（一个打开的页面 = 一条 WebSocket = 一台端）。
+   *
+   * `address` 是**服务端看到的 TCP 对端地址**，不是页面自己报的 —— 现场要回答的
+   * 「这条写入来自哪台机器」必须取传输层事实。账号与页面是页面自报的，只用于
+   * 把端对上人（不参与任何权限判定：权限走 HTTP 的令牌）。
+   */
+  const endOf = (socket) => socket.__end ?? null;
+
+  const endSummary = (end) => ({
+    id: end.id,
+    address: end.address,
+    sessionId: end.sessionId,
+    accountId: end.accountId,
+    accountName: end.accountName,
+    page: end.page,
+    openedAt: new Date(end.openedAtMs).toISOString(),
+    lastSeenAt: new Date(end.lastSeenAt).toISOString(),
+    /** 从打开到现在多久、最近一次有动静是多久以前（现场判断"这条通道还活着吗"） */
+    openedMs: Date.now() - end.openedAtMs,
+    idleMs: Date.now() - end.lastSeenAt,
+  });
+
+  const roomEnds = (sessionId) =>
+    [...(rooms.get(sessionId) ?? [])]
+      .filter((socket) => socket.readyState === socket.OPEN)
+      .map(endOf)
+      .filter(Boolean)
+      .map(endSummary);
 
   wss.on("connection", (socket, request) => {
     const url = new URL(request.url, "http://localhost");
@@ -35,6 +69,18 @@ export function createHub({ server, db, path = "/ws", noServer = false }) {
 
     if (!rooms.has(sessionId)) rooms.set(sessionId, new Set());
     rooms.get(sessionId).add(socket);
+
+    const end = {
+      id: `end-${(endSeq += 1)}`,
+      address: normalizeClientAddress(request.socket?.remoteAddress),
+      sessionId,
+      accountId: null,
+      accountName: null,
+      page: null,
+      openedAtMs: Date.now(),
+      lastSeenAt: Date.now(),
+    };
+    socket.__end = end;
 
     // 补缺口：重连后先看到断线期间发生的事，再进入实时流
     const session = getSession(db, sessionId);
@@ -60,10 +106,45 @@ export function createHub({ server, db, path = "/ws", noServer = false }) {
     socket.isAlive = true;
     socket.on("pong", () => {
       socket.isAlive = true;
+      end.lastSeenAt = Date.now();
     });
     socket.on("message", (raw) => {
-      // 只认一个客户端主动消息：ping（应用层保活，避免代理掐掉空闲连接）
-      if (raw.toString() === "ping") socket.send(JSON.stringify({ kind: "pong", at: Date.now() }));
+      end.lastSeenAt = Date.now();
+      const text = raw.toString();
+      // 老客户端只发一个字符串 "ping"（应用层保活，避免代理掐掉空闲连接）
+      if (text === "ping") {
+        socket.send(JSON.stringify({ kind: "pong", at: Date.now() }));
+        return;
+      }
+      let message = null;
+      try {
+        message = JSON.parse(text);
+      } catch {
+        return;
+      }
+      if (message?.kind === "ping") {
+        end.page = typeof message.page === "string" ? message.page : end.page;
+        end.accountId = typeof message.accountId === "string" ? message.accountId : end.accountId;
+        socket.send(JSON.stringify({ kind: "pong", at: Date.now() }));
+        return;
+      }
+      // 页面自报身份：只用来把端对上人，权限仍然只认 HTTP 令牌
+      if (message?.kind === "who") {
+        end.accountId = typeof message.accountId === "string" ? message.accountId : end.accountId;
+        end.accountName = typeof message.accountName === "string" ? message.accountName : end.accountName;
+        end.page = typeof message.page === "string" ? message.page : end.page;
+        return;
+      }
+      if (message?.kind === "sync-ack") {
+        const probe = probes.ack(message.probeId, {
+          endId: end.id,
+          address: end.address,
+          accountId: end.accountId ?? message.accountId ?? null,
+          page: end.page ?? message.page ?? null,
+        });
+        if (probe) socket.send(JSON.stringify({ kind: "sync-ack-ok", probeId: message.probeId, acked: probe.acked.length, ends: probe.ends }));
+        return;
+      }
     });
     socket.on("close", () => {
       rooms.get(sessionId)?.delete(socket);
@@ -144,6 +225,37 @@ export function createHub({ server, db, path = "/ws", noServer = false }) {
      */
     peerCount(sessionId) {
       return rooms.get(sessionId)?.size ?? 0;
+    },
+    /**
+     * 房间里每台端的明细：**TCP 对端地址** + 账号 + 当前页面 + 打开多久 + 最近动静。
+     *
+     * 这一格回答的是用户 2026-09-18 报的那个问题：「我这边添加工单，沈那边收不到」。
+     * 如果沈那台根本没出现在这个列表里，那他不是收不到，而是**没连到这台服务器**
+     * （多半在自己电脑上开着另一份副本）—— 页面上要能直接看出这件事。
+     */
+    ends(sessionId) {
+      return roomEnds(sessionId);
+    },
+    /** 所有会话房间里的端（排查"换过会话"时用） */
+    allEnds() {
+      const list = [];
+      for (const sessionId of rooms.keys()) list.push(...roomEnds(sessionId));
+      return list;
+    },
+    /**
+     * 开一次同步实测：把"这条写入有几台端真收到了"变成可读的数字。
+     *
+     * 顺序由调用方定（先 `appendEvent` 真写一条事件、再广播、然后开簿），
+     * 这里只负责记下"下发那一刻房间里有哪几台端"，等它们的回执。
+     */
+    openProbe(sessionId, { probeId, seq = null, from = {} }) {
+      return probes.open({ probeId, sessionId, seq, from, ends: roomEnds(sessionId) });
+    },
+    probeStatus(probeId) {
+      return probes.get(probeId);
+    },
+    latestProbe() {
+      return probes.latest();
     },
     /**
      * 由 index.mjs 的 upgrade 路由调用。

@@ -5656,6 +5656,128 @@
   background: rgba(78, 168, 255, 0.2);
 }
 
+/* 虚拟局域网那条：与内网地址区分开，但仍然是"可以念出去"的一条 */
+.cs-lan__url--vpn {
+  background: rgba(255, 196, 84, 0.12);
+  color: var(--text-warn, #e0a33a);
+  border-color: rgba(255, 196, 84, 0.35);
+}
+
+.cs-lan__url--vpn em {
+  margin-left: 6px;
+  font-style: normal;
+  font-family: var(--font-sans, inherit);
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.cs-lan__host {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* 本机模式提示：现场最容易犯、又最难自己发现的错（两边界面长得一模一样） */
+.cs-lan__warn {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border: 1px solid rgba(255, 196, 84, 0.35);
+  border-radius: 6px;
+  background: rgba(255, 196, 84, 0.12);
+  color: var(--text-warn, #e0a33a);
+  line-height: 1.6;
+}
+
+.cs-lan__hint {
+  display: inline-block;
+  margin-left: 8px;
+  line-height: 1.6;
+}
+
+/* 每台端一行：谁 · 从哪台机器 · 在哪一页 · 还活着吗 */
+.cs-lan__ends {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 3px;
+}
+
+.cs-lan__ends li {
+  display: block;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.cs-lan__ends li i {
+  margin-right: 6px;
+  color: var(--tone-ok, #46c07a);
+  font-style: normal;
+}
+
+.cs-lan__ends li.is-stale i {
+  color: var(--text-tertiary);
+}
+
+.cs-lan__ends li.is-stale {
+  color: var(--text-tertiary);
+}
+
+/* 写入来源：现场对表用 —— 谁从哪台机器写了什么 */
+.cs-lan__writes {
+  margin-top: var(--space-3);
+  border-top: 1px dashed var(--border-subtle);
+  padding-top: var(--space-2);
+}
+
+.cs-lan__writes-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.cs-lan__writes-head > b {
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.cs-lan__writes-head > .muted {
+  flex: 1;
+  min-width: 0;
+}
+
+.cs-lan__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.cs-lan__table th,
+.cs-lan__table td {
+  padding: 3px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.cs-lan__table td:nth-child(3) {
+  white-space: normal;
+  word-break: break-all;
+}
+
+.cs-lan__table th {
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.cs-lan__table td.is-fail {
+  color: var(--tone-danger, #e06c6c);
+}
+
 .cs-sessions,
 .cs-snapshots,
 .cs-preflight {
@@ -9175,6 +9297,19 @@
   grid-template-columns: minmax(56px, 0.7fr) repeat(4, minmax(0, 1fr));
   align-items: center;
   gap: var(--space-3);
+}
+
+/*
+ * 列数不写死的行 / 表头（GPU 页签 4 列：服务器 / GPU 占用 / 显存占用 / 负载）。
+ * 表格是「每行一个 grid」，所以列数由这一行的子元素个数决定 —— 删掉「型号」列后
+ * 不用改行内 JSX 的列数，也不会留下一个空列把「负载」推到最右。
+ * 表头是独立 grid，必须跟着一起改，否则列宽对不上行。
+ */
+.rm-table__head--flex,
+.rm-table__row--flex {
+  grid-template-columns: minmax(56px, 0.7fr);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
 }
 
 .rm-table__head {

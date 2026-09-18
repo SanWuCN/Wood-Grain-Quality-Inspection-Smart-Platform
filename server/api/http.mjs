@@ -9,7 +9,7 @@
  */
 
 import { createReadStream, existsSync, statSync } from "node:fs";
-import { networkInterfaces } from "node:os";
+import { hostname, networkInterfaces } from "node:os";
 import { extname, join, normalize, resolve } from "node:path";
 import {
   ASSETS_ROOT,
@@ -62,6 +62,7 @@ import { createDeviceReadiness } from "../services/device-readiness.mjs";
 import { createSensorService } from "../services/sensortag.mjs";
 import { createPlatformResources } from "../services/platform-resources.service.mjs";
 import { registerUploadRoutes } from "../services/uploads.mjs";
+import { addressLabel, createWriteLog, normalizeClientAddress, usableAddresses } from "../services/collab.mjs";
 
 /** 归档副本的补传 / 重选属于「交付摘要校验」的写入侧，与前端 archive:verify 同一个权限 */
 function hasAssetPermission(actorId) {
@@ -139,8 +140,39 @@ function readRawBody(req, limit = 2 * 1024 * 1024) {
  * 路由
  * ------------------------------------------------------------------ */
 
-export function createApi({ db, hub, bridge, devices = null, workOrders = null, uploads = null, cart = null, voiceProxy = null, staticRoot = null, knowledgeRunner = null, logger = console }) {
+export function createApi({ db, hub, bridge, devices = null, workOrders = null, uploads = null, cart = null, voiceProxy = null, staticRoot = null, knowledgeRunner = null, dbFile = null, logger = console }) {
   ensureAssetsRoot();
+  /**
+   * 多机协同的现场读数（用户 2026-09-18「平台同步有问题」）。
+   *
+   * 三个都在服务端算，页面只念：
+   *   · `serverInfo` —— 这台服务器是谁（主机名 / 端口 / 库文件 / 启动时刻），
+   *     用来回答"我这台连的是哪一台服务器"；
+   *   · `addresses` —— 同事能打开哪些地址（含虚拟局域网那条，原来被过滤掉了）；
+   *   · `writeLog` —— 最近谁从哪台机器写了什么（写请求级留痕，内存环形）。
+   */
+  const startedAt = new Date().toISOString();
+  const writeLog = createWriteLog();
+  /**
+   * 数据在哪个库文件里：优先用启动参数，其次问 SQLite 自己（`location()` 对内存库回 null，
+   * 那就如实写 `:memory:` —— 测试跑的是内存库，不该被误报成一个磁盘路径）。
+   */
+  const databaseFile = (() => {
+    if (dbFile) return dbFile;
+    try {
+      if (typeof db?.location !== "function") return null;
+      return db.location() ?? ":memory:";
+    } catch {
+      return null;
+    }
+  })();
+  const serverInfo = (port) => ({
+    hostname: hostname(),
+    port: port ?? null,
+    dbFile: databaseFile,
+    startedAt,
+    serverTime: new Date().toISOString(),
+  });
   /*
     路由表是**每个 API 实例一份**，不是模块级。
     模块级的话，同一个进程里起第二个服务（测试、预检都会这么干）时，
@@ -696,37 +728,38 @@ export function createApi({ db, hub, bridge, devices = null, workOrders = null, 
    * 这台机器上 IPv4 有八条，其中五条是**虚拟网卡**：VPN 隧道（198.18/26.x）、
    * 以太网 2 与 VirtualBox Host-Only（169.254 自动私有地址）、VMware VMnet1/8
    * （192.168.62/75）。全列出来用户根本不知道念哪一个。
-   * 所以按两条过滤：① 只保留**私有网段**（10/8、172.16/12、192.168/16）——
-   * 公网与隧道地址本来也不是"内网地址"；② 按网卡名排掉明显是虚拟交换机的
-   * （VMware / VirtualBox / Hyper-V / VPN / Radmin / ZeroTier / Tailscale / Docker / WSL…）。
-   * 过滤结果为空时**如实返回空数组**，由页面说明"这一台没读到内网地址"，
-   * 不拿一个可能是错的地址糊上去。
+   * 所以地址由 `services/collab.mjs` 的 `usableAddresses()` 统一挑（分类规则
+   * 与单测都在那里），这里只负责把结果发出去；过滤结果为空时**如实返回空数组**，
+   * 由页面说明"这一台没读到内网地址"，不拿一个可能是错的地址糊上去。
+   *
+   * ── 2026-09-18 补：把「同一个虚拟局域网里的同事」也算进来 ──────────────
+   * 用户报「我这边添加工单，沈那边收不到」。原来只报私有网段的地址，
+   * 而 Radmin 这类虚拟局域网给的是 26.x —— 远程同事能连的地址**一个都没列**，
+   * 他只能自己去猜。现在分两类报：局域网（lan）与虚拟局域网（vpn），
+   * 每条都带网卡名，页面照念即可；同时把每台端的**对端地址**也报出来，
+   * 于是"他到底连上没有"从"猜"变成"看一眼列表"。
    */
-  const VIRTUAL_ADAPTER_RE =
-    /vmware|virtualbox|vbox|hyper-?v|vethernet|loopback|bluetooth|radmin|zerotier|tailscale|hamachi|ikuuu|vpn|tap|tun|docker|wsl|npcap|virtual/i;
-  const isPrivateIpv4 = (address) =>
-    /^10\./.test(address) ||
-    /^192\.168\./.test(address) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(address);
-
   route("GET", "/api/sessions/:id/peers", async (ctx) => {
     const session = requireSession(ctx.params.id);
     const port = ctx.req?.socket?.localPort ?? null;
-    const lanUrls = [];
-    for (const [name, list] of Object.entries(networkInterfaces())) {
-      if (VIRTUAL_ADAPTER_RE.test(name)) continue;
-      for (const item of list ?? []) {
-        if (!item || item.family !== "IPv4" || item.internal) continue;
-        if (!isPrivateIpv4(item.address)) continue;
-        lanUrls.push(port ? `http://${item.address}:${port}` : `http://${item.address}`);
-      }
-    }
+    const addresses = usableAddresses(networkInterfaces(), port);
     return {
       sessionId: session.id,
       /* 这个房间里的 WebSocket 连接数 = 现在开着页面的端数（含本机这一台） */
       peers: hub.peerCount(session.id),
       clients: hub.clientCount(),
-      lanUrls,
+      /** 老字段：只含局域网地址（页面与被引用的工装都还读它） */
+      lanUrls: addresses.filter((item) => item.kind === "lan").map((item) => item.url),
+      /**
+       * 每台端的明细（对端地址 + 账号 + 当前页面 + 打开多久 + 最近动静）。
+       * 「沈那边收不到」的第一句诊断就是在这里：列表里没有他那个地址，
+       * 说明他那台压根没连到这台服务器。
+       */
+      ends: hub.ends(session.id),
+      /** 服务器身份：页面据此显示"我连的是哪一台" */
+      server: { ...serverInfo(port), addressCount: addresses.length, endsTotal: hub.allEnds().length },
+      /** 可达地址（lan 在前、vpn 在后；第一条是推荐念的那条） */
+      addresses,
       port,
       serverTime: new Date().toISOString(),
     };
@@ -1316,6 +1349,68 @@ export function createApi({ db, hub, bridge, devices = null, workOrders = null, 
     return diagnosticsBundle(db, sessionId, preflightDetail(db, sessionId));
   });
 
+  /* ------------------------------------------------------------------ *
+   * 多机协同现场排查（用户 2026-09-18「平台同步有问题」）
+   *
+   * 用户原话：「我这边添加工单，沈那边收不到；沈那边派发人员，我这边也同步不到。」
+   * 两边都不动只有两种可能：**写的不是同一台服务器**，或者**有一台的实时通道断了**。
+   * 原来这两件事在页面上都看不出来，只能靠猜。所以补两条读数：
+   *
+   *   ① 同步实测（`POST /api/console/sync-probe`）——
+   *      走和工单事件**同一条路**：真写一条事件 → 广播 → 每台端收到后回执。
+   *      结论是「M/N 台端在 x 秒内收到」；哪几台没回也列出来。
+   *      这条能把"同步坏了"从一个感觉变成一句可证伪的话。
+   *
+   *   ② 写入来源（`GET /api/console/write-log`）——
+   *      最近谁从哪台机器写了什么（写请求级留痕，内存环形，重启即清）。
+   *      「沈说他派了人」这句话对不对，看这里有没有一条来自他那台机器的写入；
+   *      没有就说明他的写入**根本没到这台服务器**，问题在网络/地址，不在数据。
+   * ------------------------------------------------------------------ */
+
+  route("POST", "/api/console/sync-probe", async (ctx) => {
+    requireAdmin(ctx.actor);
+    const sessionId = ctx.body.sessionId ?? DEFAULT_SESSION_ID;
+    requireSession(sessionId);
+    const address = normalizeClientAddress(ctx.req?.socket?.remoteAddress);
+    const probeId = `probe-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000)}`;
+    /* 先真写一条事件（持久化 + 进事件流），再按下发那一刻的端列表打开实测簿 */
+    const event = appendEvent(db, sessionId, {
+      type: "sync.probe",
+      entityKind: "session",
+      entityId: sessionId,
+      actorId: ctx.actor,
+      payload: { probeId, by: ctx.actor, from: address },
+    });
+    const probe = hub.openProbe(sessionId, { probeId, seq: event?.seq ?? null, from: { address, actorId: ctx.actor } });
+    if (event) hub.broadcast(sessionId, event);
+    return { ...probe, event };
+  });
+
+  route("GET", "/api/console/sync-probe/:id", async (ctx) => {
+    requireAdmin(ctx.actor);
+    const probe = hub.probeStatus(ctx.params.id);
+    if (!probe) throw new WorkflowError(404, "NO_PROBE", "这次实测已过期（实测结论只保留两分钟）");
+    return probe;
+  });
+
+  /** 最近一次实测：页面刷新后仍能念出上一次的结论 */
+  route("GET", "/api/console/sync-probe", async (ctx) => {
+    requireAdmin(ctx.actor);
+    return { probe: hub.latestProbe() };
+  });
+
+  route("GET", "/api/console/write-log", async (ctx) => {
+    requireAdmin(ctx.actor);
+    const limit = Math.max(1, Math.min(Number(ctx.query.limit ?? 20) || 20, 200));
+    return {
+      entries: writeLog.list(limit),
+      kept: writeLog.size(),
+      server: serverInfo(ctx.req?.socket?.localPort ?? null),
+      /* 现场对表用：这台服务器看到的每台端 */
+      ends: hub.allEnds().map((end) => ({ ...end, addressLabel: addressLabel(end.address) })),
+    };
+  });
+
   /* ---- 平台资源（总览「平台数据」与资源弹窗的唯一数据源，PRD §10.2） ---- */
 
   /*
@@ -1414,6 +1509,27 @@ export function createApi({ db, hub, bridge, devices = null, workOrders = null, 
         }
       }
 
+      /*
+        写请求留痕（用户 2026-09-18「沈那边派发人员，我这边也同步不到」）。
+        只记写请求、只记服务端能确证的事实（方法 / 路径 / 账号 / **TCP 对端地址** /
+        状态码 / 耗时），放在这里是因为**所有写都必须经过这个循环** ——
+        在每条路由里各记一次，迟早漏掉一条，而漏掉的那条正是要排查的那条。
+      */
+      const mutating = req.method === "POST" || req.method === "PUT" || req.method === "PATCH" || req.method === "DELETE";
+      const writeStartedAt = Date.now();
+      const recordWrite = (status, body) => {
+        if (!mutating) return;
+        writeLog.record({
+          method: req.method,
+          path: pathname,
+          action: typeof body?.action === "string" ? body.action : null,
+          actorId: actor ?? null,
+          address: req.socket?.remoteAddress,
+          status,
+          durationMs: Date.now() - writeStartedAt,
+        });
+      };
+
       try {
         /*
          * 上传接口要自己消费 `req` 这个流（边写盘边算摘要），
@@ -1436,7 +1552,9 @@ export function createApi({ db, hub, bridge, devices = null, workOrders = null, 
           res.writeHead(200, { ...JSON_HEADERS, ...corsHeaders() });
           res.end(JSON.stringify(result));
         }
+        recordWrite(res.statusCode ?? 200, body);
       } catch (error) {
+        recordWrite(error instanceof WorkflowError ? error.status : 500, null);
         if (!res.writableEnded) sendError(res, error);
         else logger.error?.("[api] 响应已开始，无法回写错误:", error?.message);
       }

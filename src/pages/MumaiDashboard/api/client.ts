@@ -149,17 +149,104 @@ export type SceneEntity = {
  * `peers` 是**服务端数的真实连接数**（WebSocket 房间大小，含本机这一台），
  * `lanUrls` 是服务端从网卡枚举出来的内网地址 —— 两个都不在前端猜，
  * 现场"别人连上了没有""同事该打开哪个地址"直接照这个念。
+ *
+ * 2026-09-18 补（用户报「我这边添加工单，沈那边收不到」）：端数与地址不够用了，
+ * 还要能回答"他那台到底连到这台服务器没有"。于是服务端把**每台端的对端地址**
+ * （TCP 事实，不是页面自报）、服务器身份（主机名 / 端口 / 库文件 / 启动时刻）、
+ * 以及可达地址（局域网 + 虚拟局域网两类）一起报出来。
  */
+export type CollabAddress = {
+  url: string;
+  address: string;
+  /** 网卡名，例如 WLAN / Radmin VPN */
+  iface: string;
+  kind: "lan" | "vpn";
+  kindLabel: string;
+  /** 现场该念的那一条 */
+  recommended: boolean;
+};
+
+export type CollabEnd = {
+  id: string;
+  address: string;
+  sessionId: string;
+  accountId: string | null;
+  accountName: string | null;
+  page: string | null;
+  openedAt: string;
+  lastSeenAt: string;
+  /** 打开到现在多久（毫秒） */
+  openedMs: number;
+  /** 最近一次有动静是多久以前（毫秒） */
+  idleMs: number;
+};
+
+export type CollabServer = {
+  hostname: string;
+  port: number | null;
+  dbFile: string | null;
+  startedAt: string;
+  serverTime: string;
+  addressCount?: number;
+  endsTotal?: number;
+};
+
 export type LanPeers = {
   sessionId: string;
   /** 本会话房间里现在有几台端连着（含自己） */
   peers: number;
   /** 所有会话房间的总连接数（排查用：换过会话时它比 peers 大） */
   clients: number;
-  /** 同事可直接打开的地址（非回环、非 link-local 的 IPv4） */
+  /** 同事可直接打开的地址（内网网段） */
   lanUrls: string[];
+  /** 每台端的明细：对端地址 + 账号 + 当前页面 + 打开多久 + 最近动静 */
+  ends: CollabEnd[];
+  /** 这台服务器是谁 */
+  server: CollabServer;
+  /** 可达地址（lan 在前、vpn 在后；第一条是推荐念的那条） */
+  addresses: CollabAddress[];
   port: number | null;
   serverTime: string;
+};
+
+/** 同步实测结论（服务端 /api/console/sync-probe） */
+export type SyncProbe = {
+  probeId: string;
+  sessionId: string;
+  /** 实测事件在事件流里的序号（证明它是真写进去的一条，不是假消息） */
+  seq: number | null;
+  at: string;
+  ageMs: number;
+  from: { address?: string; addressLabel?: string; actorId?: string };
+  /** 下发那一刻房间里有几台端 */
+  ends: number;
+  acked: { endId: string; address: string; addressLabel: string; accountId: string | null; page: string | null; at: string; ms: number }[];
+  /** 没回执的端 —— 现场要盯的就是这几个 */
+  pending: { id: string; address: string; addressLabel: string; accountId: string | null; page: string | null }[];
+  /** 全部端都回了执才算通过；一台都没连上时不算通过 */
+  ok: boolean;
+  /** 最后一台端回执的用时（"几秒内全网可见"） */
+  lastAckMs: number | null;
+};
+
+/** 写入来源（服务端 /api/console/write-log）：最近谁从哪台机器写了什么 */
+export type WriteLogEntry = {
+  at: string;
+  atMs: number;
+  method: string;
+  path: string;
+  action: string | null;
+  actorId: string | null;
+  address: string;
+  status: number | null;
+  durationMs: number | null;
+};
+
+export type WriteLogPage = {
+  entries: WriteLogEntry[];
+  kept: number;
+  server: CollabServer;
+  ends: (CollabEnd & { addressLabel: string })[];
 };
 
 /** 排练控制台的总览（服务端 /api/console/overview） */
@@ -757,6 +844,35 @@ export const api = {
     return apiRequest<LanPeers>(`/api/sessions/${encodeURIComponent(sessionId)}/peers`);
   },
 
+  /**
+   * 同步实测：真写一条 `sync.probe` 事件并下发，每台端收到后回执。
+   *
+   * 结论是「M/N 台端在 x 秒内收到」—— 用户 2026-09-18 报的
+   * 「我这边添加工单，沈那边收不到」，到这里就从一句感觉变成一条可证伪的读数。
+   * 权限：排练控制台（console:admin）。
+   */
+  syncProbe(sessionId: string) {
+    return apiRequest<SyncProbe>("/api/console/sync-probe", {
+      method: "POST",
+      body: JSON.stringify({ sessionId }),
+    });
+  },
+
+  /** 查实测结论（端回执是异步的，页面按 probeId 轮询到齐） */
+  syncProbeStatus(probeId: string) {
+    return apiRequest<SyncProbe>(`/api/console/sync-probe/${encodeURIComponent(probeId)}`);
+  },
+
+  /** 最近一次实测（页面刷新后还能念出上一次的结论） */
+  latestSyncProbe() {
+    return apiRequest<{ probe: SyncProbe | null }>("/api/console/sync-probe");
+  },
+
+  /** 最近谁从哪台机器写了什么（写请求级留痕，权限：console:admin） */
+  writeLog(limit = 20) {
+    return apiRequest<WriteLogPage>(`/api/console/write-log?limit=${limit}`);
+  },
+
   /** 新建一场演示会话：新一轮隔离，从开场状态开始 */
   consoleNewSession(scenarioId = "chapter2") {
     return apiRequest<{ session: RehearsalOverview["sessions"][number]; entityCount: number }>(
@@ -1154,7 +1270,18 @@ function filenameFromDisposition(header: string | null): string | null {
  * 事件流
  * ------------------------------------------------------------------ */
 
-export type StreamHandle = { close: () => void };
+export type StreamHandle = {
+  close: () => void;
+  /**
+   * 往这条实时通道发一条控制消息。
+   *
+   * 实时通道**只走控制消息**，业务写入一律走 POST /api/commands（文件头那条约定）：
+   *   · `who`      页面自报"我是谁、在哪一页" —— 服务端据此把端对上人；
+   *   · `sync-ack` 收到同步实测事件后回执（服务端算"M/N 台端在 x 秒内收到"）。
+   * 权限判定只认 HTTP 令牌，这里自报的身份仅用于现场对表。
+   */
+  send: (message: Record<string, unknown>) => boolean;
+};
 
 /**
  * 订阅演示会话的事件流。
@@ -1168,6 +1295,8 @@ export function subscribe(
     onHello?: (info: { lastSeq: number; replayed: number }) => void;
     onEvent?: (event: StreamEvent) => void;
     onStatus?: (status: "connecting" | "open" | "closed") => void;
+    /** 连接建立时报一次身份（账号 + 当前页面），服务端用来把端对上人 */
+    onIdentify?: () => { accountId?: string; accountName?: string } | null;
   },
 ): StreamHandle {
   let socket: WebSocket | null = null;
@@ -1188,6 +1317,24 @@ export function subscribe(
     return `${protocol}://${window.location.host}/ws?sessionId=${encodeURIComponent(sessionId)}&afterSeq=${lastSeq}`;
   };
 
+  /** 当前页面：端明细里"他在哪一页"就是它（切换路由不需要重连，心跳会带上新的） */
+  const currentPage = () => (typeof window === "undefined" ? null : window.location.hash || "#/");
+
+  const send = (message: Record<string, unknown>): boolean => {
+    if (socket?.readyState !== WebSocket.OPEN) return false;
+    try {
+      socket.send(JSON.stringify(message));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const identify = () => {
+    const identity = handlers.onIdentify?.() ?? {};
+    send({ kind: "who", page: currentPage(), ...identity });
+  };
+
   const connect = () => {
     if (closed) return;
     handlers.onStatus?.("connecting");
@@ -1201,9 +1348,13 @@ export function subscribe(
       attempt = 0;
       lastMessageAt = Date.now();
       handlers.onStatus?.("open");
+      identify();
       // 应用层保活：局域网里空闲连接会被中间设备掐掉
       pingTimer = window.setInterval(() => {
-        if (socket?.readyState === WebSocket.OPEN) socket.send("ping");
+        if (socket?.readyState === WebSocket.OPEN) {
+          /* 带 JSON 的 ping 顺手上报当前页面：端明细里的"在哪一页"跟着路由走 */
+          if (!send({ kind: "ping", page: currentPage() })) socket.send("ping");
+        }
       }, PING_EVERY_MS);
       /*
         ── 失联自检（2026-09-17 加）─────────────────────────────────────
@@ -1275,6 +1426,7 @@ export function subscribe(
       window.clearInterval(watchdogTimer);
       socket?.close();
     },
+    send,
   };
 }
 

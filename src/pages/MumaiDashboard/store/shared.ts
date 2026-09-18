@@ -104,8 +104,25 @@ export const useSharedStore = create<SharedState>()((set, get) => ({
         else if (next === "closed" && get().status === "online") set({ status: "connecting" });
       },
       onHello: ({ lastSeq }) => set({ lastSeq }),
+      /*
+        端自报身份：服务端的「这台服务器上有哪几台端」要靠它把端对上人
+        （地址是服务端从 TCP 取的，账号与页面只能由页面自报；权限仍然只认 HTTP 令牌）。
+      */
+      onIdentify: () => {
+        const actor = get().actor;
+        return actor ? { accountId: actor.id, accountName: actor.name } : null;
+      },
       onEvent: (event) => {
         set({ lastEvent: event });
+        /*
+          同步实测回执：服务端真写了一条 `sync.probe` 事件并广播，
+          每台端收到就在这里回一条 —— 于是"这条写入几台端真收到了"成了服务端算得出的数。
+          页面**不做任何判断**，只回执；结论由服务端给（`/api/console/sync-probe/:id`）。
+        */
+        if (event.type === "sync.probe") {
+          const probeId = event.payload?.probeId;
+          if (typeof probeId === "string") stream?.send({ kind: "sync-ack", probeId });
+        }
         scheduleRefresh(get);
       },
     });

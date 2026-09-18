@@ -15,17 +15,28 @@
  * （评审反复强调「成功反馈必须对应实际动作」）。缺什么就写在页面下方。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import { Btn, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
-import { api, isApiError, type LanPeers, type RehearsalOverview } from "../api/client";
+import {
+  api,
+  isApiError,
+  type LanPeers,
+  type RehearsalOverview,
+  type SyncProbe,
+  type WriteLogPage,
+} from "../api/client";
 import { isOnline, useSharedStore } from "../store/shared";
 import { useMumai } from "../context";
 import { actorName } from "../api/accounts";
+import { addressGroups, endRows, hostOf, isLocalHost, probeVerdict, recommendedUrl, serverLine } from "./collabLogic";
 
 /** 内网端数多久读一次：它是本页唯一会"自己变"的读数（别人开关页面） */
 const PEERS_POLL_MS = 10000;
+/** 同步实测的回执是异步的：开完实测按这个间隔追结论，最多追这么久 */
+const PROBE_POLL_MS = 400;
+const PROBE_DEADLINE_MS = 8000;
 
 export default function Console() {
   const { toast } = useMumai();
@@ -36,6 +47,12 @@ export default function Console() {
   const [busy, setBusy] = useState<string | null>(null);
   const [stage, setStage] = useState("P11");
   const [label, setLabel] = useState("");
+  /** 最近一次同步实测的结论（端回执是异步的，追到齐或超时为止） */
+  const [probe, setProbe] = useState<SyncProbe | null>(null);
+  const [probing, setProbing] = useState(false);
+  /** 最近谁从哪台机器写了什么 */
+  const [writeLog, setWriteLog] = useState<WriteLogPage | null>(null);
+  const probeTimer = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!online) return;
@@ -75,6 +92,72 @@ export default function Console() {
     const timer = window.setInterval(() => void refreshPeers(), PEERS_POLL_MS);
     return () => window.clearInterval(timer);
   }, [refreshPeers]);
+
+  /**
+   * 写入来源：最近谁从哪台机器写了什么。
+   *
+   * 用户 2026-09-18「沈那边派发人员，我这边也同步不到」—— 这一格直接回答
+   * "他到底写没写进来"：有他那台机器的地址就说明写到了这台服务器（那问题在实时通道），
+   * 没有就说明他的写入**根本没到这台服务器**（问题在网络/地址，换多少台电脑都一样）。
+   */
+  const refreshWriteLog = useCallback(async () => {
+    if (!online) {
+      setWriteLog(null);
+      return;
+    }
+    try {
+      setWriteLog(await api.writeLog(12));
+    } catch {
+      setWriteLog(null);
+    }
+  }, [online]);
+
+  useEffect(() => {
+    void refreshWriteLog();
+    /* 页面刷新后还能念出上一次实测的结论：不至于"刚才那条到底过没过"说不清 */
+    void api
+      .latestSyncProbe()
+      .then((result) => setProbe(result.probe))
+      .catch(() => setProbe(null));
+  }, [refreshWriteLog]);
+
+  useEffect(() => () => window.clearTimeout(probeTimer.current), []);
+
+  /**
+   * 开一次同步实测：服务端真写一条事件并广播，每台端回执后才算通过。
+   *
+   * 只追一段时间（8 秒）：端没回就是没回 —— 结论如实显示"只有 M/N 台收到"，
+   * 比转圈转到天荒地老有用得多。
+   */
+  const runProbe = useCallback(async () => {
+    if (!online) return;
+    setProbing(true);
+    window.clearTimeout(probeTimer.current);
+    try {
+      const opened = await api.syncProbe(currentSessionId);
+      setProbe(opened);
+      const deadline = Date.now() + PROBE_DEADLINE_MS;
+      const follow = async () => {
+        try {
+          const next = await api.syncProbeStatus(opened.probeId);
+          setProbe(next);
+          if (next.ok || Date.now() > deadline) {
+            setProbing(false);
+            await refreshPeers();
+            await refreshWriteLog();
+            return;
+          }
+        } catch {
+          /* 实测过期之类的：保留上一份读数，别把结论清成空白 */
+        }
+        probeTimer.current = window.setTimeout(() => void follow(), PROBE_POLL_MS);
+      };
+      probeTimer.current = window.setTimeout(() => void follow(), PROBE_POLL_MS);
+    } catch (error) {
+      toast(isApiError(error) ? error.message : "同步实测没开起来", "danger");
+      setProbing(false);
+    }
+  }, [currentSessionId, online, refreshPeers, refreshWriteLog, toast]);
 
   /** 「重新读取」把两类读数一起刷新（端数平时自己轮询，不必等按钮） */
   const refreshAll = useCallback(async () => {
@@ -265,11 +348,16 @@ export default function Console() {
         </Panel>
 
         {/*
-          ── 内网协同（用户口径 2026-09-17「完善平台内网同步」）──────────
-          多机演示现场只问两件事：「别人连上了没有」「同事该打开哪个地址」。
-          这两件都从服务端读（`/api/sessions/:id/peers`）：端数是 WebSocket
-          房间里的真实连接数，地址是服务端从网卡枚举出来的内网 IPv4。
-          刻意不写死 IP，也不去猜端数 —— 现场念错一个数字就要多排查一轮。
+          ── 内网协同（用户口径 2026-09-17「完善平台内网同步」；
+             2026-09-18「平台同步有问题」后补：服务器身份 / 端明细 / 同步实测 / 写入来源）
+          多机演示现场只问四件事：
+            「我连的是哪一台服务器」「别人连上了没有」「同事该打开哪个地址」
+            「他说他写了，到底写进来了没有」。
+          这四件都从服务端读，一处不猜：
+            · 端数 = WebSocket 房间里的真实连接数；
+            · 端明细的地址 = **TCP 对端地址**（不是页面自报的）；
+            · 地址清单 = `os.networkInterfaces()` 分类后的结果（含虚拟局域网那条）；
+            · 写入来源 = 服务端对每个写请求留的痕（含被拒的那些）。
         */}
         <Panel
           title="内网协同"
@@ -286,6 +374,21 @@ export default function Console() {
           }>
           <ul className="cs-lan">
             <li>
+              <b>这一页从哪打开</b>
+              <span>
+                <code className="cs-lan__host">{typeof window === "undefined" ? "—" : window.location.host}</code>
+                {typeof window !== "undefined" && isLocalHost(hostOf(window.location.host)) ? (
+                  <em className="cs-lan__warn">
+                    本机模式：同事打不开这个地址。把下面的地址发给他 —— 他要是也在自己电脑上开一份，两边数据不互通。
+                  </em>
+                ) : null}
+              </span>
+            </li>
+            <li>
+              <b>服务器</b>
+              <span>{serverLine(peers?.server ?? null)}</span>
+            </li>
+            <li>
               <b>本会话在线端数</b>
               <span>
                 <NumberAnimation value={peers?.peers ?? 0} /> 台
@@ -295,24 +398,62 @@ export default function Console() {
             <li>
               <b>同事打开这个地址</b>
               <span>
-                {peers?.lanUrls.length ? (
-                  peers.lanUrls.map((url) => (
-                    <button
-                      key={url}
-                      type="button"
-                      className="cs-lan__url"
-                      title="点一下复制"
-                      onClick={() => {
-                        void navigator.clipboard?.writeText(url).then(
-                          () => toast(`已复制 ${url}`, "ok"),
-                          () => toast("复制失败，请手动选中这段地址", "warn"),
-                        );
-                      }}>
-                      {url}
-                    </button>
-                  ))
+                {peers?.addresses.length ? (
+                  <>
+                    {addressGroups(peers.addresses).lan.map((item) => (
+                      <button
+                        key={item.url}
+                        type="button"
+                        className="cs-lan__url"
+                        title={`${item.iface} · 点一下复制`}
+                        onClick={() => {
+                          void navigator.clipboard?.writeText(item.url).then(
+                            () => toast(`已复制 ${item.url}`, "ok"),
+                            () => toast("复制失败，请手动选中这段地址", "warn"),
+                          );
+                        }}>
+                        {item.url}
+                      </button>
+                    ))}
+                    {addressGroups(peers.addresses).vpn.map((item) => (
+                      <button
+                        key={item.url}
+                        type="button"
+                        className="cs-lan__url cs-lan__url--vpn"
+                        title={`${item.iface}（虚拟局域网）· 同在这个虚拟网里的同事用这条 · 点一下复制`}
+                        onClick={() => {
+                          void navigator.clipboard?.writeText(item.url).then(
+                            () => toast(`已复制 ${item.url}`, "ok"),
+                            () => toast("复制失败，请手动选中这段地址", "warn"),
+                          );
+                        }}>
+                        {item.url}
+                        <em>虚拟局域网</em>
+                      </button>
+                    ))}
+                    {recommendedUrl(peers) ? (
+                      <em className="cs-lan__hint">现场默认念第一条：{recommendedUrl(peers)}</em>
+                    ) : null}
+                  </>
                 ) : (
-                  <em>这一台没读到内网地址（可能没连局域网）</em>
+                  <em>这一台没读到对内地址（可能没连局域网，也没进虚拟局域网）</em>
+                )}
+              </span>
+            </li>
+            <li>
+              <b>现在连着的端</b>
+              <span>
+                {peers?.ends.length ? (
+                  <ul className="cs-lan__ends">
+                    {endRows(peers.ends).map((row) => (
+                      <li key={row.key} className={row.alive ? "" : "is-stale"}>
+                        <i aria-hidden>{row.alive ? "●" : "○"}</i>
+                        {row.text}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <em>还没有端连上来 —— 同事那台不在这份列表里，说明他没连到这台服务器</em>
                 )}
               </span>
             </li>
@@ -323,7 +464,82 @@ export default function Console() {
                 {peers ? `（会话 ${peers.sessionId}）` : ""}
               </span>
             </li>
+            <li>
+              <b>同步实测</b>
+              <span>
+                <Btn tone="primary" disabled={!online || probing} onClick={() => void runProbe()}>
+                  {probing ? "等端回执…" : "开一次实测"}
+                </Btn>{" "}
+                {probe ? (
+                  (() => {
+                    const verdict = probeVerdict(probe);
+                    return (
+                      <>
+                        {/*
+                          追回执期间显示「等端回执 M/N」：这时给结论会读到"只有 0/N 台收到"，
+                          看着像"同步坏了"，其实只是端还没回 —— 中间态要说成中间态。
+                        */}
+                        <StatusChip
+                          text={probing ? `等端回执 ${probe.acked.length}/${probe.ends}` : verdict.text}
+                          tone={probing ? "info" : verdict.tone}
+                        />
+                        <em className="cs-lan__hint">{verdict.detail}</em>
+                      </>
+                    );
+                  })()
+                ) : (
+                  <em className="cs-lan__hint">
+                    开一次实测：服务端真写一条事件，看有几台端真的收到了 —— 「他那边收不到」从这里就能证实或排除。
+                  </em>
+                )}
+              </span>
+            </li>
           </ul>
+
+          <div className="cs-lan__writes">
+            <div className="cs-lan__writes-head">
+              <b>最近写入来源</b>
+              <span className="muted">谁 · 从哪台机器 · 写了什么（写请求级留痕，服务重启即清）</span>
+              <Btn tone="ghost" onClick={() => void refreshWriteLog()}>
+                刷新
+              </Btn>
+            </div>
+            {writeLog?.entries.length ? (
+              <table className="cs-lan__table">
+                <thead>
+                  <tr>
+                    <th>时刻</th>
+                    <th>谁</th>
+                    <th>写入</th>
+                    <th>来自</th>
+                    <th>结果</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {writeLog.entries.map((entry) => (
+                    <tr key={`${entry.at}-${entry.method}-${entry.path}`}>
+                      <td>{entry.at.slice(11, 19)}</td>
+                      <td>{entry.actorId ? actorName(entry.actorId) : "—"}</td>
+                      <td title={entry.action ?? undefined}>
+                        {entry.method} {entry.path}
+                        {entry.action ? ` · ${entry.action}` : ""}
+                      </td>
+                      <td>{entry.address}</td>
+                      <td className={entry.status && entry.status >= 400 ? "is-fail" : ""}>
+                        {entry.status ?? "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <StateBlock
+                kind="empty"
+                title="还没有写请求记录"
+                hint="这一格只记写操作（新增、指派、删除…）；有同事在别的机器上操作时，这里会按机器地址分开列出。"
+              />
+            )}
+          </div>
         </Panel>
       </div>
     </div>

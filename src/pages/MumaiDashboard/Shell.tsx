@@ -39,6 +39,8 @@ import { useConfigStore } from "./mapDemo/stores";
 import { COMPONENTS, CURRENT_RISKS, DEVICES, SCAN_BATCHES } from "./seed/scenario";
 import type { Mission } from "./seed/types";
 import { useDeviceLink } from "./device/useDeviceLink";
+import { useCollabPeers } from "./pages/useCollabPeers";
+import { collabHeadline } from "./pages/collabLogic";
 import { VERSION_ITEMS } from "./seed/versions";
 import type { Tone } from "./lib";
 import { HANDHELD_DEVICE_ID } from "./device/types";
@@ -183,6 +185,14 @@ export default function Shell() {
     sharedStatus,
     sharedError,
   } = useMumai();
+
+  /*
+    协同读数（端数 / 端明细 / 服务器身份）：顶栏那一格与排练控制台面板共用同一份接口。
+    `active` 跟着共享服务的连接状态走：没登录时读它只会白拿一个 401，
+    登录（或重连）成功后再读，顶栏那一格就不会停在"没数"上。
+    ⚠ 必须写在 `useMumai()` 解构**之后**：`sharedStatus` 是 const，写在前面会 TDZ 报错。
+  */
+  const collabPeers = useCollabPeers(sharedStatus === "online");
 
   const [booting, setBooting] = useState(true);
   const [online, setOnline] = useState(true);
@@ -520,6 +530,15 @@ export default function Shell() {
       deviceLink.view?.report?.versions?.model ?? VERSION_ITEMS.find((item) => item.key === "model")?.current ?? "—";
     const pipeline = VERSION_ITEMS.find((item) => item.key === "pipeline")?.current ?? "—";
 
+    /*
+      协同：这台服务器上现在有几台端连着（用户 2026-09-18「平台同步有问题」）。
+      这一格存在的理由很具体：「我这边添加工单，沈那边收不到」的第一诊断是
+      **"他那台到底连到这台上没有"** —— 端数与每台端的对端地址都由服务端报出。
+      本机模式（从 localhost 打开）会转黄并在悬停里给出"同事该用哪个地址"：
+      否则两边界面长得一模一样，谁也看不出自己开的是另一份。
+    */
+    const collab = collabHeadline(collabPeers.peers, typeof window === "undefined" ? "" : window.location.host);
+
     return [
       {
         key: "platform",
@@ -552,8 +571,15 @@ export default function Shell() {
         tone: "info",
         title: `回放模型（不是控制器固件） · 推理流水线 ${pipeline}`,
       },
+      {
+        key: "collab",
+        label: "协同",
+        text: collab.text,
+        tone: collab.tone,
+        title: collab.title,
+      },
     ];
-  }, [deviceLink, mission, sessionId, sharedError, sharedStatus]);
+  }, [collabPeers, deviceLink, mission, sessionId, sharedError, sharedStatus]);
 
   /** 右上角计数与四格状态同源：不写死 4/4，掉线时数字会跟着变 */
   const statusSummary = useMemo(() => {
