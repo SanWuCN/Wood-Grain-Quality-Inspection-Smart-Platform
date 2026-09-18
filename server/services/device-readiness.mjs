@@ -116,7 +116,12 @@ export function buildReadiness(facts) {
       hints: ['创建 server/data/cart.json：{"url":"http://<小车IP>:8765","token":"<control_token>"}', "或用环境变量 MUMAI_CART_URL / MUMAI_CART_TOKEN；改完必须重启后端", "小车屏幕上写的 127.0.0.1:8765 是它自己，要用它的局域网地址"],
     });
   } else if (cart.link === "online") {
-    cartItems.push({ level: "ok", title: `平台 → 小车链路 online`, detail: `configured=true · canControl=${cart.canControl} · live=${cart.live}` });
+    cartItems.push({
+      level: "ok",
+      title: `平台 → 小车链路 online`,
+      /* 状态对象里没有 live 字段：能报的是 configured / canControl / 数据年龄 */
+      detail: `configured=true · canControl=${cart.canControl} · 数据年龄 ${cart.ageMs === null || cart.ageMs === undefined ? "—" : `${Math.round(cart.ageMs)}ms`}`,
+    });
   } else {
     cartItems.push({
       level: "fail",
@@ -137,11 +142,18 @@ export function buildReadiness(facts) {
         hints: ["补 server/data/cart.json 再重启后端"],
       });
     } else {
+      /* 502 的三种原因要分开说：连不上 / 不是 multipart / 连上了但没出帧 */
+      const why =
+        probe.reason === "no-frames" || probe.reason === "timeout"
+          ? "小车这一路没有出帧（RViz / 摄像头可能没起）"
+          : probe.reason === "not-multipart"
+            ? "这一路返回的不是 MJPEG（小车侧该通道没就绪）"
+            : `连不上小车视频通道（${probe.reason}）`;
       cartItems.push({
         level: "fail",
-        title: `${label} 502 —— 平台能连小车，但这一路没出帧（${probe.reason}）`,
-        detail: "在小车上验该通道：curl -s -o NUL -w '%{size_download}' http://127.0.0.1:8765/api/streams/<通道>.mjpeg",
-        hints: ["字节为 0 = 小车侧该通道未就绪（RViz 没起 / 摄像头没起），不是平台的问题"],
+        title: `${label} 502 —— ${why}`,
+        detail: "平台能连上小车，但这一路没有画面",
+        hints: ["在小车上验该通道：curl -s -m 3 -o NUL -w '%{size_download}' http://127.0.0.1:8765/api/streams/<通道>.mjpeg", "字节为 0 = 该通道未就绪（RViz 没起 / 摄像头没起），不是平台的问题"],
       });
     }
   }
@@ -197,7 +209,25 @@ export function buildReadiness(facts) {
       hints: ["要开这一路：server/data/capture-screen.json + 树莓派上的 mumai-screen.service（X11 → FFmpeg → MJPEG）"],
     });
   } else if (screen.online) {
-    screenItems.push({ level: "ok", title: "屏幕串流在线" });
+    screenItems.push({ level: "ok", title: "屏幕串流在线", detail: screen.width ? `${screen.width}×${screen.height} @ ${screen.fps}fps` : undefined });
+  } else if (screen.reason === "unauthorized") {
+    /* 上游回 401：地址是对的、服务也起着，缺的是令牌 —— 别把人送去 systemctl 查服务 */
+    screenItems.push({
+      level: "warn",
+      title: `屏幕串流上游回 ${screen.upstreamStatus ?? 401}：地址通了，令牌不对或没填`,
+      detail: "树莓派上的服务是好的，平台侧这份 capture-screen.json 里的 token 要与它一致",
+      hints: [
+        "在树莓派上取令牌：cat ~/.config/mumai-screen/environment（看 MUMAI_SCREEN_TOKEN）",
+        '写进 server/data/capture-screen.json 的 "token"，或设环境变量 MUMAI_SCREEN_TOKEN，然后重启后端',
+      ],
+    });
+  } else if (screen.reason === "unreachable") {
+    screenItems.push({
+      level: "warn",
+      title: `屏幕串流连不上（${screen.detail ?? "上游无响应"}）`,
+      detail: "地址配了但连不上树莓派：设备是否开机、是否同一网段、防火墙",
+      hints: ["在部署平台的这台机器上验：curl -s http://<树莓派IP>:8766/status"],
+    });
   } else {
     screenItems.push({
       level: "warn",

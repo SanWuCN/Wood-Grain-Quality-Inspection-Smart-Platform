@@ -18,10 +18,26 @@ export async function screenStatus() {
     const response = await fetch(new URL('/status', config.url), {
       headers: { authorization: `Bearer ${config.token ?? ''}` }, signal: AbortSignal.timeout(3000), redirect: 'error',
     });
-    if (!response.ok) throw new Error('upstream');
+    if (!response.ok) {
+      /*
+        上游**回话了**但不是 200：要如实说清是哪一种，别一律吞成"离线"。
+        实测（2026-09-22）：树莓派屏幕服务起着，地址对、令牌没拿到 → 401，
+        这时页面若只写「已配置但离线 → systemctl status mumai-screen.service」，
+        会把人送到错误的方向（服务明明是好的）。
+      */
+      return {
+        configured: true,
+        online: false,
+        upstreamStatus: response.status,
+        reason: response.status === 401 || response.status === 403 ? 'unauthorized' : 'upstream',
+      };
+    }
     const status = await response.json();
     return { configured: true, online: Boolean(status.online), width: status.width, height: status.height, fps: status.fps };
-  } catch { return { configured: true, online: false }; }
+  } catch (error) {
+    /* 连不上/超时：与"回话但不是 200"分开，前者的排查方向完全不同 */
+    return { configured: true, online: false, reason: 'unreachable', detail: error?.message ?? 'upstream' };
+  }
 }
 
 export function proxyScreen(req, res) {

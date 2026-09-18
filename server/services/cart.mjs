@@ -469,8 +469,17 @@ export function createCartService({ logger = console } = {}) {
     const url = new URL(path, config.url);
     const getter = url.protocol === "https:" ? httpsGet : httpGet;
     const upstream = getter(url, { headers: baseHeaders(), timeout: 8000 });
-    upstream.on("timeout", () => upstream.destroy(new Error("上游没有出帧")));
+    /*
+      「连不上」与「连上了但没出帧」要分开报（接真车实测）：小车那一头 RViz 没起时，
+      上游会回 200 + 正确的 content-type 然后一直不吐帧 —— 这时说「连不上小车视频通道」
+      会把人送到网络方向去查。用一个标记区分，502 的文案才说得准。
+    */
+    let sawResponse = false;
+    upstream.on("timeout", () => {
+      upstream.destroy(Object.assign(new Error("上游没有出帧"), { noFrames: true }));
+    });
     upstream.on("response", (stream) => {
+      sawResponse = true;
       if (stream.statusCode !== 200 || !String(stream.headers["content-type"]).startsWith("multipart/x-mixed-replace")) {
         stream.resume();
         if (!res.headersSent) {
@@ -487,11 +496,11 @@ export function createCartService({ logger = console } = {}) {
       stream.on("error", () => res.destroy());
       stream.pipe(res);
     });
-    upstream.on("error", () => {
+    upstream.on("error", (error) => {
       if (res.destroyed) return;
       if (!res.headersSent) {
         res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
-        res.end("连不上小车视频通道");
+        res.end(error?.noFrames || sawResponse ? "小车这一路没有出帧（RViz / 摄像头可能没起）" : "连不上小车视频通道");
       } else res.destroy();
     });
     res.on("close", () => upstream.destroy());
@@ -499,13 +508,17 @@ export function createCartService({ logger = console } = {}) {
   }
 
   /**
-   * 探一路 MJPEG：**只等响应头**，拿到结论就断开（不把流拉完）。
+   * 探一路 MJPEG：**等到第一块数据**才判定出帧。
    *
-   * 给「设备链路自检」用（交接包 `smoke-devices.sh` 的第 2 节就是这三条结论）：
-   * 未配置 → `503`、上游不出帧/不是 multipart → `502`、出帧 → `200 + multipart`。
-   * 语义与 `proxyStream` 完全一致 —— 页面看到的码和这里探到的必须是同一套解释。
+   * ⚠ 只回 200 + multipart 不代表有画面（接上真车实测出来的）：
+   *   小车那一头 RViz 没起时，`/api/streams/rviz.mjpeg` 会「200 + 正确的 content-type，
+   *   然后一直不吐帧」—— 只看响应头会把它报成"有真实出帧"，页面却是黑的。
+   *   所以这里等第一块数据（最多 `FIRST_FRAME_MS`），等不到就是 `no-frames`。
+   *
+   * 语义与 `proxyStream` 完全一致：未配置 → 503、连不上 → 502(unreachable)、
+   * 连上了但没帧 → 502(no-frames)、出帧 → 200。
    */
-  function streamProbe(channel) {
+  function streamProbe(channel, { firstFrameMs = 1500, timeoutMs = 4000 } = {}) {
     const path = STREAM_PATHS[channel];
     if (!path) return Promise.resolve({ channel, code: null, contentType: null, reason: "unknown-channel" });
     if (!config.configured) return Promise.resolve({ channel, code: 503, contentType: null, reason: "unconfigured" });
@@ -516,20 +529,33 @@ export function createCartService({ logger = console } = {}) {
       const finish = (result) => {
         if (done) return;
         done = true;
+        clearTimeout(firstFrameTimer);
         resolve({ channel, ...result });
       };
-      const upstream = getter(url, { headers: baseHeaders(), timeout: 4000 });
+      let firstFrameTimer = setTimeout(() => {
+        upstream.destroy();
+        finish({ code: 502, contentType, reason: "no-frames" });
+      }, firstFrameMs);
+      let contentType = null;
+      const upstream = getter(url, { headers: baseHeaders(), timeout: timeoutMs });
       upstream.on("timeout", () => {
         upstream.destroy();
-        finish({ code: 502, contentType: null, reason: "timeout" });
+        finish({ code: 502, contentType, reason: "timeout" });
       });
       upstream.on("response", (stream) => {
-        const contentType = String(stream.headers["content-type"] ?? "");
-        const ok = stream.statusCode === 200 && contentType.startsWith("multipart/x-mixed-replace");
-        stream.destroy();
-        finish({ code: ok ? 200 : 502, contentType, reason: ok ? "frames" : "not-multipart" });
+        contentType = String(stream.headers["content-type"] ?? "");
+        if (stream.statusCode !== 200 || !contentType.startsWith("multipart/x-mixed-replace")) {
+          stream.destroy();
+          finish({ code: 502, contentType, reason: "not-multipart" });
+          return;
+        }
+        stream.once("data", (chunk) => {
+          stream.destroy();
+          finish({ code: 200, contentType, reason: "frames", firstChunkBytes: chunk.length });
+        });
+        stream.on("error", () => finish({ code: 502, contentType, reason: "stream-error" }));
       });
-      upstream.on("error", (error) => finish({ code: 502, contentType: null, reason: error?.code ?? "unreachable" }));
+      upstream.on("error", (error) => finish({ code: 502, contentType, reason: error?.code ?? "unreachable" }));
     });
   }
 
