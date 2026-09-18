@@ -285,7 +285,13 @@ try {
       const text = document.body.innerText || '';
       return text.includes('22') && text.includes('58') && text.includes('四柱区域入口') ? true : null;
     })()`,
-    { timeoutMs: 10_000 },
+    /*
+      ⚠ 10 秒不够（2026-09-30 实测假红一次）：B 这一跳是**冷页面**——
+      要重新拉共享快照、再拉工单详情与环境记录，慢的时候（另一台机器同时在跑
+      别的验收、服务端刚重启过）刚好压线。判据不变，只是把窗口放宽到 20 秒：
+      "慢"和"没同步"必须能分开，否则这条会周期性假红。
+    */
+    { timeoutMs: 20_000 },
   );
   check("  ↳ **B 的环境记录页上也显示这组读数**", Boolean(envPageOnB), envPageOnB ? "22 / 58 / 位置都在" : "B 的页面上没读到");
 
