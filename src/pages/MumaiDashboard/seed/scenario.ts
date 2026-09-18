@@ -304,6 +304,28 @@ export const DEMO_SCENARIO_V3 = Object.freeze({
     missing: 1,
     summaryMismatch: 2,
   }),
+
+  /**
+   * 通道巡查读数（⑨ 的**监听窗口**：建图效果 + 现场视频流）。
+   *
+   * ── 为什么这几个数在这里再写一遍（而不是引用 `CHANNELS`）──────────────
+   * 对象字面量里写 `get x() {...}` 在本仓库跑不起来：单测走 Node 原生类型剥离，
+   * 实测报 `ERR_INVALID_TYPESCRIPT_SYNTAX`（见 `validateScenario` 的说明）。
+   * 所以按本文件既有的办法处理：**这里写值、`validateScenario()` 逐项核对**
+   * 它们与 `CHANNELS` 一致 —— 谁改了一边、另一边没跟上，自洽性校验会报出来
+   * （`demoScenario.test.ts` 会调它）。
+   *
+   * 值取自 `CHANNELS`：`map` 2s 前更新、`pose` 1s 前、`video` 延迟 9 秒
+   * （那一路走 MJPEG 同源转发）—— ⑨ 的台词说的正是「先查看当前建图效果，
+   * 然后通过小车视频流分析现场情况」，窗口里就得有这两路的真实读数。
+   */
+  channels: Object.freeze({
+    videoState: "延迟",
+    videoAgeSec: 9,
+    videoSource: "MJPEG 同源转发",
+    mapAgeSec: 2,
+    poseAgeSec: 1,
+  }),
 });
 
 /**
@@ -386,6 +408,33 @@ export function validateScenario(): string[] {
   */
   if (v.model.deployChecksPassed > v.model.deployChecksTotal) {
     problems.push(`部署条件通过数 ${v.model.deployChecksPassed} 超过总数 ${v.model.deployChecksTotal}`);
+  }
+  /*
+    ── 通道巡查读数与 `CHANNELS` 必须同源（⑨ 的监听窗口）──────────────────
+    ⑨ 那一轮台上要看到「建图效果 + 视频通道」两路状态，而界面读的是
+    `DEMO_SCENARIO_V3.channels`、设备页读的是 `CHANNELS` —— 同一件事的两份写法。
+    值可以写两处（对象字面量里不能用 getter，见上面那条说明），但**必须一致**：
+    「视频通道延迟 9 秒」在设备页写着 9 秒、在监听窗口里写着 2 秒，是当场被拆台的那种错。
+  */
+  const channelOf = (key: string) => CHANNELS.find((item) => item.key === key) ?? null;
+  const channelStateText = (state: string | undefined) => (state === "online" ? "在线" : "延迟");
+  const video = channelOf("video");
+  const mapChannel = channelOf("map");
+  const poseChannel = channelOf("pose");
+  if (video && n(channelStateText(video.state)) !== n(v.channels.videoState)) {
+    problems.push(`视频通道状态不一致：监听窗口写「${v.channels.videoState}」，设备页是「${channelStateText(video.state)}」`);
+  }
+  if (video && n(video.ageSec) !== n(v.channels.videoAgeSec)) {
+    problems.push(`视频通道延迟不一致：监听窗口 ${v.channels.videoAgeSec}s ≠ 设备页 ${video.ageSec}s`);
+  }
+  if (video && n(video.source) !== n(v.channels.videoSource)) {
+    problems.push(`视频通道来源不一致：监听窗口「${v.channels.videoSource}」≠ 设备页「${video.source}」`);
+  }
+  if (mapChannel && n(mapChannel.ageSec) !== n(v.channels.mapAgeSec)) {
+    problems.push(`地图通道刷新时间不一致：监听窗口 ${v.channels.mapAgeSec}s ≠ 设备页 ${mapChannel.ageSec}s`);
+  }
+  if (poseChannel && n(poseChannel.ageSec) !== n(v.channels.poseAgeSec)) {
+    problems.push(`位姿通道刷新时间不一致：监听窗口 ${v.channels.poseAgeSec}s ≠ 设备页 ${poseChannel.ageSec}s`);
   }
 
   return problems;

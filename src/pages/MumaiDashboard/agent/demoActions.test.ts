@@ -23,7 +23,39 @@ import assert from "node:assert/strict";
 
 import { SCRIPT_ROUNDS } from "./script.ts";
 import { DEMO_ACTIONS, SURFACE_KINDS, actionFor } from "./demoActions.ts";
-import { scenarioValue } from "../seed/scenario.ts";
+import { rowsOf } from "./demoSurfaceRows.ts";
+import { scenarioValue, validateScenario } from "../seed/scenario.ts";
+
+/*
+  ── 剧本 §104 的「弹出个监听窗口」必须真的有那两路内容（2026-09-30）──────
+  ⑨ 的台词是「已开启通道巡查，我会先查看当前建图效果，然后通过小车视频流
+  分析现场情况」—— 窗口里就得同时有**建图**与**视频通道**两类读数。
+  改前只有 `map.*` 与航线长度，标题却写着"地图质量与视频通道状态"：
+  台下问"视频呢"，屏幕上答不出来。这条把两路内容一起钉住。
+*/
+test("⑨ 的监听窗口同时给出建图效果与视频通道读数（标题与内容一致）", () => {
+  const action = actionFor("⑨");
+  assert.ok(action, "⑨ 必须登记动作");
+  assert.equal(action.surface, "channels");
+  assert.match(action.title, /监听窗口/, "窗口标题要写明这是监听窗口");
+  const keys = action.dataKeys;
+  assert.ok(keys.some((k) => k.startsWith("map.")), "要有建图效果（版本 / 覆盖率 / 分辨率）");
+  for (const key of ["channels.videoState", "channels.videoAgeSec", "channels.videoSource"]) {
+    assert.ok(keys.includes(key), `窗口里缺视频通道读数：${key}`);
+  }
+  assert.ok(keys.includes("channels.mapAgeSec") && keys.includes("channels.poseAgeSec"), "要有地图 / 位姿通道的刷新时间");
+
+  /* 每一行都取得到值，且行名里能认出"视频通道" */
+  const rows = rowsOf(action);
+  assert.deepEqual(rows.filter((row) => row.missing).map((row) => row.key), [], "监听窗口不许有取不到值的行");
+  assert.ok(rows.some((row) => row.label.includes("视频通道")), "窗口里要有一行写着视频通道");
+  const video = rows.find((row) => row.key === "channels.videoAgeSec");
+  assert.equal(video?.value, "9 s", "视频通道延迟取自设备通道数据（9 秒）");
+});
+
+test("通道读数与设备页 CHANNELS 同源（自洽性校验抓得住两边改一边）", () => {
+  assert.deepEqual(validateScenario(), [], "演示数据包必须自洽");
+});
 
 test("25 轮每一轮都登记了动作（没有'播完什么都不发生'的轮次）", () => {
   for (const round of SCRIPT_ROUNDS) {

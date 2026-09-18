@@ -176,6 +176,30 @@ try {
       }
     }
 
+    /* 建图巡航（⑨）：剧本 §104 要求「弹出个监听窗口」，窗口里要有建图效果与视频流 */
+    if (nav.route === "/mapping") {
+      const panel = await machine.waitFor(
+        `(() => {
+          const node = document.querySelector('.dsf');
+          if (!node) return null;
+          const text = node.innerText || '';
+          return {
+            text,
+            title: /监听窗口/.test(text),
+            video: /视频通道/.test(text),
+            delay: /延迟/.test(text) && /9 s/.test(text),
+            map: /建图版本/.test(text) && /地图覆盖率/.test(text),
+          };
+        })()`,
+        { timeoutMs: 8000 },
+      );
+      check(`  ↳ 弹出监听窗口`, Boolean(panel?.title), panel ? "窗口标题写着监听窗口" : "⑨ 的小窗没弹出来");
+      if (panel) {
+        check(`  ↳ 窗口里有建图效果那一组`, panel.map);
+        check(`  ↳ 窗口里有视频通道那一路（状态与延迟）`, panel.video && panel.delay);
+      }
+    }
+
     /* 三维场景：四柱构件条要真的渲染出来，且重点构件带「建议优先复核」 */
     if (nav.route === "/twin") {
       /*

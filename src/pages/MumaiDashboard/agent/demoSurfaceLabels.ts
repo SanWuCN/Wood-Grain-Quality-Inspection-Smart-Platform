@@ -36,6 +36,16 @@ export const FIELD_LABELS: Record<string, FieldLabel> = {
   "map.resolutionM": { label: "分辨率", unit: "m" },
   "map.coveragePct": { label: "地图覆盖率", unit: "%" },
   "map.fileSizeText": { label: "建图文件" },
+  /*
+    ── ⑨「监听窗口」的两路通道（建图效果 + 现场视频流）──────────────────
+    行名要让人一眼看出"这是哪一路通道的什么读数"，所以带上通道名；
+    取值与 `CHANNELS` 同源，由 `validateScenario()` 核对（见 seed/scenario.ts）。
+  */
+  "channels.mapAgeSec": { label: "地图通道 · 刷新于", unit: "s 前" },
+  "channels.poseAgeSec": { label: "位姿通道 · 刷新于", unit: "s 前" },
+  "channels.videoState": { label: "视频通道 · 状态" },
+  "channels.videoAgeSec": { label: "视频通道 · 延迟", unit: "s" },
+  "channels.videoSource": { label: "视频通道 · 来源" },
   "twin.sceneId": { label: "三维场景编号" },
   "twin.boundingBoxText": { label: "场景包围盒" },
   "draftOrder.no": { label: "工单草稿编号" },

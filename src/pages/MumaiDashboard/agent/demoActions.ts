@@ -213,9 +213,28 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
   },
   {
     roundNo: "⑨",
-    title: "并排显示地图质量与视频通道状态",
+    /*
+      ── 剧本 §104 的「弹出个监听窗口」────────────────────────────────
+      原文：小木「已开启通道巡查，我会先查看当前建图效果，然后通过小车视频流
+      分析现场情况。（弹出个监听窗口）」
+      所以这个窗口要同时给出**两路**：建图效果（版本 / 覆盖率 / 分辨率 / 航线长度）
+      与视频通道（状态 / 延迟 / 来源）+ 地图与位姿的刷新时间。
+      原先只列了 `map.*` 与航线长度，标题却写着"地图质量与视频通道状态" ——
+      窗口里压根没有视频那一行（用户口径："该有展示的地方要真的有"）。
+    */
+    title: "通道巡查 · 监听窗口：建图效果与现场视频流",
     surface: "channels",
-    dataKeys: ["map.version", "map.coveragePct", "map.resolutionM", "mission.routeLengthM"],
+    dataKeys: [
+      "map.version",
+      "map.coveragePct",
+      "map.resolutionM",
+      "mission.routeLengthM",
+      "channels.mapAgeSec",
+      "channels.poseAgeSec",
+      "channels.videoState",
+      "channels.videoAgeSec",
+      "channels.videoSource",
+    ],
     simulated: true,
   },
   {
