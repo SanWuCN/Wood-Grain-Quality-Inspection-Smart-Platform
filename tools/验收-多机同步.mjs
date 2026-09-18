@@ -120,6 +120,41 @@ try {
     `语音合成 ${spoken?.synth} 次 · 音频对象 ${spoken?.audio} 个`,
   );
 
+  /* ---------- ③b 揭示也跟随：⑪ 的四柱构件条在 B 上同样逐柱点亮 ---------- */
+  await askOnA("对比四根木柱", "11");
+  const twinOnB = await waitHash(B, "/twin", 20_000);
+  check("A 说⑪ → B 跟到三维场景", String(twinOnB).includes("/twin"), `B hash=${twinOnB}`);
+  /* 先看中间态（证明是"逐柱"而不是一次性全亮），再等最终态 */
+  let partial = 0;
+  for (let i = 0; i < 30; i += 1) {
+    await sleep(400);
+    const count = await B.evaluate(`document.querySelectorAll('.twin-col').length`);
+    if (count > 0 && count < 4) {
+      partial = count;
+      break;
+    }
+    if (count === 4) break;
+  }
+  const twinFinal = await B.waitFor(
+    `(() => {
+      const cols = [...document.querySelectorAll('.twin-col')];
+      const text = document.body.innerText || '';
+      const current = (document.querySelector('.twin-col.is-current .twin-col__id')?.textContent || '').trim();
+      return cols.length === 4 && /建议优先复核/.test(text) && current === 'Z04' ? { count: cols.length } : null;
+    })()`,
+    { timeoutMs: 25_000 },
+  );
+  check(
+    "B 上的四柱构件条**逐柱点亮**（揭示跟随，不是一次性全亮）",
+    partial > 0,
+    partial > 0 ? `采样到中间态：${partial} 根` : "没采到中间态（可能采晚了，看下一条最终态）",
+  );
+  check(
+    "  ↳ B 最终四根都在、重点构件高亮、选中 Z04（与讲解机同一画面）",
+    Boolean(twinFinal),
+    twinFinal ? `${twinFinal.count} 根` : "25 秒内没等到最终态",
+  );
+
   /* ---------- ④ 关掉跟随就不再跟随 ---------- */
   await B.evaluate(`localStorage.setItem('mumai.follow.presenter', 'off'); location.hash = '#/'; 1`);
   await sleep(500);
