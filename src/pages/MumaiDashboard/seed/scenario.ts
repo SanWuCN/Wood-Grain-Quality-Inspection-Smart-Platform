@@ -1294,6 +1294,23 @@ export const SCENES: SceneAsset[] = [
   },
 ];
 
+/**
+ * 这一版场景是不是用**预采**素材构建的。
+ *
+ * ── 剧本为什么要这个判据（§134）────────────────────────────────────
+ * 原文：「（B屏切回架构师电脑。**场景标题持续显示"预采场景"**。…）」
+ * 现场录像要等活动结束才归档，三维场景这一轮用的是出发前预采的全景视频
+ * （`precollected_sh_0901_pano.mp4`）。标题上不写这一笔，观众会以为看到的是
+ * 现场刚拍回来的画面 —— 这是"把预采当成现场"的穿帮口，必须自己标出来。
+ *
+ * 判据只看**素材名**（`sourceVideo`）里的两处：中文「预采」与文件名前缀
+ * `precollected`。不猜标题、不看轮次 —— 换一版素材时，标不标得看素材本身。
+ */
+export function isPrecollectedScene(row: { sourceVideo?: string | null }): boolean {
+  const text = String(row?.sourceVideo ?? "");
+  return text.includes("预采") || /(^|[\\/\s])precollected/i.test(text);
+}
+
 export const SCENE_BOOKMARKS = [
   { id: "BM-Z01-lower", componentId: "Z01", label: "Z01 下部正视", azimuth: 12, polar: 78 },
   { id: "BM-Z02-lower", componentId: "Z02", label: "Z02 下部正视", azimuth: 12, polar: 78 },
@@ -2359,13 +2376,30 @@ export type FusionBranch = {
   state: "合格" | "不合格" | "未采集";
 };
 
+/**
+ * 一条**标注框记录**（视觉分支的输出）。
+ *
+ * ⚠ 这里**没有**图内坐标（`x/y/w/h`），这是数据事实而不是漏字段：
+ * 真实视觉模型未接通，标注结果来自归档的标注 JSON（`source` 写着"归档标注"）；
+ * 剧本 §141 对此有明文 —— 「没有标注坐标时只打开原图，不虚构放大定位」。
+ * 所以界面不许自己"算"一个放大区域出来（见 `pages/Twin.tsx` 的原图查看）。
+ */
+export type AnnotationBox = {
+  boxId: string;
+  image: string;
+  label: string;
+  confidence: number;
+  zone: string;
+  source: string;
+};
+
 export type FusionRecord = {
   recordId: string;
   ruleVersion: string;
   batchId: string;
   branches: FusionBranch[];
   completeness: { label: string; value: string; ok: boolean; note: string }[];
-  annotations: { boxId: string; image: string; label: string; confidence: number; zone: string; source: string }[];
+  annotations: AnnotationBox[];
   radarFeatures: { segment: string; zone: string; amplitude: number; quality: "合格" | "不合格" }[];
   zoneMatch: { visual: string; radar: string; matched: boolean; note: string }[];
   outputs: {
@@ -2423,6 +2457,21 @@ export const FUSION_RULES = [
   { key: "one", label: "规则二：仅一路提示异常", result: "补充检测" as const, note: "另一路补充采集后再判定，不做分数相加" },
   { key: "mismatch", label: "规则三：位置不一致或任一路质量不合格", result: "待核对" as const, note: "暂不输出确定性结论，返回待核对" },
 ];
+
+/**
+ * 按**图片编号**取标注框（剧本 §141：小木「根据分析结果中的图片编号和标注框
+ * 调用原图查看工具」）。
+ *
+ * 界面那一侧要"标注与构件编号一起显示"，靠的就是图片编号这一条线索 ——
+ * 原图名来自热点证据（`HOTSPOTS[].image.name`），标注框来自融合记录
+ * （`FUSION_RECORD.annotations[].image`），两边对得上才显示。
+ * 对不上时返回空数组：**不许按构件或测区猜一个框出来**（那正是"虚构标注"）。
+ */
+export function annotationsOfImage(imageName: string | null | undefined): AnnotationBox[] {
+  const name = String(imageName ?? "").trim();
+  if (!name) return [];
+  return FUSION_RECORD.annotations.filter((item) => item.image === name);
+}
 
 /* ------------------------------------------------------------------ *
  * 14. 复巡计划（PRD 3.8）

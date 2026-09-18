@@ -30,6 +30,9 @@ import { apiRequest, isApiError } from "../api/client";
 import { missions, useSharedStore } from "../store/shared";
 import { acceptCruiseMission, activeCruiseMission, cancelCruiseMission, completeCruiseMission, cruiseRevisionOf } from "../store/cruise";
 import { CruiseTaskBanner } from "./cart/CruiseTaskBanner";
+/* 「通道巡查」按钮与 ⑨ 那一轮弹的是同一个窗口（剧本 §102） */
+import { CHANNEL_PATROL_ROUND_NO } from "../agent/demoActions";
+import { openDemoSurface } from "../agent/demoSurfaceAction";
 import MapCanvas, { type MapCanvasMode } from "./cart/MapCanvas";
 import ParameterStrip from "./cart/ParameterStrip";
 import { DEFAULT_VIEW, fitView, missionStateText, type MapView } from "./cart/geometry";
@@ -573,6 +576,19 @@ export default function Mapping() {
                       onClick={() => void loadLists()}>
                       刷新
                     </button>
+                    {/*
+                      ── 通道巡查（剧本 §102）──────────────────────────────
+                      原文：「（等待时选用：小车继续建图，**史在平台开启数据通道巡查**；
+                      只检查已有通道状态，不替代车端避障。）」
+                      所以这个窗口不能只有"小木说话时才弹"——人自己也要点得开。
+                      它弹的就是 ⑨ 那一轮的那个窗口（同一轮声明、同一份实现）。
+                    */}
+                    <Btn
+                      tone="ghost"
+                      title="检查建图效果与视频通道状态，只提醒影响作业的异常；不替代车端避障"
+                      onClick={() => openDemoSurface(CHANNEL_PATROL_ROUND_NO)}>
+                      通道巡查
+                    </Btn>
                     <StatusChip
                       text={cartMode === "mapping" ? "建图中" : cartMode === "navigation" ? "巡航中" : "待机"}
                       tone={cartMode === "mapping" ? "ok" : cartMode === "navigation" ? "warn" : "muted"}

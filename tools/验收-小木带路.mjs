@@ -198,10 +198,96 @@ try {
         check(`  ↳ 窗口里有建图效果那一组`, panel.map);
         check(`  ↳ 窗口里有视频通道那一路（状态与延迟）`, panel.video && panel.delay);
       }
+      /*
+        ── 剧本 §102：人自己也要点得开 ─────────────────────────────────
+        「等待时选用：小车继续建图，**史在平台开启数据通道巡查**」。
+        所以建图页上要有一个真的按钮，点下去弹的是同一个窗口。
+      */
+      const manual = await machine.evaluate(`(() => {
+        const button = [...document.querySelectorAll('button')].find((node) => (node.textContent || '').trim() === '通道巡查');
+        if (!button || button.disabled) return null;
+        button.click();
+        return true;
+      })()`);
+      check(`  ↳ 建图页上有「通道巡查」按钮且点得动（§102 史自己开启）`, manual === true);
+      const reopened = await machine.waitFor(`Boolean(document.querySelector('.dsf'))`, { timeoutMs: 5000 });
+      check(`  ↳ 点它弹出同一个监听窗口`, Boolean(reopened));
+    }
+
+    /* 数据集页（⑰）：沈那一步的「受限校验单元 + 集合求交语句 + 冲突清单」要真的在屏上 */
+    if (nav.route === "/firmware" && nav.tab === "dataset") {
+      const unit = await machine.waitFor(
+        `(() => {
+          const text = document.body.innerText || '';
+          const code = [...document.querySelectorAll('.code-block')].map((n) => n.textContent || '').join('');
+          return {
+            expr: /overlap = \\(train_ids & val_ids\\) \\| \\(train_ids & test_ids\\) \\| \\(val_ids & test_ids\\)/.test(code),
+            list: /交集/.test(text) && /三类问题明细/.test(text),
+            rerun: /整组调整后重跑/.test(text),
+          };
+        })()`,
+        { timeoutMs: 8000 },
+      );
+      check(
+        `  ↳ 受限校验单元里的集合求交语句逐字在屏上（沈那一步）`,
+        Boolean(unit?.expr),
+        unit?.expr ? "语句与剧本一致" : "没找到那句 overlap = (train_ids & val_ids) | …",
+      );
+      check(
+        `  ↳ 冲突清单与「整组调整后重跑」都在（有冲突则调整分组后重跑）`,
+        Boolean(unit?.list && unit?.rerun),
+        `清单=${unit?.list} 重跑=${unit?.rerun}`,
+      );
     }
 
     /* 三维场景：四柱构件条要真的渲染出来，且重点构件带「建议优先复核」 */
     if (nav.route === "/twin") {
+      /*
+        ── 先看「预采场景」角标（剧本 §134）────────────────────────────
+        原文：「场景标题持续显示"预采场景"」。这一版场景用的是出发前预采的全景
+        视频，标题上不写这一笔就会被当成"现场刚拍回来的画面"。判据只看素材名，
+        所以这里查的是屏上真的有这个标记（服务端实体没有素材名，靠 id 回查本地）。
+      */
+      const sceneTag = await machine.waitFor(
+        `(() => {
+          const node = document.querySelector('.scene-list .scene-list__tag');
+          if (!node || !(node.textContent || '').includes('预采场景')) return null;
+          /* 工具条那一行要单独取（整页 innerText 里也有角标本身，那样判等于没判） */
+          const note = document.querySelector('.toolbar__note');
+          return { tag: (node.textContent || '').trim(), toolbar: /预采场景/.test(note ? note.innerText : '') };
+        })()`,
+        { timeoutMs: 8000 },
+      );
+      check(`  ↳ 场景标题带「预采场景」角标（§134）`, Boolean(sceneTag), sceneTag ? sceneTag.tag : "标题上没看到角标");
+      check(`  ↳ 顶部工具条也写明这是预采场景（持续显示）`, Boolean(sceneTag?.toolbar), sceneTag ? `工具条带标记=${sceneTag.toolbar}` : "无角标可比对");
+      /*
+        ── ⑫「打开你标记的原图」的可见结果（剧本 §140–142）──────────────
+        小木：「对应原图已打开，标注与构件编号一起显示。请核对这处表面缺损。」
+        屏上要同时有：图片编号、标注框（编号 + 类别 + 置信度）、
+        以及 §141 那句"没有标注坐标时只打开原图、不虚构放大定位"的交代。
+      */
+      const evidence = await machine.waitFor(
+        `(() => {
+          const text = document.body.innerText || '';
+          return {
+            image: /img-Z04-lower-f11\\.jpg/.test(text),
+            box: /anno-box-11/.test(text),
+            noZoom: /不做放大定位/.test(text),
+            preset: /预置标注记录/.test(text),
+          };
+        })()`,
+        { timeoutMs: 8000 },
+      );
+      check(
+        `  ↳ 屏上给出原图编号与标注框（标注与构件编号一起显示）`,
+        Boolean(evidence?.image && evidence?.box),
+        `原图编号=${evidence?.image} 标注框=${evidence?.box}`,
+      );
+      check(
+        `  ↳ 写明标注是预置记录、未附坐标所以不做放大定位（§141）`,
+        Boolean(evidence?.noZoom && evidence?.preset),
+        `不做放大定位=${evidence?.noZoom} 预置标注记录=${evidence?.preset}`,
+      );
       /*
         ⚠ 分两步等：先等构件条出现（证明页内定位到了三维场景），
         再等**最终态**（四根都在 + 重点构件高亮 + 选中 Z04）。

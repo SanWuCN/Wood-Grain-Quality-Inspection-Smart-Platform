@@ -53,8 +53,14 @@ import {
   SCENES,
   WAVEFORMS,
   WORK_ORDER,
+  /* 「预采场景」角标的判据（剧本 §134）：只看素材名，不猜标题 */
+  isPrecollectedScene,
+  /* 「打开标注原图」（剧本 §141）：按图片编号取标注框，取不到就不显示 */
+  annotationsOfImage,
 } from "../seed/scenario";
 import { cancelTwinReveal, useTwinReveal } from "../twinReveal";
+/* 本轮重建素材的来源（⑭ 预采场景角标与素材质检页同一份取值，不另写文件名） */
+import { currentSource } from "./materialsData";
 import "./twinColumns.css";
 /**
  * 泼溅渲染舞台（`SplatStage`）**异步加载**。
@@ -96,6 +102,8 @@ function useSceneRows() {
       orderId: string | null;
       assetFileId: string | null;
       assetName: string | null;
+      /** 素材来源名（本地参照条目里有；服务端实体没有这个字段，靠 id 回查） */
+      sourceVideo: string | null;
     }[] = [];
     for (const entity of sharedScenes) {
       const local = SCENES.find((item) => item.id === entity.id);
@@ -112,6 +120,7 @@ function useSceneRows() {
         orderId: entity.data.orderId ?? null,
         assetFileId: entity.data.assetFileId ?? null,
         assetName: entity.data.assetId ?? null,
+        sourceVideo: local?.sourceVideo ?? null,
       });
     }
     /* 本地参照条目：只有标题与素材描述，没有实际模型文件，因此不能当作可显示的场景 */
@@ -128,6 +137,7 @@ function useSceneRows() {
         orderId: null,
         assetFileId: null,
         assetName: null,
+        sourceVideo: local.sourceVideo,
       });
     }
     return rows;
@@ -202,6 +212,23 @@ export default function Twin() {
     [orderId, sceneRows],
   );
   const hasModel = Boolean(orderScene?.assetFileId);
+  /**
+   * ── 这一版场景是不是**预采**来的（剧本 §134）─────────────────────────
+   * 原文：「（B屏切回架构师电脑。**场景标题持续显示"预采场景"**。…）」
+   *
+   * 素材名以**本轮重建用的素材**为准（`currentSource()`，与素材质检页同一份取值）：
+   * 现场上传的模型是 `scene.submit` 生成的（id 形如 `SCN-…`），服务端实体里
+   * **没有素材名这个字段** —— 只看实体 id 去 `SCENES` 里找是找不到的，
+   * 那样角标永远不会出现（第一版就是这么写的，验收当场红了）。
+   * 只有当该行自己带素材名（种子里的参照条目）时才优先用它。
+   */
+  const roundSource = useMemo(() => currentSource(), []);
+  const precollected = useMemo(
+    () => isPrecollectedScene({ sourceVideo: orderScene?.sourceVideo ?? roundSource?.sourceVideo ?? null }),
+    [orderScene?.sourceVideo, roundSource?.sourceVideo],
+  );
+  /** 角标提示里显示的素材名（行上的优先，没有就用本轮素材） */
+  const sceneSourceVideo = orderScene?.sourceVideo ?? roundSource?.sourceVideo ?? "";
   /** 只有全栈开发工程师能上传：其他人选已上传的模型显示 */
   const canUpload = can("scene:upload");
 
@@ -291,6 +318,21 @@ export default function Twin() {
   /** 重点构件与重点区域来自数据包（`components.focus` / `focusRegion`），页面不写死 */
   const focusId = DEMO_SCENARIO_V3.components.focus;
   const hotspot = useMemo(() => HOTSPOTS.find((item) => item.componentId === selected) ?? null, [selected]);
+  /**
+   * ── 这张原图对应的**标注框**（剧本 §140–141）─────────────────────────
+   * 史：「小木，打开你标记的原图，把疑点区域放大。」
+   * 文档旁注：「小木根据分析结果中的图片编号和标注框调用原图查看工具；
+   * 没有标注坐标时只打开原图，**不虚构放大定位**。」
+   *
+   * 所以这里按**图片编号**去融合记录里取框（`annotationsOfImage`），
+   * 取不到就如实显示"未附带标注框" —— 绝不按构件号猜一个框、更不编一个放大区域。
+   * 这些框本身来自归档的标注 JSON（`source` 写着"归档标注"），页面上要标成
+   * 「预置标注记录」（真实视觉模型未接通，见 `script.ts` ⑪ 的前置条件）。
+   */
+  const annotationBox = useMemo(
+    () => annotationsOfImage(hotspot?.image.name)[0] ?? null,
+    [hotspot?.image.name],
+  );
   const risks = useMemo(
     () => CURRENT_RISKS.filter((item) => item.componentId === selected),
     [selected],
@@ -616,7 +658,11 @@ const TOUR_INTERVAL_MS = 5200;
             <span>
               工单 {order?.id ?? "—"} · {order?.site ?? "—"} · {order?.title ?? ""}
             </span>
-            <span>{orderScene ? `模型 ${orderScene.id} · ${orderScene.version}` : "该工单尚未收到模型文件"}</span>
+            <span>
+              {orderScene
+                ? `模型 ${orderScene.id} · ${orderScene.version}${precollected ? " · 预采场景" : ""}`
+                : "该工单尚未收到模型文件"}
+            </span>
           </>
         }>
         <label className="twin-order">
@@ -1008,7 +1054,23 @@ const TOUR_INTERVAL_MS = 5200;
               <ul className="scene-list">
                 <li className={orderScene.assetFileId ? "" : "is-missing"}>
                   <button type="button">
-                    <b>{orderScene.title}</b>
+                    <b>
+                      {orderScene.title}
+                      {/*
+                        ── 「预采场景」角标（剧本 §134）────────────────────────
+                        原文：「场景标题持续显示"预采场景"」。现场录像要等活动结束
+                        才归档，这一版场景用的是出发前预采的全景视频 —— 标题上不写
+                        这一笔，观众会以为这是现场刚拍回来的画面（把预采当现场）。
+                        判据在 `isPrecollectedScene`（只看素材名，两者有单测）。
+                      */}
+                      {precollected ? (
+                        <span
+                          className="scene-list__tag"
+                          title={`素材 ${sceneSourceVideo} —— 现场录像活动结束后归档`}>
+                          预采场景
+                        </span>
+                      ) : null}
+                    </b>
                     <span>
                       {orderScene.round} · {orderScene.version} · {orderScene.meta}
                     </span>
@@ -1069,22 +1131,53 @@ const TOUR_INTERVAL_MS = 5200;
               </span>
             }>
             {hotspot ? (
-              <ul className="hotspot-brief">
-                <li>
-                  <small>构件 / 部位</small>
-                  <b>{(component?.name ?? selected) + " · " + (component?.part ?? "—")}</b>
-                </li>
-                <li>
-                  <small>回波</small>
-                  <b>
-                    {hotspot.echo.amplitude.toFixed(2)} {hotspot.echo.unit}
-                  </b>
-                </li>
-                <li>
-                  <small>融合规则</small>
-                  <b>{hotspot.fusion.ruleVersion}</b>
-                </li>
-              </ul>
+              <>
+                <ul className="hotspot-brief">
+                  <li>
+                    <small>构件 / 部位</small>
+                    <b>{(component?.name ?? selected) + " · " + (component?.part ?? "—")}</b>
+                  </li>
+                  {/*
+                    ── 原图与标注框（剧本 §140–142）─────────────────────────
+                    小木：「对应原图已打开，标注与构件编号一起显示。请核对这处表面缺损。」
+                    所以图片编号与标注框要和构件编号一起在屏上 —— 这正是"原图查看工具"
+                    调用的可见结果。框按**图片编号**取自融合记录（`annotationsOfImage`），
+                    取不到就写"未附带标注框"，不按构件号猜。
+                  */}
+                  <li>
+                    <small>原图</small>
+                    <b>{hotspot.image.name}</b>
+                  </li>
+                  <li>
+                    <small>标注框</small>
+                    <b>
+                      {annotationBox
+                        ? `${annotationBox.boxId} · ${annotationBox.label} · ${annotationBox.confidence.toFixed(2)}`
+                        : "未附带标注框"}
+                    </b>
+                  </li>
+                  <li>
+                    <small>回波</small>
+                    <b>
+                      {hotspot.echo.amplitude.toFixed(2)} {hotspot.echo.unit}
+                    </b>
+                  </li>
+                  <li>
+                    <small>融合规则</small>
+                    <b>{hotspot.fusion.ruleVersion}</b>
+                  </li>
+                </ul>
+                {/*
+                  剧本 §141 的明文要求：「没有标注坐标时只打开原图，**不虚构放大定位**」。
+                  这一行就是"我们确实没有放大"的显式交代 —— 台上有人问"怎么没放大"，
+                  屏幕上已经写着原因，不必靠讲解人临场解释。
+                */}
+                <p className={`hotspot-origin${annotationBox ? "" : " is-missing"}`}>
+                  {annotationBox
+                    ? `预置标注记录（${annotationBox.source}）· 未附图内坐标：只打开原图，不做放大定位`
+                    : "该原图未附标注框：只打开原图，不做放大定位"}
+                </p>
+              </>
             ) : (
               <StateBlock kind="empty" title="未选中热点" />
             )}
@@ -1152,8 +1245,13 @@ const TOUR_INTERVAL_MS = 5200;
                 <dd>{component?.part ?? "—"}</dd>
               </div>
               <div>
-                <dt>原图</dt>
-                <dd>{hotspot.image.name}</dd>
+                <dt>原图 / 标注框</dt>
+                <dd>
+                  {hotspot.image.name}
+                  {annotationBox
+                    ? ` · ${annotationBox.boxId}（${annotationBox.label} ${annotationBox.confidence.toFixed(2)}）`
+                    : " · 未附带标注框"}
+                </dd>
               </div>
               <div>
                 <dt>回波</dt>

@@ -30,6 +30,7 @@ import {
 } from "./degrade";
 import { evaluateFacts, factToneOf, type FactContext, type FactRow, type LiveSnapshot } from "./facts";
 import { buildSyncBackupStream } from "./syncBackup";
+import { DEMO_SURFACE_EVENT } from "./demoSurfaceAction";
 import { voicePackEntryCount } from "./voicePack";
 import {
   FALLBACK_TEXT,
@@ -628,7 +629,7 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
     事件名与 `Shell.tsx` 的监听一一对应；找不到动作的轮次由组件自己返回 null
     （`actionFor` 查不到就不渲染），所以这里不必再判一次。
   */
-  window.dispatchEvent(new CustomEvent("mumai:demo-surface", { detail: { roundNo: round.roundNo } }));
+  window.dispatchEvent(new CustomEvent(DEMO_SURFACE_EVENT, { detail: { roundNo: round.roundNo } }));
 
   /*
     ── 执行工作台的任务卡（剧本 ⑥ ⑮；用户 2026-09-23「小木互动触发的自动操作」）──

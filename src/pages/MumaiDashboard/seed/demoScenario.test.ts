@@ -17,7 +17,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { DEMO_BUSINESS_DATE, DEMO_SCENARIO_V3, scenarioValue, SCENARIO_KEYS } from "./scenario.ts";
+import { DEMO_BUSINESS_DATE, DEMO_SCENARIO_V3, SCENES, isPrecollectedScene, scenarioValue, SCENARIO_KEYS } from "./scenario.ts";
 
 /* ------------------------------------------------------------------ *
  * 1. 时间与工单标识（§6.1）
@@ -213,6 +213,24 @@ test("取不到的数据键返回 undefined（进入缺失态），不得伪造�
   assert.equal(scenarioValue("weather.rain.notExist"), undefined);
   assert.equal(scenarioValue("no.such.path"), undefined);
   assert.equal(scenarioValue(""), undefined);
+});
+
+/* ------------------------------------------------------------------ *
+ * 4.1 「预采场景」角标（剧本 §134）
+ * ------------------------------------------------------------------ */
+
+/*
+  剧本原文：「（B屏切回架构师电脑。**场景标题持续显示"预采场景"**。…）」
+  判据只看素材名 —— 换一版素材（改成现场录像）时，角标必须自己消失。
+*/
+test("预采场景判据：本轮与历史那两版都算预采，现场录像不算", () => {
+  const byId = (id: string) => SCENES.find((item) => item.id === id)!;
+  assert.equal(isPrecollectedScene(byId("scene-SH-0901")), true, "本轮那版是预采（素材名带「预采」）");
+  assert.equal(isPrecollectedScene(byId("scene-May")), true, "五月那版是离线预采");
+  /* 反例：现场录像归档之后的素材名里没有「预采」，也不该有 precollected 前缀 */
+  assert.equal(isPrecollectedScene({ sourceVideo: "onsite_sh_0901_pano.mp4" }), false);
+  assert.equal(isPrecollectedScene({ sourceVideo: null }), false);
+  assert.equal(isPrecollectedScene({}), false);
 });
 
 test("数据包整体冻结，运行期不可被改写（防组件顺手改演示数据）", () => {

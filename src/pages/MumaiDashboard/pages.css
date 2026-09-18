@@ -2773,6 +2773,50 @@
   font-size: var(--fs-aux);
 }
 
+/*
+  「预采场景」角标（剧本 §134：场景标题持续显示"预采场景"）。
+  贴在标题右边、字号比标题小一号，颜色走警示系 —— 它要一眼被看见，
+  但不能抢过标题本身。
+
+  ⚠ 选择器必须写成 `.scene-list .scene-list__tag`（两个类）：
+  下面还有一条 `.scene-list span`（一个类 + 一个类型）在管颜色与字号，
+  只写单个类会被它盖住 —— 角标就会变成一片灰字，白加。
+*/
+/*
+  ── 原图查看那一行交代（剧本 §141）──────────────────────────────────
+  「没有标注坐标时只打开原图，不虚构放大定位」—— 这一行把口径写在屏上：
+  有标注框时说明它来自预置标注记录、未附图内坐标；一条框都没有时说明原图未附标注框。
+  所以缺框那一种要更显眼一点（`is-missing`），别让人以为是加载失败。
+*/
+.hotspot-origin {
+  margin: 6px 0 0;
+  padding: 4px 8px;
+  border-left: 2px solid var(--ma-info, #4ea8ff);
+  background: var(--fill-soft, rgba(78, 168, 255, 0.06));
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  line-height: 1.5;
+}
+
+.hotspot-origin.is-missing {
+  border-left-color: var(--ma-warn);
+  color: var(--ma-text-2);
+}
+
+.scene-list .scene-list__tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--ma-warn);
+  border-radius: 999px;
+  background: var(--fill-soft, rgba(255, 176, 32, 0.12));
+  color: var(--ma-warn);
+  font-size: 11px;
+  line-height: 16px;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
 .scene-list span,
 .scene-list em {
   color: var(--ma-text-3);

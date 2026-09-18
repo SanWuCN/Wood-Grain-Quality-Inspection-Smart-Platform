@@ -61,6 +61,8 @@ import { CommissionPreview } from "./pages/orders/CommissionPreview";
   不是 15 个各自独立的页面。挂在外壳上，任何已登录页面都能弹。
 */
 import { DemoSurface } from "./agent/demoSurface";
+/* 演示表面的事件名与派发（跨树开关，页面上的手动入口也用同一份，见 agent/demoSurfaceAction.ts） */
+import { DEMO_SURFACE_EVENT } from "./agent/demoSurfaceAction";
 /*
   同步备份小窗（第④轮「同步备份」：小木说「收到，已启用同步备份。」之后弹出，
   用户 2026-09-18 口径 = "小木回一句 → 展开动态备份窗口做显示"）。
@@ -321,7 +323,7 @@ export default function Shell() {
       /* 没有圈号就关掉，不留一个说不清是哪一轮的浮层 */
       setDemoSurfaceRound(roundNo ? String(roundNo) : null);
     };
-    window.addEventListener("mumai:demo-surface", onSurface);
+    window.addEventListener(DEMO_SURFACE_EVENT, onSurface);
 
     /*
       ── 语音命中剧本时收掉屏幕上的浮层（现场实测出的穿帮）────────────
@@ -338,7 +340,7 @@ export default function Shell() {
     };
     window.addEventListener("mumai:dismiss-overlays", onDismiss);
     return () => {
-      window.removeEventListener("mumai:demo-surface", onSurface);
+      window.removeEventListener(DEMO_SURFACE_EVENT, onSurface);
       window.removeEventListener("mumai:dismiss-overlays", onDismiss);
     };
   }, []);
