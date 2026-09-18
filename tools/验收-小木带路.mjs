@@ -45,6 +45,7 @@ const DB_FILE = "server/data/mumai.db";
 
 const { SCRIPT_ROUNDS } = await import("../src/pages/MumaiDashboard/agent/script.ts");
 const { routeUtterance } = await import("../src/pages/MumaiDashboard/agent/scriptMatch.ts");
+const { SCRIPT_SHORTCUT_ENTRIES } = await import("../src/pages/MumaiDashboard/agent/scriptShortcutEntries.ts");
 
 let failed = 0;
 const check = (name, ok, detail = "") => {
@@ -206,6 +207,29 @@ try {
       );
     }
 
+    /* 更新交付页：交付包 / 目标版本 / 回验与取用记录（版本回执 + 自检）都要在 */
+    if (nav.route === "/firmware" && nav.tab === "delivery") {
+      const content = await machine.waitFor(
+        `(() => {
+          const text = document.body.innerText || '';
+          const need = ['已发布产物', '回验与取用记录'];
+          const hit = need.filter((k) => text.includes(k));
+          return hit.length === need.length
+            ? { hits: hit.length, pkg: /DEMO-PKG-02/.test(text), target: /DEMO-M02b/.test(text), selfCheck: /自检/.test(text) }
+            : null;
+        })()`,
+        { timeoutMs: 8000 },
+      );
+      check(`  ↳ 更新交付页内容`, Boolean(content), content ? "已发布产物与回验记录两屏都在" : "交付页没渲染出来");
+      if (content) {
+        check(
+          `  ↳ 交付包、目标版本与自检结论都在屏上`,
+          content.pkg && content.target && content.selfCheck,
+          `包=${content.pkg} 目标版本=${content.target} 自检=${content.selfCheck}`,
+        );
+      }
+    }
+
     /* 素材质检页：素材清单 + 两处低清晰度标记 + 切片检查，三块都要真的渲染出来 */
     if (nav.route === "/materials") {
       const content = await machine.waitFor(
@@ -227,7 +251,62 @@ try {
     }
   }
 
-  if (skipped.length) console.log(`\n  跳过（非语音触发）：${skipped.join("、")}`);
+  if (skipped.length) console.log(`\n  非语音触发的轮次（下面用快捷键真按一遍）：${skipped.join("、")}`);
+
+  /*
+    ── 本地事件触发的那几轮（⑬ 小木主动预警）──────────────
+    它们**不收语音**（`triggerSource: "local-event"`，剧本里是小木自己起头），
+    现场靠快捷键触发（`scriptShortcutEntries.ts` 里 `proactive: true` 的条目）。
+    这里就用那条快捷键真按一遍：Ctrl+<字母> 再按数字，然后断言
+    ① 页面被带到剧本对应的页签；② 预警小窗出现（用户口径：「⑬ 这个触发时，
+    会弹出预警窗口，然后带个确认按钮」）。
+  */
+  for (const round of rounds.filter((item) => item.triggerSource !== "voice")) {
+    const entry = SCRIPT_SHORTCUT_ENTRIES.find((item) => item.roundNo === round.roundNo);
+    if (!entry) {
+      check(`${round.roundNo} ${round.title}`, false, "没有对应的快捷键条目，现场无法主动发起");
+      continue;
+    }
+    await machine.evaluate(`location.hash = '#/console'`);
+    await sleep(250);
+    const [letter, digit] = String(entry.key).split(":");
+    await machine.evaluate(`(() => {
+      const fire = (key) => window.dispatchEvent(new KeyboardEvent('keydown', {
+        key, code: 'Key' + key.toUpperCase(), ctrlKey: true, bubbles: true, cancelable: true }));
+      fire(${JSON.stringify(letter)});
+      fire(${JSON.stringify(digit)});
+      return true;
+    })()`);
+    const parts = expectHash(round.nav ?? { route: "/" });
+    let hash = "";
+    for (let i = 0; i < 40; i += 1) {
+      await sleep(250);
+      hash = await machine.evaluate(`location.hash`);
+      if (parts.every((part) => String(hash).includes(part))) break;
+    }
+    const hit = parts.every((part) => String(hash).includes(part));
+    check(
+      `${round.roundNo} ${round.title}（主动发起 · Ctrl+${letter.toUpperCase()}+${digit}）`,
+      hit,
+      hit ? `→ ${hash}` : `期望 ${parts.join(" & ")}，实际 ${hash}`,
+    );
+    if (!hit) continue;
+    /* 预警小窗：警示描边 + 「预警」角标 + 一个确认按钮（这是用户点名要的形态） */
+    const alert = await machine.waitFor(
+      `(() => {
+        const box = document.querySelector('.dsf--alert');
+        if (!box) return null;
+        const button = [...box.querySelectorAll('button')].find((node) => !node.className.includes('dsf__close'));
+        return { alert: true, badge: /预警/.test(box.textContent || ''), button: Boolean(button), label: (button?.textContent || '').trim() };
+      })()`,
+      { timeoutMs: 6000 },
+    );
+    check(
+      `  ↳ 弹出预警小窗且带确认按钮`,
+      Boolean(alert?.alert && alert?.badge && alert?.button),
+      alert ? `角标=${alert.badge} 按钮=${alert.button}（${alert.label}）` : "预警小窗没出现",
+    );
+  }
 
   /*
     收工：清掉 ⑥⑮ 这一轮在服务端生成的任务卡。

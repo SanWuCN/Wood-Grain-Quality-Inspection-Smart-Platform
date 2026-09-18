@@ -963,16 +963,17 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     ],
     next: "饶：更新完成，版本核对一致，参考输入检查通过。",
     /*
-     * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
-     * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
-     */
-    reveal: {
-      target: "order-detail",
-      sections: ["order", "scope", "pending"],
-      /* 三段节拍：摘要 → 任务范围 → 后续执行模块（与 `ordersReveal.ts` 的组名对齐） */
-      beats: [["order"], ["scope"], ["pending"]],
-    },
-    nav: { route: "order", order: "current" },
+      ── ⑳ 的页面落点（2026-09-23 改）────────────────────────────────────
+      剧本这一轮是【S18《设备更新与回验》】的等待段：「平台已收到写入状态，正在等待
+      设备重启和版本回报」，小木「我正在核对目标版本与设备回报。收到版本信息后还要
+      检查自检结果，两项一致才会更新交付状态」。
+      对得上的页面是**固件及模型 · 更新交付**：交付包、下载与接收、以及「回验与取用记录」
+      （版本回执 + 自检结论）都在那一屏；原先把页面带到工单详情（下发区），
+      与剧本里的 B 屏（全栈电脑那一路）对不上。
+      ⚠ 不再声明 reveal：那一页的"逐块展开"没有语义（这一轮是**等待**，不是逐项讲解），
+        所以这一轮回到普通浮层（`demoActions.ts` 里的 `revealOnly` 一并去掉）。
+    */
+    nav: { route: "/firmware", tab: "delivery" },
     voicePack: null,
     intentId: "deployment_check",
     precondition: "不按倒计时编造成功",
