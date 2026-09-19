@@ -59,6 +59,14 @@ import {
   annotationsOfImage,
 } from "../seed/scenario";
 import { cancelTwinReveal, useTwinReveal } from "../twinReveal";
+/* 内部点云：数据与口径在 internalPointCloud.ts（纯函数、可单测），这里只用它的合计 */
+import { buildInternalCloud } from "./internalPointCloud";
+/**
+ * 内部点云视图（three + @react-three/fiber）。
+ *
+ * 与高斯那一屏一样**按需加载**：它引 three 与 drei，没切到"内部点云"之前不该下载。
+ */
+const InternalPointCloudView = lazy(() => import("./InternalPointCloudView"));
 /* 本轮重建素材的来源（⑭ 预采场景角标与素材质检页同一份取值，不另写文件名） */
 import { currentSource } from "./materialsData";
 /* 「打开你标记的原图」（剧本 ⑫）：窗口本体 + 触发事件（executor 派发同一个事件） */
@@ -246,6 +254,18 @@ export default function Twin() {
    * （见 `originalPhotoAction.ts`；它不带构件号时按"当前选中的构件"开）。
    */
   const [photoOpen, setPhotoOpen] = useState(false);
+  /**
+   * 主视图看哪个：外观（高斯泼溅）还是内部点云。
+   *
+   * 默认外观 —— 这一页的主线是"场景已打开，可以移动视角"（剧本 §136）。
+   * 内部点云是**用户 2026-09-30 追加的一项**，切换按钮在视图上方常驻可见。
+   */
+  const [stageView, setStageView] = useState<"splat" | "internal">("splat");
+  /** 四根柱子的内部缺陷合计（切换按钮上那个数字；数据来自生成器，不另写常数） */
+  const cloudDefectCount = useMemo(
+    () => Object.values(buildInternalCloud().totals).reduce((sum, value) => sum + value, 0),
+    [],
+  );
   const [uploadOpen, setUploadOpen] = useState(false);
   const [fitNonce, setFitNonce] = useState(0);
   const [splatError, setSplatError] = useState<string | null>(null);
@@ -803,13 +823,47 @@ const TOUR_INTERVAL_MS = 5200;
       <div className="twin-layout">
         {/* 主视图：占页面 2/3 以上 */}
         <div className="twin-stage">
+          {/*
+            ── 看外观还是看内部（用户 2026-09-30）──────────────────────────
+            「我现在要他也可以展示内部点云，分一项作为内部点云」——
+            所以主视图上面加一行切换：**外观·高斯场景** / **内部点云**。
+            两者共用同一套场景坐标与包围盒，切过去柱子还在原来的位置，
+            只是从"看表面"变成"看里面"（内部那一屏的来源说明写在它自己的右栏里）。
+          */}
+          <div className="twin-views" role="tablist" aria-label="主视图">
+            {([
+              ["splat", "外观 · 高斯场景"],
+              ["internal", "内部点云"],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={stageView === key}
+                className={`twin-view__tab${stageView === key ? " is-active" : ""}`}
+                onClick={() => setStageView(key)}>
+                {label}
+                {key === "internal" ? <em>{cloudDefectCount} 处内部缺陷</em> : null}
+              </button>
+            ))}
+          </div>
+
           <div className="twin-view">
             {/*
-              只在**确实有模型文件**时挂载渲染器（= 只在此时下载那个异步分包）。
-              没有模型时 `.twin-view` 仍是空的黑底，空态覆盖层照旧显示在上面；
-              fallback 取 null：分包到达前不显示骨架，避免黑底上闪一下。
+              ⚠ 两个视图**互斥挂载**：高斯那一屏是 Spark 自己的 WebGL 画布、内部点云是 three 的，
+                同时挂会同时占显存与下载两个分包（点云这屏在没切过来之前完全不加载）。
             */}
-            {hasModel ? (
+            {stageView === "internal" ? (
+              <Suspense fallback={null}>
+                <InternalPointCloudView
+                  focusComponentId={selected}
+                  onPickDefect={({ componentId, defect }) => {
+                    setComponent(componentId);
+                    pushEvent(`内部点云：${componentId} ${defect.label}（${defect.source}）`, "info");
+                  }}
+                />
+              </Suspense>
+            ) : hasModel ? (
               <Suspense fallback={null}>
                 <SplatStage
                   url={orderScene?.assetFileId ? api.modelUrl(orderScene.assetFileId, orderScene.assetName) : ""}

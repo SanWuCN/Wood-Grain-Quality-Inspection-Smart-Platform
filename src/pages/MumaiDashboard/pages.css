@@ -2545,6 +2545,49 @@
   background: var(--bg-page);
 }
 
+/*
+  ── 主视图切换：外观 · 高斯场景 / 内部点云（用户 2026-09-30）──────────
+  放在视图**上方**而不是浮在画面上：这一行是"看哪一层"的入口，
+  浮层位置在数字孪生页已经被 图层开关（.twin-layers）与读数条占着了，
+  再叠一个会出现"三个浮层抢左上角"。
+*/
+.twin-views {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.twin-view__tab {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius-2, 6px) var(--radius-2, 6px) 0 0;
+  background: transparent;
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  cursor: pointer;
+}
+
+.twin-view__tab em {
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--ma-text-3);
+}
+
+.twin-view__tab.is-active {
+  border-color: var(--border-subtle);
+  background: var(--panel-surface);
+  color: var(--ma-text);
+}
+
+.twin-view__tab.is-active em {
+  color: var(--tone-warn, #ffb020);
+}
+
 .twin-layers {
   position: absolute;
   left: var(--space-3);
