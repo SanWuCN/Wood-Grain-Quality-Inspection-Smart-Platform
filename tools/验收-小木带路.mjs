@@ -220,13 +220,20 @@ try {
         `(() => {
           const text = document.body.innerText || '';
           const code = [...document.querySelectorAll('.code-block')].map((n) => n.textContent || '').join('');
-          return {
-            expr: /overlap = \\(train_ids & val_ids\\) \\| \\(train_ids & test_ids\\) \\| \\(val_ids & test_ids\\)/.test(code),
-            list: /交集/.test(text) && /三类问题明细/.test(text),
-            rerun: /整组调整后重跑/.test(text),
-          };
+          const expr = /overlap = \\(train_ids & val_ids\\) \\| \\(train_ids & test_ids\\) \\| \\(val_ids & test_ids\\)/.test(code);
+          const list = /交集/.test(text) && /三类问题明细/.test(text);
+          const rerun = /整组调整后重跑/.test(text);
+          /* 三样齐了才返回 —— 只返回一部分会让 waitFor 立刻收工（见下面的说明） */
+          return expr && list && rerun ? { expr, list, rerun } : null;
         })()`,
-        { timeoutMs: 8000 },
+        /*
+          ⚠ 这个等待函数**必须返回 null 才会继续等**（2026-09-30 修）。
+          旧写法无条件返回对象，`waitFor` 第一拍（250ms）就拿到结果 —— 等于没等：
+          8000（dist，渲染快）碰巧已就绪，5173（dev，模块按需加载）还没挂上分组检查面板，
+          于是这两条在 5173 上稳定报假红。
+          现在三样都齐了才返回；超时 8 秒放宽到 15 秒（分得清"慢"与"没有"）。
+        */
+        { timeoutMs: 15_000 },
       );
       check(
         `  ↳ 受限校验单元里的集合求交语句逐字在屏上（沈那一步）`,
@@ -382,18 +389,27 @@ try {
 
     /* 素材质检页：素材清单 + 两处低清晰度标记 + 切片检查，三块都要真的渲染出来 */
     if (nav.route === "/materials") {
+      /*
+        ⚠ 等待条件必须把**下面每一条检查要看的字**都写进去（2026-09-30 修）。
+        旧写法只等那 5 个素材数字，拿到就快照；而这页的板块是先后挂上的 ——
+        在 5173（dev，模块按需加载更慢）上快照取早了，后两块还没渲染，
+        于是"需重看的画面 / 切片检查 / 预置结果"三条**稳定报假红**，8000 上却全绿。
+        现在：等到全部条件齐了再快照；超过 15 秒才判失败（分得清"慢"与"没渲染"）。
+      */
       const content = await machine.waitFor(
         `(() => {
           const text = document.body.innerText || '';
           const need = ['3840×1920', '214', '00:43', '02:17', '缺失文件'];
+          const marks = /需要重看的画面/.test(text);
+          const checks = /切片与重建前检查/.test(text);
+          const origin = /预置结果/.test(text);
           const hit = need.filter((k) => text.includes(k));
-          return hit.length === need.length
-            ? { hits: hit.length, marks: /需要重看的画面/.test(text), checks: /切片与重建前检查/.test(text), origin: /预置结果/.test(text) }
-            : null;
+          if (hit.length !== need.length || !marks || !checks || !origin) return null;
+          return { hits: hit.length, marks, checks, origin };
         })()`,
-        { timeoutMs: 6000 },
+        { timeoutMs: 15_000 },
       );
-      check(`  ↳ 素材质检页内容`, Boolean(content), content ? "分辨率 / 关键帧 / 两处标记 / 缺失文件都在" : "素材清单没渲染出来");
+      check(`  ↳ 素材质检页内容`, Boolean(content), content ? "分辨率 / 关键帧 / 两处标记 / 缺失文件都在" : "素材清单没渲染出来（15 秒）");
       if (content) {
         check(`  ↳ 需重看的画面与切片检查两块都在`, content.marks && content.checks);
         check(`  ↳ 标明检查结论来自「预置结果」`, content.origin);
