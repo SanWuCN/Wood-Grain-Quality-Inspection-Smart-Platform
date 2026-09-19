@@ -113,6 +113,25 @@ export default defineConfig({
         changeOrigin: true,
         configure: attachProxyErrorHandler("语音桥接层"),
       },
+      /**
+       * 照片批次素材（`/photos/processed`、`/photos/annotated` 与两个缩略图前缀）。
+       *
+       * ── 为什么必须在这里补上（2026-09-30 实测）─────────────────────────
+       * 这批素材**不在 `public/` 里**，是平台服务按 URL 前缀只读映射出去的
+       * （见 `server/services/photo-set.mjs`：1312 张处理后影像 + 27 张已标注原片
+       * 有 ~430 MB，塞进 public 会同时进 git 和每次构建的 dist 拷贝）。
+       * 于是在 **5173（vite dev）** 上打开页面时，`<img src="/photos/...">` 打到的是
+       * Vite 自己 —— 它把这条路径当 SPA 路由，回一页 `index.html`（200 · text/html），
+       * 浏览器拿到 HTML 当图片解 → **整页缩略图全裂**（用户看到的就是这个：
+       * 「怎么都不显示了」）。8000 上同一张图是好的（200 · 真图字节）。
+       *
+       * 代理之后，localhost 的两条入口（5173 / 8000）与内网地址行为一致。
+       */
+      "/photos": {
+        target: process.env.MUMAI_API ?? "http://localhost:8000",
+        changeOrigin: true,
+        configure: attachProxyErrorHandler("照片素材"),
+      },
     },
 
     /**

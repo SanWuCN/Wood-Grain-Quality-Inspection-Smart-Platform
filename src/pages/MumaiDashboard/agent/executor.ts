@@ -31,6 +31,8 @@ import {
 import { evaluateFacts, factToneOf, type FactContext, type FactRow, type LiveSnapshot } from "./facts";
 import { buildSyncBackupStream } from "./syncBackup";
 import { DEMO_SURFACE_EVENT } from "./demoSurfaceAction";
+/* ⑫「打开你标记的原图」：窗口在 Twin 页里，这里只负责派发事件 */
+import { openOriginalPhoto } from "../pages/originalPhotoAction";
 import { voicePackEntryCount } from "./voicePack";
 import {
   FALLBACK_TEXT,
@@ -700,6 +702,32 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
         .then(showSyncPanel);
     } else {
       showSyncPanel();
+    }
+  }
+
+  /*
+    ── 原图查看窗口（剧本 ⑫，「打开你标记的原图」）────────────────────────
+    小木：「对应原图已打开，标注与构件编号一起显示。请核对这处表面缺损。」
+    文档旁注：「小木根据分析结果中的**图片编号和标注框**调用原图查看工具；
+             没有标注坐标时只打开原图，不虚构放大定位。」
+
+    这一轮播完就把原图窗口弹出来：显示照片批次里那张**人工标注原片**，
+    并按检出到的红框坐标放大疑点区域（坐标离线量自原片红框，见
+    `pages/annotatedPhotos.ts` 与 `tools-夜间/出-标注框坐标.py`），
+    图片编号、构件编号、标注框记录同时写在窗口里。
+
+    ⚠ 与 ④ 的同步备份小窗同一套时机：**等播报结束**再弹（台词还在念、窗口已经在放大，
+      观众会以为"没等小木说完"）；拿不到播报 Promise（注入的同步实现）时直接弹。
+    ⚠ 不带构件号：窗口按页面上**当前选中的构件**开 —— 台词说的"你标记的原图"就是它。
+  */
+  if (round.roundNo === "⑫") {
+    const showOriginalPhoto = () => openOriginalPhoto();
+    if (spoken && typeof (spoken as Promise<void>).then === "function") {
+      void (spoken as Promise<void>)
+        .catch(() => { /* 播报失败也要把窗口弹出来，不能因为没声音就少一个动作 */ })
+        .then(showOriginalPhoto);
+    } else {
+      showOriginalPhoto();
     }
   }
 }

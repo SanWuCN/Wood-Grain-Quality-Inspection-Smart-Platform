@@ -270,9 +270,8 @@ try {
         `(() => {
           const text = document.body.innerText || '';
           return {
-            image: /img-Z04-lower-f11\\.jpg/.test(text),
+            image: /img-Z04-lower-f11\\.jpg|IMG_\\d{4}\\.jpg/.test(text),
             box: /anno-box-11/.test(text),
-            noZoom: /不做放大定位/.test(text),
             preset: /预置标注记录/.test(text),
           };
         })()`,
@@ -284,10 +283,51 @@ try {
         `原图编号=${evidence?.image} 标注框=${evidence?.box}`,
       );
       check(
-        `  ↳ 写明标注是预置记录、未附坐标所以不做放大定位（§141）`,
-        Boolean(evidence?.noZoom && evidence?.preset),
-        `不做放大定位=${evidence?.noZoom} 预置标注记录=${evidence?.preset}`,
+        `  ↳ 写明标注是预置记录（§141 口径）`,
+        Boolean(evidence?.preset),
+        `预置标注记录=${evidence?.preset}`,
       );
+      /*
+        ── ⑫ 的原图窗口（用户 2026-09-30：「应该打开个窗口，放出木材表面图片」）──
+        要看到的是**真图**，不是一段文字。所以这里断言三件事：
+          · 窗口在（`.opw`）；
+          · 里面那张 `<img>` **真的解码出了像素**（`naturalWidth > 200`）——
+            这正是"图裂了"的判据：`/photos/*` 没被代理时 src 返回的是一页 HTML，
+            浏览器解不出图，`naturalWidth` 会是 0，而页面本身不报错；
+          · 平台叠的框在（`.opw__box`），且默认是"以框为中心"的 transform 放大。
+
+        ⚠ **只有 ⑫ 会开这个窗**（⑪㉒ 也落在 /twin，但它们的台词不要求打开原图）。
+          第一版把这段挂在所有 /twin 轮次上，于是 ⑪㉒ 两轮报了"没等到原图窗口"的假红 ——
+          判据要跟着"这一轮该不该开窗"走。
+      */
+      if (round.roundNo === "⑫") {
+        const photoWin = await machine.waitFor(
+          `(() => {
+            const win = document.querySelector('.opw');
+            if (!win) return null;
+            const img = win.querySelector('.opw__img');
+            const box = win.querySelector('.opw__box');
+            const inner = win.querySelector('.opw__inner');
+            return {
+              natural: img ? img.naturalWidth : 0,
+              box: Boolean(box),
+              zoomed: (inner?.getAttribute('style') || '').includes('scale('),
+              src: img ? img.getAttribute('src') : '',
+            };
+          })()`,
+          { timeoutMs: 12_000 },
+        );
+        check(
+          `  ↳ ⑫ 弹出原图窗口，且图片**真的解码出来**（不是裂图）`,
+          Boolean(photoWin && photoWin.natural > 200),
+          photoWin ? `naturalWidth=${photoWin.natural} · src=${photoWin.src}` : "没等到原图窗口",
+        );
+        check(
+          `  ↳ 窗口里有平台的标注框，且默认按框放大`,
+          Boolean(photoWin?.box && photoWin?.zoomed),
+          `框=${photoWin?.box} 放大=${photoWin?.zoomed}`,
+        );
+      }
       /*
         ⚠ 分两步等：先等构件条出现（证明页内定位到了三维场景），
         再等**最终态**（四根都在 + 重点构件高亮 + 选中 Z04）。

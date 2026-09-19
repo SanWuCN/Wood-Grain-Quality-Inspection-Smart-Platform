@@ -61,6 +61,11 @@ import {
 import { cancelTwinReveal, useTwinReveal } from "../twinReveal";
 /* 本轮重建素材的来源（⑭ 预采场景角标与素材质检页同一份取值，不另写文件名） */
 import { currentSource } from "./materialsData";
+/* 「打开你标记的原图」（剧本 ⑫）：窗口本体 + 触发事件（executor 派发同一个事件） */
+import { OriginalPhotoWindow } from "./OriginalPhotoWindow";
+import { ORIGINAL_PHOTO_EVENT } from "./originalPhotoAction";
+/* ⑫ 窗口里那张真实原片（照片批次里的人工标注原片） */
+import { annotatedPhotoFor } from "./annotatedPhotos";
 import "./twinColumns.css";
 /**
  * 泼溅渲染舞台（`SplatStage`）**异步加载**。
@@ -233,6 +238,14 @@ export default function Twin() {
   const canUpload = can("scene:upload");
 
   const [detailOpen, setDetailOpen] = useState(false);
+  /**
+   * 原图查看窗口（剧本 ⑫：「打开你标记的原图，把疑点区域放大」）。
+   *
+   * 两个入口开的是同一个窗口：本页热点面板上的「打开原图」按钮，
+   * 以及 ⑫ 播完时 `executor` 派发的 `mumai:original-photo` 事件
+   * （见 `originalPhotoAction.ts`；它不带构件号时按"当前选中的构件"开）。
+   */
+  const [photoOpen, setPhotoOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [fitNonce, setFitNonce] = useState(0);
   const [splatError, setSplatError] = useState<string | null>(null);
@@ -333,6 +346,8 @@ export default function Twin() {
     () => annotationsOfImage(hotspot?.image.name)[0] ?? null,
     [hotspot?.image.name],
   );
+  /** 这一根柱子的**真实原片**（照片批次里的人工标注原片；⑫ 的窗口用的就是它） */
+  const evidencePhoto = useMemo(() => annotatedPhotoFor(selected), [selected]);
   const risks = useMemo(
     () => CURRENT_RISKS.filter((item) => item.componentId === selected),
     [selected],
@@ -625,6 +640,25 @@ const TOUR_INTERVAL_MS = 5200;
     }, TOUR_INTERVAL_MS);
     return () => window.clearTimeout(timer);
   }, [gotoFrame, keyframes.length, pushEvent, tour]);
+
+  /**
+   * ⑫ 播完时打开原图窗口（`executor` 派发 `mumai:original-photo`）。
+   *
+   * 事件带构件号时先把它选上（`setComponent` 走 URL，与手选同一套），再开窗 ——
+   * 这样窗口里的原片与页面选中的构件一定是同一根，不会出现"看的是 Z04、开的是 Z01"。
+   * 依赖里带上 `setComponent` 会每次渲染都重建监听（它是内联箭头函数），
+   * 所以这里只依赖 `params` 与开关状态，用 ref 之外最简单的方式：直接读闭包里的 setParams。
+   */
+  useEffect(() => {
+    const onOpen = (event: Event) => {
+      const componentId = String((event as CustomEvent<{ componentId?: string }>).detail?.componentId ?? "");
+      if (componentId) setComponent(componentId);
+      setPhotoOpen(true);
+    };
+    window.addEventListener(ORIGINAL_PHOTO_EVENT, onOpen);
+    return () => window.removeEventListener(ORIGINAL_PHOTO_EVENT, onOpen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setComponent 每次渲染都是新函数，进依赖会让监听反复重建
+  }, [params]);
 
   const removeKeyframe = useCallback(
     async (frame: TwinKeyframe) => {
@@ -1125,6 +1159,16 @@ const TOUR_INTERVAL_MS = 5200;
             extra={
               <span className="fw-console__actions">
                 <StatusChip text={hotspot?.zoneId ?? "—"} tone="info" />
+                {/*
+                  「打开原图」（剧本 ⑫）：小木的那句「对应原图已打开，标注与构件编号一起显示」
+                  对应的就是这个窗口。与 ⑫ 播完自动弹的是同一个组件，不是第二个实现。
+                */}
+                <Btn
+                  disabled={!hotspot}
+                  title="打开这批人工标注原片，按标注框放大疑点区域"
+                  onClick={() => setPhotoOpen(true)}>
+                  打开原图
+                </Btn>
                 <Btn disabled={!hotspot} onClick={() => setDetailOpen(true)}>
                   查看完整证据
                 </Btn>
@@ -1146,7 +1190,7 @@ const TOUR_INTERVAL_MS = 5200;
                   */}
                   <li>
                     <small>原图</small>
-                    <b>{hotspot.image.name}</b>
+                    <b>{evidencePhoto ? evidencePhoto.file : hotspot.image.name}</b>
                   </li>
                   <li>
                     <small>标注框</small>
@@ -1168,14 +1212,18 @@ const TOUR_INTERVAL_MS = 5200;
                   </li>
                 </ul>
                 {/*
-                  剧本 §141 的明文要求：「没有标注坐标时只打开原图，**不虚构放大定位**」。
-                  这一行就是"我们确实没有放大"的显式交代 —— 台上有人问"怎么没放大"，
-                  屏幕上已经写着原因，不必靠讲解人临场解释。
+                  剧本 §141 原文：「没有标注坐标时只打开原图，**不虚构放大定位**」。
+                  现在两件事都是真的、都写在屏上：
+                    · 有原片且检出到框 → 说明坐标是从**人工标注原片的红框**离线量出来的，
+                      窗口按它放大（"放大"落在真坐标上，不是虚构的定位）；
+                    · 没有原片或没有框 → 按原文只打开原图，并说明为什么不放大。
                 */}
-                <p className={`hotspot-origin${annotationBox ? "" : " is-missing"}`}>
-                  {annotationBox
-                    ? `预置标注记录（${annotationBox.source}）· 未附图内坐标：只打开原图，不做放大定位`
-                    : "该原图未附标注框：只打开原图，不做放大定位"}
+                <p className={`hotspot-origin${annotationBox || evidencePhoto?.box ? "" : " is-missing"}`}>
+                  {evidencePhoto?.box
+                    ? `预置标注记录（${annotationBox?.source ?? "归档标注"}）· 标注框坐标离线量自人工标注原片（${evidencePhoto.file}）：窗口按该框放大`
+                    : annotationBox
+                      ? `预置标注记录（${annotationBox.source}）· 未附图内坐标：只打开原图，不做放大定位`
+                      : "该原图未附标注框：只打开原图，不做放大定位"}
                 </p>
               </>
             ) : (
@@ -1184,6 +1232,20 @@ const TOUR_INTERVAL_MS = 5200;
           </Panel>
         </div>
       </div>
+
+      {/*
+        ── 原图查看窗口（剧本 ⑫）─────────────────────────────────────
+        ⑫ 播完时 `executor` 派发 `mumai:original-photo`：带了构件号就用它，
+        没带就按**当前选中的构件**开（台词是「打开你标记的原图」，选中的那根就是"你标记的"）。
+      */}
+      {photoOpen ? (
+        <OriginalPhotoWindow
+          componentId={selected}
+          zoneId={hotspot?.zoneId ?? null}
+          annotation={annotationBox}
+          onClose={() => setPhotoOpen(false)}
+        />
+      ) : null}
 
       {/*
         帧的大图：缩略图只有 96px，讲解前要看清楚"这一帧到底拍到了什么"
