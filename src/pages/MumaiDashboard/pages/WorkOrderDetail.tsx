@@ -156,6 +156,8 @@ export function WorkOrderDetail({
   const [requirementsOpen, setRequirementsOpen] = useState(false);
   /** 删除确认：不可恢复的动作必须再问一次 */
   const [deleteOpen, setDeleteOpen] = useState(false);
+  /** 归档确认：同样是终态（没有"撤销归档"迁移），点错了只能重建工单 */
+  const [archiveOpen, setArchiveOpen] = useState(false);
   /**
    * 「工单识别」点了却没演起来时的可恢复提示（正常情况下恒为 null）。
    *
@@ -238,7 +240,19 @@ export function WorkOrderDetail({
               key={item.action}
               tone={item.tone ?? "default"}
               disabled={busy}
-              onClick={() => void actions.setStatus(item.action)}>
+              /*
+                ⚠ 「归档」要再过一次确认（用户 2026-10-01：「平台得能把工单归档」）。
+                归档是**终态**（没有"撤销归档"这条迁移），点错了只能重建工单 ——
+                与删除同一条口径：不可恢复的动作必须再问一次。
+                其余状态动作（开始/提交验收/暂停/恢复）都可逆，保持一键。
+              */
+              onClick={() => {
+                if (item.action === "archive") {
+                  setArchiveOpen(true);
+                  return;
+                }
+                void actions.setStatus(item.action);
+              }}>
               {item.label}
             </Btn>
           ))}
@@ -436,6 +450,42 @@ export function WorkOrderDetail({
           await actions.cancelCruise();
         }}
       />
+
+      {/*
+        归档确认（用户 2026-10-01：「平台得能把工单归档」）。
+        状态机里归档是**终态**：服务端没有"撤销归档"这条迁移，主体/环境/指派也都改不动了。
+        所以这里把"归档之后会发生什么"说清楚，再让人点一下 —— 与删除同一个口径。
+      */}
+      {archiveOpen ? (
+        <Modal
+          title={`归档工单 ${order.orderNo}`}
+          subtitle="归档后进入「已归档」，不再出现在「待指派 / 进行中」筛选里"
+          onClose={() => setArchiveOpen(false)}
+          footer={
+            <>
+              <span className="muted">
+                归档是终态：当前没有「撤销归档」；未完成的派发会标记为「工单已归档」
+                {logs.length ? `；操作日志保留 ${logs.length} 条` : ""}
+              </span>
+              <Btn onClick={() => setArchiveOpen(false)}>取消</Btn>
+              <Btn
+                tone="danger"
+                disabled={busy}
+                onClick={() => {
+                  setArchiveOpen(false);
+                  void actions.setStatus("archive");
+                }}>
+                确认归档
+              </Btn>
+            </>
+          }>
+          <p>
+            确认把工单 <b>{order.orderNo}</b>（当前状态「{order.status}」）归档？
+            归档后它仍可在「报告归档」与工单列表的「已归档」筛选里查到，操作日志与附件都保留，
+            但**不能再改指派、环境读数或状态**。
+          </p>
+        </Modal>
+      ) : null}
 
       {deleteOpen ? (
         <Modal

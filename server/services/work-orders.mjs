@@ -727,7 +727,7 @@ export function createWorkOrderService({ db, hub = null, devices = null, session
       canStart: operator && row.status === "待作业",
       canSubmit: operator && row.status === "作业中",
       canAccept: operator && row.status === "待验收",
-      canArchive: operator && ["待准备", "待作业", "作业中", "待验收", "已暂停"].includes(row.status),
+      canArchive: operator && row.status !== "已归档",
     };
   }
 
@@ -1019,7 +1019,21 @@ export function createWorkOrderService({ db, hub = null, devices = null, session
     start: { from: ["待作业"], to: "作业中", label: "开始作业" },
     submit: { from: ["作业中"], to: "待验收", label: "提交验收" },
     accept: { from: ["待验收"], to: "已归档", label: "验收通过并归档" },
-    archive: { from: ["待准备", "待作业", "作业中", "待验收"], to: "已归档", label: "归档工单" },
+    /*
+      ⚠ 归档的允许状态 = **除已归档外的全部**（用户 2026-10-01：「平台得能把工单归档」）。
+      改之前是 ["待准备","待作业","作业中","待验收"]，于是两处都不对：
+        · **待指派**的单子归档不了 —— 演示库那张单一直没指派（现场没人点"指派"），
+          讲解人想把它收档时按钮根本不出现（能力位 `canArchive` 也不含它）；
+        · 能力位那份名单里**有"已暂停"**、这份迁移表里**没有** —— 暂停中的单子
+          界面上给了「归档」按钮、服务端却回 422 BAD_STATE。
+      现在两处同源：都按"未归档即可归档"判。归档仍是**终态**（没有"撤销归档"迁移），
+      所以界面上要再确认一次。
+    */
+    archive: {
+      from: ["待指派", "待准备", "待作业", "作业中", "待验收", "已暂停"],
+      to: "已归档",
+      label: "归档工单",
+    },
     pause: { from: ["待准备", "待作业", "作业中", "待验收"], to: "已暂停", label: "暂停工单" },
     resume: { from: ["已暂停"], to: null, label: "恢复工单" },
   };
