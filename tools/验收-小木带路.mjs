@@ -202,15 +202,22 @@ try {
         ── 剧本 §102：人自己也要点得开 ─────────────────────────────────
         「等待时选用：小车继续建图，**史在平台开启数据通道巡查**」。
         所以建图页上要有一个真的按钮，点下去弹的是同一个窗口。
+
+        ⚠ 必须 `waitFor` 等它渲染出来再点（2026-09-30 修）：建图页在 5173（dev）上
+        模块按需加载，比 dist 慢；第一版是一次 `evaluate` 直接找 —— 找不到就报假红
+        （8000 上"碰巧"已就绪，所以只在 5173 上暴露）。
       */
-      const manual = await machine.evaluate(`(() => {
-        const button = [...document.querySelectorAll('button')].find((node) => (node.textContent || '').trim() === '通道巡查');
-        if (!button || button.disabled) return null;
-        button.click();
-        return true;
-      })()`);
-      check(`  ↳ 建图页上有「通道巡查」按钮且点得动（§102 史自己开启）`, manual === true);
-      const reopened = await machine.waitFor(`Boolean(document.querySelector('.dsf'))`, { timeoutMs: 5000 });
+      const manual = await machine.waitFor(
+        `(() => {
+          const button = [...document.querySelectorAll('button')].find((node) => (node.textContent || '').trim() === '通道巡查');
+          if (!button || button.disabled) return null;
+          button.click();
+          return 'clicked';
+        })()`,
+        { timeoutMs: 12_000 },
+      );
+      check(`  ↳ 建图页上有「通道巡查」按钮且点得动（§102 史自己开启）`, manual === "clicked");
+      const reopened = await machine.waitFor(`Boolean(document.querySelector('.dsf'))`, { timeoutMs: 6000 });
       check(`  ↳ 点它弹出同一个监听窗口`, Boolean(reopened));
     }
 
