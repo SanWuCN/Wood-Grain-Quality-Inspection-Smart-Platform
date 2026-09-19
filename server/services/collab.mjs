@@ -198,6 +198,12 @@ export function createProbeBook({ ttlMs = 120_000, keep = 20, now = Date.now } =
       from: { ...probe.from, addressLabel: addressLabel(probe.from?.address ?? "") },
       /** 下发时的端数（房间里真实连接数） */
       ends: probe.ends.length,
+      /**
+       * 房间里**已经没动静**的端数（半开连接：浏览器被强杀、笔记本休眠、切网之后
+       * TCP 既不报错也不触发 close，于是它在名单里但永远不会回执）。
+       * 这些端**不进分母** —— 否则现场念出来的是"只有 2/3 台收到"，而第三台其实早就没了。
+       */
+      stale: probe.stale ?? 0,
       acked: probe.acked.map((item) => ({ ...item, addressLabel: addressLabel(item.address) })),
       pending: probe.ends
         .filter((end) => !ackedIds.has(end.id))
@@ -210,8 +216,11 @@ export function createProbeBook({ ttlMs = 120_000, keep = 20, now = Date.now } =
   };
 
   return {
-    /** `ends` 由调用方从 hub 房间里取（本模块不认识 hub） */
-    open({ probeId, sessionId, seq = null, from = {}, ends = [] }) {
+    /**
+     * `ends` 由调用方从 hub 房间里取（本模块不认识 hub）；
+     * `stale` 是"没动静、不计入分母"的端数（由调用方按 `idleMs` 判）。
+     */
+    open({ probeId, sessionId, seq = null, from = {}, ends = [], stale = 0 }) {
       probes.set(probeId, {
         probeId,
         sessionId,
@@ -219,6 +228,7 @@ export function createProbeBook({ ttlMs = 120_000, keep = 20, now = Date.now } =
         atMs: now(),
         from: { ...from, address: normalizeClientAddress(from.address) },
         ends: ends.map((end) => ({ ...end, address: normalizeClientAddress(end.address) })),
+        stale: Math.max(0, Number(stale) || 0),
         acked: [],
       });
       /* 先放进来再清：清完才算"只保留最近 keep 次"，先清后放会多留一次 */

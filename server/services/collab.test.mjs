@@ -145,6 +145,25 @@ test("同步实测簿：几台端回了执、哪几台没回、用时多少", ()
   assert.equal(book.latest(), null);
 });
 
+test("同步实测簿：没动静的端不进分母，单独报 stale（否则现场读到「只有 2/3 台收到」）", () => {
+  let clock = 1_000;
+  const book = createProbeBook({ now: () => clock });
+  /*
+    现场场景：房间里有一台**半开连接**（浏览器被强杀/笔记本休眠/切网，TCP 不报错也不 close），
+    它在名单里但永远不会回执。hub 侧按 idleMs 把它挡在分母外，只报 stale 计数。
+  */
+  const alive = [{ id: "end-1", address: "192.168.101.8", accountId: "shen", page: "#/mapping" }];
+  const opened = book.open({ probeId: "probe-stale", sessionId: "demo-01", ends: alive, stale: 2 });
+  assert.equal(opened.ends, 1, "分母只算活着的端");
+  assert.equal(opened.stale, 2, "没动静的端单独报数，界面才能说明白");
+  assert.equal(opened.ok, false);
+
+  clock += 500;
+  const done = book.ack("probe-stale", { endId: "end-1", address: "192.168.101.8", accountId: "shen" });
+  assert.equal(done.ok, true, "活着的端都回了执就算通过（不再被死端拖成「只有 1/3」）");
+  assert.equal(done.stale, 2, "结论里仍要带着「另有 2 台没动静」，不能假装房间里只有一台");
+});
+
 test("同步实测簿：只保留最近若干次，最新的那次能直接取到", () => {
   let clock = 0;
   const book = createProbeBook({ keep: 2, now: () => (clock += 1) });

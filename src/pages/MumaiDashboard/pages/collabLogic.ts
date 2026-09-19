@@ -147,6 +147,8 @@ export function endRows(
  */
 export function probeVerdict(probe: {
   ends: number;
+  /** 已经没动静、不进分母的端数（服务端 `hub.openProbe` 把半开连接挡在分母外） */
+  stale?: number;
   acked: { addressLabel: string; accountId: string | null }[];
   pending: { addressLabel: string; accountId: string | null }[];
   ok: boolean;
@@ -161,17 +163,24 @@ export function probeVerdict(probe: {
     };
   }
   const seconds = probe.lastAckMs === null ? null : (probe.lastAckMs / 1000).toFixed(1);
+  /*
+    「另有 N 台已经没动静」要说出来（服务端把半开连接挡在分母外了，见 hub.openProbe）：
+    不说的话，现场看到"1/1 台收到"会以为房间里只有一台，而屏幕上明明还挂着一台死端。
+  */
+  const staleNote = probe.stale ? `另有 ${probe.stale} 台已经没动静（不计入）` : "";
   if (probe.ok) {
     return {
       text: `写入→全网可见 ${probe.acked.length}/${probe.ends} 台${seconds ? `（${seconds} 秒）` : ""}`,
       tone: "ok",
-      detail: `每一台连着的端都收到了这条写入：${probe.acked.map(who).join("、")}`,
+      detail: `每一台连着的端都收到了这条写入：${probe.acked.map(who).join("、")}${staleNote ? `；${staleNote}` : ""}`,
     };
   }
   return {
     text: `只有 ${probe.acked.length}/${probe.ends} 台收到`,
     tone: "warn",
-    detail: `没回执的端：${probe.pending.map(who).join("、")} —— 这一台的页面可能已经断了（刷新一下，或看它是不是被切到后台很久）。`,
+    detail:
+      `没回执的端：${probe.pending.map(who).join("、")} —— 这一台的页面可能已经断了（刷新一下，或看它是不是被切到后台很久）。` +
+      (staleNote ? `；${staleNote}` : ""),
   };
 }
 

@@ -248,3 +248,27 @@ test("同机两端地址相同：按端 id 分谁没回执（按地址会把另�
   assert.match(hint, /马 本来就停在别的页面/, "按 id 应当认出是马");
   assert.ok(!/沈/.test(hint), "不能把同地址的另一台（沈）说成掉队");
 });
+
+test("房间里还有没动静的端：端数只算活着的，但要补一句「另有 N 台已经没动静」", () => {
+  /*
+    现场场景：一台半开连接（浏览器被强杀/切网）一直挂在名单里却永远不会回执。
+    端明细照旧如实列出来，但「本轮同步」的端数只算活着的 —— 否则刚打开一台就被报"有一台掉队"。
+  */
+  const later = Date.parse("2026-09-20T01:05:00.000Z");
+  const alive = roundSyncView(
+    [turn({ route: "/mapping" })],
+    [end("a", "#/mapping", "沈")],
+    [],
+    later,
+    2,
+  );
+  assert.ok(alive);
+  assert.equal(alive.followed.length, 1);
+  assert.match(alive.verdict, /1 台端都在第 ⑨ 轮的页面上/);
+  assert.match(alive.verdict, /另有 2 台已经没动静，不计入/);
+
+  /* 没有死端时不加这句（别没事找事） */
+  const clean = roundSyncView([turn({ route: "/mapping" })], [end("a", "#/mapping", "沈")], [], later, 0);
+  assert.ok(clean);
+  assert.ok(!/没动静/.test(clean.verdict));
+});

@@ -13,7 +13,7 @@
  */
 
 import { readSession } from "../auth";
-import type { DeviceEvent, DeviceHardwareView, DeviceLedgerEntry } from "../device/types";
+import type { DeviceEvent, DeviceHardwareView, DeviceLedgerEntry, DeviceLinkState } from "../device/types";
 
 /* ------------------------------------------------------------------ *
  * 类型（与服务端 contracts 对应）
@@ -311,8 +311,10 @@ export type SyncProbe = {
   at: string;
   ageMs: number;
   from: { address?: string; addressLabel?: string; actorId?: string };
-  /** 下发那一刻房间里有几台端 */
+  /** 下发那一刻房间里**还活着**的端数（没动静的半开连接不进分母） */
   ends: number;
+  /** 房间里已经没动静、不计入分母的端数（界面要说明"另有 N 台"） */
+  stale?: number;
   acked: { endId: string; address: string; addressLabel: string; accountId: string | null; page: string | null; at: string; ms: number }[];
   /** 没回执的端 —— 现场要盯的就是这几个 */
   pending: { id: string; address: string; addressLabel: string; accountId: string | null; page: string | null }[];
@@ -1047,6 +1049,42 @@ export const api = {
       `/api/devices/${encodeURIComponent(deviceId)}/commands`,
       { method: "POST", body: JSON.stringify({ type, args }) },
     );
+  },
+
+  /* ---- 「重启服务」按钮（2026-09-19 用户口径） ---- */
+
+  /**
+   * 重置平台↔小车那**一条**连接。
+   *
+   * ⚠ 它**不重启平台、也不重启小车**：平台进程不动（浏览器这条 `/ws` 不断，
+   * 页面不刷新、不用重新登录），车上的建图/导航进程也不中断。
+   * 只把连接作废，由平台既有的退避重连立刻接手（退避被拨回最小值）。
+   */
+  cartReconnect() {
+    return apiRequest<{ ok: boolean; hadConnection?: boolean; code?: string; message: string }>(
+      "/api/cart/reconnect",
+      { method: "POST" },
+    );
+  },
+
+  /**
+   * 重置某一台设备的通道（精扫终端 / 手持终端）。
+   *
+   * ⚠ 终端命令白名单里**没有重启**，所以这是平台侧能做到的极限：
+   * 断开这条通道、等终端自己重连并重新握手。若终端自身卡在「离线」
+   * （`ConnectionMachine` 不允许 OFFLINE→ONLINE 迁移），只有重启终端进程才行，
+   * 页面必须如实显示，不能把"重置成功"说成"设备已恢复"。
+   */
+  deviceReconnect(deviceId: string) {
+    return apiRequest<{
+      ok: boolean;
+      deviceId: string;
+      closed: number;
+      hadChannel: boolean;
+      channelConnected: boolean;
+      link: DeviceLinkState | null;
+      message: string;
+    }>(`/api/devices/${encodeURIComponent(deviceId)}/reconnect`, { method: "POST" });
   },
 
   /* ---- 工单指派与扫描仪下发（PRD-工单指派与扫描仪下发-v1.0） ---- */

@@ -28,6 +28,11 @@ export function createHub({ server, db, path = "/ws", noServer = false }) {
   const matches = (request) => new URL(request.url, "http://localhost").pathname === path;
   /** sessionId → Set<ws> */
   const rooms = new Map();
+  /**
+   * 「同步实测」分母里算"还活着"的窗口：客户端每 15 秒 ping 一次（`PING_EVERY_MS`），
+   * 超过这个时间没动静的端不进分母（半开连接，永远不会回执）——见 `openProbe` 的说明。
+   */
+  const PROBE_ALIVE_MS = 30_000;
   /** 同步实测簿：谁开了实测、哪几台端回了执（多机协同现场排查用） */
   const probes = createProbeBook();
   let endSeq = 0;
@@ -249,7 +254,23 @@ export function createHub({ server, db, path = "/ws", noServer = false }) {
      * 这里只负责记下"下发那一刻房间里有哪几台端"，等它们的回执。
      */
     openProbe(sessionId, { probeId, seq = null, from = {} }) {
-      return probes.open({ probeId, sessionId, seq, from, ends: roomEnds(sessionId) });
+      const ends = roomEnds(sessionId);
+      /*
+        ⚠ **分母只算"还活着"的端**（用户 2026-10-01 长期口径下的排查口径）。
+        房间里会留着**半开连接**：浏览器被强杀 / 笔记本休眠 / 切网之后，TCP 既不报错
+        也不触发 close —— socket 仍是 OPEN，于是它一直在名单里，却永远不会回执。
+        实测现场读到的是"只有 2/3 台收到"，让人以为同步坏了；其实第三台早就没了。
+        现在超过 `PROBE_ALIVE_MS` 没动静的端不进分母，单独报 `stale` 给界面说明。
+      */
+      const alive = ends.filter((end) => (end.idleMs ?? 0) <= PROBE_ALIVE_MS);
+      return probes.open({
+        probeId,
+        sessionId,
+        seq,
+        from,
+        ends: alive,
+        stale: ends.length - alive.length,
+      });
     },
     probeStatus(probeId) {
       return probes.get(probeId);

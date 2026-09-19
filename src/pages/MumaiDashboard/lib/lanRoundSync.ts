@@ -205,6 +205,7 @@ export function roundSyncView(
   ends: CollabEnd[],
   excludeIds: string[] = [],
   nowMs = Date.now(),
+  staleCount = 0,
 ): RoundSyncView | null {
   if (!turns.length) return null;
   /* 最近一轮：按 at 取最新（同一毫秒时按数组顺序取靠后的那条） */
@@ -226,25 +227,27 @@ export function roundSyncView(
     }
   }
 
+  /* 房间里还有没动静的端（半开连接）时补一句：端数只算活着的，但别假装房间里就这么多 */
+  const staleNote = staleCount > 0 ? `（另有 ${staleCount} 台已经没动静，不计入）` : "";
   let verdict: string;
   let tone: RoundSyncView["tone"];
   if (!target) {
     verdict = `第 ${turn.roundNo} 轮不换页，各端保持自己当前页面`;
     tone = "info";
   } else if (!others.length) {
-    verdict = "本会话目前只有本机一台端（同事连上来后这里会显示他们跟没跟上）";
+    verdict = `本会话目前只有本机一台端（同事连上来后这里会显示他们跟没跟上）${staleNote}`;
     tone = "warn";
   } else if (!lagging.length) {
-    verdict = `${others.length} 台端都在第 ${turn.roundNo} 轮的页面上（${target}）`;
+    verdict = `${others.length} 台端都在第 ${turn.roundNo} 轮的页面上（${target}）${staleNote}`;
     tone = "ok";
   } else if (roundIsFresh(turn.at, nowMs)) {
     /* 刚讲完：端每 15 秒才上报一次，这时说"掉队"是假警报 —— 如实说"还没上报" */
-    verdict = `${followed.length} 台端已同页 · ${lagging.length} 台还没上报当前页面（端每 15 秒上报一次，稍等再看）`;
+    verdict = `${followed.length} 台端已同页 · ${lagging.length} 台还没上报当前页面（端每 15 秒上报一次，稍等再看）${staleNote}`;
     tone = "info";
   } else {
     verdict = `${followed.length} 台端已同页 · ${lagging.length} 台还在别的页面：${lagging
       .map((row) => `${row.account}（${row.page || "未上报页面"}）`)
-      .join("、")}`;
+      .join("、")}${staleNote}`;
     tone = "warn";
   }
   return {

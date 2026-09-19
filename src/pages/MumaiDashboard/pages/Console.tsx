@@ -30,7 +30,7 @@ import {
 import { agentTurns, isOnline, useSharedStore } from "../store/shared";
 import { useMumai } from "../context";
 import { actorName } from "../api/accounts";
-import { addressGroups, endRows, hostOf, isLocalHost, probeVerdict, recommendedUrl, serverLine } from "./collabLogic";
+import { END_ALIVE_MS, addressGroups, endRows, hostOf, isLocalHost, probeVerdict, recommendedUrl, serverLine } from "./collabLogic";
 import { followEnabled, setFollowEnabled } from "../agent/roundSync";
 import { endRoundSuffix, probeFollowHint, roundSyncView, selfEndIds } from "../lib/lanRoundSync";
 
@@ -100,14 +100,18 @@ export default function Console() {
   const turns = useSharedStore(agentTurns);
   /** 回合留痕的数据体（端明细的「已在第几轮」与「本轮同步」两处共用，不必每次渲染都 map） */
   const turnData = useMemo(() => turns.map((entity) => entity.data), [turns]);
+  /*
+    房间里会留**半开连接**（浏览器被强杀 / 笔记本休眠 / 切网后 TCP 不报错也不 close）：
+    它一直在名单里，却永远不会回执。端明细照旧如实列出来（标 ○ 灰），
+    但「本轮同步」的端数只用**还活着**的端，另报一句"另有 N 台已经没动静"。
+  */
+  const allEnds = peers?.ends ?? [];
+  const aliveEnds = allEnds.filter((end) => end.idleMs <= END_ALIVE_MS);
+  const staleCount = allEnds.length - aliveEnds.length;
   const roundSync = useMemo(
     () =>
-      roundSyncView(
-        turnData,
-        peers?.ends ?? [],
-        selfEndIds(peers?.ends ?? []),
-      ),
-    [turnData, peers],
+      roundSyncView(turnData, aliveEnds, selfEndIds(aliveEnds), Date.now(), staleCount),
+    [turnData, aliveEnds, staleCount],
   );
   /* 「同步实测」那一段的补充说明：没回执的端是"没跟上"还是"页面跟上了但没收到" */
   const followHint = useMemo(() => probeFollowHint(probe, roundSync), [probe, roundSync]);
