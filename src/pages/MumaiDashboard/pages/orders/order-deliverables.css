@@ -1,0 +1,83 @@
+/*
+ * 「小木生成物」面板（㉓ 工单草稿 / ㉔ 复盘草稿 / ㉕ 交付摘要）
+ *
+ * 展示口径：**每一行都带来源**，且来源是投屏上看得见的小字（不是 tooltip）——
+ * 与「预置结果必须标来源」同一条规矩。行结构是 键 / 值 / 来源 三列，
+ * 窄屏下自动折成两行（值在上、来源在下），不横向溢出。
+ */
+
+.deliv {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 每一块自己也是一个揭示组：父组件按拍点给它拼 is-in */
+.deliv__block {
+  margin: 0;
+}
+
+.deliv__block:not(.is-in) {
+  display: none;
+}
+
+.deliv__block > dt {
+  margin-bottom: 4px;
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+  font-weight: 600;
+}
+
+.deliv__block > dd {
+  margin: 0;
+}
+
+.deliv__block ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.deliv__block li {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 3px 0;
+  border-bottom: 1px dashed var(--border-subtle);
+  font-size: var(--fs-aux);
+}
+
+.deliv__block li:last-child {
+  border-bottom: none;
+}
+
+.deliv__k {
+  color: var(--ma-text-3);
+}
+
+.deliv__v {
+  color: var(--ma-text);
+  word-break: break-word;
+}
+
+.deliv__from {
+  color: var(--ma-text-3);
+  font-style: normal;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+@media (max-width: 1320px) {
+  .deliv__block li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .deliv__from {
+    white-space: normal;
+  }
+}

@@ -33,6 +33,14 @@ import { TaskScopePanel } from "./orders/TaskScopePanel";
 import { EnvironmentPanel } from "./orders/EnvironmentPanel";
 import { DispatchPanel } from "./orders/DispatchPanel";
 import { CruiseTaskPanel } from "./orders/CruiseTaskPanel";
+import { OrderDeliverablesPanel } from "./orders/OrderDeliverablesPanel";
+import {
+  DELIVERABLE_SECTIONS,
+  DELIVERABLE_TITLES,
+  draftOrderBlocks,
+  reviewBlocks,
+  summaryBlocks,
+} from "./orders/orderDeliverables";
 import type { CruiseDispatchBody } from "../store/cruise";
 import "./orders/orders.css";
 import "./orders-page.css";
@@ -112,6 +120,16 @@ export function WorkOrderDetail({
   const revealed = useOrderReveal(order.id);
   const revealGate = (key: string) =>
     revealed === null || revealed.includes(key) ? "wop-reveal is-in" : "wop-reveal";
+  /**
+   * 「小木生成物」三块（㉓㉔㉕）的门控：**任一**子组被揭示，整块面板就出现。
+   *
+   * 为什么按"任一"而不是"全部"：面板的标题与来源行属于这一轮的开场
+   * （「工单草稿已生成」），念到第一小句就该看见它；里面的三/四块各自再按拍点出现。
+   * 播报期间没轮到的两份生成物整块不渲染（`display:none`），
+   * 所以观众看到的是"这一轮多出来一块"，而不是三块长得一样的面板。
+   */
+  const revealGateAny = (keys: readonly string[]) =>
+    revealed === null || keys.some((key) => revealed.includes(key)) ? "wop-reveal is-in" : "wop-reveal";
   /*
     能力集合兜底：服务端每条返回详情的路由都带 capabilities（services/work-orders.mjs 的
     detailFor）。这里再兜一层是**不让一个字段缺失把整页打成白屏** ——
@@ -243,6 +261,44 @@ export function WorkOrderDetail({
 
         {error ? <p className="wop-error">{error.message}</p> : null}
       </Panel>
+
+      {/*
+        ── 小木生成物（用户口径 2026-10-01）──────────────────────────────
+        「平台最后几个对话需要更好的平台展示，而不只是跳转下页面」。
+        ㉓㉔㉕ 分别生成**工单草稿 / 复盘草稿 / 交付摘要**，三份是不同的东西，
+        所以各给一块面板（数据与来源见 `orders/orderDeliverables.ts`），
+        台词念到哪一小句、面板里哪一块出现（拍点表在 `script.ts` 的 `reveal.beats`）。
+
+        ⚠ 位置紧跟工单摘要、**在委托要求之前**：委托要求那块很长（委托单位/检测范围/
+        原始要求正文本），放在它后面的话，这三轮的主角内容会落在首屏之外 ——
+        投屏上就成了"跳过来什么都没看见"，正是用户要修的那个问题。
+        没有播报计划时（人自己点进来）三块都在，页面顺序仍读得通：
+        摘要 → 生成物 → 委托要求 → 任务范围 → 执行与成果。
+      */}
+      <OrderDeliverablesPanel
+        className={revealGateAny(DELIVERABLE_SECTIONS.draft)}
+        title={DELIVERABLE_TITLES.draft.title}
+        roundNo={DELIVERABLE_TITLES.draft.roundNo}
+        subtitle="复核位置 · 附件 · 处理建议"
+        blocks={draftOrderBlocks()}
+        gate={revealGate}
+      />
+      <OrderDeliverablesPanel
+        className={revealGateAny(DELIVERABLE_SECTIONS.review)}
+        title={DELIVERABLE_TITLES.review.title}
+        roundNo={DELIVERABLE_TITLES.review.roundNo}
+        subtitle="任务完成情况 · 异常处置 · 版本交付 · 后续待办"
+        blocks={reviewBlocks({ orderNo: order.orderNo, status: order.status, title: order.title })}
+        gate={revealGate}
+      />
+      <OrderDeliverablesPanel
+        className={revealGateAny(DELIVERABLE_SECTIONS.summary)}
+        title={DELIVERABLE_TITLES.summary.title}
+        roundNo={DELIVERABLE_TITLES.summary.roundNo}
+        subtitle="文件校验 · 待办清单 · 关联与审核"
+        blocks={summaryBlocks({ orderNo: order.orderNo, status: order.status, title: order.title })}
+        gate={revealGate}
+      />
 
       <Panel
         className={revealGate("scope")}

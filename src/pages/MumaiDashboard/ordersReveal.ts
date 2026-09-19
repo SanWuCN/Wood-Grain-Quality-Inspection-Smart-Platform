@@ -54,12 +54,35 @@ export const CHARS_PER_SECOND = 5.5;
 const MIN_SEGMENT_MS = 420;
 
 /**
- * 工单详情页的**四大组**，顺序即播报顺序。
+ * 工单详情页的各组，顺序即播报顺序。
  *
  * ⚠ 顺序是契约：`script.ts` 的揭示声明与这里必须一致，测试会逐项核对
  *   （`ordersReveal.test.ts` 的「分段声明」用例），改动时两边一起改。
+ *
+ * 前四组是第①–④轮讲的那张单本身；后九组是**小木在最后三轮生成的交付物**
+ * （用户 2026-10-01：「平台最后几个对话需要更好的平台展示，而不只是跳转下页面」）：
+ *   · ㉓ 工单草稿  → `draft-focus` / `draft-attachments` / `draft-advice`
+ *   · ㉔ 复盘草稿  → `review-done` / `review-issues` / `review-version` / `review-todo`
+ *   · ㉕ 交付摘要  → `summary-check` / `summary-todo` / `summary-linked`
+ * 数据与来源见 `pages/orders/orderDeliverables.ts`；面板见 `OrderDeliverablesPanel.tsx`。
+ * 三处（这里 / script.ts 的拍点表 / 数据模块的 `DELIVERABLE_SECTIONS`）对不上时单测会红。
  */
-export const ORDER_DETAIL_SECTIONS = ["order", "scope", "tasks", "pending"] as const;
+export const ORDER_DETAIL_SECTIONS = [
+  "order",
+  "scope",
+  "tasks",
+  "pending",
+  "draft-focus",
+  "draft-attachments",
+  "draft-advice",
+  "review-done",
+  "review-issues",
+  "review-version",
+  "review-todo",
+  "summary-check",
+  "summary-todo",
+  "summary-linked",
+] as const;
 
 export type OrderDetailSection = (typeof ORDER_DETAIL_SECTIONS)[number];
 

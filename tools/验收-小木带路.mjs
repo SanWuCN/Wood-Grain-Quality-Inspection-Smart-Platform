@@ -403,6 +403,77 @@ try {
       );
     }
 
+    /*
+      ── ㉓㉔㉕：最后三轮各带出**自己的**生成物面板（用户 2026-10-01）────────
+      「平台最后几个对话需要更好的平台展示，而不只是跳转下页面」。
+      原先这三轮都只跳到工单页、把同样的三组分区再展开一次 —— 屏幕上三遍一模一样。
+      现在的判据（每条都能证伪）：
+        ① 屏幕上**只有这一轮**那一份生成物（另外两份收起，否则"三块一样"的老毛病回来了）；
+        ② 这一轮的每一块都真的出现（念完还在，不是闪一下）；
+        ③ 面板里每一行都带来源（投屏上看得见的 `.deliv__from`，不是 hover 才有）。
+    */
+    const DELIVERABLE_BY_ROUND = {
+      "㉓": { title: "工单草稿", blocks: 3, first: "重点复核项" },
+      "㉔": { title: "任务复盘草稿", blocks: 4, first: "任务完成情况" },
+      "㉕": { title: "交付摘要", blocks: 3, first: "文件校验结果" },
+    };
+    const wantDeliverable = DELIVERABLE_BY_ROUND[round.roundNo];
+    if (wantDeliverable) {
+      const focused = await machine.waitFor(
+        `(() => {
+          const panels = [...document.querySelectorAll('.deliv')]
+            .map((list) => ({ panel: list.closest('.wop-reveal'), list }))
+            .filter((item) => item.panel && item.panel.offsetParent !== null);
+          if (panels.length !== 1) return null;
+          const title = (panels[0].panel.querySelector('h3, .panel__title, header')?.textContent || '').trim();
+          /* ⚠ 必须**是这一轮那一份**才算数：上一轮/上一轮收尾留下的状态可能正好也是"只剩一份"，
+             只判"只剩一份"会把别轮的生成物当成本轮的（第一版就是这么假红的） */
+          if (!title.includes(${JSON.stringify(wantDeliverable.title)})) return null;
+          return { title, panels: panels.length };
+        })()`,
+        { timeoutMs: 25_000 },
+      );
+      check(
+        `  ↳ ${round.roundNo} 屏幕上只出现这一轮的生成物（另外两份收起）`,
+        Boolean(focused && focused.title.includes(wantDeliverable.title)),
+        focused ? `屏上 ${focused.panels} 份：${focused.title.slice(0, 30)}` : "25 秒内没等到「聚焦到一份生成物」的状态",
+      );
+      const blocks = await machine.waitFor(
+        `(() => {
+          /*
+            ⚠ 按**标题**认这一轮那一份，不要按"屏幕上可见的那一份"：台词念完时揭示计划会解除，
+            三份生成物会一起显示 —— 那时按可见性取会拿到第一份（工单草稿），
+            于是 ㉔㉕ 两条稳定假红（实测踩到）。
+          */
+          const list = [...document.querySelectorAll('.deliv')].find((item) =>
+            (item.closest('.wop-reveal')?.textContent || '').includes(${JSON.stringify(wantDeliverable.title)}));
+          if (!list || list.closest('.wop-reveal')?.offsetParent === null) return null;
+          const all = [...list.querySelectorAll('.deliv__block')];
+          const shown = all.filter((block) => block.offsetParent !== null);
+          if (shown.length !== all.length || all.length === 0) return null;
+          const rows = [...list.querySelectorAll('li')];
+          const sourced = rows.filter((row) => (row.querySelector('.deliv__from')?.textContent || '').trim().length > 0);
+          return {
+            blocks: all.length,
+            firstBlock: (all[0]?.querySelector('dt')?.textContent || '').trim(),
+            rows: rows.length,
+            sourced: sourced.length,
+          };
+        })()`,
+        { timeoutMs: 25_000 },
+      );
+      check(
+        `  ↳ ${wantDeliverable.title}：${wantDeliverable.blocks} 块全部出现，首块是「${wantDeliverable.first}」`,
+        Boolean(blocks && blocks.blocks === wantDeliverable.blocks && blocks.firstBlock.includes(wantDeliverable.first)),
+        blocks ? `${blocks.blocks} 块 · 首块=${blocks.firstBlock}` : "25 秒内没等到全部块出现",
+      );
+      check(
+        `  ↳ 面板里每一行都标了来源（投屏上看得见）`,
+        Boolean(blocks && blocks.rows > 0 && blocks.sourced === blocks.rows),
+        blocks ? `${blocks.sourced}/${blocks.rows} 行带来源` : "没有取到行",
+      );
+    }
+
     /* 更新交付页：交付包 / 目标版本 / 回验与取用记录（版本回执 + 自检）都要在 */
     if (nav.route === "/firmware" && nav.tab === "delivery") {
       const content = await machine.waitFor(

@@ -116,6 +116,15 @@ export type ScriptRound = {
     target: "order-detail" | "clean-flow" | "workbench-cards" | "twin-components";
     sections: string[];
     beats: string[][];
+    /**
+     * 台词怎么切段：`segment`（按句号切，默认）或 `clause`（连逗号、顿号一起切）。
+     *
+     * 为什么需要按轮选：拍点表是**按段**对齐的，而"一句话里三小句"的轮次按句号切
+     * 只切得出 1–2 段，几拍会被挤成一拍（㉓「…重点复核项，检测图像和雷达分析已附上，
+     * 处理建议待专业审核」就是这种）。按小句切正好一拍推一段 ——
+     * 数据清洗流程页（⑰）用的是同一套切法。
+     */
+    split?: "segment" | "clause";
   };
   /**
    * 页码联动：这一轮说完后页面该**跳到哪**。
@@ -1051,14 +1060,21 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     ],
     next: "沈：工单里要写清楚后续责任人。持续受潮的区域先排查积水、排水和渗漏源头。",
     /*
-     * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
-     * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
+     * 这一轮讲的是**小木刚生成的工单草稿**（用户 2026-10-01：「最后几个对话需要更好的
+     * 平台展示，而不只是跳转下页面」）：面板 `draft` 三块跟着三小句出现 ——
+     *   「工单草稿已生成」→ 面板出现（摘要/委托/后续模块同时就位，页面不缺内容）
+     *   「Z04下部已列为重点复核项」→ 重点复核项
+     *   「检测图像和雷达分析已附上」→ 附件
+     *   「处理建议待专业审核」→ 处理建议
+     * 台词三小句用逗号连在一起，所以这一轮按**小句**切段（`split: "clause"`），
+     * 否则四拍会挤成两拍。组名与 `ordersReveal.ORDER_DETAIL_SECTIONS` /
+     * `orderDeliverables.DELIVERABLE_SECTIONS.draft` 三处同源，单测盯着。
      */
     reveal: {
       target: "order-detail",
-      sections: ["order", "scope", "pending"],
-      /* 三段节拍：摘要 → 任务范围 → 后续执行模块（与 `ordersReveal.ts` 的组名对齐） */
-      beats: [["order"], ["scope"], ["pending"]],
+      sections: ["order", "draft-focus", "draft-attachments", "draft-advice"],
+      split: "clause",
+      beats: [["order"], ["draft-focus"], ["draft-attachments"], ["draft-advice"]],
     },
     nav: { route: "order", order: "current" },
     voicePack: "AI语音8",
@@ -1081,14 +1097,27 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     ],
     next: "史：我们将工单状态分为待复核、待处理、处理中和待验收。",
     /*
-     * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
-     * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
+     * 这一轮讲的是**复盘草稿**的四段（面板 `review`）：
+     *   「复盘草稿已生成」→ 面板出现（摘要/委托/后续模块同时就位）
+     *   「分为任务完成情况」→ 任务完成情况
+     *   「异常处置」→ 异常处置
+     *   「版本交付和后续待办」→ 版本交付
+     *   「未完成事项单独列出」→ 后续待办（未完成项单独列出）
+     * 台词是小句连成的，按小句切段正好一拍一块；最后一句「项目经理可直接修改后纳入报告」
+     * 不再新开块（对应空拍），页面停在全亮。
      */
     reveal: {
       target: "order-detail",
-      sections: ["order", "scope", "pending"],
-      /* 三段节拍：摘要 → 任务范围 → 后续执行模块（与 `ordersReveal.ts` 的组名对齐） */
-      beats: [["order"], ["scope"], ["pending"]],
+      sections: ["order", "review-done", "review-issues", "review-version", "review-todo"],
+      split: "clause",
+      beats: [
+        ["order"],
+        ["review-done"],
+        ["review-issues"],
+        ["review-version"],
+        ["review-todo"],
+        [],
+      ],
     },
     nav: { route: "order", order: "current" },
     voicePack: null,
@@ -1111,14 +1140,18 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     ],
     next: "沈：本次待办事项是否已登记？",
     /*
-     * 这一轮讲的正是工单详情里的东西 → 让详情跟着台词逐段展开。
-     * 数量 3 = WorkOrderDetail 的三个可揭示分区（摘要 / 指派 / 环境·下发）。
+     * 这一轮讲的是**交付摘要**（面板 `summary`）：
+     *   「交付摘要已更新」→ 面板出现（摘要/委托/后续模块同时就位）
+     *   「文件校验结果和待办清单分别列出」→ 文件校验结果（逐项 SHA-256）+ 待办清单
+     *   「复盘草稿已关联本次工单」→ 关联与审核
+     *   「等待项目经理审核」→ 不再新开块（对应空拍）
+     * 第二轮把"校验结果"与"待办清单"两块一起带出：台词是一小句，两块都属于它。
      */
     reveal: {
       target: "order-detail",
-      sections: ["order", "scope", "pending"],
-      /* 三段节拍：摘要 → 任务范围 → 后续执行模块（与 `ordersReveal.ts` 的组名对齐） */
-      beats: [["order"], ["scope"], ["pending"]],
+      sections: ["order", "summary-check", "summary-todo", "summary-linked"],
+      split: "clause",
+      beats: [["order"], ["summary-check", "summary-todo"], ["summary-linked"], []],
     },
     nav: { route: "order", order: "current" },
     voicePack: null,

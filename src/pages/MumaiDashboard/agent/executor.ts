@@ -804,7 +804,15 @@ function startOrderDetailReveal(round: ScriptRound, orderId: string, spoken?: un
     那三条规矩（先对齐、只补到点、等挂载）抄第二遍必漏一条。
   */
   runRevealTimeline({
-    segments: splitSegments(mainLineOf(round)),
+    /*
+      切段口径由这一轮自己声明（`reveal.split`）：
+        · 默认按句号切（`splitSegments`）—— 大多数轮次一句一拍；
+        · ㉓㉔㉕ 三小句用逗号连在一起，按小句切（`splitClauses`）才一拍一块
+          （否则四拍被挤成两拍，"念到哪亮到哪"就没了）。
+      ⑰ 的数据清洗流程页一直用的是按小句切（见 startCleanFlowReveal）。
+    */
+    segments:
+      reveal.split === "clause" ? splitClauses(mainLineOf(round)) : splitSegments(mainLineOf(round)),
     beats: reveal.beats,
     apply: (sections) => advanceOrderReveal(orderId, sections),
     clear: () => cancelOrderReveal(),

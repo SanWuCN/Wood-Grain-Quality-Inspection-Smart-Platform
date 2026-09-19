@@ -68,6 +68,7 @@ const {
   advanceOrderReveal,
   cancelOrderReveal,
   revealSectionsFor,
+  splitClauses,
   splitSegments,
 } = await import("./ordersReveal.ts");
 
@@ -75,13 +76,41 @@ const {
  * 1. 分段声明本身
  * ------------------------------------------------------------------ */
 
-test("分段声明：四组、顺序固定、无重复", () => {
+test("分段声明：顺序固定、无重复，且覆盖最后三轮的三份生成物", async () => {
+  /*
+    前四组是第①–④轮讲的那张单本身；后九组是小木在最后三轮生成的交付物
+    （用户 2026-10-01：「最后几个对话需要更好的平台展示，而不只是跳转下页面」）。
+    顺序是契约：`script.ts` 的拍点表按这个顺序推进，来回跳会让页面看起来在闪。
+  */
   assert.deepEqual(
     [...ORDER_DETAIL_SECTIONS],
-    ["order", "scope", "tasks", "pending"],
-    "四组必须按播报顺序声明：摘要 → 范围与清单 → 四项任务 → 待确认与后续",
+    [
+      "order",
+      "scope",
+      "tasks",
+      "pending",
+      "draft-focus",
+      "draft-attachments",
+      "draft-advice",
+      "review-done",
+      "review-issues",
+      "review-version",
+      "review-todo",
+      "summary-check",
+      "summary-todo",
+      "summary-linked",
+    ],
+    "组名顺序即播报顺序：摘要 → 范围与清单 → 四项任务 → 待确认与后续 → ㉓草稿 → ㉔复盘 → ㉕交付摘要",
   );
   assert.equal(new Set(ORDER_DETAIL_SECTIONS).size, ORDER_DETAIL_SECTIONS.length, "不能有重复组名");
+
+  /* 三份生成物的组名必须与数据模块逐字一致（两边各写一份就会漂） */
+  const { DELIVERABLE_SECTIONS } = await import("./pages/orders/orderDeliverables.ts");
+  assert.deepEqual(
+    [...DELIVERABLE_SECTIONS.draft, ...DELIVERABLE_SECTIONS.review, ...DELIVERABLE_SECTIONS.summary],
+    [...ORDER_DETAIL_SECTIONS].slice(4),
+    "数据模块里的三份生成物组名与揭示声明必须一一对应",
+  );
 });
 
 /* ------------------------------------------------------------------ *
@@ -213,7 +242,9 @@ test("语义拍点：每段至少推进一组，且顺序与声明一致", () =>
       seen.add(key);
     }
   }
-  assert.deepEqual([...seen], [...ORDER_DETAIL_SECTIONS], "四段念完必须覆盖全部四组");
+  /* 这里比的是**这一轮声明的组**（BEATS_V1 的并集），不是页面上全部组 ——
+     最后三轮的三份生成物不在第①轮的拍点表里，拿全部组去比会假红 */
+  assert.deepEqual([...seen], BEATS_V1.flat(), "四段念完必须覆盖这一轮声明的全部组");
 });
 
 test("拍点时间按**段**累加，不是按整段总字数平均分配", () => {
@@ -245,8 +276,8 @@ test("段数少于拍数时把多出来的组摊到现有段上，一组都不�
   assert.equal(two.length, 2, "两段台词就是两个拍点");
   assert.equal(two[0].sections[0], "order", "第一段必须先亮摘要");
   assert.ok(two[1].sections.includes("pending"), "最后一段必须把末组补齐");
-  assert.deepEqual([...two[0].sections, ...two[1].sections], [...ORDER_DETAIL_SECTIONS],
-    "两拍合起来要覆盖四组，不重不漏");
+  assert.deepEqual([...two[0].sections, ...two[1].sections], BEATS_V1.flat(),
+    "两拍合起来要覆盖这一轮声明的全部组，不重不漏");
 
   /* 段数 ≥ 拍数：原样返回，逐拍推进的节奏不变 */
   const aligned = alignBeats(SEGMENTS_V1, BEATS_V1);
@@ -289,7 +320,8 @@ test("真实 25 轮：凡声明揭示的组，都必须排得进某一拍（一�
   assert.ok(rounds.length >= 6, `应有多轮声明了工单详情揭示（实际 ${rounds.length} 轮）`);
 
   for (const { roundNo, reveal, text } of rounds) {
-    const segments = splitSegments(text);
+    /* 切段口径必须与执行侧一致（`executor.startOrderDetailReveal`）：㉓㉔㉕ 按小句切 */
+    const segments = reveal.split === "clause" ? splitClauses(text) : splitSegments(text);
     const schedule = buildRevealSchedule(segments, alignBeats(segments, reveal.beats));
     const planned = schedule.flatMap((b) => b.sections);
     const missing = reveal.sections.filter((s) => !planned.includes(s));
