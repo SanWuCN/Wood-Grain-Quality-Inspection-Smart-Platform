@@ -44,20 +44,17 @@ export function OriginalPhotoWindow({ componentId, zoneId, annotation, onClose }
   /** 默认用缩略图（宽 640）加载，点「看原尺寸」再换 2 MB 的大图 */
   const [fullSize, setFullSize] = useState(false);
   const [zoomed, setZoomed] = useState(true);
+  /**
+   * 并排对照（用户 2026-09-30：「进行缺失标注对比啥的」）。
+   *
+   * 默认开：左边整张原图（看得出"这是柱子的哪一段"），右边按框放大（看得出"这处缺损长什么样"）。
+   * 关掉就回到单张放大 —— 投影幕小、或想把图铺满时用得上。
+   */
+  const [compare, setCompare] = useState(true);
 
   /* 没有框就没什么可放大的 —— 按剧本原文："没有标注坐标时只打开原图" */
   const box = photo?.box ?? null;
   const zoom = zoomFactorFor(box);
-  const innerStyle = useMemo<React.CSSProperties | undefined>(() => {
-    if (!photo) return undefined;
-    const style: React.CSSProperties = { aspectRatio: `${photo.width} / ${photo.height}` };
-    if (zoomed && box) {
-      style.transform = `scale(${zoom})`;
-      /* 放大中心 = 框中心：这样"放大疑点区域"是字面意义上成立的 */
-      style.transformOrigin = `${(box.x + box.w / 2) * 100}% ${(box.y + box.h / 2) * 100}%`;
-    }
-    return style;
-  }, [photo, zoomed, box, zoom]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -68,6 +65,41 @@ export function OriginalPhotoWindow({ componentId, zoneId, annotation, onClose }
   }, [onClose]);
 
   const src = photo ? (fullSize ? photo.url : photo.thumbUrl) : "";
+
+  /** 一块画面：`mode` 决定是"整张"还是"按框放大" */
+  const pane = (mode: "whole" | "zoom") => {
+    if (!photo) return null;
+    const isZoom = mode === "zoom" && Boolean(box) && zoomed;
+    const style: React.CSSProperties = { aspectRatio: `${photo.width} / ${photo.height}` };
+    if (isZoom && box) {
+      style.transform = `scale(${zoom})`;
+      style.transformOrigin = `${(box.x + box.w / 2) * 100}% ${(box.y + box.h / 2) * 100}%`;
+    }
+    return (
+      <figure className={`opw__pane${isZoom ? " is-zoom" : ""}`} key={mode}>
+        <div className="opw__frame">
+          <div className="opw__inner" style={style}>
+            <img className="opw__img" src={src} alt={`${componentId} 原始影像 ${photo.file}`} />
+            {box ? (
+              <span
+                className="opw__box"
+                style={{
+                  left: `${box.x * 100}%`,
+                  top: `${box.y * 100}%`,
+                  width: `${box.w * 100}%`,
+                  height: `${box.h * 100}%`,
+                }}
+                aria-hidden="true"
+              />
+            ) : null}
+          </div>
+        </div>
+        <figcaption>
+          {mode === "whole" ? `原图 · 整张（${photo.file}）` : box ? `疑点区域 · 放大 ${zoom}×` : "该原片无标注框 · 只打开原图"}
+        </figcaption>
+      </figure>
+    );
+  };
 
   return (
     <Modal
@@ -95,6 +127,13 @@ export function OriginalPhotoWindow({ componentId, zoneId, annotation, onClose }
               {zoomed ? `已放大疑点区域 ${zoom}×` : "放大疑点区域"}
             </Btn>
           ) : null}
+          <Btn
+            tone={compare ? "primary" : "default"}
+            active={compare}
+            onClick={() => setCompare((value) => !value)}
+            title="左边整张原图、右边疑点放大，便于说明位置与形态">
+            {compare ? "并排对照（已开）" : "并排对照"}
+          </Btn>
           <Btn tone="primary" onClick={onClose}>
             关闭
           </Btn>
@@ -102,42 +141,28 @@ export function OriginalPhotoWindow({ componentId, zoneId, annotation, onClose }
       }>
       {photo ? (
         <div className="opw">
-          <figure className="opw__stage">
-            <div className={`opw__frame${zoomed && box ? " is-zoomed" : ""}`}>
-              {/* inner 的宽高比 = 原图比例；放大作用于它，所以框跟着画面一起缩放 */}
-              <div className="opw__inner" style={innerStyle} data-zoomed={zoomed && box ? "1" : "0"}>
-                <img className="opw__img" src={src} alt={`${componentId} 原始影像 ${photo.file}`} />
-                {/*
-                  平台自己画的那个框：与图片里**人工画的红框**是两回事 ——
-                  一个是原片自带的（烧在像素里），一个是平台按记录叠的。
-                  图例里分开写，免得被当成同一件事。
-                */}
-                {box ? (
-                  <span
-                    className="opw__box"
-                    style={{
-                      left: `${box.x * 100}%`,
-                      top: `${box.y * 100}%`,
-                      width: `${box.w * 100}%`,
-                      height: `${box.h * 100}%`,
-                    }}
-                    aria-hidden="true"
-                  />
-                ) : null}
-              </div>
+          <div className="opw__stage">
+            {/*
+              并排对照（默认）＝ 左整张 / 右放大；单张模式只留放大那一块。
+              两块用的是同一个 `src`（浏览器只下一次）与同一个框坐标，所以"左边框在哪、
+              右边放大的是不是同一处"一眼能对上。
+            */}
+            <div className={`opw__panes${compare && box ? " is-compare" : ""}`}>
+              {compare && box ? pane("whole") : null}
+              {pane("zoom")}
             </div>
-            <figcaption className="opw__legend">
+            <div className="opw__legend">
               <span className="opw__chip opw__chip--human">原片自带的红框（人工标注）</span>
               <span className="opw__chip opw__chip--platform">平台按记录叠的框</span>
               {zoomed && box ? (
-                <span className="muted">当前视图：以标注框为中心放大 {zoom}×</span>
+                <span className="muted">放大范围 = 标注框中心，倍率 {zoom}×</span>
               ) : (
                 <span className="muted">
-                  {box ? "当前视图：整张原图" : "该原片没有标注坐标 —— 按剧本只打开原图，不做放大定位"}
+                  {box ? "当前未放大：显示整张原图" : "该原片没有标注坐标 —— 按剧本只打开原图，不做放大定位"}
                 </span>
               )}
-            </figcaption>
-          </figure>
+            </div>
+          </div>
 
           <aside className="opw__side">
             <h4 className="sub">这处疑点的记录</h4>

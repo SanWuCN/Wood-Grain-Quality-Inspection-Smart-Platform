@@ -314,11 +314,13 @@ try {
             if (!win) return null;
             const img = win.querySelector('.opw__img');
             const box = win.querySelector('.opw__box');
-            const inner = win.querySelector('.opw__inner');
+            const panes = win.querySelectorAll('.opw__pane').length;
+            const zoomPane = win.querySelector('.opw__pane.is-zoom .opw__inner');
             return {
               natural: img ? img.naturalWidth : 0,
               box: Boolean(box),
-              zoomed: (inner?.getAttribute('style') || '').includes('scale('),
+              panes,
+              zoomed: (zoomPane?.getAttribute('style') || '').includes('scale('),
               src: img ? img.getAttribute('src') : '',
             };
           })()`,
@@ -333,6 +335,12 @@ try {
           `  ↳ 窗口里有平台的标注框，且默认按框放大`,
           Boolean(photoWin?.box && photoWin?.zoomed),
           `框=${photoWin?.box} 放大=${photoWin?.zoomed}`,
+        );
+        /* 用户 2026-09-30：「进行缺失标注对比啥的」→ 默认并排：左边整张、右边放大 */
+        check(
+          `  ↳ 并排对照（原图 · 整张 / 疑点区域 · 放大）`,
+          photoWin?.panes === 2,
+          `画面块数=${photoWin?.panes}（期望 2）`,
         );
       }
       /*

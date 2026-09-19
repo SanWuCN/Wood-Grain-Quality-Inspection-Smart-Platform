@@ -27,6 +27,41 @@
   gap: 8px;
 }
 
+/*
+  并排对照：左「原图 · 整张」/ 右「疑点区域 · 放大」。
+  两块同宽（1fr 1fr），窄屏时上下堆叠；单张模式时只有一块。
+*/
+.opw__panes {
+  display: grid;
+  gap: 8px;
+}
+
+.opw__panes.is-compare {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+  .opw__panes.is-compare {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.opw__pane {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.opw__pane figcaption {
+  color: var(--ma-text-3, #8b98ab);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.opw__pane.is-zoom figcaption {
+  color: var(--ma-text-2, #c6d2e2);
+}
+
 .opw__frame {
   position: relative;
   display: grid;
