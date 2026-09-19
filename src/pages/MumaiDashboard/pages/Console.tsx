@@ -15,7 +15,7 @@
  * （评审反复强调「成功反馈必须对应实际动作」）。缺什么就写在页面下方。
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import NumberAnimation from "@/components/numberAnimation";
 import { Panel } from "../Panel";
 import { Btn, SourceTag, StateBlock, StatusChip, Toolbar } from "../ui";
@@ -27,11 +27,12 @@ import {
   type SyncProbe,
   type WriteLogPage,
 } from "../api/client";
-import { isOnline, useSharedStore } from "../store/shared";
+import { agentTurns, isOnline, useSharedStore } from "../store/shared";
 import { useMumai } from "../context";
 import { actorName } from "../api/accounts";
 import { addressGroups, endRows, hostOf, isLocalHost, probeVerdict, recommendedUrl, serverLine } from "./collabLogic";
 import { followEnabled, setFollowEnabled } from "../agent/roundSync";
+import { roundSyncView, selfEndIds } from "../lib/lanRoundSync";
 
 /** 内网端数多久读一次：它是本页唯一会"自己变"的读数（别人开关页面） */
 const PEERS_POLL_MS = 10000;
@@ -90,6 +91,22 @@ export default function Console() {
   /** 最近谁从哪台机器写了什么 */
   const [writeLog, setWriteLog] = useState<WriteLogPage | null>(null);
   const probeTimer = useRef(0);
+  /*
+    「本轮同步」读数（用户 2026-10-01 长期口径）：
+    讲解机按下某一轮之后，各端有没有跟到这一轮的页面上 —— 现场被问
+    「两台机器是同一屏吗」时，这里有一句可以直接念的话。
+    数据：store 里的小木回合留痕（`agentTurn`）+ 内网协同面板的端明细（`peers.ends`）。
+  */
+  const turns = useSharedStore(agentTurns);
+  const roundSync = useMemo(
+    () =>
+      roundSyncView(
+        turns.map((entity) => entity.data),
+        peers?.ends ?? [],
+        selfEndIds(peers?.ends ?? []),
+      ),
+    [turns, peers],
+  );
 
   const refresh = useCallback(async () => {
     if (!online) return;
@@ -481,6 +498,23 @@ export default function Console() {
                   </ul>
                 ) : (
                   <em>还没有端连上来 —— 同事那台不在这份列表里，说明他没连到这台服务器</em>
+                )}
+              </span>
+            </li>
+            <li>
+              <b>本轮同步</b>
+              <span>
+                {roundSync ? (
+                  <>
+                    <StatusChip text={roundSync.verdict} tone={roundSync.tone} />
+                    <em className="cs-lan__hint">
+                      最近一轮：{roundSync.roundNo}（{roundSync.by} · {roundSync.at.slice(11, 19)}）
+                      {roundSync.target ? ` · 落点 ${roundSync.target}` : " · 本轮不换页"}
+                      {roundSync.lagging.length ? ` · ${roundSync.laggingLabel}：${roundSync.lagging.map((row) => row.label).join("；")}` : ""}
+                    </em>
+                  </>
+                ) : (
+                  <em className="cs-lan__hint">还没有小木回合留痕 —— 讲第一轮之后这里会显示各端跟没跟上。</em>
                 )}
               </span>
             </li>

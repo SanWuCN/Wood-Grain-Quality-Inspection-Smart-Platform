@@ -127,8 +127,14 @@ export function resolveArgs(
   return out;
 }
 
-/** 拼接查询串（navigate_page 支持 route + tab / batch / component / view / q） */
-function withQuery(route: string, args: Record<string, string>, keys: string[]): string {
+/**
+ * 拼接查询串（navigate_page 支持 route + tab / batch / component / view / q）
+ *
+ * 导出给「本轮同步」读数用（`lib/lanRoundSync.ts`）：那边要判断"各端是不是跟到了
+ * 这一轮的落点"，必须用**同一套**拼串规则，否则两边算出来的地址不一样，
+ * 面板会把跟上的端误判成没跟上。
+ */
+export function withQuery(route: string, args: Record<string, string>, keys: string[]): string {
   const params = new URLSearchParams();
   keys.forEach((key) => {
     const value = args[key];

@@ -102,6 +102,37 @@ try {
   const afterOne = await turnsCount();
   check("一轮广播只留一条痕（B 不会把跟来的那一轮再广播出去）", afterOne === before + 1, `留痕 ${before} → ${afterOne}`);
 
+  /* ---------- ①b 「本轮同步」读数：A 的面板上有一句能直接念的结论 ---------- */
+  /*
+    用户 2026-10-01 长期口径：现场被问「两台机器是同一屏吗」时，讲解人需要一句当场可用的话。
+    这一行由 `lib/lanRoundSync.ts` 算（复用 `routeSatisfied` 判同页），数据是
+    `agentTurn` 留痕 + `peers.ends`。判据写宽一点：只要指出"有端已同页 + 是第几轮"就算过 ——
+    ends 里可能还留着上一台已关闭的端（它会如实显示成掉队，不该让这条假红）。
+  */
+  await A.evaluate(`location.hash = '#/console'; 1`);
+  await sleep(2500);
+  /*
+    ⚠ 判据要容忍端上报的 15 秒延迟：刚讲完一轮时端可能还没上报，面板会如实说
+    「还没上报」（tone=info），这不是故障。所以只要这一行**给出一句提到轮次的话**就算过，
+    并把原文打出来供人工核对。
+  */
+  const readout = await A.waitFor(
+    `(() => {
+      const row = [...document.querySelectorAll('.cs-lan li')].find((node) => (node.textContent || '').includes('本轮同步'));
+      if (!row) return null;
+      const text = (row.innerText || '').replace(/\\s+/g, ' ').trim();
+      /* 这一行一定带「最近一轮：<轮次>（谁 · 时刻）· 落点 …」——按它判，别按"第几轮"的措辞判
+         （刚讲完那一档的结论写的是「还没上报」，不含"第"字） */
+      return /最近一轮/.test(text) ? { text } : null;
+    })()`,
+    { timeoutMs: 20_000 },
+  );
+  check(
+    "A 在排练控制台看到「本轮同步」：给出一句提到轮次、可直接念的结论",
+    Boolean(readout && /最近一轮/.test(readout.text) && /落点|不换页/.test(readout.text)),
+    readout ? readout.text.slice(0, 130) : "20 秒内没读到「本轮同步」这一行",
+  );
+
   /* ---------- ② 主动预警（⑬）在第二台也弹窗 ---------- */
   await A.evaluate(`(() => {
     const fire = (key) => window.dispatchEvent(new KeyboardEvent('keydown', { key, code: 'Key' + key.toUpperCase(), ctrlKey: true, bubbles: true, cancelable: true }));
