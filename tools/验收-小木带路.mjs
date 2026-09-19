@@ -533,7 +533,11 @@ try {
           if (!query || !hits || !detail) return null;
           return { query, hits, cards, detail };
         })()`,
-        { timeoutMs: 20_000 },
+        /*
+          ⚠ 45 秒：检索是**服务端真跑 RAG**，而服务刚重启时索引要现建/现热，
+          第一次检索可能十几秒才出结果（实测 20 秒窗口偶发假红一次）。
+        */
+        { timeoutMs: 45_000 },
       );
       check(
         `  ↳ ① 知识库页面上真的跑出了这一问（问题在框里 + 有命中 + 右侧详情）`,
