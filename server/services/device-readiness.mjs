@@ -65,7 +65,25 @@ export function configStateOf({ path, text }) {
  * @param facts 见 `createDeviceReadiness().snapshot()` 的组装处
  */
 export function buildReadiness(facts) {
-  const { health, hosting, cart, streams, device, screen, configs, generatedAt } = facts;
+  /**
+ * 「多久没收到小车状态」这一句。
+ *
+ * ⚠ 与前端 `src/pages/MumaiDashboard/pages/cartStatusText.ts` 的 `lastSeenText` 是**同一套措辞**
+ * （服务端是 .mjs、前端是 .ts，两边没法共享代码，所以改一处要顺手改另一处）。
+ * `ageMs === null` 表示**本轮服务启动后还没收到过**（与"刚断线"是两回事，见 `cart.mjs` 的注释）。
+ */
+function lastSeenText(ageMs) {
+  if (ageMs === null || ageMs === undefined) return "本轮服务启动后还没收到过小车状态";
+  const seconds = Math.round(Number(ageMs) / 1000);
+  if (seconds < 5) return "刚刚还收到过小车状态";
+  if (seconds < 60) return `最后收到小车状态：${seconds} 秒前`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `最后收到小车状态：${minutes} 分钟前`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `最后收到小车状态：${hours} 小时前`;
+  return `最后收到小车状态：${Math.round(hours / 24)} 天前`;
+}
+const { health, hosting, cart, streams, device, screen, configs, generatedAt } = facts;
   const sections = [];
 
   /* ---------------- 0 平台服务 ---------------- */
@@ -123,11 +141,38 @@ export function buildReadiness(facts) {
       detail: `configured=true · canControl=${cart.canControl} · 数据年龄 ${cart.ageMs === null || cart.ageMs === undefined ? "—" : `${Math.round(cart.ageMs)}ms`}`,
     });
   } else {
+    /*
+      ── 「车不在网上」和「车上的服务没起」必须分开说（2026-09-19 现场）──────────
+      用户报的是「莫名其妙服务掉了，不能同步小车」。查下来小车整机不在网上
+      （本机 ARP 表里都没有它、ping 不通），而平台这一侧的提示原来只有
+      「地址配了但连不上，通常是网段 / 防火墙 / 小车服务没起」—— 照着这句去查
+      平台代码或防火墙，方向就错了。
+
+      `ETIMEDOUT` 的语义很明确：**对端根本没应答**（不在网上 / 断电 / 换了网段），
+      而不是"连上了被拒"（那才是 `ECONNREFUSED`，服务没起）。所以按错误码给不同的下一步。
+    */
+    const reason = String(cart.lastError ?? "");
+    const unreachable = /ETIMEDOUT|EHOSTUNREACH|ENETUNREACH/i.test(reason);
     cartItems.push({
       level: "fail",
       title: `平台 → 小车链路 ${cart.link}：${cart.lastError ?? "无错误信息"}`,
-      detail: "地址配了但连不上，通常是网段 / 防火墙 / 小车服务没起",
-      hints: ["在后端这台机器上跑：curl -s http://<小车IP>:8765/api/health", "通不了 = 网络问题，不是平台代码问题"],
+      detail: `${
+        unreachable
+          ? "对端没有任何应答（ETIMEDOUT）—— 车**不在网上**，不是平台代码问题，也不是「服务没起」"
+          : "地址配了但连不上，通常是网段 / 防火墙 / 小车服务没起"
+      }；${lastSeenText(cart.ageMs)}`,
+      hints: unreachable
+        ? [
+            "先给小车重新上电，等它连回 Wi-Fi（车上的 RViz 也要靠它自己起来）",
+            "在平台这台机器上确认它到底在不在网上：arp -a | findstr 192.168.31（列表里没有它 = 车不在网上）",
+            "小车整机重启后，车上的控制台服务会自己拉起 RViz；RViz 画面要等它启动完（几十秒）",
+            "它换了 IP 的可能很小但要排除：车里若是 DHCP，重启后地址会变，变了要同步改 server/data/cart.json 并重启后端",
+          ]
+        : [
+            "在后端这台机器上跑：curl -s http://<小车IP>:8765/api/health",
+            "通不了 = 网络问题，不是平台代码问题",
+            "通了但平台还报错 = 检查 server/data/cart.json 里的 url 与 token",
+          ],
     });
   }
   for (const probe of streams) {
@@ -142,18 +187,39 @@ export function buildReadiness(facts) {
         hints: ["补 server/data/cart.json 再重启后端"],
       });
     } else {
-      /* 502 的三种原因要分开说：连不上 / 不是 multipart / 连上了但没出帧 */
+      /*
+        502 的原因要分开说：连不上 / 不是 multipart / 连上了但没出帧。
+
+        ⚠ 还有一个会误导人的坑（2026-09-19 修）：车**不在网上**时，
+        `streamProbe` 会先撞它的"首帧 1.5 秒"计时器，reason 落成 `no-frames` ——
+        于是页面说「平台能连上小车，但这一路没有画面」，把人往"RViz 没起"上引。
+        而真相是整台车都不在网上：这时候该查的是车的电和网，不是 RViz。
+        所以先看**链路状态**：车不可达时，直接把话说成"车不在网上"。
+      */
+      const carOffline = cart.link === "offline" || cart.link === "connecting";
       const why =
-        probe.reason === "no-frames" || probe.reason === "timeout"
-          ? "小车这一路没有出帧（RViz / 摄像头可能没起）"
-          : probe.reason === "not-multipart"
-            ? "这一路返回的不是 MJPEG（小车侧该通道没就绪）"
-            : `连不上小车视频通道（${probe.reason}）`;
+        probe.reason === "not-multipart"
+          ? "这一路返回的不是 MJPEG（小车侧该通道没就绪）"
+          : carOffline
+            ? "小车当前不可达（整机不在网上），这一路自然也拿不到画面"
+            : probe.reason === "no-frames" || probe.reason === "timeout"
+              ? "小车这一路没有出帧（RViz / 摄像头可能没起）"
+              : `连不上小车视频通道（${probe.reason}）`;
       cartItems.push({
         level: "fail",
         title: `${label} 502 —— ${why}`,
-        detail: "平台能连上小车，但这一路没有画面",
-        hints: ["在小车上验该通道：curl -s -m 3 -o NUL -w '%{size_download}' http://127.0.0.1:8765/api/streams/<通道>.mjpeg", "字节为 0 = 该通道未就绪（RViz 没起 / 摄像头没起），不是平台的问题"],
+        detail: carOffline
+          ? `平台到小车这条链路是 ${cart.link}：先把车弄上网，再谈 RViz 有没有出帧`
+          : "平台能连上小车，但这一路没有画面",
+        hints: carOffline
+          ? [
+              "先给小车重新上电并确认它回到 Wi-Fi（arp -a | findstr 192.168.31 里要能看到它）",
+              "车回来后 RViz 由车上的控制台服务自启，画面要等几十秒；不用在平台侧改任何东西",
+            ]
+          : [
+              "在小车上验该通道：curl -s -m 3 -o NUL -w '%{size_download}' http://127.0.0.1:8765/api/streams/<通道>.mjpeg",
+              "字节为 0 = 该通道未就绪（RViz 没起 / 摄像头没起），不是平台的问题",
+            ],
       });
     }
   }

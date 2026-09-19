@@ -26,7 +26,7 @@ import { useMumai } from "../context";
 import { permissionHint } from "../auth";
 import { Panel } from "../Panel";
 import { Btn, Modal, PermNote, StateBlock, StatusChip } from "../ui";
-import { apiRequest, isApiError } from "../api/client";
+import { api, apiRequest, isApiError } from "../api/client";
 import { missions, useSharedStore } from "../store/shared";
 import { acceptCruiseMission, activeCruiseMission, cancelCruiseMission, completeCruiseMission, cruiseRevisionOf } from "../store/cruise";
 import { CruiseTaskBanner } from "./cart/CruiseTaskBanner";
@@ -34,6 +34,8 @@ import { CruiseTaskBanner } from "./cart/CruiseTaskBanner";
 import { CHANNEL_PATROL_ROUND_NO } from "../agent/demoActions";
 import { openDemoSurface } from "../agent/demoSurfaceAction";
 import MapCanvas, { type MapCanvasMode } from "./cart/MapCanvas";
+/* 「最后收到小车状态：N 分钟前」这一句的口径（单测在 cartStatusText.test.ts，.tsx 里测不了） */
+import { cartAgeMs, lastSeenText } from "./cartStatusText";
 import { MapArchivePanel } from "./MapArchivePanel";
 import ParameterStrip from "./cart/ParameterStrip";
 import { DEFAULT_VIEW, fitView, missionStateText, type MapView } from "./cart/geometry";
@@ -83,6 +85,74 @@ function formatTime(value: string | number | null | undefined): string {
 const SPEED_MIN = 0.05;
 const SPEED_MAX = 0.35;
 
+/**
+ * 一路视频流（RViz / 相机）的**带重试占位**。
+ *
+ * ── 为什么不能只写一个裸 `<img>`（2026-09-19，小车寄走之后）────────────
+ * 小车不在时，`/api/cart/stream/<通道>` 会回 502 —— 浏览器把它当**图片加载失败**，
+ * 于是只有一个裂图图标 + alt 文本：既看不出"是小车没接入、不是平台坏了"，
+ * 也**永远不会自己恢复**（img 加载失败后不会重试），车回来还得手动刷新。
+ *
+ * 所以这里做两件裸 `<img>` 做不到的事：
+ *   · 加载失败 → 明确写"小车未接入 / 这一路没出帧"，并说明**车回来会自己恢复**；
+ *   · 每 `RETRY_MS` 换一个 `key` 重建 `<img>`，即**自动重试**（局域网里 3 秒足够，
+ *     不至于把服务端打满；失败一次也只多一个请求）。
+ *
+ * 不用定时器时（车此刻在线、只是这一路没出帧）也照样重试：那种情况通常几十秒内会好。
+ */
+const STREAM_RETRY_MS = 3000;
+
+function LiveStream({ channel, alt, hint }: { channel: "rviz" | "camera"; alt: string; hint: string }) {
+  const [attempt, setAttempt] = useState(0);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!failed) return undefined;
+    const timer = window.setTimeout(() => {
+      setFailed(false);
+      setAttempt((n) => n + 1);
+    }, STREAM_RETRY_MS);
+    return () => window.clearTimeout(timer);
+  }, [failed, attempt]);
+
+  if (failed) {
+    return (
+      <div className="cart-stream-offline" role="status">
+        <b>{alt}：未接入</b>
+        <small>{hint}</small>
+        <small className="muted">画面会在小车恢复后自动接上（每 {STREAM_RETRY_MS / 1000} 秒重试一次，不用刷新页面）</small>
+      </div>
+    );
+  }
+  return (
+    <img
+      key={attempt}
+      src={streamUrl(channel)}
+      alt={alt}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+
+/**
+ * 小车不在时，运营/讲解一眼要看到的那句话。
+ * 与设备接入页的服务端自检是**同一口径**（`ETIMEDOUT` = 车不在网上），不另编一套。
+ */
+function cartOfflineHint(
+  carLink: string | undefined,
+  lastError: string | null | undefined,
+  status?: { ageMs?: number | null; lastSeenAt?: string | null } | null,
+): string {
+  /* 年龄怎么取由 `cartAgeMs` 定（本轮 ageMs 优先，其次服务端落盘的上一次成功联系） */
+  const seen = lastSeenText(cartAgeMs(status));
+  if (carLink === "offline" && /ETIMEDOUT|EHOSTUNREACH|ENETUNREACH/i.test(String(lastError ?? ""))) {
+    return `小车不在网上（平台等不到任何应答）。${seen}。先给小车重新上电并确认它回到 Wi-Fi，平台侧不用改。`;
+  }
+  if (carLink === "offline") return `平台到小车的连接断了，正在退避重连。${seen}。`;
+  return "小车这一路当前没有出帧（RViz / 摄像头可能没起）。";
+}
+
 export default function Mapping() {
   const { toast, pushEvent, can, sharedSessionId } = useMumai();
   const navigate = useNavigate();
@@ -100,6 +170,9 @@ export default function Mapping() {
   const [listError, setListError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
+  /** 链路重置按钮的忙碌态与结果提示（只重置平台↔小车那一条连接，不重启任何服务） */
+  const [linkResetBusy, setLinkResetBusy] = useState(false);
+  const [linkResetNote, setLinkResetNote] = useState("");
   const [lastAction, setLastAction] = useState<{ at: number; text: string; tone: "ok" | "warn" | "danger" } | null>(null);
   const [params, setParams] = useSearchParams();
 
@@ -280,6 +353,28 @@ export default function Mapping() {
     );
   const stopMapping = () =>
     void run("mapping/stop", "mapping/stop", {}, () => "已请求结束建图（结束不自动保存地图）");
+
+  /**
+   * 重置平台↔小车的**那一条**连接（按钮：「重置链路」）。
+   *
+   * 与上面那些 `run(...)` 动作不是一类东西，所以**刻意不走 `run`/CART_ACTIONS 白名单**：
+   *   · 那些是发给**小车**的控制动作（要令牌、要权限、走 `/api/cart/action`）；
+   *   · 这个是**平台自己的运维动作**，只把平台侧那条状态连接作废重来 ——
+   *     不重启平台进程（页面不掉线、不用刷新）、不重启小车（建图/导航不中断）。
+   * 权限在服务端按 `console:admin` 判，这里只负责把结果如实显示出来。
+   */
+  const resetCartLink = async () => {
+    setLinkResetBusy(true);
+    setLinkResetNote("");
+    try {
+      const result = await api.cartReconnect();
+      setLinkResetNote(result.message || "已重置小车链路，正在重连");
+    } catch (cause) {
+      setActionError(isApiError(cause) ? cause.message : "重置小车链路失败");
+    } finally {
+      setLinkResetBusy(false);
+    }
+  };
   const saveMap = () =>
     void run("mapping/save", "mapping/save", { name: mapName.trim() }, (result) => {
       const saved = result.map as CartSavedMap | undefined;
@@ -532,6 +627,24 @@ export default function Mapping() {
               ? `最近一份状态已过去 ${Math.round((cart.ageMs ?? 0) / 1000)} 秒，运动操作已禁用`
               : "到小车的连接已断开，正在退避重连"}
           </span>
+          {/*
+            掉线时最顺手的位置（2026-09-19 用户口径）：
+            这里做的是"把平台↔小车这条连接作废重来"，**不重启平台、不重启小车** ——
+            页面不掉线、不用刷新，车上的建图/导航也不中断。
+            另外把退避从最多 15 秒拨回 1 秒，不然按下去要干等十几秒才看着有反应。
+          */}
+          <button type="button" disabled={linkResetBusy} onClick={() => void resetCartLink()}>
+            {linkResetBusy ? "重置中…" : "重置链路"}
+          </button>
+        </div>
+      ) : null}
+      {linkResetNote ? (
+        <div className="cart-banner is-warn">
+          <b>链路已重置</b>
+          <span>{linkResetNote}</span>
+          <button type="button" onClick={() => setLinkResetNote("")}>
+            知道了
+          </button>
         </div>
       ) : null}
       {actionError ? (
@@ -1023,7 +1136,11 @@ export default function Mapping() {
                       width: rvizBox ? `${rvizBox.width}px` : undefined,
                       height: rvizBox ? `${rvizBox.height}px` : undefined,
                     }}>
-                    <img src={streamUrl("rviz")} alt="小车 RViz 屏幕画面" />
+                    <LiveStream
+                      channel="rviz"
+                      alt="小车 RViz 屏幕画面"
+                      hint={cartOfflineHint(cart.link, cart.status?.lastError, cart.status)}
+                    />
                     <span className="cart-view__tag">
                       RViz{rvizSize ? ` · ${rvizSize.width}×${rvizSize.height}` : ""}
                     </span>
@@ -1064,7 +1181,11 @@ export default function Mapping() {
             }
             className="cart-video">
             <div className="cart-video__frame" style={{ aspectRatio: cameraRatio }}>
-              <img src={streamUrl("camera")} alt="小车摄像头实时画面" />
+              <LiveStream
+                channel="camera"
+                alt="小车摄像头实时画面"
+                hint={cartOfflineHint(cart.link, cart.status?.lastError, cart.status)}
+              />
             </div>
           </Panel>
 

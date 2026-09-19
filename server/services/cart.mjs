@@ -25,7 +25,7 @@
  * 这一页依然可看**，只是所有按钮置灰并说明原因；配了令牌才有控制权。
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { get as httpGet, request as httpRequest } from "node:http";
 import { get as httpsGet } from "node:https";
@@ -188,6 +188,42 @@ export function createCartService({ logger = console } = {}) {
   }
 
   /**
+   * 「最后一次收到小车状态」**落盘**（跨服务重启也记得住）。
+   *
+   * ── 为什么要落盘 ────────────────────────────────────────────────────
+   * 现场问得最多的第二句是「上次是什么时候通的」。`stateAt` 只在内存里，
+   * 服务一重启就变 `null`，页面上只剩「本轮服务启动后还没收到过」——
+   * 那句话没错，但答不了问题。所以每次收到状态顺手记一笔（**最多每分钟写一次**，
+   * 不给磁盘添乱），启动时读回来。
+   *
+   * ⚠ 写在 `server/data/`（与 `cart.json` 同目录，.gitignore 已忽略），
+   * 不进数据库：只是一条读数，不值得为它改表结构。
+   */
+  const LAST_SEEN_FILE = resolve("server/data/cart-last-seen.json");
+  let lastSeenBeforeBoot = null;
+  let lastSeenWrittenAt = 0;
+  try {
+    const saved = JSON.parse(readFileSync(LAST_SEEN_FILE, "utf8"));
+    if (saved?.at && !Number.isNaN(Date.parse(saved.at))) lastSeenBeforeBoot = saved.at;
+  } catch {
+    /* 第一次跑没有这个文件，正常 */
+  }
+  function rememberLastSeen(at) {
+    if (at - lastSeenWrittenAt < 60_000) return;
+    lastSeenWrittenAt = at;
+    try {
+      writeFileSync(LAST_SEEN_FILE, JSON.stringify({ at: new Date(at).toISOString() }), "utf8");
+    } catch {
+      /* 写不进去不影响链路本身 */
+    }
+  }
+  /** 界面要用的"最后一次收到状态"的时刻：本轮的优先，其次上一次服务记下的 */
+  function lastSeenAt() {
+    if (stateAt) return new Date(stateAt).toISOString();
+    return lastSeenBeforeBoot;
+  }
+
+  /**
    * 对外的状态快照。
    *
    * 文档 §2：超过 3 秒没有新状态就应显示断线并禁用运动操作 —— 这个判定放在
@@ -205,6 +241,8 @@ export function createCartService({ logger = console } = {}) {
       /** 状态数据是否新鲜（≤3 秒）。页面用它决定运动按钮能不能点 */
       live,
       ageMs: age,
+      /** 最后一次收到小车状态的时刻（含上一次服务进程记下的）；null = 从没收到过 */
+      lastSeenAt: lastSeenAt(),
       lastError,
       state,
       info,
@@ -225,6 +263,52 @@ export function createCartService({ logger = console } = {}) {
     }, delay);
     // 只是重连计时器，不该拖住进程退出
     reconnectTimer.unref?.();
+  }
+
+  /**
+   * 立即重连（页面上的「重启服务」按钮走这里）。
+   *
+   * ── 为什么需要它（2026-09-19 用户口径）──────────────────────────────
+   * 「重启服务不能掉线，得保证页面不崩，然后小车或扫描设备掉了可以连上」。
+   * 所以这个动作**不重启平台进程、不重启小车**，只把平台↔小车那**一条**连接
+   * 作废重来；页面不用刷新，浏览器那条 `/ws` 一直活着（`emit` 照旧推 link 变化）。
+   *
+   * 三个细节都不能省：
+   *   · `reconnectDelay` 重置成最小值 —— 否则退避可能已经涨到 15 秒，
+   *     按钮按下去要干等十几秒才重连，看着像"没反应"；
+   *   · 先 `clearTimeout` 清掉在途的退避定时器，再让 `close` 那条既有路径接手 ——
+   *     否则新旧两条重连路径各开一条 socket（平台侧只允许一条）；
+   *   · `terminate()` 而不是 `close()` —— 半开连接上 `close()` 要等握手，
+   *     `terminate()` 立刻把它推回 `close` 事件，重连才真的开始。
+   */
+  function reconnectNow() {
+    if (disposed || !config.configured) {
+      return { ok: false, code: "CART_UNCONFIGURED", message: "小车地址未配置，先在 server/data/cart.json 里配好再重启后端" };
+    }
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    reconnectDelay = RECONNECT_MIN_MS;
+    const stale = socket;
+    socket = null;
+    if (stale) {
+      try {
+        stale.terminate();
+      } catch {
+        /* 已经烂掉的 socket，terminate 抛错也无所谓 */
+      }
+      /*
+        ⚠ 这里**特意不直接 `connect()`**：`terminate()` 会立刻派发 `close` 事件，
+        而 `close` 处理器本来就会 `scheduleReconnect()`。直接调一次的话，
+        紧随其后的 `close` 又会安排一次 —— 平台侧就开出了两条到小车的状态连接。
+        所以只把退避拨回最小值，让既有那条重连路径立刻接手（1 秒内连上）。
+      */
+      return { ok: true, hadConnection: true, message: "已断开旧连接，正在立即重连" };
+    }
+    /* 原本就没有连接（一直连不上）：没有 `close` 事件可等，得自己把重连排上 */
+    scheduleReconnect();
+    return { ok: true, hadConnection: false, message: "原本没有连接，已立即发起连接" };
   }
 
   function connect() {
@@ -271,6 +355,7 @@ export function createCartService({ logger = console } = {}) {
       if (message?.type !== "state" || !message.payload) return;
       state = message.payload;
       stateAt = now();
+      rememberLastSeen(stateAt);
       if (link !== "online") {
         link = "online";
         emit({ type: "link" });
@@ -620,6 +705,8 @@ export function createCartService({ logger = console } = {}) {
     proxyStream,
     streamProbe,
     refreshInfo,
+    /** 页面「重启服务」按钮：只重置平台↔小车这一条连接，不重启平台、不重启小车 */
+    reconnectNow,
     status: () => ({
       configured: config.configured,
       canControl: config.canControl,
