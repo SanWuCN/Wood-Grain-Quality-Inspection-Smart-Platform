@@ -8,7 +8,9 @@
  *      随便写个数字骗不过去：它是 WebGL 这一帧真正提交的点数；
  *   ③ 三类缺陷与**来源**都在屏上（虫蛀 / 内部裂痕 / 缺损，每条带编号或档案出处）；
  *   ④ 口径那行字在（"按外形与档案记录生成、不是实测点云"）；
- *   ⑤ 健康构件**没有被编缺陷**（Z01/Z02 显示"无内部缺陷记录"）。
+ *   ⑤ 健康构件**没有被编缺陷**（Z01/Z02 显示"无内部缺陷记录"）；
+ *   ⑥ 「只看某一根」点得动，且**真的少画了三根**（点数跟着掉）；
+ *   ⑦ 「只看破损」把木料整层收掉（点数掉到一成上下），切回「木料全显」又涨回来。
  *
  * 用法（仓库根目录）：
  *   node --import ./tools/test-resolve-ts.mjs tools/验收-内部点云.mjs
@@ -123,6 +125,64 @@ try {
   check(`勾上之后只剩选中的那一根`, Boolean(soloState), soloState ? `剩 ${soloState.count} 根` : "还是四根都在");
 
   /*
+    ---------- ⑦ 「只看破损」真的把木料收掉了 ----------
+    这一条判的是**屏幕上的点**（渲染器自报），不是按钮上那行字：木料整层收掉之后，
+    点数应当掉到原来的一成上下；再切回「木料全显」又要涨回来。
+
+    ⚠ 取数必须等它**稳下来**：点数按 0.5 s 一帧上报，点完按钮立刻读会读到上一个状态的
+      值（第一版就这么假红了一次 —— "只看 Z04"读到的是四根的 238515，于是"涨回来"永远不成立）。
+  */
+  const pointsNow = () =>
+    machine.evaluate(`Number(document.querySelector('.ipc__stage')?.getAttribute('data-points') || 0)`);
+  const stablePoints = async () => {
+    let previous = await pointsNow();
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await sleep(900);
+      const current = await pointsNow();
+      if (current === previous) return current;
+      previous = current;
+    }
+    return previous;
+  };
+
+  const woodPoints = await stablePoints();
+  check(
+    `只看一根时画的点明显少于四根`,
+    Boolean(soloState) && woodPoints > 0 && Boolean(drawn) && woodPoints < drawn.points * 0.9,
+    `四根 ${drawn?.points ?? "?"} → 只看 Z04 ${woodPoints} 个点`,
+  );
+
+  const onlyDefect = await machine.evaluate(`(() => {
+    const button = [...document.querySelectorAll('.ipc__toggle')].find((node) => (node.textContent || '').trim() === '只看破损');
+    if (!button) return false;
+    button.click();
+    return true;
+  })()`);
+  const defectPoints = await machine.waitFor(
+    `(() => {
+      const points = Number(document.querySelector('.ipc__stage')?.getAttribute('data-points') || 0);
+      return points > 0 && points < ${Math.round(woodPoints * 0.5)} ? points : null;
+    })()`,
+    { timeoutMs: 10_000 },
+  );
+  check(
+    `「只看破损」把木料收掉（屏幕上只剩缺陷点）`,
+    onlyDefect === true && defectPoints !== null,
+    defectPoints !== null ? `木料 ${woodPoints} → 破损 ${defectPoints} 个点` : `10 秒内点数没掉下来（还是 ${woodPoints}？）`,
+  );
+  await machine.evaluate(`(() => {
+    const button = [...document.querySelectorAll('.ipc__toggle')].find((node) => (node.textContent || '').trim() === '木料全显');
+    button?.click();
+    return Boolean(button);
+  })()`);
+  const backPoints = await stablePoints();
+  check(
+    `切回「木料全显」点数涨回来（这个开关是双向的，不是一次性的）`,
+    backPoints > woodPoints * 0.9,
+    `${backPoints} 个点（收回前 ${woodPoints}）`,
+  );
+
+  /*
     ㉒「证据对照」播完时 `executor` 派发的事件 —— 这里**直接派发同一条事件**验证接线，
     不重跑那一轮的播报（省时间，且这一条要证的正是"事件到页面的那段线"）。
   */
@@ -138,15 +198,17 @@ try {
       const active = document.querySelector('.twin-view__tab.is-active');
       const stage = document.querySelector('.ipc__stage');
       return active && stage && (active.textContent || '').includes('内部点云')
-        ? { tab: (active.textContent || '').trim(), points: Number(stage.getAttribute('data-points') || 0) }
+        ? { tab: (active.textContent || '').trim() }
         : null;
     })()`,
     { timeoutMs: 20_000 },
   );
+  /* 同上：切过来之后等点数稳下来再读，免得把这之前的数当成"切过来画出的点" */
+  const autoPoints = await stablePoints();
   check(
     `㉒ 的事件能把主视图切到内部点云（并画出点）`,
-    opened === true && Boolean(autoView && autoView.points > 10_000),
-    autoView ? `${autoView.tab} · ${autoView.points} 个点` : "20 秒内没切过去",
+    opened === true && Boolean(autoView && autoPoints > 10_000),
+    autoView ? `${autoView.tab} · ${autoPoints} 个点` : "20 秒内没切过去",
   );
 
   const shot = await machine.shot("内部点云");

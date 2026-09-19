@@ -10,18 +10,25 @@
  *
  * ⚠ **不在同一张画布上叠加**：Spark 自己管一块 WebGL 画布，点云这块是 three 的画布，
  * 两套渲染器的相机各自维护；硬叠会出现"两层没对齐"这种最难解释的偏差。
- * 所以这里做成**切换**（外观 / 内部点云 / 并排），并排时是两块画布共享同一组相机参数。
+ * 所以这里做成**切换**（外观 · 高斯场景 / 内部点云），一次只挂一块画布。
  *
- * ── 画什么 ──────────────────────────────────────────────────────────
- *   · 外壳点：暖木色，看得出来是四根圆柱；
- *   · 内部芯点：深棕、稀疏，给体积感；
- *   · 缺陷：虫蛀空洞（橙）、内部裂痕（洋红）、缺损/破损（蓝灰）——配色与图例同源
- *     （`DEFECT_STYLE`），并且**每一处都带编号与出处**（`CURRENT_RISKS` 的编号或档案原话）；
- *   · 模型外框：用 `SPLAT_BOUNDS` 画一个线框盒 —— 这是"按原有外形生成"的参照物；
+ * ── 画什么（用户 2026-09-30 补的第二句：「做的是一个 3d 的点云展示，就是木柱内部
+ *    都是点云，破损可视化之类的」）────────────────────────────────────
+ *   · 木料：**柱体内是实心的点云**（柱壳 + 内部体积一起填），不是空壳；
+ *   · 缺陷：虫蛀空洞（橙）、内部裂痕（洋红）、缺损/破损（蓝灰）——这三种是**从木料里
+ *     挖掉的区域**（虫蛀腔内没有木点、裂痕是一条缝、缺损是柱脚被啃掉一块），
+ *     配色与图例同源（`DEFECT_STYLE`），每一处都带编号与出处
+ *     （`CURRENT_RISKS` 的编号或档案原话）；
+ *   · 三种看法（`materialView`）：木料全显 / 只看内部（收壳）/ 只看破损（木料整层收掉）；
+ *   · 模型外框：用 `SPLAT_BOUNDS` 画一个线框盒 —— 这是"按原有外形生成"的参照物
+ *     （只在四根一起看时画，单看一根时它会挡住取景）；
  *   · 地面网格：给出尺度感（每格 1 m）。
+ *
+ * ⚠ 取景跟着"你在看什么"走（`FrameCamera`）：只看一根时按这一根取景。
+ *   光改 `<Canvas camera>` 是没用的 —— R3F 只在创建相机时读它，见 `FrameCamera` 的说明。
  */
-import { useEffect, useMemo, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Grid, OrbitControls, Line } from "@react-three/drei";
 import { Box3, Vector3 } from "three";
 
@@ -29,8 +36,10 @@ import {
   DEFECT_STYLE,
   INTERNAL_CLOUD_SOURCE_NOTE,
   buildInternalCloud,
+  fitGroupDistance,
   type CloudDefect,
   type ColumnCloud,
+  type ColumnSpec,
 } from "./internalPointCloud";
 import "./internalPointCloud.css";
 
@@ -47,6 +56,16 @@ export type InternalPointCloudViewProps = {
 const SHELL_COLOR = "#d8b98a";
 const CORE_COLOR = "#6b4b2c";
 const FOCUS_SHELL_COLOR = "#f3d9a8";
+
+/** 相机竖向视场角（度）—— 建相机与算取景距离必须是同一个数 */
+const CAMERA_FOV_DEG = 34;
+/**
+ * 相机相对注视点的方向（斜前上方；水平分量的模约等于 1，所以"距离"就是水平退开的米数）。
+ *
+ * 抬高量刻意压到 0.16：抬高越多越俯视，柱脚就越容易被画面下沿切掉。
+ * 第一版是 0.30，四根一起看时最近那根（Z03）的柱脚正好切在画外。
+ */
+const CAMERA_DIR = { x: 0.62, y: 0.16, z: 0.78 } as const;
 
 /** 一个点集：BufferGeometry + PointsMaterial（three 最小用法，不引额外封装） */
 function PointSet({
@@ -70,27 +89,36 @@ function PointSet({
   );
 }
 
-function Column({ cloud, focused }: { cloud: ColumnCloud; focused: boolean }) {
+function Column({ cloud, focused, onlyDefects }: { cloud: ColumnCloud; focused: boolean; onlyDefects: boolean }) {
   return (
     <group>
       {/*
-        ⚠ 外壳默认**半透明**（0.3）：这一屏是"看里面"的，壳要是实心的，
-        虫蛀与裂痕全被自己的柱子挡住 —— 第一版 0.55 就这样，截图上只看得出柱形。
-        「隐藏外表面（只看内部）」按钮再把壳整层收掉。
+        ⚠ 三段分开画（用户口径：「木柱内部都是点云，破损可视化之类的」）：
+          ① 壳：亮一点、点大一点，看得出柱形；
+          ② 内部木料：**按体积填满**（实心点云柱），点小一点、暗一点，不抢缺陷；
+          ③ 缺陷：大点 + 各自的颜色；虫蛀空腔上再套一层淡球，让"洞"读得出来。
+        「只看破损」把 ①② 收掉，只剩 ③ —— 那时屏幕上就是"哪里有伤"。
       */}
-      <PointSet positions={cloud.shell} color={focused ? FOCUS_SHELL_COLOR : SHELL_COLOR} size={0.011} opacity={focused ? 0.3 : 0.16} />
-      <PointSet positions={cloud.core} color={CORE_COLOR} size={0.013} opacity={0.4} />
+      {onlyDefects ? null : (
+        <>
+          <PointSet
+            positions={cloud.shell}
+            color={focused ? FOCUS_SHELL_COLOR : SHELL_COLOR}
+            size={0.01}
+            opacity={focused ? 0.34 : 0.2}
+          />
+          {/* 内部木料：点比壳小、比壳暗 —— 实心但不抢缺陷；透明度留出"看得见里面"的余地 */}
+          <PointSet positions={cloud.volume} color={CORE_COLOR} size={0.0075} opacity={focused ? 0.3 : 0.16} />
+        </>
+      )}
       {cloud.defects.map((defect) => (
         <group key={`${defect.kind}-${defect.label}`}>
           <PointSet
             positions={defect.points}
             color={DEFECT_STYLE[defect.kind].color}
-            size={defect.kind === "crack" ? 0.014 : 0.024}
+            size={defect.kind === "crack" ? 0.016 : 0.024}
           />
-          {/*
-            虫蛀空洞再加一层**半透明球**：空腔是"里面被掏空"，
-            只靠一圈点看着像一撮火星；套个淡淡的球，它才读得出是个洞。
-          */}
+          {/* 虫蛀空洞加一层半透明球：空腔是"里面被掏空"，只靠一圈点看着像一撮火星 */}
           {defect.kind === "borer" ? (
             <mesh position={[defect.centroid.x, defect.centroid.y, defect.centroid.z]}>
               <sphereGeometry args={[0.075, 20, 16]} />
@@ -101,6 +129,73 @@ function Column({ cloud, focused }: { cloud: ColumnCloud; focused: boolean }) {
       ))}
     </group>
   );
+}
+
+/** 取景用的目标物：注视点（米，场景坐标）+ 要框住的这些柱子 */
+type FrameTarget = { center: [number, number, number]; columns: readonly ColumnSpec[] };
+
+/**
+ * 把相机**真的挪到**取景位上去。
+ *
+ * ⚠ 为什么不能只靠 `<Canvas camera={{ position, fov }}>`：R3F 只在**创建**相机时用它，
+ *   后面改这个对象不会把已经存在的相机搬走。第一版就是踩在这儿：切到"只看 Z04"时
+ *   只有 OrbitControls 的 `target` 跟着挪了（画面居中了），距离没变 —— 柱子还是四根
+ *   一起看时那么远；后来只补了 target，距离仍按整个场景算，柱子只占屏幕中间一小条。
+ *   这里用**画布的真实宽高比**（`useThree().size`）+ `fitGroupDistance`（每一根各算一次）
+ *   算距离，显式 set 机位并把 `controls.target` 一起挪过去
+ *   （`makeDefault` 之后能从 `useThree` 拿到它）。
+ *
+ * 依赖里带上画布尺寸：窗口变大/变小时按新的宽高比重新取景（不然会切头切尾）。
+ */
+function FrameCamera({ frame }: { frame: FrameTarget }) {
+  const camera = useThree((state) => state.camera);
+  const size = useThree((state) => state.size);
+  const controls = useThree((state) => state.controls) as { target: Vector3; update: () => void } | null;
+  const { center, columns } = frame;
+  const cx = center[0];
+  const cy = center[1];
+  const cz = center[2];
+  useEffect(() => {
+    const aspect = size.height > 0 ? size.width / size.height : 1.6;
+    const distance = fitGroupDistance({
+      columns,
+      dirX: CAMERA_DIR.x,
+      dirZ: CAMERA_DIR.z,
+      fovDeg: CAMERA_FOV_DEG,
+      aspect,
+    });
+    /* 机位方向：斜前上方看过去（水平分量约等于 1，所以 distance 就是水平退开的米数） */
+    camera.position.set(cx + distance * CAMERA_DIR.x, cy + distance * CAMERA_DIR.y, cz + distance * CAMERA_DIR.z);
+    if (controls?.target) {
+      controls.target.set(cx, cy, cz);
+      controls.update();
+    } else {
+      camera.lookAt(new Vector3(cx, cy, cz));
+    }
+  }, [camera, controls, cx, cy, cz, columns, size.width, size.height]);
+  return null;
+}
+
+/**
+ * 把渲染器**这一帧真正提交的点数**报给页面（写进 `data-points`）。
+ *
+ * 为什么要一直报、而不是第一帧报一次：切"只看破损"之后木料整层收掉，屏幕上的点数
+ * 会掉到千级 —— 那个数字要是还挂着 23 万，它就不再是"画出来了多少"的证据了。
+ * 所以按 0.5 s 一次、且变化超过 2% 才 setState（不然每帧都渲染一次 React）。
+ */
+function PointCounter({ onChange }: { onChange: (points: number) => void }) {
+  const lastRef = useRef({ at: 0, points: 0 });
+  useFrame(({ gl, clock }) => {
+    const points = gl.info.render.points;
+    const last = lastRef.current;
+    const now = clock.elapsedTime * 1000;
+    if (now - last.at < 500) return;
+    if (points === last.points) return;
+    if (last.points > 0 && Math.abs(points - last.points) / Math.max(points, last.points) < 0.02) return;
+    lastRef.current = { at: now, points };
+    onChange(points);
+  });
+  return null;
 }
 
 export default function InternalPointCloudView({ focusComponentId = "", onlyComponentIds, onPickDefect }: InternalPointCloudViewProps) {
@@ -116,10 +211,17 @@ export default function InternalPointCloudView({ focusComponentId = "", onlyComp
     return [focusComponentId];
   }, [soloComponent, focusComponentId, onlyComponentIds]);
   const cloud = useMemo(() => buildInternalCloud(visibleIds), [visibleIds]);
-  const [showShell, setShowShell] = useState(true);
+  /**
+   * 两种"怎么看"的开关：
+   *   · `showShell` —— 要不要画木料（壳 + 内部体积）。关掉就只剩缺陷点；
+   *   · `onlyDefects` —— **只看破损**（用户口径里的"破损可视化"）：把木料整层收掉。
+   * 两者语义有重叠（都把木料收掉），所以合并成一个三态：木料全显 / 只看内部 / 只看破损。
+   */
+  const [materialView, setMaterialView] = useState<"all" | "inner" | "defects">("all");
+  const showMaterial = materialView !== "defects";
   const [pickedComponent, setPickedComponent] = useState<string>("");
   /**
-   * 渲染器**实际画出来的点数**（`gl.info.render.points`，第一帧之后读一次）。
+   * 渲染器**实际画出来的点数**（`gl.info.render.points`，由画布里的 `PointCounter` 持续上报）。
    *
    * 为什么要把这个数字写到 DOM 上：这一屏的可见结果就是"点"，而 WebGL 画布
    * 在验收里没法用 `innerText` 判断画没画（黑底和"没画"长得一样）。
@@ -148,19 +250,54 @@ export default function InternalPointCloudView({ focusComponentId = "", onlyComp
   );
 
   /*
-    相机初始机位。
-    ⚠ 第一版按"包围盒对角线 × 1.15"取距离、并且抬得很高，结果四根柱子全被压成斜线
-      （透视收敛太强），截图上像四根躺着的杆子。现在：退远一点、抬低一点、视场收窄，
-      并把注视点放在柱身中部（OrbitControls 的 target 也一样），柱子才站得住。
+    取景依据：**当前看得见的这些柱子**，不是整个场景的包围盒。
+
+    ⚠ 第一版一律按 `SPLAT_BOUNDS`（整个殿 ±3.2 m）取景，于是"只看 Z04"时
+      柱子只占画面中间一小条，缺陷更看不清 —— 取景要跟着"你在看什么"走。
+    只剩一两根时也不再画整个场景的线框盒（那盒子会把视野又撑回全场）。
+
+    ⚠ 第二版只按"整组跨度 × 柱高"算一个距离，四根一起看时**斜前方最近那根的柱脚
+      切在画外**：相机是斜着看的，Z03 比场地中心近 3.1 m，同样 3.2 m 高的柱子在屏幕上
+      粗一圈。所以距离交给 `fitGroupDistance` —— 每一根各算一次、取最远的那个。
+
+    注视点用这组柱子的水平中心与柱身中部（旋转时才不会绕场地中心转）。
+
+    视场收窄到 34°（第一版 42° + 太近，柱子全被压成斜线）。
   */
-  const camera = useMemo(() => {
-    const size = new Vector3(...cloud.bounds.max).sub(new Vector3(...cloud.bounds.min));
-    const distance = Math.max(size.x, size.z) * 1.55;
+  const frame = useMemo<FrameTarget>(() => {
+    const specs = cloud.columns.map((column) => column.spec);
+    const minX = Math.min(...specs.map((spec) => spec.x));
+    const maxX = Math.max(...specs.map((spec) => spec.x));
+    const minZ = Math.min(...specs.map((spec) => spec.z));
+    const maxZ = Math.max(...specs.map((spec) => spec.z));
+    const baseY = Math.min(...specs.map((spec) => spec.baseY));
+    const topY = Math.max(...specs.map((spec) => spec.baseY + spec.heightM));
     return {
-      position: [distance * 0.62, cloud.bounds.min[1] + 2.6, distance * 0.72] as [number, number, number],
-      fov: 34,
+      center: [(minX + maxX) / 2, (baseY + topY) / 2, (minZ + maxZ) / 2],
+      columns: specs,
     };
-  }, [cloud.bounds]);
+  }, [cloud.columns]);
+
+  /*
+    建相机时先给一个近似机位：这一刻画布还没量出宽高比（`FrameCamera` 在挂载后用
+    `fitGroupDistance` + 真实宽高比把它摆正）。fov 与 `FrameCamera` 用的是同一个常量。
+  */
+  const cameraProps = useMemo(() => {
+    const distance = fitGroupDistance({
+      columns: frame.columns,
+      dirX: CAMERA_DIR.x,
+      dirZ: CAMERA_DIR.z,
+      fovDeg: CAMERA_FOV_DEG,
+    });
+    return {
+      position: [
+        frame.center[0] + distance * CAMERA_DIR.x,
+        frame.center[1] + distance * CAMERA_DIR.y,
+        frame.center[2] + distance * CAMERA_DIR.z,
+      ] as [number, number, number],
+      fov: CAMERA_FOV_DEG,
+    };
+  }, [frame]);
 
   useEffect(() => {
     /* 页面切换构件时，把高亮同步过去（这里只做"点了缺陷再看哪个构件"） */
@@ -171,13 +308,9 @@ export default function InternalPointCloudView({ focusComponentId = "", onlyComp
     <div className="ipc">
       <div className="ipc__stage" data-points={drawnPoints} data-defects={defects.length}>
         <Canvas
-          camera={camera}
+          camera={cameraProps}
           dpr={[1, 1.75]}
-          gl={{ antialias: true }}
-          onCreated={({ gl }) => {
-            /* 第一帧之后再读：此时 info.render.points 才是这一帧真实提交的点数 */
-            requestAnimationFrame(() => setDrawnPoints(gl.info.render.points));
-          }}>
+          gl={{ antialias: true }}>
           <color attach="background" args={["#080b11"]} />
           <ambientLight intensity={1.1} />
           <Grid
@@ -191,17 +324,24 @@ export default function InternalPointCloudView({ focusComponentId = "", onlyComp
             fadeDistance={26}
             fadeStrength={1.2}
           />
-          {boxLines.map((points, index) => (
-            <Line key={index} points={points} color="#3f5a7a" lineWidth={1} dashed dashSize={0.18} gapSize={0.12} />
-          ))}
+          {/* 整个场景的线框盒只在"四根一起看"时画：它跨 ±3.2 m，单看一根时会把视野撑回全场 */}
+          {cloud.columns.length >= 3
+            ? boxLines.map((points, index) => (
+                <Line key={index} points={points} color="#3f5a7a" lineWidth={1} dashed dashSize={0.18} gapSize={0.12} />
+              ))
+            : null}
           {cloud.columns.map((column) => (
             <Column
               key={column.spec.componentId}
-              cloud={showShell ? column : { ...column, shell: new Float32Array(), core: new Float32Array() }}
+              cloud={column}
               focused={!pickedComponent || pickedComponent === column.spec.componentId}
+              onlyDefects={!showMaterial}
             />
           ))}
-          <OrbitControls makeDefault enablePan target={[0, cloud.bounds.min[1] + 1.5, 0]} />
+          <OrbitControls makeDefault enablePan target={frame.center} />
+          {/* 取景与点数都跟着"你在看什么"走：切构件 / 切木料三态时重算 */}
+          <FrameCamera frame={frame} />
+          <PointCounter onChange={setDrawnPoints} />
         </Canvas>
 
         <div className="ipc__viewhint">左键拖动旋转 · 滚轮缩放 · 右键平移</div>
@@ -212,9 +352,27 @@ export default function InternalPointCloudView({ focusComponentId = "", onlyComp
         <p className="ipc__note">{INTERNAL_CLOUD_SOURCE_NOTE}</p>
 
         <div className="ipc__row">
-          <button type="button" className={`ipc__toggle${showShell ? " is-on" : ""}`} onClick={() => setShowShell((value) => !value)}>
-            {showShell ? "隐藏外表面（只看内部）" : "显示外表面"}
-          </button>
+          {/* 三态：木料全显 → 只看内部（收壳）→ 只看破损（木料整层收掉） */}
+          {([
+            ["all", "木料全显"],
+            ["inner", "只看内部"],
+            ["defects", "只看破损"],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={`ipc__toggle${materialView === key ? " is-on" : ""}`}
+              title={
+                key === "all"
+                  ? "外壳 + 内部木料 + 缺陷，三层一起看"
+                  : key === "inner"
+                    ? "收掉外表壳，只留内部木料与缺陷"
+                    : "木料整层收掉，屏幕上只剩破损/虫蛀/裂痕的位置"
+              }
+              onClick={() => setMaterialView(key)}>
+              {label}
+            </button>
+          ))}
           {focusComponentId ? (
             <button
               type="button"
