@@ -1372,7 +1372,12 @@ export async function ask(
     if (!(await enterThinking(gen, `剧本快捷键指定第 ${pinned.roundNo} 轮，思考中...`))) return;
     replyScript(
       pinned,
-      certainMatch(pinned, "剧本快捷键（Ctrl+B/Y/M 序列）直接指定轮次，未经语音匹配"),
+      /*
+        ⚠ 这一句 note 会显示在气泡里（投影给观众看），所以**不写键位**：
+        用户 2026-10-01「小木气泡快捷键显示删了」——屏幕上出现 Ctrl+B/Y/M 等于
+        告诉观众整场是按脚本键驱动的。要查键位看 `scriptShortcutEntries.ts`。
+      */
+      certainMatch(pinned, "讲解人指定轮次，未经语音匹配"),
       runtime,
       target?.lineOverride,
     );

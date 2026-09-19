@@ -1,32 +1,34 @@
 /**
- * 小木快捷键一览（气泡里那张「按哪个键出哪一段」）
+ * 小木气泡里的**对话一览**（按顺序列出 25 轮：第几轮、这一轮怎么说、小木念什么）
  *
- * ── 为什么气泡里要自带这张表（用户口径 2026-09-17）────────────────────
+ * ── 这张表为什么在气泡里（用户口径 2026-09-17）────────────────────────
  * 用户原话：「小木呢，别人内网登上去也得能用快捷键呼唤出来相应对话」。
- *
  * 快捷键本身在**任何机器**上都是好的（纯前端：按键 → 脚本化识别 → 剧本直答，
- * 录音走同源的 `/voice/*.mp3`，见 `tools/验收-快捷键气泡.mjs` 的 LAN 验收）。
- * 真正缺的是"别人怎么知道按哪个键"：键位表原来只存在于代码与主机上的一份 md，
- * 内网另一台机器登进来的人看不到 —— 于是"能用"变成了"不会用"。
+ * 录音走同源的 `/voice/*.mp3`，见 `tools/验收-快捷键气泡.mjs`）。
+ * 缺的是"别人怎么知道按哪个键"，于是把表搬进气泡，数据源只有剧本与条目表两处，
+ * 页面不手抄一行字。
  *
- * 所以把表搬进气泡：数据源只有两处，页面不手抄一行字，
- * 剧本改了台词、条目表换了键位，这里跟着变（`shortcutSheet.test.ts` 会核对）。
+ * ── 2026-10-01 起：**键位不再显示**（用户口径：「小木气泡快捷键显示删了」）──
+ * 键位表出现在投影给观众看的气泡上，等于把"整场演示是按组合键驱动的"写在屏幕上。
+ * 所以这一览现在只列**轮次与台词**，`.keys` 字段与「一条龙」那一行一并去掉；
+ * 键位仍然好使（`useScriptShortcut` 那一套没动），只是不再画在屏幕上：
+ *   · 讲解人自己看键位 → `docs/史-台词与提词背诵方案-v1.0.md`；
+ *   · 想核对"第 N 个键 = 第 N 轮"→ `scriptShortcutSequence.test.ts` 与
+ *     `scriptShortcutCoverage.test.ts`（键位表的唯一事实源在 `scriptShortcutEntries.ts`）。
+ * `shortcutSheet.test.ts` 里钉了一条：这一览的数据里**不许再出现 `Ctrl` 字样**。
  *
  * ⚠ 麦克风那条路在内网机器上是**不可用**的：浏览器只在 https 或 localhost 下
  *   暴露 `navigator.mediaDevices`，同事用 `http://192.168.x.x:8000` 打开时
- *   唤醒与语音输入都会被挡。这一点必须在界面上说清楚（下面就有一行），
+ *   唤醒与语音输入都会被挡。这一点必须在界面上说清楚（气泡里就有一行），
  *   否则用户会以为"小木坏了"，而其实是浏览器的安全限制。
  */
 import { SCRIPT_ROUNDS, mainLineOf } from "./script";
 import { SCRIPT_SHORTCUT_ENTRIES } from "./scriptShortcutEntries";
-import { shortcutLabel, walkKeyLabel } from "./scriptShortcutSequence";
 
 /** 一条要显示的行（纯数据，便于单测；不依赖 DOM） */
 export type ShortcutSheetRow = {
   /** 序号，1 起 */
   index: number;
-  /** 显示用的键位，如 `Ctrl+B+1` / `Ctrl+Y+0` / `Ctrl+M+5` */
-  keys: string;
   /** 圈号与轮次标题，如 `① 三个月巡检与风险统计` */
   round: string;
   /** 这一轮怎么触发：照着说这句话，或"按钮触发，不用说话" */
@@ -36,32 +38,12 @@ export type ShortcutSheetRow = {
 };
 
 /**
- * 键位文本的**唯一实现**在 `scriptShortcutSequence.shortcutLabel`：
- * 2026-09-17 起三段前缀各不同（B/Y/M），前缀不能再当成一个常量导出。
- * 这里保留一个同名转发，方便页面侧少 import 一个模块。
- */
-export function keyLabel(id: string): string {
-  return shortcutLabel(id);
-}
-
-/**
- * 「一条龙」组合键那一行的说明（键位文本仍来自唯一实现 `walkKeyLabel()`）。
- *
- * 用户口径 2026-09-17：「专门搞一个组合键用于完整走完流程。ctrl加shift加z，
- * 25个对话循环播放，按一下播放一个」—— 它是**不用记 25 个键位**的那条路，
- * 所以放在一览表最上面一行，而不是混在 25 条里。
- */
-export function walkShortcutNote(total: number): string {
-  return `${walkKeyLabel()} 按一下走一条（1 → ${total} 循环，不用记上面的键位）`;
-}
-
-/**
  * 组装一览表。
  *
- * 三条来源拼起来，任何一条对不上就抛错（宁可红，也不要一张错位的表）：
- *   1. 条目表给的键位与"照着说什么"；
+ * 两条来源拼起来，任何一条对不上就抛错（宁可红，也不要一张错位的表）：
+ *   1. 条目表给的"照着说什么"；
  *   2. 剧本给的轮次标题与主台词；
- *   3. 条目数必须等于轮数（第 N 个键 = 第 N 轮）。
+ * 并且条目数必须等于轮数（第 N 条 = 第 N 轮，顺序不能错）。
  */
 export function shortcutSheetRows(): ShortcutSheetRow[] {
   if (SCRIPT_SHORTCUT_ENTRIES.length !== SCRIPT_ROUNDS.length) {
@@ -74,8 +56,6 @@ export function shortcutSheetRows(): ShortcutSheetRow[] {
     if (!round) throw new Error(`第 ${index + 1} 条指向的轮次 ${entry.roundNo} 不存在`);
     return {
       index: index + 1,
-      /* 键位文本由复合 id 直接渲染：三段前缀各不同，这里不能再拼一个常量前缀 */
-      keys: keyLabel(entry.key),
       round: `${round.roundNo} ${round.title}`,
       /* 主动发起的条目 text 就是小木自己的台词 —— 那种情况没人说话 */
       how: entry.proactive ? "按钮触发，不用说话" : entry.text,

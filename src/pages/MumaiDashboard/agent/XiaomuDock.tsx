@@ -31,7 +31,7 @@ import { stableNote, wakeErrorHint, WAKE_REPLY_TEXT } from "./degrade";
 import { useAgentNavigate, useAgentSession } from "./agentSession";
 import { getAgentState, resolveConfirm, setAgent, subscribeAgent } from "./store";
 import { microphoneSupported } from "./asr";
-import { shortcutSheetRows, walkShortcutNote } from "./shortcutSheet";
+import { shortcutSheetRows } from "./shortcutSheet";
 import { SCRIPT_SHORTCUT_ENTRIES } from "./scriptShortcutEntries";
 import { KEYWORD_FIRE_EVENT, browserStore, keywordHintVisible, setKeywordHintVisible } from "./keywordHint";
 import { wakeChannel, type WakeSnapshot } from "./wakeChannel";
@@ -934,8 +934,17 @@ export default function XiaomuDock() {
                 <time>{reply.at}</time>
                 <span>{reply.voice}</span>
                 {reply.level !== "rule" && reply.confidence > 0 ? <span>置信度 {reply.confidence.toFixed(3)}</span> : null}
-                <button type="button" className="xd__link" onClick={() => runtimeRef.current.speak(reply.mainAnswer)}>
-                  重播（Alt+R）
+                {/*
+                  ⚠ 标签里**不写「（Alt+R）」**（用户 2026-10-01：「小木气泡快捷键显示删了」）：
+                  气泡是投影给观众看的，屏幕上不出现组合键。键位改到 title（悬停才看得到），
+                  讲解人自己知道；Alt+R 本身照旧生效（见本文件顶部的按键处理）。
+                */}
+                <button
+                  type="button"
+                  className="xd__link"
+                  title="重播上一句（Alt+R）"
+                  onClick={() => runtimeRef.current.speak(reply.mainAnswer)}>
+                  重播
                 </button>
               </footer>
               {reply.note ? <p className="xd__note">{reply.note}</p> : null}
@@ -962,7 +971,7 @@ export default function XiaomuDock() {
               title={
                 micOk
                   ? "常驻唤醒：说两遍「小木小木」即可唤起（Alt+W 开关）。关掉气泡不会关掉它。"
-                  : "这台机器的浏览器不给麦克风（内网 http 不是安全上下文）—— 唤醒用不了，请用下面「快捷键一览」里的键"
+                  : "这台机器的浏览器不给麦克风（内网 http 不是安全上下文）—— 唤醒用不了，可用快捷键唤出每一轮对话（键位见《台词与提词背诵方案》）"
               }
             >
               {listening ? "常驻唤醒：已开" : micOk ? "开启常驻唤醒" : "这台机器不能开麦"}
@@ -971,11 +980,15 @@ export default function XiaomuDock() {
           </footer>
 
           {/*
-            ── 快捷键一览（用户口径 2026-09-17）─────────────────────────
-            「小木呢，别人内网登上去也得能用快捷键呼唤出来相应对话」。
-            键位表原来只在代码和主机上的一份 md 里，内网另一台机器登进来的人看不到，
-            于是"能用"变成"不会用"。这里把表放进气泡：任何机器、任何账号都看得到，
-            数据源是条目表 + 剧本（`shortcutSheet.ts`），不手抄一行字。
+            ── 对话一览（用户口径 2026-09-17 / 2026-10-01）───────────────
+            2026-09-17：「小木呢，别人内网登上去也得能用快捷键呼唤出来相应对话」——
+            于是把"按哪个键出哪一段"的表搬进气泡，数据源是条目表 + 剧本，不手抄一行字。
+
+            2026-10-01：「小木气泡快捷键显示删了」——键位列与「一条龙」那一行都去掉了：
+            气泡是**投影给观众看**的，屏幕上写着组合键等于告诉观众整场是按脚本键驱动的。
+            现在这一览只列**轮次与台词**，键位表仍在（`scriptShortcutEntries.ts` 是唯一
+            事实源，`useScriptShortcut` 照旧生效），只是不再画出来 —— 讲解人自己看
+            `docs/史-台词与提词背诵方案-v1.0.md`。
 
             ⚠ 麦克风那行是**必须说的实话**：浏览器只在 https 或 localhost 下暴露
               `navigator.mediaDevices`，同事用内网 IP + http 打开时唤醒是用不了的，
@@ -988,14 +1001,8 @@ export default function XiaomuDock() {
               aria-expanded={keysOpen}
               onClick={() => setKeysOpen((value) => !value)}
             >
-              快捷键一览 · {sheetRows.length} 条（Ctrl+B/Y/M）{keysOpen ? "▾" : "▸"}
+              对话一览 · {sheetRows.length} 轮{keysOpen ? "▾" : "▸"}
             </button>
-            {/*
-              一条龙：完整走一遍流程时**不用记 25 个键位**（用户口径 2026-09-17：
-              「专门搞一个组合键用于完整走完流程。ctrl加shift加z，25个对话循环播放，
-              按一下播放一个」）。键位文本来自唯一实现，页面上不手写一行字。
-            */}
-            <p className="xd__note xd__note--walk">{walkShortcutNote(sheetRows.length)}</p>
             {/*
               ── 关键词提示开关（用户口径 2026-09-28）────────────────────────
               「平台内置一个比较隐蔽的小木关键词显示开关，我点开能看到，原来在气泡里的太明显了」。
@@ -1040,7 +1047,7 @@ export default function XiaomuDock() {
             {!micOk ? (
               <p className="xd__note">
                 本机浏览器不允许用麦克风（内网 http 的安全限制，只有本机 localhost 或 https 才行）——
-                唤醒与语音输入在这台机器上用不了；上面这张表里的快捷键**照样能唤出每一轮对话**。
+                唤醒与语音输入在这台机器上用不了；**快捷键照样能唤出每一轮对话**（键位见《台词与提词背诵方案》）。
               </p>
             ) : null}
             {keysOpen ? (
@@ -1054,7 +1061,6 @@ export default function XiaomuDock() {
                   const proactiveHow = SCRIPT_SHORTCUT_ENTRIES[row.index - 1]?.proactive === true;
                   return (
                     <li key={row.index}>
-                      <b>{row.keys}</b>
                       <span className="xd__keys-round">{row.round}</span>
                       {hintOpen ? (
                         proactiveHow ? (
@@ -1063,7 +1069,7 @@ export default function XiaomuDock() {
                           <button
                             type="button"
                             className="xd__keys-how xd__keys-how--tap"
-                            title={`点一下直接走这一轮（${row.keys} 也可以）`}
+                            title="点一下直接走这一轮（与快捷键走同一条链路）"
                             onClick={() =>
                               window.dispatchEvent(
                                 new CustomEvent(KEYWORD_FIRE_EVENT, {

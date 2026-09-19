@@ -622,10 +622,11 @@ try {
     await sleep(500);
   }
 
-  /* ---------- ⑦ 气泡里的「快捷键一览」（别人在内网机器上得看得到这张表）----------
-     用户口径 2026-09-17：「小木呢，别人内网登上去也得能用快捷键呼唤出来相应对话」。
-     快捷键本身在任何机器上都好使（本脚本就是证明），缺的是"别人怎么知道按哪个键" ——
-     所以气泡里必须有一张从剧本生成的表，且内网 http 打开时要如实说明麦克风用不了。
+  /* ---------- ⑦ 气泡里的「对话一览」+ **键位不许出现在屏幕上** ----------
+     2026-09-17 的需求是"别人内网登上去也得能用快捷键"；2026-10-01 用户改口径：
+     「小木气泡快捷键显示删了」——气泡是投影给观众看的，屏幕上不该写组合键。
+     所以这一段的判据翻了个面：一览还在（列 25 轮），但**整块气泡里不许出现 Ctrl/Shift/Alt**。
+     快捷键本身照样好使 —— 那是本脚本前面几段（真按键、真起播录音）在证的。
   */
   const isLoopback = /^(127\.0\.0\.1|localhost)$/i.test(new URL(PAGE).hostname);
   /*
@@ -644,7 +645,7 @@ try {
       if (avatar) avatar.click();
     }
     const btn = [...document.querySelectorAll('.xd__fold-btn')].find((b) =>
-      (b.textContent || '').includes('快捷键一览'),
+      (b.textContent || '').includes('对话一览'),
     );
     if (btn && btn.getAttribute('aria-expanded') !== 'true') btn.click();
     return Boolean(btn);
@@ -653,42 +654,39 @@ try {
   const sheet = await evaluate(`(() => {
     const list = document.querySelector('.xd__keys');
     const items = list ? [...list.querySelectorAll('li')] : [];
+    const panel = document.querySelector('.xd__panel');
     /*
-      ⚠ 取"提示"不能只拿第一条 .xd__note：
-      一条龙那一行（.xd__note--walk）也在 .xd__keys-wrap 里，而且排在麦克风提示之前，
-      按第一条取会把一条龙的文案当成麦克风提示（第一版就是这么假红的）。
-      所以这里拿**全部**提示拼起来再判断。
+      ⚠ 取"提示"不能只拿第一条 .xd__note：气泡里还有麦克风提示等好几条，
+      按第一条取会取错（第一版就是这么假红的）。这里拿**全部**提示拼起来再判断。
     */
     const note = [...document.querySelectorAll('.xd__keys-wrap .xd__note')]
       .map((el) => (el.textContent || '').trim())
       .join(' ');
+    /* 气泡里**任何**可见文字都不许出现组合键（键位列、一条龙那一行都该没了） */
+    const visible = panel ? (panel.innerText || '') : '';
     return {
       found: Boolean(list),
       count: items.length,
-      first: (items[0]?.querySelector('b')?.textContent || '').trim(),
-      last: (items[items.length - 1]?.querySelector('b')?.textContent || '').trim(),
+      first: (items[0]?.querySelector('.xd__keys-round')?.textContent || '').trim(),
+      last: (items[items.length - 1]?.querySelector('.xd__keys-round')?.textContent || '').trim(),
       note: note ? note.replace(/\\s+/g, ' ') : '',
+      shortcutTexts: visible.match(/(Ctrl|Shift|Alt)\\s*\\+\\s*\\S+/g) || [],
+      walkRow: Boolean(document.querySelector('.xd__note--walk')),
+      keyColumn: panel ? panel.querySelectorAll('.xd__keys b').length : 0,
     };
   })()`);
-  check("气泡里能找到「快捷键一览」入口", openedSheet);
+  check("气泡里能找到「对话一览」入口", openedSheet);
   check(
-    "一览表列出全部 25 条（任何机器都看得到键位）",
+    "一览列出全部 25 轮（列的是轮次，不再是键位）",
     Boolean(sheet?.found) && sheet.count === 25,
-    `${sheet?.count ?? 0} 条`,
+    `${sheet?.count ?? 0} 轮 · 首=${sheet?.first ?? "?"} 末=${sheet?.last ?? "?"}`,
   );
   check(
-    "首尾键位对得上（Ctrl+B+1 … Ctrl+M+5）",
-    sheet?.first === "Ctrl+B+1" && sheet?.last === "Ctrl+M+5",
-    `${sheet?.first ?? "?"} … ${sheet?.last ?? "?"}`,
-  );
-  /* 「一条龙」那一行**不展开也要看得见**（它就是"不想记 25 个键位"的那条路） */
-  const walkHint = await evaluate(
-    `(document.querySelector('.xd__note--walk')?.textContent || '').trim()`,
-  );
-  check(
-    "气泡里不展开也能看到一条龙的组合键",
-    String(walkHint).includes("Ctrl+Shift+Z") && /循环|走一条/.test(String(walkHint)),
-    `提示=「${walkHint || "（没有）"}」`,
+    "气泡里**一处键位都不显示**（用户 2026-10-01：「小木气泡快捷键显示删了」）",
+    Array.isArray(sheet?.shortcutTexts) && sheet.shortcutTexts.length === 0 && sheet.walkRow === false && sheet.keyColumn === 0,
+    sheet?.shortcutTexts?.length
+      ? `仍看到：${sheet.shortcutTexts.slice(0, 3).join(" / ")}`
+      : `键位列 ${sheet?.keyColumn ?? "?"} 个 · 一条龙那一行 ${sheet?.walkRow ? "还在" : "已删"}`,
   );
   if (isLoopback) {
     check(
@@ -732,7 +730,7 @@ try {
       `title=「${String(wakeBtn?.title ?? "").slice(0, 50)}…」`,
     );
   }
-  await shot(send, "5-气泡里的快捷键一览");
+  await shot(send, "5-气泡里的对话一览（不再显示键位）");
 
   /* ---------- ⑦c 「关键词提示」隐蔽开关（用户口径 2026-09-28）----------
      原话：「平台内置一个比较隐蔽的小木关键词显示开关，我点开能看到，
@@ -759,7 +757,7 @@ try {
       /* 一览收起时这块 UI 应当整块不存在（"隐蔽"的第一层） */
       wrapHiddenWhenFolded: (() => {
         const btn = [...document.querySelectorAll('.xd__fold-btn')].find((b) =>
-          (b.textContent || '').includes('快捷键一览'),
+          (b.textContent || '').includes('对话一览'),
         );
         if (!btn || btn.getAttribute('aria-expanded') !== 'true') return null;
         return true;
