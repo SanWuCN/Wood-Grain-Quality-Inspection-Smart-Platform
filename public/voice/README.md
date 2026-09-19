@@ -36,9 +36,20 @@
 **② 失败/降级的固定提示**（这些也是固定文案，命中率高、用户最常听到）
 
 ```
-没有听清，请再说一次。
+不好意思，请再说一遍
 ```
-> 其余降级文案见 `src/pages/MumaiDashboard/agent/degrade.ts` 的 `NOT_HEARD_TEXT` / `FALLBACK_SPOKEN`，
+
+> 这句就是 `src/pages/MumaiDashboard/agent/degrade.ts` 的 `NOT_HEARD_TEXT` 与
+> `intents.ts` 的 `FALLBACK_TEXT`（**同一句话、两个变体**）：
+> 未听清那条路 `replyNotHeard()` 播的文本**带句号**，未命中意图那条路**不带句号**，
+> 所以 `manifest.json` 里两条键都指向同一个 `not_heard.mp3`（用户 2026-10-01 补录，2.95 秒）。
+> 只接一条键，另一条路照样回退浏览器语音 —— `agent/notHeardVoice.test.ts` 与
+> `tools/验收-未听清语音.mjs` 各钉一遍（后者真跑两条路，判据是"播放了 /voice/not_heard.mp3
+> 且 speechSynthesis 一次都没响"）。
+>
+> ⚠ 工装验录音**必须先造用户手势**（`machine.activate()`）：headless 页面没过任何交互时
+> autoplay 会把 `play()` 拒掉，平台按设计回退合成音 —— 那是环境造成的假故障。
+> 其余降级文案见 `degrade.ts` 的 `NOT_HEARD_TEXT` / `FALLBACK_SPOKEN`，
 > 以那里的字符串为准（改过文案就要重新录，否则回退到浏览器语音）。
 
 **③ 其余意图的主回答**：先跑一遍你要演示的流程，把气泡里出现的那句话整句复制出来，

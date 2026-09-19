@@ -129,10 +129,34 @@ export class Machine {
     });
   }
 
-  async evaluate(expr) {
-    const r = await this.send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true });
+  async evaluate(expr, { userGesture = false } = {}) {
+    const r = await this.send("Runtime.evaluate", {
+      expression: expr,
+      awaitPromise: true,
+      returnByValue: true,
+      ...(userGesture ? { userGesture: true } : {}),
+    });
     if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description ?? "页面内抛错");
     return r.result?.result?.value;
+  }
+
+  /**
+   * 造一次"用户手势"（**验录音必须先用**）。
+   *
+   * 为什么必须有：headless 页面没有过任何交互时，Chrome 的 autoplay 策略会把
+   * `new Audio(url).play()` 直接拒掉（`NotAllowedError: play() failed because the user
+   * didn't interact with the document first`）。而平台的播报逻辑是"音频放不成就回退
+   * 浏览器合成音"（`tts.ts` 的 `speak()`），于是工装会看到"录音也放了、合成音也响了"
+   * 这种**环境造成的假故障** —— 真人演示时点一下页面就不会出现（sticky activation）。
+   *
+   * `Runtime.evaluate` 的 `userGesture: true` 等价于一次真实手势：实测调用后
+   * `navigator.userActivation.hasBeenActive` 由 false 变 true，play() 随即成功。
+   */
+  async activate() {
+    const state = await this.evaluate(`navigator.userActivation ? navigator.userActivation.hasBeenActive : null`, {
+      userGesture: true,
+    });
+    return state;
   }
 
   /**

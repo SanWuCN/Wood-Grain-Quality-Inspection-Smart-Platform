@@ -1320,9 +1320,13 @@ export async function ask(
    *
    * 现在给一条可见的提示，并且**一个工具都不调用**（`replyNotHeard` 里
    * 没有任何通向 Tool Registry 的路径）。
+   *
+   * ⚠ `runtime.speak` 必须传进去（2026-10-01）：这条路径原先只写气泡不出声，
+   *   用户唤醒成功、说了一句没被识别的话，界面动了却一点声音都没有。
+   *   与 `replyFallback(judge, runtime.speak)` 同一条口径 —— 兜底回复必须出声。
    */
   if (!trimmed) {
-    replyNotHeard(via);
+    replyNotHeard(via, runtime.speak);
     return;
   }
 

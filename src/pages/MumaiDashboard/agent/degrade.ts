@@ -126,8 +126,17 @@ export const WAKE_REPLY_TEXT = "我在";
  *
  * 返回值里没有任何 intentId / toolRuns，本函数也不调用 understand() ——
  * 这就是"不执行任何工具"这句话在代码上的落点：整条函数没有通向 Tool Registry 的路径。
+ *
+ * @param speak 播报回调。**必须传**（与 `replyFallback` 同一条口径，理由见那里的长注释）。
+ *
+ * ⚠ 2026-10-01 补的：这条路径原先**不出声**，只往气泡里写一行字 ——
+ *   用户唤醒成功、说了一句没被识别的话，界面动了但一点声音都没有，
+ *   第一反应是"设备死了"。用户当天正好补录了这句「不好意思，请再说一遍」
+ *   （`public/voice/not_heard.mp3`）让我接上，接上时才发现根本没有播报调用：
+ *   录音接得再好，没人 `speak()` 也是静音。与 `replyFallback` 当年"搬移时漏了一行"
+ *   是同一类缺口 —— 兜底回复必须出声。
  */
-export function replyNotHeard(via: "text" | "mic" | "example"): BotTurn {
+export function replyNotHeard(via: "text" | "mic" | "example", speak?: (text: string) => void): BotTurn {
   const turn: BotTurn = {
     kind: "bot",
     id: nextId(),
@@ -163,6 +172,8 @@ export function replyNotHeard(via: "text" | "mic" | "example"): BotTurn {
     // 多步任务清单挂在这一轮回复下面
     steps: [],
   });
+  /* 播报这一句（带句号的变体，语音包里有它自己的键）。位置与 `replyFallback` 一致：最后一步 */
+  speak?.(turn.text);
   return turn;
 }
 
