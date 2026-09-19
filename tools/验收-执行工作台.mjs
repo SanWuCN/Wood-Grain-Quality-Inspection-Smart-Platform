@@ -108,12 +108,24 @@ try {
   const afterCreate = await machine.call("GET", "/api/sessions/demo-01/snapshot");
   const stored = afterCreate?.json?.entities?.taskCard ?? [];
   check("卡片落在服务端（不是页面内存）", stored.length >= 4, `快照里 ${stored.length} 张`);
+  /*
+    ⚠ 判据只针对**这一单的卡**：会话里可能还留着别的轮次/别的工装生成的卡片
+      （演示库里本来就有历史工单的卡），拿"全库 every"去判会假红 —— 2026-09-30 修。
+      用什么认"这一单的卡"：页面上刚出现的那批卡号（它们是按当前工单渲染的）。
+  */
+  const idsOnPage = new Set((cards ?? []).map((item) => item.id));
+  const mineCards = stored.filter((item) => item.data.orderId === order.id);
+  const pageCards = stored.filter((item) => idsOnPage.has(item.id));
   check(
     "卡片挂在当前工单下",
-    stored.every((item) => item.data.orderId === order.id),
-    `orderId=${order.id}`,
+    mineCards.length >= 4 && pageCards.length >= 4 && pageCards.every((item) => item.data.orderId === order.id),
+    `本单共 ${mineCards.length} 张 · 页面上这 ${pageCards.length} 张都属于它`,
   );
-  check("卡片带执行人（按岗位分工预填）", stored.every((item) => item.data.ownerAccountId && item.data.ownerLabel), stored.map((i) => i.data.ownerLabel).join(" / "));
+  check(
+    "卡片带执行人（按岗位分工预填）",
+    mineCards.length > 0 && mineCards.every((item) => item.data.ownerAccountId && item.data.ownerLabel),
+    mineCards.map((i) => i.data.ownerLabel).join(" / "),
+  );
 
   /* ---------- ③ 幂等：再说一次同样的话，不多出一批 ---------- */
   const countBeforeRepeat = stored.length;
@@ -149,14 +161,37 @@ try {
 
   /* ---------- ⑤ 说「拆分异常任务」→ 异常适配那一批也生成到同一页 ---------- */
   const phrase15 = phraseOf("⑮");
+  /* 比的是**同一页上的卡数**（服务端总数里还混着别的工单的卡，见上面 ② 的说明） */
+  const pageBefore15 = ((await machine.evaluate(CARDS_IN_PAGE)) ?? []).length;
   await machine.evaluate(
     `window.dispatchEvent(new CustomEvent('mumai:xiaomu-ask', { detail: { question: ${JSON.stringify(phrase15)}, interactionId: 'wb-15-${Date.now()}' } })); 1`,
   );
   const more = await machine.waitFor(
-    `(() => { const list = ${CARDS_IN_PAGE}; return list.length > ${countBeforeRepeat} ? list.length : null; })()`,
+    `(() => { const list = ${CARDS_IN_PAGE}; return list.length > ${pageBefore15} ? list.length : null; })()`,
     { timeoutMs: 9000 },
   );
-  check("⑮「任务卡已生成」→ 异常适配那一批也出现在同一页", Boolean(more), `页面上 ${more ?? "?"} 张`);
+  check(
+    "⑮「任务卡已生成」→ 异常适配那一批也出现在同一页",
+    more !== null,
+    `页面上 ${pageBefore15} → ${more ?? "?"} 张`,
+  );
+  /*
+    卡片是**跟着台词逐张铺开**的（⑮ 那一句没播完，页面上就只画出一部分）。
+    要比"两台机器一样"就得先等它铺完：以**服务端这一单的卡数**为准等页面追上来。
+  */
+  const expectedCards =
+    ((await machine.call("GET", "/api/sessions/demo-01/snapshot"))?.json?.entities?.taskCard ?? []).filter(
+      (item) => item.data.orderId === order.id,
+    ).length;
+  const settled = await machine.waitFor(
+    `(() => { const list = ${CARDS_IN_PAGE}; return list.length >= ${expectedCards} ? list.length : null; })()`,
+    { timeoutMs: 25_000 },
+  );
+  check(
+    "这一单的卡都铺开了（服务端几张、页面上就几张）",
+    settled !== null,
+    `服务端 ${expectedCards} 张 · 页面 ${settled ?? "?"} 张`,
+  );
 
   /* ---------- ⑥ 内网同步：另一台机器（马）看到同样多的卡 ---------- */
   await peer.start();
@@ -170,13 +205,41 @@ try {
   const peerState = (peerSnapshot?.json?.entities?.taskCard ?? []).length;
   const mine = (await machine.call("GET", "/api/sessions/demo-01/snapshot"))?.json?.entities?.taskCard?.length ?? -1;
   check("另一台机器（马）看到同样多的卡（内网同步）", peerState === mine && mine > 0, `这台 ${mine} · 另一台 ${peerState}`);
-  await peer.evaluate(`location.hash = '#/workbench'`);
-  await sleep(2500);
-  const peerCards = await peer.evaluate(CARDS_IN_PAGE);
+  /*
+    ⚠ 另一台机器**显式指定同一张工单**（`?order=`）：页面上画的是"当前工单的卡"，
+      而"当前工单"来自 `commissionBinding`（每台机器各自的 localStorage）——
+      不指定的话两台机器可能各看各的单，张数对不上（2026-09-30 修）。
+  */
+  const pageAfter15 = (await machine.evaluate(CARDS_IN_PAGE) ?? []).length;
+  await peer.evaluate(`location.hash = '#/workbench?order=${order.id}'`);
+  const peerCards = await peer.waitFor(
+    `(() => { const list = ${CARDS_IN_PAGE}; return list.length >= ${pageAfter15} ? list : null; })()`,
+    { timeoutMs: 12_000 },
+  );
   check(
-    "另一台机器的页面上也渲染出卡片，且回执按钮归执行人本人",
-    Array.isArray(peerCards) && peerCards.length === mine,
-    `渲染 ${Array.isArray(peerCards) ? peerCards.length : 0} 张`,
+    "另一台机器的页面上也渲染出卡片（内网同步到页面）",
+    Array.isArray(peerCards) && peerCards.length === pageAfter15,
+    `讲解机 ${pageAfter15} 张 · 另一台 ${Array.isArray(peerCards) ? peerCards.length : 0} 张`,
+  );
+
+  /* ---------- ⑦ 回执按钮**按卡判人**：只对这张卡的执行人亮 ---------- */
+  const receipt = await peer.evaluate(`(() => {
+    const cards = [...document.querySelectorAll('.wb-card')];
+    const rows = cards.map((node) => {
+      const owner = (node.querySelector('.wb-card__owner')?.textContent || node.textContent || '').trim();
+      const button = [...node.querySelectorAll('button')].find((item) => (item.textContent || '').includes('执行人回执'));
+      return { owner, hasButton: Boolean(button), enabled: Boolean(button && !button.disabled) };
+    });
+    return { total: cards.length, rows };
+  })()`);
+  const mineRows = (receipt?.rows ?? []).filter((row) => row.owner.includes("马"));
+  check(
+    "另一台机器（马）上，属于马的卡回执按钮可点、别人的卡不可点",
+    Boolean(receipt) &&
+      mineRows.length > 0 &&
+      mineRows.some((row) => row.enabled) &&
+      (receipt?.rows ?? []).filter((row) => !row.owner.includes("马")).every((row) => !row.enabled),
+    `共 ${receipt?.total ?? 0} 张 · 属马的 ${mineRows.length} 张（可点 ${mineRows.filter((r) => r.enabled).length}）`,
   );
 
   const shot = await machine.shot("执行工作台");
