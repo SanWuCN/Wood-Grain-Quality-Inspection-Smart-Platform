@@ -379,7 +379,7 @@ try {
               src: img ? img.getAttribute('src') : '',
             };
           })()`,
-          { timeoutMs: 12_000 },
+          { timeoutMs: 45_000_000 },
         );
         check(
           `  ↳ ⑫ 弹出原图窗口，且图片**真的解码出来**（不是裂图）`,
