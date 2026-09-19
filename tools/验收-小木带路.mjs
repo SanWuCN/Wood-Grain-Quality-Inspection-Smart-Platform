@@ -404,6 +404,32 @@ try {
     }
 
     /*
+      ── ①「三个月巡检与风险统计」的落点是**知识库 · 检索验证**（用户 2026-10-01）──
+      「第一个对话跳转不对，跳那啥都没有评委看什么」：原先只跳到页签，屏幕上是一个空
+      输入框 + 三条示例。现在这一轮把检索问题带进 URL（`nav.q`）并**自动执行**，
+      判据是页面上真的出现了：问题在框里、检索结果若干条、右侧证据详情已选中一条。
+    */
+    if (round.roundNo === "①") {
+      const kb = await machine.waitFor(
+        `(() => {
+          const input = document.querySelector('.kb-input--search');
+          const query = (input && input.value || '').trim();
+          const hits = [...document.querySelectorAll('.kb-hit, .kb-result-item, .kb-search li')].length;
+          const cards = document.querySelectorAll('[data-kb-citation-chunk], .kb-cite__text').length;
+          const detail = /证据详情/.test(document.body.innerText || '');
+          if (!query || !hits || !detail) return null;
+          return { query, hits, cards, detail };
+        })()`,
+        { timeoutMs: 20_000 },
+      );
+      check(
+        `  ↳ ① 知识库页面上真的跑出了这一问（问题在框里 + 有命中 + 右侧详情）`,
+        Boolean(kb && kb.query.length >= 2 && kb.hits >= 3),
+        kb ? `问题=「${kb.query}」 · 命中 ${kb.hits} 条 · 详情块 ${kb.cards}` : "20 秒内没等到检索结果（页面还是空的？）",
+      );
+    }
+
+    /*
       ── ㉓㉔㉕：最后三轮各带出**自己的**生成物面板（用户 2026-10-01）────────
       「平台最后几个对话需要更好的平台展示，而不只是跳转下页面」。
       原先这三轮都只跳到工单页、把同样的三组分区再展开一次 —— 屏幕上三遍一模一样。

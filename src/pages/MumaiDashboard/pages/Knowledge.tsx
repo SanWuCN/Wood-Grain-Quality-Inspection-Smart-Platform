@@ -510,6 +510,8 @@ export default function Knowledge() {
             }}
             currentServingVersion={overview?.servingVersion ?? null}
             onRerun={() => void search.run(search.result?.query ?? "")}
+            /* 小木代问：URL 上的 q（`#/knowledge?tab=search&q=…`）由页面直接执行 */
+            initialQuery={params.get("q") ?? ""}
           />
         ) : null}
       </div>

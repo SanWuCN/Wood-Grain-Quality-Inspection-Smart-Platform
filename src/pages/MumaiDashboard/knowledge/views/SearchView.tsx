@@ -9,7 +9,7 @@
  * 不在图下面再复制一份（PRD §6.2「重复展示同一个片段 → 合并」）。
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import NumberAnimation from "@/components/numberAnimation";
 import { Btn, StateBlock } from "../../ui";
 import type { SearchHit, SearchResult } from "../types";
@@ -35,6 +35,7 @@ export function SearchView({
   onFocusGraph,
   currentServingVersion,
   onRerun,
+  initialQuery = "",
 }: {
   result: SearchResult | null;
   running: boolean;
@@ -46,8 +47,17 @@ export function SearchView({
   onFocusGraph: (assetId: string) => void;
   currentServingVersion: string | null;
   onRerun: () => void;
+  /**
+   * URL 里带的检索问题（`#/knowledge?tab=search&q=…`）：进页面就**直接跑这一问**。
+   *
+   * 为什么要它（用户 2026-10-01：「第一个对话跳转不对，跳那啥都没有评委看什么」）：
+   * 小木第①轮说「我正在检索RAG知识库…」，落点就是这一页；不代问的话屏幕上只剩一个
+   * 空输入框 + 三条示例。带 `q` 进来 → 问题、命中的资料与原文定位一起出现，
+   * 而且刷新/复制链接都能回到同一屏（与 `doc`/`chunk` 落点同一条口径）。
+   */
+  initialQuery?: string;
 }) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showLow, setShowLow] = useState(false);
 
@@ -66,6 +76,32 @@ export function SearchView({
     setShowLow(false);
     void onSearch(text).then(() => setSelectedId(null));
   }
+
+  /*
+    URL 带来的问题**自动跑一次**（小木第①轮代问）。
+    `ranRef` 保证同一个问题只自动跑一次：结果回来后父组件会重渲染，
+    不禁一下会把同一问反复提交（每次提交都会打一次检索接口）。
+  */
+  const ranRef = useRef("");
+  const autoSelectRef = useRef(false);
+  useEffect(() => {
+    const text = initialQuery.trim();
+    if (!text || ranRef.current === text) return;
+    ranRef.current = text;
+    /* 代问的这一问跑完**自动选中第一条证据**：否则右侧详情停在
+       「从左侧选择一条证据」，投屏上等于半屏是空的（真人自己检索时不受影响） */
+    autoSelectRef.current = true;
+    submit(text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只认 initialQuery，submit 每次渲染都会重建
+  }, [initialQuery]);
+
+  useEffect(() => {
+    if (!autoSelectRef.current) return;
+    const first = (result?.hits ?? [])[0];
+    if (!first) return;
+    autoSelectRef.current = false;
+    setSelectedId(first.chunkId);
+  }, [result]);
 
   return (
     <div className="kb-search">

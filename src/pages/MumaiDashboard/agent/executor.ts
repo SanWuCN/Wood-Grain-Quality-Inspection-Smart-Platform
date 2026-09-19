@@ -564,6 +564,8 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
     if (round.nav.view) args.view = round.nav.view;
     if (round.nav.component) args.component = round.nav.component;
     if (round.nav.batch) args.batch = round.nav.batch;
+    /* 检索问题（第①轮）：带进 URL，让知识库检索验证页打开就把这一问跑出来 */
+    if (round.nav.q) args.q = round.nav.q;
     if (tool) {
       try {
         await runTool(tool, args, runtime, entities, false);
