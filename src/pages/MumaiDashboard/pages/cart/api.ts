@@ -156,6 +156,14 @@ export type CartStatus = {
   /** 服务端判定：链路在线且状态年龄 ≤3 秒（文档 §2） */
   live: boolean;
   ageMs: number | null;
+  /**
+   * 最后一次收到小车状态的时刻（**服务端落盘**，跨服务重启也记得住；
+   * 见 `server/services/cart.mjs` 的 `rememberLastSeen`）。null = 从没收到过。
+   *
+   * 现场问的第二句是「上次是什么时候通的」：服务刚重启时 `ageMs` 是 null，
+   * 但这一条还在，页面就能照实说「最后收到小车状态：12 分钟前」。
+   */
+  lastSeenAt?: string | null;
   lastError: string | null;
   state: CartState | null;
   info: CartInfo;
