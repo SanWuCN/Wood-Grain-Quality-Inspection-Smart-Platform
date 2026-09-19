@@ -27,6 +27,7 @@
  */
 
 import { DatabaseSync } from "node:sqlite";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { Machine, sleep } from "./browser-harness.mjs";
 
 const args = process.argv.slice(2);
@@ -48,8 +49,17 @@ const { routeUtterance } = await import("../src/pages/MumaiDashboard/agent/scrip
 const { SCRIPT_SHORTCUT_ENTRIES } = await import("../src/pages/MumaiDashboard/agent/scriptShortcutEntries.ts");
 
 let failed = 0;
+/*
+  每一条检查（含通过的）都留一份到磁盘上。
+  ⚠ 为什么要留：一条 25 轮的工装跑 8 分钟，偶发失败时如果只看终端最后几行，
+  根本不知道**是哪一条**红的（实测踩过：一次后台跑只留下"有 1 项未通过"，
+  再跑一遍又全绿，等于白丢一次线索）。文件按运行时刻命名，最近一次同时写一份 `-最近一次`。
+*/
+const checkLog = [];
 const check = (name, ok, detail = "") => {
-  console.log(`  ${ok ? "✓" : "✗"} ${name}${detail ? `　（${detail}）` : ""}`);
+  const line = `  ${ok ? "✓" : "✗"} ${name}${detail ? `　（${detail}）` : ""}`;
+  console.log(line);
+  checkLog.push(line);
   if (!ok) failed += 1;
 };
 
@@ -740,7 +750,26 @@ try {
   process.exitCode = failed === 0 ? 0 : 1;
 } catch (error) {
   console.error(`工装异常：${error?.stack ?? error}`);
+  checkLog.push(`  ✗ 工装异常：${error?.message ?? error}`);
   process.exitCode = 1;
 } finally {
+  /* 把这一轮的每条检查（含通过的）落盘：偶发失败时才有据可查 */
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const target = `D:\\平台\\验收截图`;
+    mkdirSync(target, { recursive: true });
+    const body = [
+      `小木带路验收 · ${BASE} · ${new Date().toLocaleString("zh-CN", { hour12: false })}`,
+      `结果：${failed === 0 ? "全部通过" : `${failed} 项未通过`}`,
+      "",
+      ...checkLog,
+      "",
+    ].join("\n");
+    writeFileSync(`${target}\\小木带路-${stamp}.log`, body, "utf8");
+    writeFileSync(`${target}\\小木带路-最近一次.log`, body, "utf8");
+    console.log(`  记录：${target}\\小木带路-最近一次.log`);
+  } catch {
+    /* 写不了日志不影响验收结论 */
+  }
   machine.kill();
 }
