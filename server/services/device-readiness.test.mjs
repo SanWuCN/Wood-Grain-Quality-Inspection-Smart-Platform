@@ -113,7 +113,8 @@ test("在线判定用网关自己的阈值：≤6s 在线 / 6–15s 延迟 / >15
   assert.equal(at(3).exitCode, 0, "3s：在线");
   assert.equal(at(9).counts.warn >= 1, true, "9s：延迟（提醒）");
   assert.match(textsOf(at(9)), /设备上报延迟（9s/);
-  assert.match(textsOf(at(40)), /已经不新鲜（40s/);
+  /* 读数给人读：秒数换成"多久前"（2026-10-01），断言跟着改口径 */
+assert.match(textsOf(at(40)), /已经不新鲜（最后收到设备上报：40 秒前/);
   assert.equal(at(40).exitCode, 0, "不新鲜是提醒不是失败");
 });
 

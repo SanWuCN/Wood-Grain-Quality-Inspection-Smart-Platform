@@ -72,16 +72,16 @@ export function buildReadiness(facts) {
  * （服务端是 .mjs、前端是 .ts，两边没法共享代码，所以改一处要顺手改另一处）。
  * `ageMs === null` 表示**本轮服务启动后还没收到过**（与"刚断线"是两回事，见 `cart.mjs` 的注释）。
  */
-function lastSeenText(ageMs) {
-  if (ageMs === null || ageMs === undefined) return "本轮服务启动后还没收到过小车状态";
+function lastSeenText(ageMs, subject = "小车状态") {
+  if (ageMs === null || ageMs === undefined) return `本轮服务启动后还没收到过${subject}`;
   const seconds = Math.round(Number(ageMs) / 1000);
-  if (seconds < 5) return "刚刚还收到过小车状态";
-  if (seconds < 60) return `最后收到小车状态：${seconds} 秒前`;
+  if (seconds < 5) return `刚刚还收到过${subject}`;
+  if (seconds < 60) return `最后收到${subject}：${seconds} 秒前`;
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `最后收到小车状态：${minutes} 分钟前`;
+  if (minutes < 60) return `最后收到${subject}：${minutes} 分钟前`;
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `最后收到小车状态：${hours} 小时前`;
-  return `最后收到小车状态：${Math.round(hours / 24)} 天前`;
+  if (hours < 24) return `最后收到${subject}：${hours} 小时前`;
+  return `最后收到${subject}：${Math.round(hours / 24)} 天前`;
 }
 const { health, hosting, cart, streams, device, screen, configs, generatedAt } = facts;
   const sections = [];
@@ -241,7 +241,8 @@ const { health, hosting, cart, streams, device, screen, configs, generatedAt } =
   } else if (device.ageSec !== null && device.ageSec > device.offlineAfterMs / 1000) {
     deviceItems.push({
       level: "warn",
-      title: `收到过设备上报，但已经不新鲜（${device.ageSec}s，页面会显示「离线」）`,
+      /* 读数给人读：秒数太大就看不出"多久了"（实测现场是 29361s ≈ 8 小时）——统一成人话 */
+      title: `收到过设备上报，但已经不新鲜（${lastSeenText(device.ageSec * 1000, "设备上报")}，页面会显示「离线」）`,
       detail: `在线判定：≤${device.staleAfterMs / 1000}s 在线 / ${device.staleAfterMs / 1000}–${device.offlineAfterMs / 1000}s 延迟 / >${device.offlineAfterMs / 1000}s 离线`,
       hints: ["终端进程还在跑吗？平台地址是不是改了没重启终端？"],
     });
