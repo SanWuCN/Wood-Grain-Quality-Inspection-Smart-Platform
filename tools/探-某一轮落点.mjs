@@ -26,7 +26,8 @@ try {
   await sleep(1500);
   await machine.evaluate(`(() => {
     const segment = ${ROUND} <= 10 ? 'b' : ${ROUND} <= 20 ? 'y' : 'm';
-    const digit = String((${ROUND} - 1) % 10 + 1);
+    /* 段内数字 1…9、**0 代表第 10 条**：第 10 轮 = Ctrl+B+0、第 20 轮 = Ctrl+Y+0 */
+    const digit = (${ROUND} - 1) % 10 === 9 ? '0' : String((${ROUND} - 1) % 10 + 1);
     const fire = (key) => window.dispatchEvent(new KeyboardEvent('keydown', { key, code: 'Key' + key.toUpperCase(), ctrlKey: true, bubbles: true, cancelable: true }));
     fire(segment);
     fire(digit);
