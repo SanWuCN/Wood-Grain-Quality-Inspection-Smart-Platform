@@ -33,6 +33,8 @@ import { buildSyncBackupStream } from "./syncBackup";
 import { DEMO_SURFACE_EVENT } from "./demoSurfaceAction";
 /* ⑫「打开你标记的原图」：窗口在 Twin 页里，这里只负责派发事件 */
 import { openOriginalPhoto } from "../pages/originalPhotoAction";
+/* ㉒「切到内部点云」：同上（事件与派发在 twinViewAction.ts，页面里也有手动页签） */
+import { openInternalCloud } from "../pages/twinViewAction";
 import { voicePackEntryCount } from "./voicePack";
 import {
   FALLBACK_TEXT,
@@ -728,6 +730,28 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
         .then(showOriginalPhoto);
     } else {
       showOriginalPhoto();
+    }
+  }
+
+  /*
+    ── 切到内部点云（㉒「证据对照与补核清单」）──────────────────────────
+    小木：「证据对照已打开。两路共同提示的项目优先展示，结果不一致或资料不齐的项目已列入补核清单。」
+    这一轮的落点就是数字孪生页，说的正是"两路证据汇到一起" —— 内部响应区（虫蛀空洞 / 内部裂痕）
+    就是两路汇到的那一层，所以播完把主视图切到「内部点云」。
+
+    ⚠ **刻意不挂在 ⑪**：⑪ 讲的是"外观可见的表面缺损与孔洞状疑点"，台词里还写着
+      「不能确认内部是否存在空洞」。那一轮切内部点云，等于把精扫之后才得到的结论提前演了 ——
+      剧情上说不通（`twinViewAction.test.ts` 把这条约束钉住了）。
+    ⚠ 与 ④⑫ 同一套时机：等播报结束再切（不然台词还在念、屏幕已经换了）。
+  */
+  if (round.roundNo === "㉒") {
+    const showInternalCloud = () => openInternalCloud();
+    if (spoken && typeof (spoken as Promise<void>).then === "function") {
+      void (spoken as Promise<void>)
+        .catch(() => { /* 播报失败也要切过去，不能因为没声音就少一个动作 */ })
+        .then(showInternalCloud);
+    } else {
+      showInternalCloud();
     }
   }
 }

@@ -72,6 +72,8 @@ import { currentSource } from "./materialsData";
 /* 「打开你标记的原图」（剧本 ⑫）：窗口本体 + 触发事件（executor 派发同一个事件） */
 import { OriginalPhotoWindow } from "./OriginalPhotoWindow";
 import { ORIGINAL_PHOTO_EVENT } from "./originalPhotoAction";
+/* 「切到内部点云」（㉒ 证据对照）：事件在 twinViewAction.ts，页面与 executor 共用 */
+import { TWIN_INTERNAL_CLOUD_EVENT } from "./twinViewAction";
 /* ⑫ 窗口里那张真实原片（照片批次里的人工标注原片） */
 import { annotatedPhotoFor } from "./annotatedPhotos";
 import "./twinColumns.css";
@@ -678,6 +680,24 @@ const TOUR_INTERVAL_MS = 5200;
     window.addEventListener(ORIGINAL_PHOTO_EVENT, onOpen);
     return () => window.removeEventListener(ORIGINAL_PHOTO_EVENT, onOpen);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- setComponent 每次渲染都是新函数，进依赖会让监听反复重建
+  }, [params]);
+
+  /**
+   * ㉒「证据对照与补核清单」播完时切到内部点云（`executor` 派发 `mumai:twin-internal-cloud`）。
+   *
+   * 为什么挂 ㉒ 而不是 ⑪：⑪ 讲的是"外观可见的表面缺损与孔洞状疑点"，
+   * 它的台词本身还写着「不能确认内部是否存在空洞」——那时候把内部点云摆出来，
+   * 等于把精扫之后才得到的结论提前演了。㉒ 才是"两路证据汇到一起"的那一轮。
+   */
+  useEffect(() => {
+    const onInternal = (event: Event) => {
+      const componentId = String((event as CustomEvent<{ componentId?: string }>).detail?.componentId ?? "");
+      if (componentId) setComponent(componentId);
+      setStageView("internal");
+    };
+    window.addEventListener(TWIN_INTERNAL_CLOUD_EVENT, onInternal);
+    return () => window.removeEventListener(TWIN_INTERNAL_CLOUD_EVENT, onInternal);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 同上：setComponent 是内联箭头函数
   }, [params]);
 
   const removeKeyframe = useCallback(

@@ -105,6 +105,50 @@ try {
   check(`Z01（档案：外观连续）显示「无内部缺陷记录」`, z01.includes("无内部缺陷记录"), z01 || "没找到 Z01 那行");
   check(`Z02（档案：轻微褪色）显示「无内部缺陷记录」`, z02.includes("无内部缺陷记录"), z02 || "没找到 Z02 那行");
 
+  /* ---------- ⑥ 「只看选中构件」与 ㉒ 的自动切换 ---------- */
+  const solo = await machine.evaluate(`(() => {
+    const button = [...document.querySelectorAll('.ipc__toggle')].find((node) => (node.textContent || '').includes('只看 Z04'));
+    if (!button) return null;
+    button.click();
+    return (button.textContent || '').trim();
+  })()`);
+  check(`有「只看 Z04」这一项且点得动`, Boolean(solo), solo ?? "没找到那个开关");
+  const soloState = await machine.waitFor(
+    `(() => {
+      const specs = [...document.querySelectorAll('.ipc__specs li')].map((node) => node.textContent || '');
+      return specs.length === 1 && specs[0].includes('Z04') ? { count: specs.length } : null;
+    })()`,
+    { timeoutMs: 8000 },
+  );
+  check(`勾上之后只剩选中的那一根`, Boolean(soloState), soloState ? `剩 ${soloState.count} 根` : "还是四根都在");
+
+  /*
+    ㉒「证据对照」播完时 `executor` 派发的事件 —— 这里**直接派发同一条事件**验证接线，
+    不重跑那一轮的播报（省时间，且这一条要证的正是"事件到页面的那段线"）。
+  */
+  await machine.evaluate(`location.hash = '#/twin?component=Z04'`);
+  await machine.waitFor(`Boolean(document.querySelector('.page--twin'))`, { timeoutMs: 10_000 });
+  await sleep(600);
+  const opened = await machine.evaluate(`(() => {
+    window.dispatchEvent(new CustomEvent('mumai:twin-internal-cloud', { detail: { componentId: 'Z04' } }));
+    return true;
+  })()`);
+  const autoView = await machine.waitFor(
+    `(() => {
+      const active = document.querySelector('.twin-view__tab.is-active');
+      const stage = document.querySelector('.ipc__stage');
+      return active && stage && (active.textContent || '').includes('内部点云')
+        ? { tab: (active.textContent || '').trim(), points: Number(stage.getAttribute('data-points') || 0) }
+        : null;
+    })()`,
+    { timeoutMs: 20_000 },
+  );
+  check(
+    `㉒ 的事件能把主视图切到内部点云（并画出点）`,
+    opened === true && Boolean(autoView && autoView.points > 10_000),
+    autoView ? `${autoView.tab} · ${autoView.points} 个点` : "20 秒内没切过去",
+  );
+
   const shot = await machine.shot("内部点云");
   if (shot) console.log(`  截图：${shot}`);
   console.log(failed === 0 ? "\n✓ 内部点云：全部通过" : `\n✗ 有 ${failed} 项未通过`);

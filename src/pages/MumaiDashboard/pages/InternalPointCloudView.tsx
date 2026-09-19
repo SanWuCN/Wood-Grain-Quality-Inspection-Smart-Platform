@@ -104,7 +104,18 @@ function Column({ cloud, focused }: { cloud: ColumnCloud; focused: boolean }) {
 }
 
 export default function InternalPointCloudView({ focusComponentId = "", onlyComponentIds, onPickDefect }: InternalPointCloudViewProps) {
-  const cloud = useMemo(() => buildInternalCloud(onlyComponentIds), [onlyComponentIds]);
+  /**
+   * 「只看这一根」（用户口径里的"分一项"要能聚焦）。
+   *
+   * 默认四根都画；勾上之后只保留**当前聚焦的那一根** —— ㉒ 自动切过来时聚焦 Z04，
+   * 讲解人一勾就能把 Z04 的两处虫蛀、一条裂痕、柱脚缺损看干净，不被另外三根挡视线。
+   */
+  const [soloComponent, setSoloComponent] = useState(false);
+  const visibleIds = useMemo(() => {
+    if (!soloComponent || !focusComponentId) return onlyComponentIds;
+    return [focusComponentId];
+  }, [soloComponent, focusComponentId, onlyComponentIds]);
+  const cloud = useMemo(() => buildInternalCloud(visibleIds), [visibleIds]);
   const [showShell, setShowShell] = useState(true);
   const [pickedComponent, setPickedComponent] = useState<string>("");
   /**
@@ -204,6 +215,15 @@ export default function InternalPointCloudView({ focusComponentId = "", onlyComp
           <button type="button" className={`ipc__toggle${showShell ? " is-on" : ""}`} onClick={() => setShowShell((value) => !value)}>
             {showShell ? "隐藏外表面（只看内部）" : "显示外表面"}
           </button>
+          {focusComponentId ? (
+            <button
+              type="button"
+              className={`ipc__toggle${soloComponent ? " is-on" : ""}`}
+              title="只画页面上选中的那一根，便于讲这一根的缺陷"
+              onClick={() => setSoloComponent((value) => !value)}>
+              {soloComponent ? `只看 ${focusComponentId}（已开）` : `只看 ${focusComponentId}`}
+            </button>
+          ) : null}
           <button type="button" className={`ipc__toggle${pickedComponent ? "" : " is-on"}`} onClick={() => setPickedComponent("")}>
             四根都亮
           </button>

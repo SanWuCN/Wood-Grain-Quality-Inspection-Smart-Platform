@@ -344,6 +344,30 @@ try {
         );
       }
       /*
+        ── ㉒「证据对照」播完应自动切到**内部点云**（用户 2026-09-30 追加的那一项）──
+        这一轮落在数字孪生页、台词说的是"两路共同提示的项目优先展示"，
+        内部响应区（虫蛀/裂痕）就是两路汇到的那一层。
+        ⚠ **⑪ 不许切**：那一轮讲外观，台词里还写着「不能确认内部是否存在空洞」——
+          提前把内部结论摆出来就是剧情矛盾（`twinViewAction.test.ts` 钉住这条）。
+      */
+      if (round.roundNo === "㉒") {
+        const internal = await machine.waitFor(
+          `(() => {
+            const active = document.querySelector('.twin-view__tab.is-active');
+            const stage = document.querySelector('.ipc__stage');
+            if (!active || !stage || !(active.textContent || '').includes('内部点云')) return null;
+            const points = Number(stage.getAttribute('data-points') || 0);
+            return points > 10_000 ? { tab: (active.textContent || '').trim(), points } : null;
+          })()`,
+          { timeoutMs: 25_000 },
+        );
+        check(
+          `  ↳ ㉒ 播完自动切到「内部点云」并画出点`,
+          Boolean(internal),
+          internal ? `${internal.tab} · ${internal.points} 个点` : "25 秒内没切过去",
+        );
+      }
+      /*
         ⚠ 分两步等：先等构件条出现（证明页内定位到了三维场景），
         再等**最终态**（四根都在 + 重点构件高亮 + 选中 Z04）。
         为什么不等"中间态"：⑪ 那一轮是**跟着播报逐柱点亮**的，最后一根要等台词念完
