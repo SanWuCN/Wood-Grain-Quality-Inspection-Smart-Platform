@@ -83,6 +83,14 @@ export class Machine {
         "--enable-unsafe-swiftshader",
         "--use-angle=swiftshader",
         "--mute-audio",
+        /*
+          ⚠ 无头 Chrome 默认会以"没有用户交互"为由**拒掉 `play()`**（NotAllowedError），
+          于是平台的播报按设计回退浏览器合成音 —— 验收里看着像"录音没接上"，
+          其实是环境（`voice-module` 那边的验收工装早就带着这个开关，见
+          `voice-pipeline-and-lan` 的记录）。带上它，audio 的工装才验的是功能。
+          另留一条 `activate()`（CDP `userGesture`）给不带此开关的场景兜底。
+        */
+        "--autoplay-policy=no-user-gesture-required",
         `--window-size=${this.width},${this.height}`,
         `${this.base}/`,
       ],
