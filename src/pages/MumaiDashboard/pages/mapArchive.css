@@ -1,0 +1,124 @@
+/*
+ * 「最近一次成功建图（归档）」面板（车离线时建图页的那一屏）
+ *
+ * 版式口径：**左图右数据**。缩略栅格图按 GRID_MAP 的原始比例（40×26 → 320×208）画，
+ * 不做拉伸；右边一行一条元数据，最后是"怎么把实时画面找回来"的三步。
+ */
+
+.map-archive__body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-4, 16px);
+  align-items: start;
+}
+
+.map-archive__grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.map-archive__grid canvas {
+  display: block;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-2, 6px);
+  image-rendering: pixelated; /* 让 40×26 的格子边界清楚，不做平滑 */
+  background: #0a1526;
+}
+
+.map-archive__legend {
+  display: flex;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ma-text-3);
+  font-size: 11.5px;
+}
+
+.map-archive__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.map-archive__legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid var(--border-subtle);
+}
+
+.map-archive__meta {
+  min-width: 0;
+}
+
+.map-archive__headline {
+  margin: 0 0 8px;
+  color: var(--ma-text);
+  font-weight: 600;
+}
+
+.map-archive__meta dl {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.map-archive__meta dl > div {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 10px;
+  font-size: var(--fs-aux);
+}
+
+.map-archive__meta dt {
+  color: var(--ma-text-3);
+}
+
+.map-archive__meta dd {
+  margin: 0;
+  color: var(--ma-text-2);
+}
+
+.map-archive__asset {
+  display: inline-block;
+  margin-right: 10px;
+}
+
+.map-archive__asset b {
+  margin-left: 6px;
+  font-weight: 600;
+}
+
+.map-archive__asset b.is-ok {
+  color: var(--tone-ok, #3ddc97);
+}
+
+.map-archive__asset b.is-bad {
+  color: var(--danger, #ff5c70);
+}
+
+.map-archive__caption {
+  margin: 10px 0 0;
+  padding: 6px 9px;
+  border-left: 2px solid var(--tone-warn, #ffb020);
+  background: rgba(255, 176, 32, 0.08);
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+}
+
+.map-archive__recovery {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  line-height: 1.6;
+}
+
+@media (max-width: 1100px) {
+  .map-archive__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -34,6 +34,7 @@ import { CruiseTaskBanner } from "./cart/CruiseTaskBanner";
 import { CHANNEL_PATROL_ROUND_NO } from "../agent/demoActions";
 import { openDemoSurface } from "../agent/demoSurfaceAction";
 import MapCanvas, { type MapCanvasMode } from "./cart/MapCanvas";
+import { MapArchivePanel } from "./MapArchivePanel";
 import ParameterStrip from "./cart/ParameterStrip";
 import { DEFAULT_VIEW, fitView, missionStateText, type MapView } from "./cart/geometry";
 import {
@@ -1032,6 +1033,15 @@ export default function Mapping() {
 
             </div>
           </Panel>
+
+          {/*
+            车离线时这一页原来只有一串"未接通"（实测正文 243 字）。这里补一块
+            **归档建图结果**（用户 2026-10-01 长期口径）：显示最近一次成功建图的栅格图
+            与归档文件校验结论，并写清怎么把实时画面找回来。
+            ⚠ 有实时地图、或车在线时**不显示**（`archivedMapPanel` 里判）——
+              那时候"没有地图"的意思是还没开始建图，拿归档去顶会看着像实时结果。
+          */}
+          <MapArchivePanel hasLiveMap={mapReady} link={cart.link} />
 
           {/*
             现场视频**单独一块**，不并进上面的画面选择。

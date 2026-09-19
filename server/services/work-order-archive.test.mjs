@@ -14,13 +14,16 @@
  *
  * ⚠ 一个文件只起一个服务（同端口起第二个会卡住 —— 实测：拆成两个 test 各起一次，
  *   第二个 startService 永远不返回，整个 runner 挂住不退出）。
+ * ⚠ 端口要与其它测试文件错开：`node --test "server/services/*.test.mjs"` 是**并行**跑的，
+ *   两个文件占同一个端口会互相抢（实测 18092 与 device-link-reset 撞过一次，
+ *   表现是别的用例莫名其妙红）。当前占用：18080/81/86/87/91/92/94/95/96/97，本文件用 **18098**。
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
 test("工单归档：待指派 / 已暂停都能归档，归档后锁住且可查", async () => {
   const { startService } = await import("../index.mjs");
-  const service = await startService({ port: 18092, host: "127.0.0.1", dbFile: ":memory:", quiet: true });
+  const service = await startService({ port: 18098, host: "127.0.0.1", dbFile: ":memory:", quiet: true });
   const base = service.url;
   const login = await fetch(`${base}/api/auth/login`, {
     method: "POST",

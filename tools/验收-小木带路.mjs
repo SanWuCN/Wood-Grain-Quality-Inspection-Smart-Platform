@@ -219,6 +219,44 @@ try {
       check(`  ↳ 建图页上有「通道巡查」按钮且点得动（§102 史自己开启）`, manual === "clicked");
       const reopened = await machine.waitFor(`Boolean(document.querySelector('.dsf'))`, { timeoutMs: 6000 });
       check(`  ↳ 点它弹出同一个监听窗口`, Boolean(reopened));
+
+      /*
+        ── 车离线时这一页不能是空的（用户 2026-10-01 长期口径）────────────
+        原来小车的链路一断，这一页只剩一串"未接通"（实测正文 243 字）。
+        现在显示「最近一次成功建图（归档）」：缩略栅格图 + 版本/时间/格数 +
+        归档文件与 SHA 结论 + 三步恢复指引。
+
+        ⚠ 条件判据：车**在线**时这一屏**不该**出现（有实时图就不拿归档顶），
+        所以在线就跳过并说明，不能写成"必须在"——否则现场车一连上就假红。
+      */
+      const cartLink = await machine.evaluate(`(async () => {
+        const token = localStorage.getItem('mumai.token') || '';
+        const response = await fetch('/api/cart/status', { headers: { authorization: 'Bearer ' + token } });
+        const body = await response.json();
+        return body.link || body.state || '';
+      })()`);
+      if (cartLink === "online") {
+        check(`  ↳ 车在线：建图页不显示归档那一屏（实时优先，符合口径）`, true, "车在线 → 归档屏按设计不出现");
+      } else {
+        const archive = await machine.waitFor(
+          `(() => {
+            const panel = [...document.querySelectorAll('.panel, section')]
+              .find((node) => (node.textContent || '').includes('最近一次成功建图'));
+            if (!panel) return null;
+            const canvas = panel.querySelector('canvas');
+            const cells = Number(canvas?.dataset?.cells || 0);
+            if (!cells) return null;
+            const text = panel.innerText || '';
+            return { cells, version: canvas.dataset.version || '', archived: /归档/.test(text), notLive: /不是实时/.test(text) };
+          })()`,
+          { timeoutMs: 12_000 },
+        );
+        check(
+          `  ↳ 车离线：建图页显示「最近一次成功建图（归档）」并写明非实时`,
+          Boolean(archive && archive.archived && archive.notLive),
+          archive ? `${archive.version} · ${archive.cells} 格 · 归档=${archive.archived} 非实时=${archive.notLive}` : "12 秒内没等到归档建图那一屏",
+        );
+      }
     }
 
     /* 数据集页（⑰）：沈那一步的「受限校验单元 + 集合求交语句 + 冲突清单」要真的在屏上 */
