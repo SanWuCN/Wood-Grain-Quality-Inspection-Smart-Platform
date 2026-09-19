@@ -371,7 +371,9 @@ try {
             const box = win.querySelector('.opw__box');
             const panes = win.querySelectorAll('.opw__pane').length;
             const zoomPane = win.querySelector('.opw__pane.is-zoom .opw__inner');
-            return {
+            /* 未解码（或被 React 换 key 重建中）就继续等：以前无条件返回，第一次取样就把 0 交出去，窗口再长也没用 */
+        if (!img || img.naturalWidth <= 200) return null;
+        return {
               natural: img ? img.naturalWidth : 0,
               box: Boolean(box),
               panes,
