@@ -80,7 +80,7 @@ const POINTS = [
   { where: "§230（第 230 行）", id: "受限校验单元：整组调整后重跑", route: "/firmware?tab=dataset", find: { textAny: ["整组调整后重跑", "编入所选集合"] }, provedBy: "验收-小木带路.mjs 数据集页检查" },
   { where: "§260（第 260 行）", id: "下发到设备（更新包）", route: "/firmware?tab=delivery", find: { textAny: ["下发到设备"] }, provedBy: "验收-更新包下发（device-update-dispatch）" },
   { where: "§331（第 331 行）", id: "运行交付文件校验（SHA-256）", route: "/archive", find: { textAny: ["运行交付文件校验"] } },
-  { where: "⑥⑮（第 30 / 198 行）", id: "任务卡的「核对后保存」/「执行人回执」", route: "/workbench", find: { textAny: ["核对后保存", "执行人回执", "回执"] }, optional: true, provedBy: "验收-执行工作台.mjs（13/13）" },
+  { where: "⑥⑮（第 30 / 198 行）", id: "任务卡的「核对后保存」/「执行人回执」", route: "/workbench", find: { textAny: ["核对后保存", "执行人回执", "回执"] }, optional: true, provedBy: "验收-执行工作台.mjs（15/15）" },
 ];
 
 let failed = 0;

@@ -113,6 +113,12 @@ export class Machine {
     });
     await this.send("Page.enable");
     await this.send("Runtime.enable");
+    /*
+      焦点模拟：headless=new 下窗口不是"活动窗口"，`document.hasFocus()` 为 false，
+      于是 **CDP 的 Input 事件会被丢掉**（鼠标、键盘全都不进页面 —— 真鼠标点击的验收就此失效）。
+      `Emulation.setFocusEmulationEnabled` 是 Puppeteer 里 `bringToFront` 用的同一条命令。
+    */
+    await this.send("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => null);
   }
 
   send(method, params = {}) {
@@ -197,6 +203,42 @@ export class Machine {
       await sleep(300);
     }
     return false;
+  }
+
+  /**
+   * 按**浏览器的命中测试**点一下：先 `document.elementFromPoint`，再在它身上派发冒泡 click。
+   *
+   * ── 为什么不是 `element.click()` ──────────────────────────────────────
+   * `element.click()` **不看层级**：控件被别的层盖住时它照样触发，人却看不见也点不着。
+   * 数字孪生的主视图页签就踩过这个坑 —— 页签放在 `.twin-stage` 里，被
+   * `position:absolute; inset:0` 的 `.twin-view` 整个压住，脚本全绿，用户却问
+   * "3D 点云图去哪儿查看"。命中测试点法在那种情况下命中的是**盖住它的那个元素**，
+   * 目标控件的 onClick 不会被触发 —— 与真人点击的结果一致（`探-主视图页签` 也钉了这条）。
+   *
+   * ── 为什么不用 CDP 的真鼠标事件 ──────────────────────────────────────
+   * 试过：`Input.dispatchMouseEvent`（直连页面端点、以及连浏览器端点 + sessionId 两种）
+   * 回包都是 `{}` 成功，但页面里 `document` 上**一个事件都收不到**
+   * （`document.hasFocus()` 已用 `Emulation.setFocusEmulationEnabled` 置为 true，
+   * viewport 1582×904、dpr 1，坐标无误）。这套 headless=new 环境里 Input 事件进不去页面，
+   * 所以退回到"命中测试 + 派发"这条能真正反映层级的做法。
+   *
+   * 用法：`await machine.clickHitTest('.twin-view__tab', { contains: '内部点云' })`
+   *   （`contains` 用来在一组同类控件里认准那一个 —— 只给选择器会点到第一个）
+   */
+  async clickHitTest(selector, { contains = "" } = {}) {
+    return this.evaluate(`(() => {
+      const list = [...document.querySelectorAll(${JSON.stringify(selector)})];
+      const node = ${contains ? `list.find((item) => (item.textContent || '').includes(${JSON.stringify(contains)}))` : "list[0]"};
+      if (!node) return { ok: false, reason: '找不到元素' };
+      const rect = node.getBoundingClientRect();
+      const x = rect.x + rect.width / 2;
+      const y = rect.y + rect.height / 2;
+      const top = document.elementFromPoint(x, y);
+      if (!top) return { ok: false, reason: '这一点上没有元素' };
+      const mine = top === node || node.contains(top);
+      top.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window }));
+      return { ok: true, hitSelf: mine, text: (node.textContent || '').trim(), topClass: String(top.className || top.tagName) };
+    })()`);
   }
 
   async shot(name) {

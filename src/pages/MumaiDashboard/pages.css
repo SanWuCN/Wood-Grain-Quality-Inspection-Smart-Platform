@@ -2538,7 +2538,22 @@
   gap: var(--space-3);
 }
 
+/*
+  ── 主视图那一列（页签 + 画布）────────────────────────────────────────
+  ⚠ 页签**不能**放进 `.twin-stage`（2026-10-01 修）：stage 里那层 `.twin-view` 是
+    `position: absolute; inset: 0`，会把页签整个盖住 —— 脚本 `element.click()` 点得动，
+    人却看不见也点不着（用户就是因此问"3D 点云图去哪儿看"）。
+    所以把页签与 stage 一起放进这一列：页签在正常流里，stage 占剩下的高度。
+*/
+.twin-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
 .twin-stage {
+  flex: 1;
   position: relative;
   min-height: 0;
   overflow: hidden;
@@ -2550,26 +2565,42 @@
   放在视图**上方**而不是浮在画面上：这一行是"看哪一层"的入口，
   浮层位置在数字孪生页已经被 图层开关（.twin-layers）与读数条占着了，
   再叠一个会出现"三个浮层抢左上角"。
+
+  ⚠ 三个页签要**看着像按钮**（2026-10-01 改）：先前未选中的页签是透明底、无边框，
+    整行读起来像画布上的一行小字说明 —— 用户看完就问"3D 点云图去哪儿看"。
+    现在前面加「主视图」标签、每个页签给底色与描边、选中项用强调色。
 */
 .twin-views {
   display: flex;
+  align-items: center;
   gap: var(--space-1);
-  padding: var(--space-1) var(--space-2) 0;
+  padding: var(--space-2) var(--space-2) var(--space-1);
   border-bottom: 1px solid var(--border-subtle);
+}
+
+.twin-views__label {
+  margin-right: 2px;
+  color: var(--ma-text-3);
+  font-size: var(--fs-aux);
+  letter-spacing: 0.08em;
 }
 
 .twin-view__tab {
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
-  padding: 5px 12px;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: var(--radius-2, 6px) var(--radius-2, 6px) 0 0;
-  background: transparent;
-  color: var(--ma-text-3);
-  font-size: var(--fs-aux);
+  padding: 6px 14px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-2, 6px);
+  background: var(--panel-surface);
+  color: var(--ma-text-2);
+  font-size: var(--fs-body);
   cursor: pointer;
+}
+
+.twin-view__tab:hover {
+  border-color: var(--border-hover);
+  color: var(--ma-text);
 }
 
 .twin-view__tab em {
@@ -2578,10 +2609,12 @@
   color: var(--ma-text-3);
 }
 
+/* 选中态与站内其它页签同一套（`.btn.is-active`）：主色描边 + 淡淡的主色底 */
 .twin-view__tab.is-active {
-  border-color: var(--border-subtle);
-  background: var(--panel-surface);
-  color: var(--ma-text);
+  border-color: var(--primary);
+  background: var(--fill-soft);
+  color: var(--primary);
+  font-weight: 600;
 }
 
 .twin-view__tab.is-active em {

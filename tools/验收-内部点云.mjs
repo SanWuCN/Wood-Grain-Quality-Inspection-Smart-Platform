@@ -2,7 +2,8 @@
  * 验收：数字孪生的**内部点云**（用户 2026-09-30 追加的一项）
  *
  * ── 这条工装回答的问题 ──────────────────────────────────────────────
- *   ① 数字孪生页上**有没有这一项**（主视图切换里那个「内部点云」页签）；
+ *   ① 数字孪生页上**有没有这一项**（主视图切换里那个「内部点云」页签），
+ *      且它**没被画布盖住**、用真鼠标点得动（`element.click()` 不算数，见下）；
  *   ② 点进去**真的画出了点**（不是一块黑画布）—— 判据是渲染器自己报的
  *      `gl.info.render.points`（写在同一块 DOM 的 `data-points` 上），
  *      随便写个数字骗不过去：它是 WebGL 这一帧真正提交的点数；
@@ -57,13 +58,38 @@ try {
   );
 
   /* ---------- ② 点进去，等渲染器报点数 ---------- */
-  const clicked = await machine.evaluate(`(() => {
-    const tab = [...document.querySelectorAll('.twin-view__tab')].find((node) => (node.textContent || '').includes('内部点云'));
-    if (!tab) return false;
-    tab.click();
-    return true;
+  /*
+    ⚠ 用**命中测试点法**（`machine.clickHitTest`），不是页面里的 `tab.click()`：
+      `element.click()` 不看层级 —— 页签被画布盖住时它照样"点得动"，人却点不着。
+      这个坑真发生过（用户 2026-10-01 问"3D 点云图去哪儿查看"）：页签原本在 `.twin-stage`
+      里，被 `position:absolute; inset:0` 的 `.twin-view` 整个压住，脚本全绿、人找不到入口。
+      所以先查"页签中心点上最顶层的是不是它自己"，再在那个**命中到的元素**上点一下。
+  */
+  const tab = await machine.evaluate(`(() => {
+    const node = [...document.querySelectorAll('.twin-view__tab')].find((item) => (item.textContent || '').includes('内部点云'));
+    if (!node) return null;
+    const rect = node.getBoundingClientRect();
+    const cx = rect.x + rect.width / 2;
+    const cy = rect.y + rect.height / 2;
+    const top = document.elementFromPoint(cx, cy);
+    return { width: rect.width, height: rect.height, covered: !(top && node.contains(top)), topClass: top ? String(top.className || top.tagName) : null };
   })()`);
-  check("点得动", clicked === true);
+  check(
+    `「内部点云」页签在画布之上（人点得着，不是被盖住）`,
+    Boolean(tab) && tab.covered === false,
+    tab ? `中心点上最顶层=${tab.topClass}${tab.covered ? "（被盖住了！）" : ""}` : "没找到页签",
+  );
+  const hit = await machine.clickHitTest(".twin-view__tab", { contains: "内部点云" });
+  check(
+    `点下去命中的就是这个页签（不是画布）`,
+    Boolean(hit?.ok) && hit.hitSelf === true,
+    hit?.ok ? `命中=${hit.topClass}${hit.hitSelf ? "" : "（点到的是别的东西）"}` : (hit?.reason ?? "点击失败"),
+  );
+  const tabOpened = await machine.waitFor(
+    `(() => { const stage = document.querySelector('.ipc__stage'); return stage ? true : null; })()`,
+    { timeoutMs: 10_000 },
+  );
+  check("点完真的切到内部点云", tabOpened === true, tabOpened === true ? "" : "10 秒内没切过去");
 
   const drawn = await machine.waitFor(
     `(() => {

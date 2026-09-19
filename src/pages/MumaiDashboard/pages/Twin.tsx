@@ -841,16 +841,26 @@ const TOUR_INTERVAL_MS = 5200;
       </div>
 
       <div className="twin-layout">
-        {/* 主视图：占页面 2/3 以上 */}
-        <div className="twin-stage">
+        {/*
+          ⚠ 页签必须待在 `.twin-stage` **外面**（用户 2026-10-01 问"3D 点云图去哪儿看"）：
+            主视图那层 `.twin-view` 是 `position: absolute; inset: 0`，它在 stage 里铺满整块，
+            页签若放在 stage 内就会被画布整个盖住 —— 脚本点得动（`element.click()` 不看层级），
+            人却看不见也点不着。这一条是"真的能够操作"的判据，工装 `探-主视图页签` 用
+            `elementFromPoint` 钉住：页签中心点上最顶层的必须是页签自己。
+        */}
+        <div className="twin-main">
           {/*
             ── 看外观还是看内部（用户 2026-09-30）──────────────────────────
             「我现在要他也可以展示内部点云，分一项作为内部点云」——
             所以主视图上面加一行切换：**外观·高斯场景** / **内部点云**。
             两者共用同一套场景坐标与包围盒，切过去柱子还在原来的位置，
             只是从"看表面"变成"看里面"（内部那一屏的来源说明写在它自己的右栏里）。
+
+            ⚠ 开头那个「主视图」标签别省：只放两个页签时它们看着像画布上的一行小字说明，
+              不像入口；加上"这是主视图的切换"这层意思，人才知道点得动。
           */}
           <div className="twin-views" role="tablist" aria-label="主视图">
+            <span className="twin-views__label">主视图</span>
             {([
               ["splat", "外观 · 高斯场景"],
               ["internal", "内部点云"],
@@ -868,80 +878,83 @@ const TOUR_INTERVAL_MS = 5200;
             ))}
           </div>
 
-          <div className="twin-view">
+          {/* 主视图：占页面 2/3 以上 */}
+          <div className="twin-stage">
+            <div className="twin-view">
+              {/*
+                ⚠ 两个视图**互斥挂载**：高斯那一屏是 Spark 自己的 WebGL 画布、内部点云是 three 的，
+                  同时挂会同时占显存与下载两个分包（点云这屏在没切过来之前完全不加载）。
+              */}
+              {stageView === "internal" ? (
+                <Suspense fallback={null}>
+                  <InternalPointCloudView
+                    focusComponentId={selected}
+                    onPickDefect={({ componentId, defect }) => {
+                      setComponent(componentId);
+                      pushEvent(`内部点云：${componentId} ${defect.label}（${defect.source}）`, "info");
+                    }}
+                  />
+                </Suspense>
+              ) : hasModel ? (
+                <Suspense fallback={null}>
+                  <SplatStage
+                    url={orderScene?.assetFileId ? api.modelUrl(orderScene.assetFileId, orderScene.assetName) : ""}
+                    active={!splatError}
+                    /* 回放：点某一帧就把它的机位喂回来，`cameraNonce` 保证同一帧再点也重飞 */
+                    camera={flyTo ? poseToCamera(flyTo.pose) : null}
+                    cameraNonce={flyTo?.nonce ?? 0}
+                    poseRef={poseRef}
+                    onUserInput={handleUserInput}
+                    /* 打帧时截"这一刻的画面"（captureRef）；画面真出画了才放开按钮（onPainted） */
+                    captureRef={captureRef}
+                    onPainted={() => setStagePainted(true)}
+                    fitNonce={fitNonce}
+                    onLoaded={() => setStageReady(true)}
+                    onError={(message) => {
+                      setStageReady(false);
+                      setSplatError(message);
+                    }}
+                  />
+                </Suspense>
+              ) : null}
+            </div>
+
             {/*
-              ⚠ 两个视图**互斥挂载**：高斯那一屏是 Spark 自己的 WebGL 画布、内部点云是 three 的，
-                同时挂会同时占显存与下载两个分包（点云这屏在没切过来之前完全不加载）。
+              没有模型文件时的空态。这是**真实缺口**（该工单还没上传重建产物），
+              不是加载失败 —— 所以文案与「加载失败」分开，且上传入口只对有权限的人出现。
             */}
-            {stageView === "internal" ? (
-              <Suspense fallback={null}>
-                <InternalPointCloudView
-                  focusComponentId={selected}
-                  onPickDefect={({ componentId, defect }) => {
-                    setComponent(componentId);
-                    pushEvent(`内部点云：${componentId} ${defect.label}（${defect.source}）`, "info");
-                  }}
-                />
-              </Suspense>
-            ) : hasModel ? (
-              <Suspense fallback={null}>
-                <SplatStage
-                  url={orderScene?.assetFileId ? api.modelUrl(orderScene.assetFileId, orderScene.assetName) : ""}
-                  active={!splatError}
-                  /* 回放：点某一帧就把它的机位喂回来，`cameraNonce` 保证同一帧再点也重飞 */
-                  camera={flyTo ? poseToCamera(flyTo.pose) : null}
-                  cameraNonce={flyTo?.nonce ?? 0}
-                  poseRef={poseRef}
-                  onUserInput={handleUserInput}
-                  /* 打帧时截"这一刻的画面"（captureRef）；画面真出画了才放开按钮（onPainted） */
-                  captureRef={captureRef}
-                  onPainted={() => setStagePainted(true)}
-                  fitNonce={fitNonce}
-                  onLoaded={() => setStageReady(true)}
-                  onError={(message) => {
-                    setStageReady(false);
-                    setSplatError(message);
-                  }}
-                />
-              </Suspense>
+            {!hasModel ? (
+              <div className="twin-model-empty">
+                <Icon name="nav-capture" size={32} aria-hidden />
+                <b>未收到模型文件</b>
+                <span>
+                  工单 {order?.id ?? "—"} 还没有高斯重建模型。
+                  {canUpload ? "上传后本页即可显示。" : "等待全栈开发工程师上传后即可显示。"}
+                </span>
+                {canUpload ? (
+                  <Btn tone="primary" onClick={() => setUploadOpen(true)}>
+                    上传模型文件
+                  </Btn>
+                ) : (
+                  <PermNote permissions={["scene:upload"]} />
+                )}
+              </div>
             ) : null}
-          </div>
 
-          {/*
-            没有模型文件时的空态。这是**真实缺口**（该工单还没上传重建产物），
-            不是加载失败 —— 所以文案与「加载失败」分开，且上传入口只对有权限的人出现。
-          */}
-          {!hasModel ? (
-            <div className="twin-model-empty">
-              <Icon name="nav-capture" size={32} aria-hidden />
-              <b>未收到模型文件</b>
-              <span>
-                工单 {order?.id ?? "—"} 还没有高斯重建模型。
-                {canUpload ? "上传后本页即可显示。" : "等待全栈开发工程师上传后即可显示。"}
-              </span>
-              {canUpload ? (
-                <Btn tone="primary" onClick={() => setUploadOpen(true)}>
-                  上传模型文件
-                </Btn>
-              ) : (
-                <PermNote permissions={["scene:upload"]} />
-              )}
+            {hasModel && splatError ? (
+              <div className="twin-model-empty is-error">
+                <Icon name="status-warning" size={32} tone="warning" aria-hidden />
+                <b>模型文件无法渲染</b>
+                <span>{splatError}</span>
+                <Btn onClick={() => setSplatError(null)}>重试</Btn>
+              </div>
+            ) : null}
+
+            <div className="twin-readout">
+              <span>工单 {order?.id ?? "—"}</span>
+              <span>模型 {orderScene?.assetFileId ? orderScene.id : "—"}</span>
+              <span>WASD 移动 · QE 升降 · Ctrl/Shift 调速 · 鼠标转视角与缩放</span>
             </div>
-          ) : null}
-
-          {hasModel && splatError ? (
-            <div className="twin-model-empty is-error">
-              <Icon name="status-warning" size={32} tone="warning" aria-hidden />
-              <b>模型文件无法渲染</b>
-              <span>{splatError}</span>
-              <Btn onClick={() => setSplatError(null)}>重试</Btn>
-            </div>
-          ) : null}
-
-          <div className="twin-readout">
-            <span>工单 {order?.id ?? "—"}</span>
-            <span>模型 {orderScene?.assetFileId ? orderScene.id : "—"}</span>
-            <span>WASD 移动 · QE 升降 · Ctrl/Shift 调速 · 鼠标转视角与缩放</span>
           </div>
         </div>
 
