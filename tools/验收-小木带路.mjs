@@ -351,27 +351,66 @@ try {
         );
       }
       /*
-        ── ㉒「证据对照」播完应自动切到**内部点云**（用户 2026-09-30 追加的那一项）──
-        这一轮落在数字孪生页、台词说的是"两路共同提示的项目优先展示"，
-        内部响应区（虫蛀/裂痕）就是两路汇到的那一层。
+        ── ㉒「证据对照」播完应自动切到**证据对照那一屏**（用户 2026-10-01）──
+        「证据对照已打开…这个对话，还是要做具体的东西，而不只是跳转」。
+        所以判据是那一屏**真的把对照画出来了**：两路共同提示 2 行（视觉框 ↔ 雷达段 ↔
+        为什么算一致）、补核清单 1 项（并写清哪一路不合格）、每行都有出处。
+        再点它上面的「看内部点云」→ 内部点云那一屏照样能画出来（下钻没丢）。
         ⚠ **⑪ 不许切**：那一轮讲外观，台词里还写着「不能确认内部是否存在空洞」——
           提前把内部结论摆出来就是剧情矛盾（`twinViewAction.test.ts` 钉住这条）。
       */
       if (round.roundNo === "㉒") {
-        const internal = await machine.waitFor(
+        const evidence = await machine.waitFor(
           `(() => {
             const active = document.querySelector('.twin-view__tab.is-active');
-            const stage = document.querySelector('.ipc__stage');
-            if (!active || !stage || !(active.textContent || '').includes('内部点云')) return null;
-            const points = Number(stage.getAttribute('data-points') || 0);
-            return points > 10_000 ? { tab: (active.textContent || '').trim(), points } : null;
+            const view = document.querySelector('.evd');
+            if (!active || !view || !(active.textContent || '').includes('证据对照')) return null;
+            const rows = [...view.querySelectorAll('.evd__table tbody tr')];
+            if (rows.length < 2) return null;
+            const supplement = [...view.querySelectorAll('.evd__supplement > li')];
+            if (supplement.length < 1) return null;
+            const text = view.innerText || '';
+            const sourced = rows.every((row) => /anno-box-\\d+/.test(row.textContent || '') && /seg-\\d+/.test(row.textContent || ''));
+            return {
+              tab: (active.textContent || '').trim(),
+              rows: rows.length,
+              supplement: supplement.length,
+              sourced,
+              verdict: /优先复核/.test(text),
+              failing: /不合格/.test(text) && /88\\.4%|90%/.test(text),
+            };
           })()`,
           { timeoutMs: 25_000 },
         );
         check(
-          `  ↳ ㉒ 播完自动切到「内部点云」并画出点`,
-          Boolean(internal),
-          internal ? `${internal.tab} · ${internal.points} 个点` : "25 秒内没切过去",
+          `  ↳ ㉒ 播完打开「证据对照」：两路共同提示 ${evidence?.rows ?? "?"} 行 + 补核清单 ${evidence?.supplement ?? "?"} 项`,
+          Boolean(evidence),
+          evidence ? `${evidence.tab.slice(0, 20)} · 行=${evidence.rows} · 补核=${evidence.supplement}` : "25 秒内没等到对照表",
+        );
+        check(
+          `  ↳ 每行都带出处（视觉框号 + 雷达段号），并写清"优先复核"与"哪一路不合格"`,
+          Boolean(evidence?.sourced && evidence?.verdict && evidence?.failing),
+          evidence ? `出处=${evidence.sourced} 优先复核=${evidence.verdict} 不合格原因=${evidence.failing}` : "没有取到判据",
+        );
+        /* 下钻：点「看内部点云」→ 内部点云那一屏要真的画出点（这条链路不能因为 ㉒ 改落点而丢） */
+        const drill = await machine.evaluate(`(() => {
+          const button = [...document.querySelectorAll('.evd button')].find((node) => (node.textContent || '').includes('看内部点云'));
+          if (!button) return false;
+          button.click();
+          return true;
+        })()`);
+        const internal = await machine.waitFor(
+          `(() => {
+            const stage = document.querySelector('.ipc__stage');
+            const points = stage ? Number(stage.getAttribute('data-points') || 0) : 0;
+            return points > 10_000 ? { points } : null;
+          })()`,
+          { timeoutMs: 25_000 },
+        );
+        check(
+          `  ↳ 「看内部点云」下钻仍然画得出点`,
+          drill === true && Boolean(internal),
+          internal ? `${internal.points} 个点` : "点了按钮但 25 秒内没画出点",
         );
       }
       /*

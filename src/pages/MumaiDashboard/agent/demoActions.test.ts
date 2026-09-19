@@ -208,18 +208,25 @@ test("工单页轮次的标题不得再描述「演示流程」（页面已经�
   assert.deepEqual(offenders, [], `工单页轮次的标题仍在描述演示流程：${offenders.join("；")}`);
 });
 
-test("标了 revealOnly 的轮次必须有**页面内的揭示声明**（否则既没浮层也没动作）", () => {
+test("标了 revealOnly 的轮次必须有页面内的动作（揭示声明或主视图切换）", () => {
   /*
-    揭示目标现在有两种：
-      · `order-detail` —— 工单详情页按组逐段展开（①④⑧⑩⑳㉑ 这类）；
-      · `clean-flow`   —— 数据清洗流程页按阶段逐拍推进到人工核验（⑰）。
-    这里只判「有没有声明」；具体目标各自的拍点、类名由
-    `ordersReveal.test.ts` 与 `cleanFlowReveal.test.ts` 盯着。
+    页面内的动作现在有三种，任一即可：
+      · `order-detail`    —— 工单详情页按组逐段展开（①②③④…）；
+      · `clean-flow`      —— 数据清洗流程页按阶段逐拍推进到人工核验（⑰）；
+      · `viewSwitch`      —— 切数字孪生主视图（㉒ → 证据对照那一屏，2026-10-01 加）。
+    这里只判「有没有动作声明」；各自的拍点、类名由
+    `ordersReveal.test.ts` / `cleanFlowReveal.test.ts` / `twinViewAction.test.ts` 盯着。
   */
   const revealRounds = new Set(SCRIPT_ROUNDS.filter((r) => r.reveal).map((r) => r.roundNo));
-  const orphans = DEMO_ACTIONS.filter((a) => a.revealOnly && !revealRounds.has(a.roundNo));
+  const orphans = DEMO_ACTIONS.filter(
+    (a) => a.revealOnly && !revealRounds.has(a.roundNo) && !a.viewSwitch,
+  );
   assert.deepEqual(orphans.map((a) => a.roundNo), [],
-    `这些轮次标了 revealOnly 却没有页面揭示声明 —— 播完台词屏幕上什么都不会发生：${orphans.map((a) => a.roundNo).join("、")}`);
+    `这些轮次标了 revealOnly 却没有任何页面内动作 —— 播完台词屏幕上什么都不会发生：${orphans.map((a) => a.roundNo).join("、")}`);
+
+  /* ㉒ 必须声明「切到证据对照」：这是"要做具体的东西，而不只是跳转"那条口径的落点 */
+  const round22 = DEMO_ACTIONS.find((a) => a.roundNo === "㉒");
+  assert.equal(round22?.viewSwitch, "twin-evidence", "㉒ 的页面动作应是切到证据对照那一屏");
 
   /* 反向：标了 revealOnly 就不该再带浮层按钮（按钮长在浮层上，浮层不显示按钮就没意义） */
   const withButton = DEMO_ACTIONS.filter((a) => a.revealOnly && a.button);

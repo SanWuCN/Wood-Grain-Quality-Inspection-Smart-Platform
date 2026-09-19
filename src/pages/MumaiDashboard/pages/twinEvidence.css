@@ -1,0 +1,218 @@
+/*
+ * 数字孪生「证据对照」主视图（剧本 ㉒）
+ *
+ * 版式口径：**对照必须一眼看出来是"左一路右一路"** ——
+ * 中间那列写"为什么算一致"（规则 + 依据），结论列在最后。
+ * 补核清单与资料完整性另起面板，不合格的那一路标红。
+ */
+
+.evd {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-3);
+}
+
+/*
+  ⚠ 子项**不许被压缩**（`flex: 0 0 auto`）：容器是"高度 100% + 滚动"，
+  默认 flex-shrink:1 会在内容高于一屏时把面板挤扁 —— 实测「两路共同提示」那张表
+  被压到 83px，表头看得见、表体整片看不见（DOM 里两行都在，屏幕上就是空白）。
+  要的是"内容自然高度 + 容器滚动"，所以这里显式关掉收缩。
+*/
+.evd > * {
+  flex: 0 0 auto;
+}
+
+.evd__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-aux);
+}
+
+.evd__table th {
+  padding: 6px 8px;
+  color: var(--ma-text-3);
+  font-weight: 600;
+  text-align: left;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.evd__table td {
+  padding: 8px;
+  vertical-align: top;
+  border-bottom: 1px dashed var(--border-subtle);
+}
+
+.evd__table td > b {
+  display: block;
+  color: var(--ma-text);
+}
+
+.evd__table td > span {
+  display: block;
+  color: var(--ma-text-2);
+}
+
+.evd__table td > em {
+  display: block;
+  margin-top: 3px;
+  color: var(--ma-text-3);
+  font-style: normal;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.evd__risk {
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.evd__risk b {
+  color: var(--primary);
+}
+
+.evd__risk span {
+  color: var(--ma-text-2);
+}
+
+.evd__verdict {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  font-size: 11.5px;
+}
+
+.evd__verdict.is-priority {
+  border-color: var(--tone-warn, #ffb020);
+  color: var(--tone-warn, #ffb020);
+}
+
+.evd__incomplete {
+  margin: 0 0 8px;
+  padding: 6px 9px;
+  border-left: 2px solid var(--danger, #ff5c70);
+  background: rgba(255, 92, 112, 0.08);
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+}
+
+.evd__supplement {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.evd__supplement > li {
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-2, 6px);
+  background: var(--panel-surface);
+}
+
+.evd__supplement dl {
+  margin: 6px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.evd__supplement dl > div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
+  font-size: var(--fs-aux);
+}
+
+.evd__supplement dt {
+  color: var(--ma-text-3);
+}
+
+.evd__supplement dd {
+  margin: 0;
+  color: var(--ma-text-2);
+}
+
+.evd__two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.evd__complete,
+.evd__branches,
+.evd__rules {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.evd__complete > li,
+.evd__branches > li,
+.evd__rules > li {
+  display: grid;
+  grid-template-columns: minmax(96px, 140px) auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 3px 0;
+  border-bottom: 1px dashed var(--border-subtle);
+  font-size: var(--fs-aux);
+}
+
+.evd__complete > li > b,
+.evd__branches > li > b,
+.evd__rules > li > b {
+  color: var(--ma-text-2);
+  font-weight: 600;
+}
+
+.evd__complete > li > span,
+.evd__branches > li > span,
+.evd__rules > li > span {
+  color: var(--ma-text);
+}
+
+.evd__complete > li > em,
+.evd__branches > li > em,
+.evd__rules > li > em {
+  color: var(--ma-text-3);
+  font-style: normal;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* 不合格的那一路 / 资料不齐：标红，别让人从字里行间找 */
+.evd__complete > li.is-bad > span,
+.evd__branches > li.is-bad > span {
+  color: var(--danger, #ff5c70);
+}
+
+.evd__cross {
+  margin: 0 0 10px;
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+}
+
+@media (max-width: 1320px) {
+  .evd__two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .evd__table {
+    font-size: 12px;
+  }
+}

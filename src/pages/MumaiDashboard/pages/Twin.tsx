@@ -67,13 +67,18 @@ import { buildInternalCloud } from "./internalPointCloud";
  * 与高斯那一屏一样**按需加载**：它引 three 与 drei，没切到"内部点云"之前不该下载。
  */
 const InternalPointCloudView = lazy(() => import("./InternalPointCloudView"));
+/*
+  「证据对照」（剧本 ㉒ 的屏幕落点）：纯表格 + 列表，不引 3D 库，所以**静态引入** ——
+  它是这一轮的"具体东西"，切过去不该先等一下分包。
+*/
+import { TwinEvidenceView } from "./TwinEvidenceView";
 /* 本轮重建素材的来源（⑭ 预采场景角标与素材质检页同一份取值，不另写文件名） */
 import { currentSource } from "./materialsData";
 /* 「打开你标记的原图」（剧本 ⑫）：窗口本体 + 触发事件（executor 派发同一个事件） */
 import { OriginalPhotoWindow } from "./OriginalPhotoWindow";
 import { ORIGINAL_PHOTO_EVENT } from "./originalPhotoAction";
-/* 「切到内部点云」（㉒ 证据对照）：事件在 twinViewAction.ts，页面与 executor 共用 */
-import { TWIN_INTERNAL_CLOUD_EVENT } from "./twinViewAction";
+/* 「切到内部点云 / 证据对照」（㉒）：事件在 twinViewAction.ts，页面与 executor 共用 */
+import { TWIN_EVIDENCE_EVENT, TWIN_INTERNAL_CLOUD_EVENT } from "./twinViewAction";
 /* ⑫ 窗口里那张真实原片（照片批次里的人工标注原片） */
 import { annotatedPhotoFor } from "./annotatedPhotos";
 import "./twinColumns.css";
@@ -262,7 +267,7 @@ export default function Twin() {
    * 默认外观 —— 这一页的主线是"场景已打开，可以移动视角"（剧本 §136）。
    * 内部点云是**用户 2026-09-30 追加的一项**，切换按钮在视图上方常驻可见。
    */
-  const [stageView, setStageView] = useState<"splat" | "internal">("splat");
+  const [stageView, setStageView] = useState<"splat" | "internal" | "evidence">("splat");
   /** 四根柱子的内部缺陷合计（切换按钮上那个数字；数据来自生成器，不另写常数） */
   const cloudDefectCount = useMemo(
     () => Object.values(buildInternalCloud().totals).reduce((sum, value) => sum + value, 0),
@@ -683,11 +688,30 @@ const TOUR_INTERVAL_MS = 5200;
   }, [params]);
 
   /**
-   * ㉒「证据对照与补核清单」播完时切到内部点云（`executor` 派发 `mumai:twin-internal-cloud`）。
+   * ㉒「证据对照与补核清单」播完时切到**证据对照**那一屏
+   * （`executor` 派发 `mumai:twin-evidence`）。
    *
-   * 为什么挂 ㉒ 而不是 ⑪：⑪ 讲的是"外观可见的表面缺损与孔洞状疑点"，
-   * 它的台词本身还写着「不能确认内部是否存在空洞」——那时候把内部点云摆出来，
-   * 等于把精扫之后才得到的结论提前演了。㉒ 才是"两路证据汇到一起"的那一轮。
+   * 为什么是"证据对照"而不是"内部点云"（用户 2026-10-01）：
+   *   「证据对照已打开…这个对话，还是要做具体的东西，而不只是跳转」——
+   * ㉒ 的台词讲的就是两路对照与补核清单，落点就该是那张表；
+   * 内部点云是它的**下钻**（证据对照页上有「看内部点云」按钮）。
+   * ⑪ 仍然什么都不切：那一轮台词写着「不能确认内部是否存在空洞」，
+   * 提前把内部结论摆出来就是剧情矛盾。
+   */
+  useEffect(() => {
+    const onEvidence = (event: Event) => {
+      const componentId = String((event as CustomEvent<{ componentId?: string }>).detail?.componentId ?? "");
+      if (componentId) setComponent(componentId);
+      setStageView("evidence");
+    };
+    window.addEventListener(TWIN_EVIDENCE_EVENT, onEvidence);
+    return () => window.removeEventListener(TWIN_EVIDENCE_EVENT, onEvidence);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 同上：setComponent 是内联箭头函数
+  }, [params]);
+
+  /**
+   * 内部点云那一屏的入口：主视图页签、证据对照页上的「看内部点云」按钮，
+   * 以及同一条事件（`验收-内部点云` 直接派发它验接线）。
    */
   useEffect(() => {
     const onInternal = (event: Event) => {
@@ -864,6 +888,7 @@ const TOUR_INTERVAL_MS = 5200;
             {([
               ["splat", "外观 · 高斯场景"],
               ["internal", "内部点云"],
+              ["evidence", "证据对照"],
             ] as const).map(([key, label]) => (
               <button
                 key={key}
@@ -874,6 +899,8 @@ const TOUR_INTERVAL_MS = 5200;
                 onClick={() => setStageView(key)}>
                 {label}
                 {key === "internal" ? <em>{cloudDefectCount} 处内部缺陷</em> : null}
+                {/* 证据对照这一项挂 ㉒ 的角标：它是那一轮的屏幕落点（用户 2026-10-01） */}
+                {key === "evidence" ? <em>㉒ 两路对照</em> : null}
               </button>
             ))}
           </div>
@@ -882,10 +909,20 @@ const TOUR_INTERVAL_MS = 5200;
           <div className="twin-stage">
             <div className="twin-view">
               {/*
-                ⚠ 两个视图**互斥挂载**：高斯那一屏是 Spark 自己的 WebGL 画布、内部点云是 three 的，
-                  同时挂会同时占显存与下载两个分包（点云这屏在没切过来之前完全不加载）。
+                ⚠ 三个视图**互斥挂载**：高斯那一屏是 Spark 自己的 WebGL 画布、内部点云是 three 的，
+                  同时挂会同时占显存与下载两个分包（各自的包在没切过来之前完全不加载）。
+                  证据对照那一屏是纯表格/列表，不占显卡。
               */}
-              {stageView === "internal" ? (
+              {stageView === "evidence" ? (
+                <TwinEvidenceView
+                  onOpenInternalCloud={() => setStageView("internal")}
+                  onPickRisk={(riskId) => {
+                    const componentId = riskId.match(/Z\d{2}/)?.[0] ?? "";
+                    if (componentId) setComponent(componentId);
+                    pushEvent(`证据对照：定位到 ${riskId}`, "info");
+                  }}
+                />
+              ) : stageView === "internal" ? (
                 <Suspense fallback={null}>
                   <InternalPointCloudView
                     focusComponentId={selected}

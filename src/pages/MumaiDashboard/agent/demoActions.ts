@@ -77,6 +77,18 @@ export type DemoAction = {
    */
   revealOnly?: boolean;
   /**
+   * 这一轮的可见动作是**切数字孪生主视图**（不是弹浮层，也不是工单页逐组展开）。
+   *
+   * ── 为什么要一个声明字段（用户 2026-10-01）──────────────────────────
+   * ㉒ 的台词是「证据对照已打开。两路共同提示的项目优先展示…」——
+   * 页面动作就该是"把证据对照那一屏打开"。原先这件事写成 `executor` 里一句
+   * `if (round.roundNo === "㉒")`，于是"标了 revealOnly 却没有页面揭示声明"
+   * 这条自检把它当成孤儿轮次（既没浮层也没动作）。
+   * 改成声明式之后：`demoActions.test.ts` 能统一判「revealOnly 的轮次必须有
+   * `reveal` 或 `viewSwitch`」，executor 也只按声明办事，不再认识某个轮号。
+   */
+  viewSwitch?: "twin-evidence" | "twin-internal-cloud";
+  /**
    * 这一轮是**小木主动起头的预警**，浮层要渲染成"预警窗"：
    * 警示色描边 + 标题栏「预警」角标（见 `demoSurface.tsx` 的 `dsf--alert`）。
    *
@@ -430,8 +442,20 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
   },
   {
     roundNo: "㉒",
-    title: "显示两张优先复核与一张待补采证据卡",
+    title: "证据对照页：两路共同提示优先展示 + 补核清单",
     surface: "evidence",
+    /*
+      这一轮的页面动作就是**证据对照那一屏本身**（数字孪生主视图的第三个页签，
+      视觉 ↔ 雷达 ↔ 凭什么算一致 + 补核清单 + 资料完整性），所以不再叠浮层 ——
+      `revealOnly: true` 与 ㉓㉔㉕ 同一条口径。
+
+      ⚠ 原先这里会弹一张「显示两张优先复核与一张待补采证据卡」的浮层，
+        用户 2026-10-01 追加"要做具体的东西"之后，那张浮层正好**盖住**对照表
+        （实测截图：表头看得见、表体被浮层压住）。同一件事不再画两遍。
+    */
+    revealOnly: true,
+    /* 播完切到数字孪生主视图的「证据对照」那一屏（executor 按这个声明办事） */
+    viewSwitch: "twin-evidence",
     dataKeys: [
       "fusion.reliableCount",
       "fusion.pendingCount",

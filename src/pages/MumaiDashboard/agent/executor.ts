@@ -33,8 +33,10 @@ import { buildSyncBackupStream } from "./syncBackup";
 import { DEMO_SURFACE_EVENT } from "./demoSurfaceAction";
 /* ⑫「打开你标记的原图」：窗口在 Twin 页里，这里只负责派发事件 */
 import { openOriginalPhoto } from "../pages/originalPhotoAction";
-/* ㉒「切到内部点云」：同上（事件与派发在 twinViewAction.ts，页面里也有手动页签） */
-import { openInternalCloud } from "../pages/twinViewAction";
+/* ㉒「切到证据对照 / 内部点云」：事件与派发在 twinViewAction.ts，页面里也有手动入口 */
+import { openEvidence, openInternalCloud } from "../pages/twinViewAction";
+/* 每一轮的"可见动作"声明（`viewSwitch` 就在这张表里，executor 按声明办事、不认轮号） */
+import { actionFor } from "./demoActions";
 import { voicePackEntryCount } from "./voicePack";
 import {
   FALLBACK_TEXT,
@@ -736,24 +738,28 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
   }
 
   /*
-    ── 切到内部点云（㉒「证据对照与补核清单」）──────────────────────────
+    ── 切数字孪生主视图（按 `demoActions` 的声明办事，不认轮号）──────────
+    ㉒「证据对照与补核清单」播完切到**证据对照那一屏**：
     小木：「证据对照已打开。两路共同提示的项目优先展示，结果不一致或资料不齐的项目已列入补核清单。」
-    这一轮的落点就是数字孪生页，说的正是"两路证据汇到一起" —— 内部响应区（虫蛀空洞 / 内部裂痕）
-    就是两路汇到的那一层，所以播完把主视图切到「内部点云」。
+    用户 2026-10-01 的口径：「这个对话，还是要做具体的东西，而不只是跳转」——
+    所以这一轮播完打开的是视觉 ↔ 雷达 ↔ 凭什么算一致的对照表 + 补核清单 + 资料完整性，
+    内部点云从那一屏上的「看内部点云」下钻。
 
     ⚠ **刻意不挂在 ⑪**：⑪ 讲的是"外观可见的表面缺损与孔洞状疑点"，台词里还写着
-      「不能确认内部是否存在空洞」。那一轮切内部点云，等于把精扫之后才得到的结论提前演了 ——
+      「不能确认内部是否存在空洞」。那一轮切过去，等于把精扫之后才得到的结论提前演了 ——
       剧情上说不通（`twinViewAction.test.ts` 把这条约束钉住了）。
     ⚠ 与 ④⑫ 同一套时机：等播报结束再切（不然台词还在念、屏幕已经换了）。
   */
-  if (round.roundNo === "㉒") {
-    const showInternalCloud = () => openInternalCloud();
+  const viewSwitch = actionFor(round.roundNo)?.viewSwitch;
+  if (viewSwitch) {
+    const switchView =
+      viewSwitch === "twin-evidence" ? () => openEvidence() : () => openInternalCloud();
     if (spoken && typeof (spoken as Promise<void>).then === "function") {
       void (spoken as Promise<void>)
         .catch(() => { /* 播报失败也要切过去，不能因为没声音就少一个动作 */ })
-        .then(showInternalCloud);
+        .then(switchView);
     } else {
-      showInternalCloud();
+      switchView();
     }
   }
 }
