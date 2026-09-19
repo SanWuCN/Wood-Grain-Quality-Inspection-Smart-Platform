@@ -909,12 +909,15 @@ const TOUR_INTERVAL_MS = 5200;
           <div className="twin-stage">
             <div className="twin-view">
               {/*
-                ⚠ 三个视图**互斥挂载**：高斯那一屏是 Spark 自己的 WebGL 画布、内部点云是 three 的，
-                  同时挂会同时占显存与下载两个分包（各自的包在没切过来之前完全不加载）。
-                  证据对照那一屏是纯表格/列表，不占显卡。
+                ⚠ 三块视图**互斥挂载**（不再是"三选一"）：高斯那一屏是 Spark 自己的 WebGL 画布，
+                  内部点云是 three 的，各自的包在没切过来之前完全不加载。
+                  证据对照那一屏里**内嵌一根柱子的内部点云**（用户 2026-10-01：
+                  「数字孪生第一个是大场景，第二个才是单根柱子才对」）——
+                  它在证据对照这一屏内部按需加载，与主视图的 three 画布不会同时存在。
               */}
               {stageView === "evidence" ? (
                 <TwinEvidenceView
+                  componentId={selected}
                   onOpenInternalCloud={() => setStageView("internal")}
                   onPickRisk={(riskId) => {
                     const componentId = riskId.match(/Z\d{2}/)?.[0] ?? "";

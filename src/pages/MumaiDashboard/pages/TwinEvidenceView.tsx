@@ -11,19 +11,31 @@
  * 一条都不编）；本组件只负责画，并且**不自己算结论**。
  */
 
+import { Suspense, lazy } from "react";
+
 import { Panel } from "../Panel";
 import { Btn } from "../ui";
 import { evidenceCrossCheck, evidenceModel, evidenceRules } from "./twinEvidence";
 import "./twinEvidence.css";
 
+/**
+ * 单根柱子的内部点云（three + R3F）：与主视图那一屏**共用同一个组件**，
+ * 这里只传 `onlyComponentIds` 把它收成一根柱子（不新造第二套点云实现）。
+ *
+ * ⚠ 按需加载：three/drei 的分包只在真的画这一屏时才下载（与主视图那条路径同一口径）。
+ */
+const InternalPointCloudView = lazy(() => import("./InternalPointCloudView"));
+
 export type TwinEvidenceViewProps = {
-  /** 点「看内部点云」时切到内部点云那一屏（由 Twin 传入） */
+  /** 当前选中的构件（这一屏画它的单根内部点云） */
+  componentId: string;
+  /** 点「放大到全屏看」时切到内部点云那一屏（由 Twin 传入） */
   onOpenInternalCloud?: () => void;
   /** 点某一行的构件时告诉页面（页面据此选中构件） */
   onPickRisk?: (riskId: string) => void;
 };
 
-export function TwinEvidenceView({ onOpenInternalCloud, onPickRisk }: TwinEvidenceViewProps) {
+export function TwinEvidenceView({ componentId, onOpenInternalCloud, onPickRisk }: TwinEvidenceViewProps) {
   const model = evidenceModel();
   const rules = evidenceRules();
   const cross = evidenceCrossCheck();
@@ -31,6 +43,36 @@ export function TwinEvidenceView({ onOpenInternalCloud, onPickRisk }: TwinEviden
 
   return (
     <div className="evd">
+      {/*
+        ── 单根柱子（用户 2026-10-01：「数字孪生第一个是大场景，第二个才是单根柱子才对」）──
+        第一屏（⑪）是高斯泼溅的**大场景**（四根都在）；这一屏（㉒）讲的是 Z04 的证据，
+        所以把"两路汇到的那一层"直接画成**单根 Z04 的内部点云**：
+        木料点云 + 虫蛀空洞 / 内部裂痕 / 柱脚缺损都在这一根上看得见。
+        `onlyComponentIds` 是那个视图本来就有的过滤入口，这里不新造一套过滤。
+      */}
+      <Panel
+        title={`两路汇到的那一层 · 单根 ${componentId} 内部点云`}
+        extra={
+          <span className="muted">
+            按构件外形与档案记录生成，不是实测点云 · 只画这一根
+            {onOpenInternalCloud ? (
+              <Btn tone="ghost" onClick={onOpenInternalCloud}>
+                放大到全屏看
+              </Btn>
+            ) : null}
+          </span>
+        }>
+        <div className="evd__cloud" data-single-column={componentId}>
+          <Suspense fallback={<p className="muted">正在加载内部点云…</p>}>
+            <InternalPointCloudView
+              focusComponentId={componentId}
+              onlyComponentIds={[componentId]}
+              onPickDefect={({ componentId: picked }) => onPickRisk?.(picked)}
+            />
+          </Suspense>
+        </div>
+      </Panel>
+
       <Panel
         title="两路共同提示（优先展示）"
         extra={
@@ -164,7 +206,7 @@ export function TwinEvidenceView({ onOpenInternalCloud, onPickRisk }: TwinEviden
             {cross.consistent ? "（一致）" : "（不一致，需要人工核对）"}
           </p>
           {onOpenInternalCloud ? (
-            <Btn onClick={onOpenInternalCloud}>看内部点云（两路汇到的那一层）</Btn>
+            <Btn onClick={onOpenInternalCloud}>放大到全屏看（内部点云）</Btn>
           ) : null}
         </Panel>
       </div>

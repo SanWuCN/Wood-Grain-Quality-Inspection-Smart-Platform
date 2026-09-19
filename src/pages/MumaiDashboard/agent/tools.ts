@@ -33,6 +33,7 @@ import {
 import { requestMapMode, useDashboardStore } from "../map/store";
 import { api } from "../api/client";
 import { formatDistance, routeDistance } from "./lib/geo";
+import { routeSatisfied } from "./navigateTarget";
 import { defaultPillar, normalizePillar, resolvePillar } from "./lib/entities";
 import type { EntityBag } from "./types";
 
@@ -166,9 +167,23 @@ export const TOOLS: ToolDef[] = [
     },
     risk: 1,
     requireConfirmation: false,
-    run: (args, ctx) => {
+    run: (args, ctx): ToolResult => {
       const route = withQuery(args.route || "/", args, ["tab", "batch", "component", "view", "q"]);
       if (!ctx.navigate) return { ok: false, summary: "当前不在路由上下文内，无法跳转" };
+      /*
+        ⚠ **已经在目标页就不跳**（用户 2026-10-01：「正常已经到数字孪生页面展示了，
+        触发对话原地跳转一下反而导致数字孪生重新加载」）。
+
+        数字孪生那种重资源页面（6.7 MB 高斯模型 + Spark 画布）经不起"原地跳一下"：
+        再 navigate 一次会推一条历史、改一次 query，页面跟着重新初始化，
+        看起来就是整屏重新加载。判定用 `routeSatisfied`（路径相同 + 目标里带的参数
+        在当前地址里都存在且值相同），单测见 `navigateTarget.test.ts`。
+      */
+      const current = typeof window === "undefined" ? "" : window.location.hash;
+      if (current && routeSatisfied(current, route)) {
+        ctx.log(`已在 ${route}，跳过重复跳转`);
+        return { ok: true, summary: `已在 ${route}，无需跳转`, facts: { route, skipped: "yes" } };
+      }
       ctx.navigate(route);
       ctx.log(`路由跳转到 ${route}`);
       return { ok: true, summary: `已跳转 ${route}`, facts: { route } };

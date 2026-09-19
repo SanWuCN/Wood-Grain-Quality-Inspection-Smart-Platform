@@ -19,23 +19,27 @@ try {
     const view = document.querySelector('.evd');
     if (!view) return { view: false };
     const rows = [...view.querySelectorAll('.evd__table tbody tr')];
-    const panels = [...view.querySelectorAll('.panel, section')].map((node) => {
-      const r = node.getBoundingClientRect();
-      return {
-        title: (node.querySelector('h1,h2,h3,h4,.panel__title,header')?.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 28),
-        w: Math.round(r.width), h: Math.round(r.height),
-      };
-    });
+    /* 内嵌的单根柱子：画布真的画了点吗？规格列表里是不是只剩一根？ */
+    const cloud = view.querySelector('.evd__cloud');
+    const stage = cloud?.querySelector('.ipc__stage');
+    const canvas = cloud?.querySelector('canvas');
+    const specs = cloud
+      ? [...cloud.querySelectorAll('.ipc__specs li')].map((node) => (node.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 26))
+      : [];
     return {
       view: true,
-      viewBox: (() => { const r = view.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; })(),
       rowCount: rows.length,
-      rows: rows.map((row) => {
-        const r = row.getBoundingClientRect();
-        return { h: Math.round(r.height), text: (row.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 80) };
-      }),
+      rows: rows.map((row) => (row.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 70)),
       supplement: view.querySelectorAll('.evd__supplement li').length,
-      panels,
+      cloud: cloud
+        ? {
+            box: (() => { const r = cloud.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; })(),
+            points: Number(stage?.getAttribute('data-points') || 0),
+            canvas: canvas ? [canvas.width, canvas.height] : null,
+            specs,
+          }
+        : null,
+      buttons: [...view.querySelectorAll('button')].map((node) => (node.textContent || '').trim()).filter(Boolean),
     };
   })()`);
   console.log(JSON.stringify(info, null, 1));

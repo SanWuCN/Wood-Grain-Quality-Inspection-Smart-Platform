@@ -26,6 +26,19 @@
   flex: 0 0 auto;
 }
 
+/*
+  单根柱子的内部点云嵌在证据对照里：给它一个固定高度的画布。
+  ⚠ 不设高度不行 —— 那个视图内部是 `position:absolute; inset:0` 铺满父容器的，
+  父容器没有高度时 three 的画布会塌成 0（那一屏本来是照"整屏铺满"设计的）。
+*/
+.evd__cloud {
+  height: 380px;
+  min-height: 260px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-2, 6px);
+  overflow: hidden;
+}
+
 .evd__table {
   width: 100%;
   border-collapse: collapse;

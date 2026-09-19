@@ -353,9 +353,11 @@ try {
       /*
         ── ㉒「证据对照」播完应自动切到**证据对照那一屏**（用户 2026-10-01）──
         「证据对照已打开…这个对话，还是要做具体的东西，而不只是跳转」。
-        所以判据是那一屏**真的把对照画出来了**：两路共同提示 2 行（视觉框 ↔ 雷达段 ↔
-        为什么算一致）、补核清单 1 项（并写清哪一路不合格）、每行都有出处。
-        再点它上面的「看内部点云」→ 内部点云那一屏照样能画出来（下钻没丢）。
+        所以判据是那一屏**真的把东西画出来了**，三件都要：
+          · 两路共同提示 2 行（视觉框 ↔ 雷达段 ↔ 为什么算一致）、补核清单 1 项、每行带出处；
+          · **单根 Z04 的内部点云**内嵌在那一屏里（用户：「数字孪生第一个是大场景，
+            第二个才是单根柱子才对」）—— 判据是画布自报点数 > 10k 且规格列表里只剩一根；
+          · 「放大到全屏看」下钻到内部点云那一屏照样画得出点。
         ⚠ **⑪ 不许切**：那一轮讲外观，台词里还写着「不能确认内部是否存在空洞」——
           提前把内部结论摆出来就是剧情矛盾（`twinViewAction.test.ts` 钉住这条）。
       */
@@ -369,46 +371,70 @@ try {
             if (rows.length < 2) return null;
             const supplement = [...view.querySelectorAll('.evd__supplement > li')];
             if (supplement.length < 1) return null;
+            /* 内嵌的单根柱子：画布自报点数 + 规格只剩一根 */
+            const cloud = view.querySelector('.evd__cloud');
+            const stage = cloud?.querySelector('.ipc__stage');
+            const points = Number(stage?.getAttribute('data-points') || 0);
+            const specs = cloud ? cloud.querySelectorAll('.ipc__specs li').length : 0;
+            if (points < 10_000 || specs !== 1) return null;
             const text = view.innerText || '';
             const sourced = rows.every((row) => /anno-box-\\d+/.test(row.textContent || '') && /seg-\\d+/.test(row.textContent || ''));
             return {
               tab: (active.textContent || '').trim(),
               rows: rows.length,
               supplement: supplement.length,
+              points,
+              specs,
               sourced,
               verdict: /优先复核/.test(text),
               failing: /不合格/.test(text) && /88\\.4%|90%/.test(text),
             };
           })()`,
-          { timeoutMs: 25_000 },
+          /*
+            ⚠ 45 秒而不是 25 秒：这一条要等**内嵌的单根点云**（three 分包 + 首帧渲染 +
+            点数上报 0.5s 一次）。刚 build 完第一次跑时分包是冷的，25 秒会偶发假红
+            （实测全量跑出现过一次）。
+          */
+          { timeoutMs: 45_000 },
         );
         check(
           `  ↳ ㉒ 播完打开「证据对照」：两路共同提示 ${evidence?.rows ?? "?"} 行 + 补核清单 ${evidence?.supplement ?? "?"} 项`,
           Boolean(evidence),
-          evidence ? `${evidence.tab.slice(0, 20)} · 行=${evidence.rows} · 补核=${evidence.supplement}` : "25 秒内没等到对照表",
+          evidence ? `${evidence.tab.slice(0, 20)} · 行=${evidence.rows} · 补核=${evidence.supplement}` : "30 秒内没等到对照表",
+        );
+        check(
+          `  ↳ 同一屏里还有**单根 Z04** 的内部点云（第二个展示是单根柱子）`,
+          Boolean(evidence && evidence.points > 10_000 && evidence.specs === 1),
+          evidence ? `${evidence.points} 个点 · 规格 ${evidence.specs} 根` : "没有取到内嵌点云的读数",
         );
         check(
           `  ↳ 每行都带出处（视觉框号 + 雷达段号），并写清"优先复核"与"哪一路不合格"`,
           Boolean(evidence?.sourced && evidence?.verdict && evidence?.failing),
           evidence ? `出处=${evidence.sourced} 优先复核=${evidence.verdict} 不合格原因=${evidence.failing}` : "没有取到判据",
         );
-        /* 下钻：点「看内部点云」→ 内部点云那一屏要真的画出点（这条链路不能因为 ㉒ 改落点而丢） */
+        /* 下钻：点「放大到全屏看（内部点云）」→ 内部点云那一屏要真的画出点（这条链路不能丢） */
         const drill = await machine.evaluate(`(() => {
-          const button = [...document.querySelectorAll('.evd button')].find((node) => (node.textContent || '').includes('看内部点云'));
+          const button = [...document.querySelectorAll('.evd button')].find((node) => (node.textContent || '').includes('放大到全屏看'));
           if (!button) return false;
           button.click();
           return true;
         })()`);
+        /*
+          ⚠ 画布选择器要**排除内嵌那一块**：`.evd__cloud` 里也有一个 `.ipc__stage`，
+          按 `.ipc__stage` 取会拿到内嵌那块（它一直画着点），于是这条判据恒真 ——
+          切没切过去都"通过"（假绿）。所以只在 `.twin-view` 的**直接子层**里找。
+        */
         const internal = await machine.waitFor(
           `(() => {
-            const stage = document.querySelector('.ipc__stage');
+            const stage = [...document.querySelectorAll('.twin-view .ipc__stage')]
+              .find((node) => !node.closest('.evd__cloud'));
             const points = stage ? Number(stage.getAttribute('data-points') || 0) : 0;
             return points > 10_000 ? { points } : null;
           })()`,
           { timeoutMs: 25_000 },
         );
         check(
-          `  ↳ 「看内部点云」下钻仍然画得出点`,
+          `  ↳ 「放大到全屏看」下钻仍然画得出点`,
           drill === true && Boolean(internal),
           internal ? `${internal.points} 个点` : "点了按钮但 25 秒内没画出点",
         );
