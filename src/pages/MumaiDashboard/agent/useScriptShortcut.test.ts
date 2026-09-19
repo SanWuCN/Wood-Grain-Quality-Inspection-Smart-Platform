@@ -22,6 +22,7 @@ import assert from "node:assert/strict";
 
 import { SCRIPT_ROUNDS, mainLineOf } from "./script.ts";
 import { SCRIPT_SHORTCUT_ENTRIES } from "./scriptShortcutEntries.ts";
+import { SHORTCUT_TYPING, SIMULATED_TYPING } from "./asr.ts";
 import {
   SCRIPT_SEQUENCE_PREFIX_KEYS,
   advanceSequence,
@@ -29,7 +30,7 @@ import {
   parseShortcutId,
   shortcutLabel,
 } from "./scriptShortcutSequence.ts";
-import { askArgsFor, planFor, type ScriptShortcutEntry } from "./useScriptShortcut.ts";
+import { askArgsFor, planFor, shortcutTypingMs, type ScriptShortcutEntry } from "./useScriptShortcut.ts";
 
 /** 与 Shell 里那份表同构的最小样例（复合键位 → 台词 + 圈号），三段的头一条各取一个 */
 const ENTRIES: ScriptShortcutEntry[] = [
@@ -85,6 +86,49 @@ test("条目带的段号必须传给理解链路（漏传就静默退回模糊�
 test("没有段号的条目不给 target（走正常路由，而不是硬造一轮）", () => {
   const args = askArgsFor({ key: "z", text: "临时一句话", label: "临时" });
   assert.equal(args.target, undefined);
+});
+
+/* ------------------------------------------------------------------ *
+ * 「加快快捷键时小木听的速度」（用户 2026-09-30）
+ *
+ * 按键 → 小木开口之间有两段等待：① 逐字"听"（本组要钉的）；② 思考 2.5–4 秒。
+ * ① 原先借用了**降级 ASR 字幕**的 100–300ms/字：58 字的触发语要爬 6–17 秒，
+ * 台上就是干等（实测平均 9.3 秒）。快捷键不是人在说话 —— 按下键就等于已经听清，
+ * 所以它走自己那组更快的节奏，而**降级 ASR 那条路径必须保持不变**（方案 §46）。
+ * ------------------------------------------------------------------ */
+
+test("快捷键的「听」节奏远快于降级 ASR，且落在自己的上下界内", () => {
+  assert.ok(
+    SHORTCUT_TYPING.maxMs < SIMULATED_TYPING.minMs,
+    `快捷键的听速必须明显快于降级 ASR 字幕（实得 ${SHORTCUT_TYPING.maxMs} vs ${SIMULATED_TYPING.minMs}）`,
+  );
+  assert.equal(shortcutTypingMs(() => 0), SHORTCUT_TYPING.minMs, "下限");
+  assert.equal(shortcutTypingMs(() => 1), SHORTCUT_TYPING.maxMs, "上限");
+  for (const value of [0, 0.25, 0.5, 0.75, 1]) {
+    const ms = shortcutTypingMs(() => value);
+    assert.ok(ms >= SHORTCUT_TYPING.minMs && ms <= SHORTCUT_TYPING.maxMs, `随机值 ${value} 越界：${ms}`);
+  }
+});
+
+test("要模拟的那几条触发语：最坏 3.6 秒、典型 2.6 秒内听完", () => {
+  /*
+    逐字动画的固定开销：起步 120ms + 收尾 180ms（见 `asr.ts` 的 `simulate`）。
+    取最坏（每字都撞上限）与典型（每字取中值）各算一遍 —— 这条钉的是用户能感觉到的
+    那个数字："按一下要等多久"。任何一条超线就说明节奏被改慢了。
+
+    ⚠ 只算**要模拟的**条目：⑥⑬⑳ 是"小木主动发起"，`planFor` 给的是 proactive 计划，
+    压根不逐字吐字（它们的 text 就是小木自己的长台词，按它们算会误报）。
+  */
+  const OVERHEAD_MS = 300;
+  const typicalMs = (SHORTCUT_TYPING.minMs + SHORTCUT_TYPING.maxMs) / 2;
+  for (const entry of SCRIPT_SHORTCUT_ENTRIES) {
+    if (planFor(entry)?.kind !== "speech") continue;
+    const chars = [...entry.text].length;
+    const worst = OVERHEAD_MS + chars * SHORTCUT_TYPING.maxMs;
+    const typical = OVERHEAD_MS + chars * typicalMs;
+    assert.ok(worst <= 3600, `${entry.label} 最坏要 ${worst}ms 才听完，超过 3.6 秒`);
+    assert.ok(typical <= 2600, `${entry.label} 典型要 ${Math.round(typical)}ms 才听完，超过 2.6 秒`);
+  }
 });
 
 /* ------------------------------------------------------------------ *

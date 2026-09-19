@@ -4,8 +4,9 @@
  * ── 它在链路里的位置 ──────────────────────────────────────────────
  *   按键序列（`scriptShortcutSequence.ts` 判定：三段前缀 + 段内数字）
  *     → `planFor(entry)` 决定这一条**该怎么演**（见下）
- *     → 被动应答：`VoiceInput.simulate()` 逐字吐出这句话（每字 100–300ms 随机，
- *       模拟流式 ASR）→ 与语音控制台**同一条** `ask()` 理解链路
+ *     → 被动应答：`VoiceInput.simulate()` 逐字吐出这句话（**每字 25–55ms**，
+ *       见 `asr.ts` 的 `SHORTCUT_TYPING`：按下键=已经听清，动画只是"收到了"的反馈）
+ *       → 与语音控制台**同一条** `ask()` 理解链路
  *       （executor：剧本路由 → 意图兜底 → 播报），并带上条目里的 `roundNo`
  *       走 `ask()` 的**指定轮次直达**分支
  *     → 主动发起（`proactive`）：**不模拟识别**，交给 `executor.speakProactive()` ——
@@ -23,7 +24,7 @@
  * 它只用来做脚本化模拟，不碰麦克风（`simulate()` 不申请权限）。
  *
  * ── 为什么入队而不是直接调 ask ────────────────────────────────────
- * 一次模拟要 2–5 秒（逐字），期间用户可能又按了下一条快捷键。
+ * 一次模拟要 1–3 秒（快捷键的"听"，见下），期间用户可能又按了下一条快捷键。
  * `ask()` 并发写同一个 agent store 会交叉 push 用户轮次与小木轮次
  * （界面上出现"回答 A 挂在问题 B 下面"）—— 与控制台的 askQueue 同一套处理。
  *
@@ -40,7 +41,7 @@
  */
 import { useCallback, useEffect, useRef } from "react";
 
-import { VoiceInput } from "./asr";
+import { SHORTCUT_TYPING, VoiceInput } from "./asr";
 import { ask, speakProactive, type Runtime } from "./executor";
 import { setAgent } from "./store";
 import {
@@ -140,6 +141,20 @@ export function askArgsFor(entry: ScriptShortcutEntry): {
     text: entry.text,
     target: Object.keys(target).length ? target : undefined,
   };
+}
+
+/**
+ * 快捷键路径每条按一次的"听"节奏（毫秒/字）。
+ *
+ * 抽成纯函数有两个原因：① 钩子本体在 `node --test` 里挂不起来（没有渲染器），
+ * 而"按下键之后到底等多久"恰恰是用户会抱怨的那件事，值得钉住；
+ * ② 取随机的写法集中在一处，测试可以喂固定值断言上下界。
+ *
+ * 上下界与理由见 `asr.ts` 的 `SHORTCUT_TYPING`（25–55ms/字；降级 ASR 那条路径
+ * 仍然是 100–300ms/字，**不跟着改**）。
+ */
+export function shortcutTypingMs(random: () => number = Math.random): number {
+  return Math.round(SHORTCUT_TYPING.minMs + random() * (SHORTCUT_TYPING.maxMs - SHORTCUT_TYPING.minMs));
 }
 
 /**
@@ -325,7 +340,13 @@ export function useScriptShortcut({
         if (!input) return;
         pendingRef.current = entry;
         setAgent({ stateNote: note, finalText: "", partial: "" });
-        input.simulate(plan.text);
+        /*
+          ⚠ 这里是"加快快捷键时小木听的速度"的落点（用户 2026-09-30）：
+          不传 `perCharMs` 就会用降级 ASR 的 100–300ms/字 —— 58 字的触发语要
+          逐字爬 6–17 秒，台上就是干等。快捷键只需要一个"收到了"的反馈，
+          所以走 `SHORTCUT_TYPING`（25–55ms/字），实测 1–3 秒内进思考。
+        */
+        input.simulate(plan.text, { perCharMs: shortcutTypingMs() });
       });
     },
     [onProactive],
