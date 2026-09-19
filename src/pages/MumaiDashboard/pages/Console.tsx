@@ -32,7 +32,7 @@ import { useMumai } from "../context";
 import { actorName } from "../api/accounts";
 import { addressGroups, endRows, hostOf, isLocalHost, probeVerdict, recommendedUrl, serverLine } from "./collabLogic";
 import { followEnabled, setFollowEnabled } from "../agent/roundSync";
-import { roundSyncView, selfEndIds } from "../lib/lanRoundSync";
+import { endRoundSuffix, roundSyncView, selfEndIds } from "../lib/lanRoundSync";
 
 /** 内网端数多久读一次：它是本页唯一会"自己变"的读数（别人开关页面） */
 const PEERS_POLL_MS = 10000;
@@ -98,14 +98,16 @@ export default function Console() {
     数据：store 里的小木回合留痕（`agentTurn`）+ 内网协同面板的端明细（`peers.ends`）。
   */
   const turns = useSharedStore(agentTurns);
+  /** 回合留痕的数据体（端明细的「已在第几轮」与「本轮同步」两处共用，不必每次渲染都 map） */
+  const turnData = useMemo(() => turns.map((entity) => entity.data), [turns]);
   const roundSync = useMemo(
     () =>
       roundSyncView(
-        turns.map((entity) => entity.data),
+        turnData,
         peers?.ends ?? [],
         selfEndIds(peers?.ends ?? []),
       ),
-    [turns, peers],
+    [turnData, peers],
   );
 
   const refresh = useCallback(async () => {
@@ -489,7 +491,7 @@ export default function Console() {
               <span>
                 {peers?.ends.length ? (
                   <ul className="cs-lan__ends">
-                    {endRows(peers.ends).map((row) => (
+                    {endRows(peers.ends, (end) => endRoundSuffix(turnData, end.page)).map((row) => (
                       <li key={row.key} className={row.alive ? "" : "is-stale"}>
                         <i aria-hidden>{row.alive ? "●" : "○"}</i>
                         {row.text}

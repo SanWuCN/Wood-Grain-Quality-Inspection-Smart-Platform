@@ -71,6 +71,31 @@ const endLabel = (end: CollabEnd): string =>
   `${end.accountName || end.accountId || "未登录"} @ ${end.address}${end.page ? ` · ${end.page}` : ""}`;
 const endAccount = (end: CollabEnd): string => end.accountName || end.accountId || "未登录";
 
+/**
+ * 某一台端**跟到了第几轮**（端明细上那一小段后缀）。
+ *
+ * 把小木回合留痕按时间从新到旧扫一遍，第一条"落点 = 端当前页"的就是它跟到的那一轮。
+ * 用在「现在连着的端」那一列上，把"谁 · 在哪一页"升级成"谁 · 已在第 ⑰ 轮"——
+ * 讲解人扫一眼就知道哪台掉队、掉在哪一轮。
+ *
+ * @returns 轮次号（如 `⑰`）；这台端的当前页不满足任何一轮时返回 `null`（例如刚打开还在首页）
+ */
+export function endRoundNo(turns: AgentTurnEntity[], page: string | null | undefined): string | null {
+  if (!page) return null;
+  const ordered = [...turns].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+  for (const turn of ordered) {
+    const target = navTarget(turn.nav);
+    if (target && endFollowed(page, target)) return turn.roundNo;
+  }
+  return null;
+}
+
+/** 端明细那一列的后缀：「· 已在第 ⑰ 轮」/「· 还没跟到任何一轮」 */
+export function endRoundSuffix(turns: AgentTurnEntity[], page: string | null | undefined): string {
+  const roundNo = endRoundNo(turns, page);
+  return roundNo ? ` · 已在第 ${roundNo} 轮` : " · 还没跟到任何一轮";
+}
+
 /** 本机那一端的判定：地址是回环（`127.` / `::1` / `localhost`）就是这台服务器上的浏览器 */
 export function loopbackEndIds(ends: CollabEnd[]): string[] {
   return ends

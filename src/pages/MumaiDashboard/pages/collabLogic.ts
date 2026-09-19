@@ -118,13 +118,24 @@ export function openedText(ms: number | null | undefined): string {
  */
 export const END_ALIVE_MS = 25_000;
 
-export function endRows(ends: CollabEnd[]): { key: string; text: string; alive: boolean }[] {
+/**
+ * 端明细的每一行。
+ *
+ * `roundOf` 是「这一端跟到了第几轮」的后缀（由 `lib/lanRoundSync.ts` 的
+ * `endRoundSuffix` 算，需要小木回合留痕所以由调用方注入）——
+ * 现场看端明细时，"谁 · 在哪一页" 不如 "谁 · 已在第 ⑰ 轮" 一眼能判断。
+ */
+export function endRows(
+  ends: CollabEnd[],
+  roundOf?: (end: CollabEnd) => string,
+): { key: string; text: string; alive: boolean }[] {
   return ends.map((end) => ({
     key: end.id,
     alive: end.idleMs <= END_ALIVE_MS,
     text:
       `${end.accountName ?? end.accountId ?? "未登录"} · ${end.address}` +
-      ` · ${end.page ?? "（未知页面）"} · 已开 ${openedText(end.openedMs)} · ${idleText(end.idleMs)}有动静`,
+      ` · ${end.page ?? "（未知页面）"} · 已开 ${openedText(end.openedMs)} · ${idleText(end.idleMs)}有动静` +
+      (roundOf ? roundOf(end) : ""),
   }));
 }
 

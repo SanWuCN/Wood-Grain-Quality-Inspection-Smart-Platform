@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import type { AgentTurnEntity, CollabEnd } from "../api/client.ts";
-import { endFollowed, navTarget, roundSyncView, selfEndIds } from "./lanRoundSync.ts";
+import { endFollowed, endRoundNo, endRoundSuffix, navTarget, roundSyncView, selfEndIds } from "./lanRoundSync.ts";
 
 const turn = (nav: Record<string, unknown> | null, roundNo = "⑨", at = "2026-09-20T01:00:00.000Z"): AgentTurnEntity => ({
   id: `t-${roundNo}-${at}`,
@@ -158,4 +158,23 @@ test("该排除哪些端：局域网有同事时排除本机回环端；两端�
   /* 没有回环端（讲解机自己在局域网上）→ 不排除 */
   assert.deepEqual(selfEndIds([lan]), []);
   assert.deepEqual(selfEndIds([]), []);
+});
+
+test("端明细的「已在第几轮」：取它满足的**最新**那一轮，一轮都没跟到就如实说", () => {
+  const turns = [
+    turn({ route: "/mapping" }, "⑨", "2026-09-20T01:00:00.000Z"),
+    turn({ route: "/firmware", tab: "dataset" }, "⑰", "2026-09-20T01:30:00.000Z"),
+    turn({ route: "/hardware", tab: "triage" }, "⑬", "2026-09-20T01:20:00.000Z"),
+  ];
+  /* 停在 ⑰ 的落点上 → 报 ⑰（不是更早的 ⑨，也不是时间靠后但页面对不上的 ⑬） */
+  assert.equal(endRoundNo(turns, "#/firmware?tab=dataset"), "⑰");
+  assert.equal(endRoundSuffix(turns, "#/firmware?tab=dataset"), " · 已在第 ⑰ 轮");
+  /* 一直停在 ⑨ 的落点上（后面的轮次都没跟）→ 报 ⑨ */
+  assert.equal(endRoundNo(turns, "#/mapping"), "⑨");
+  /* 刚打开还在首页 → 一轮都没跟到 */
+  assert.equal(endRoundNo(turns, "#/"), null);
+  assert.equal(endRoundSuffix(turns, "#/"), " · 还没跟到任何一轮");
+  assert.equal(endRoundNo(turns, null), null);
+  /* 不换页的那一轮不该被算成"跟到了" */
+  assert.equal(endRoundNo([turn(null, "⑥")], "#/mapping"), null);
 });
