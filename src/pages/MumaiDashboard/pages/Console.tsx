@@ -32,7 +32,7 @@ import { useMumai } from "../context";
 import { actorName } from "../api/accounts";
 import { addressGroups, endRows, hostOf, isLocalHost, probeVerdict, recommendedUrl, serverLine } from "./collabLogic";
 import { followEnabled, setFollowEnabled } from "../agent/roundSync";
-import { endRoundSuffix, roundSyncView, selfEndIds } from "../lib/lanRoundSync";
+import { endRoundSuffix, probeFollowHint, roundSyncView, selfEndIds } from "../lib/lanRoundSync";
 
 /** 内网端数多久读一次：它是本页唯一会"自己变"的读数（别人开关页面） */
 const PEERS_POLL_MS = 10000;
@@ -109,6 +109,8 @@ export default function Console() {
       ),
     [turnData, peers],
   );
+  /* 「同步实测」那一段的补充说明：没回执的端是"没跟上"还是"页面跟上了但没收到" */
+  const followHint = useMemo(() => probeFollowHint(probe, roundSync), [probe, roundSync]);
 
   const refresh = useCallback(async () => {
     if (!online) return;
@@ -572,6 +574,12 @@ export default function Console() {
                           tone={probing ? "info" : verdict.tone}
                         />
                         <em className="cs-lan__hint">{verdict.detail}</em>
+                        {/*
+                          把「收不到」和「没跟上」分开说（用户 2026-10-01 长期口径下的排查口径）：
+                          没回执的端如果本来就停在别的页面，先让它跟页；页面跟上了却没回执，
+                          那才更像推送/连接的问题。追回执期间不插话（那时还没结论）。
+                        */}
+                        {!probing && followHint ? <em className="cs-lan__hint">{followHint}</em> : null}
                       </>
                     );
                   })()

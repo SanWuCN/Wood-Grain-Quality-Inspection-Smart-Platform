@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import type { AgentTurnEntity, CollabEnd } from "../api/client.ts";
-import { endFollowed, endRoundNo, endRoundSuffix, navTarget, roundSyncView, selfEndIds } from "./lanRoundSync.ts";
+import { endFollowed, endRoundNo, endRoundSuffix, navTarget, probeFollowHint, roundSyncView, selfEndIds } from "./lanRoundSync.ts";
 
 const turn = (nav: Record<string, unknown> | null, roundNo = "⑨", at = "2026-09-20T01:00:00.000Z"): AgentTurnEntity => ({
   id: `t-${roundNo}-${at}`,
@@ -24,7 +24,8 @@ const turn = (nav: Record<string, unknown> | null, roundNo = "⑨", at = "2026-0
 
 const end = (id: string, page: string | null, accountName = "沈"): CollabEnd => ({
   id,
-  address: "192.168.101.8",
+  /* 地址按账号区分：面板上的"同步实测 × 本轮同步"是**按地址**对人和取名的 */
+  address: accountName === "沈" ? "192.168.101.8" : accountName === "马" ? "192.168.101.9" : "192.168.101.1",
   sessionId: "demo-01",
   accountId: accountName === "沈" ? "shen" : "ma",
   accountName,
@@ -177,4 +178,73 @@ test("端明细的「已在第几轮」：取它满足的**最新**那一轮，�
   assert.equal(endRoundNo(turns, null), null);
   /* 不换页的那一轮不该被算成"跟到了" */
   assert.equal(endRoundNo([turn(null, "⑥")], "#/mapping"), null);
+});
+
+test("同步实测 × 本轮同步：把「收不到」与「没跟上」分开说", () => {
+  const later = Date.parse("2026-09-20T01:05:00.000Z");
+  const view = roundSyncView(
+    [turn({ route: "/hardware", tab: "triage" })],
+    [
+      end("self", "#/hardware?tab=triage", "史"),
+      end("a", "#/hardware?tab=triage", "沈"),
+      end("b", "#/mapping", "马"),
+    ],
+    ["self"],
+    later,
+  );
+  assert.ok(view);
+
+  /* 没回执的端里：一个页面跟上了（沈 · .8）、一个本来就停在前几轮（马 · .9）→ 两句都要说清，且不能混 */
+  const both = probeFollowHint(
+    {
+      ok: false,
+      pending: [
+        { id: "a", address: "192.168.101.8", accountId: "shen" },
+        { id: "b", address: "192.168.101.9", accountId: "ma" },
+      ],
+    },
+    view,
+  );
+  assert.match(both, /马 本来就停在别的页面/);
+  assert.match(both, /沈 的页面是跟上的/);
+  assert.match(both, /不是没跟上/);
+
+  /* 全部待回执的端页面都跟上了 → 只说"像是推送/连接没到" */
+  const push = probeFollowHint({ ok: false, pending: [{ id: "a", address: "192.168.101.8", accountId: "shen" }] }, view);
+  assert.match(push, /更像是推送\/连接没到/);
+  assert.ok(!/跟页/.test(push));
+
+  /* 实测通过 / 没有待回执 / 没测过 / 没讲过任何一轮 → 不插话 */
+  assert.equal(probeFollowHint({ ok: true, pending: [{ id: "a", address: "x", accountId: "shen" }] }, view), "");
+  assert.equal(probeFollowHint({ ok: false, pending: [] }, view), "");
+  assert.equal(probeFollowHint(null, view), "");
+  assert.equal(
+    probeFollowHint({ ok: false, pending: [{ id: "a", address: "192.168.101.8", accountId: "shen" }] }, null),
+    "shen 的页面是跟上的，却没在时限内回执 —— 更像是推送/连接没到（不是没跟上）",
+    "还没讲过任何一轮时也要能说清；没有端明细可对名字就退回账号名（shen，而不是 沈）",
+  );
+});
+
+test("同机两端地址相同：按端 id 分谁没回执（按地址会把另一台认错）", () => {
+  /*
+    实测踩到：双机演示常在同一台机器上开两个浏览器（地址都是 127.0.0.1），
+    按地址匹配时，面板把「未登录 @ 127.0.0.1」说成了「shi 本来就停在别的页面」。
+    这一条把"按 id 分"钉死。
+  */
+  const later = Date.parse("2026-09-20T01:05:00.000Z");
+  const sameMachine = (id: string, page: string, name: string): CollabEnd => ({
+    ...end(id, page, name),
+    address: "127.0.0.1",
+  });
+  const view = roundSyncView(
+    [turn({ route: "/mapping" })],
+    [sameMachine("a", "#/mapping", "沈"), sameMachine("b", "#/", "马")],
+    [],
+    later,
+  );
+  assert.ok(view);
+  /* 没回执的是 b（马 · 还在首页），不是 a（沈 · 已在那一轮） */
+  const hint = probeFollowHint({ ok: false, pending: [{ id: "b", address: "127.0.0.1", accountId: "ma" }] }, view);
+  assert.match(hint, /马 本来就停在别的页面/, "按 id 应当认出是马");
+  assert.ok(!/沈/.test(hint), "不能把同地址的另一台（沈）说成掉队");
 });

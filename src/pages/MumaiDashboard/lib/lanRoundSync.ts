@@ -22,10 +22,14 @@ import { withQuery } from "../agent/tools";
 const NAV_QUERY_KEYS = ["tab", "batch", "component", "view", "q", "order"];
 
 export type RoundSyncEnd = {
+  /** 端 id（与「同步实测」的回执/待回执**按 id 对上人**：同机多标签页时地址会重） */
+  id: string;
   /** 「史 @ 192.168.101.8」这种可念的描述 */
   label: string;
   page: string;
   account: string;
+  /** 端的地址（与「同步实测」的回执/待回执对上人用） */
+  address: string;
 };
 
 export type RoundSyncView = {
@@ -96,6 +100,62 @@ export function endRoundSuffix(turns: AgentTurnEntity[], page: string | null | u
   return roundNo ? ` · 已在第 ${roundNo} 轮` : " · 还没跟到任何一轮";
 }
 
+/**
+ * 「同步实测」与「本轮同步」对在一起看 —— 把**收不到**和**没跟上**分开。
+ *
+ * 现场这两种毛病的处置完全不同：
+ *   · 端**页面还没跟上**（停在前几轮）→ 先让它跟页，别急着查网络；
+ *   · 端**页面已经在那一轮上、却没回执** → 它跟得上，说明消息没到它那儿，查推送/连接。
+ * 原来这两块信息在面板上是分开的两行，讲解人得自己对照。
+ *
+ * @param probe 同步实测的结果（`ok` / `pending`）；null = 还没测过
+ * @param view  「本轮同步」的读数；null = 还没讲过任何一轮
+ * @returns 一句补充说明；没什么可说的（测过了/没数据/没有待回执的端）时返回空串
+ */
+export function probeFollowHint(
+  probe:
+    | { ok: boolean; pending: { id: string; address: string; accountId: string | null }[] }
+    | null
+    | undefined,
+  view: RoundSyncView | null | undefined,
+): string {
+  if (!probe || probe.ok || !probe.pending.length) return "";
+  /*
+    ⚠ **按端 id 对上人，不按地址**：双机演示经常是同一台机器上开两个浏览器
+    （地址都是 127.0.0.1），按地址会把"没回执的那台"认成另一台 ——
+    实测踩到过：面板把「未登录 @ 127.0.0.1」说成「shi 本来就停在别的页面」。
+    归属不明的（id 对不上任何端）退回按地址判，再不行才当"页面是跟上的"。
+  */
+  const known = [...(view?.followed ?? []), ...(view?.lagging ?? [])];
+  const laggingIds = new Set((view?.lagging ?? []).map((row) => row.id));
+  const match = (end: { id: string; address: string }) =>
+    known.find((row) => row.id === end.id) ?? known.find((row) => row.address === end.address) ?? null;
+  const pendingLagging = probe.pending.filter((end) => {
+    const hit = match(end);
+    if (hit) return laggingIds.has(hit.id);
+    return (view?.lagging ?? []).some((row) => row.address === end.address);
+  });
+  const pendingOnPage = probe.pending.filter((end) => !pendingLagging.includes(end));
+  /*
+    称呼用**面板上那个名字**：实测的回执项只带 `accountId`（shen / ma），
+    而端明细里有人名（沈 / 马）。能对上就用名字，对不上退回账号名。
+  */
+  const who = (end: { id: string; address: string; accountId: string | null }) =>
+    match(end)?.account ?? end.accountId ?? "未登录";
+  const parts: string[] = [];
+  if (pendingLagging.length) {
+    parts.push(
+      `${pendingLagging.map(who).join("、")} 本来就停在别的页面（${view ? `还没跟到第 ${view.roundNo} 轮` : "没跟上"}）—— 先让它跟页，再谈收没收到`,
+    );
+  }
+  if (pendingOnPage.length) {
+    parts.push(
+      `${pendingOnPage.map(who).join("、")} 的页面是跟上的，却没在时限内回执 —— 更像是推送/连接没到（不是没跟上）`,
+    );
+  }
+  return parts.join("；");
+}
+
 /** 本机那一端的判定：地址是回环（`127.` / `::1` / `localhost`）就是这台服务器上的浏览器 */
 export function loopbackEndIds(ends: CollabEnd[]): string[] {
   return ends
@@ -160,7 +220,7 @@ export function roundSyncView(
   */
   if (target) {
     for (const end of others) {
-      const row = { label: endLabel(end), page: end.page ?? "", account: endAccount(end) };
+      const row = { id: end.id, label: endLabel(end), page: end.page ?? "", account: endAccount(end), address: end.address };
       if (endFollowed(end.page, target)) followed.push(row);
       else lagging.push(row);
     }
