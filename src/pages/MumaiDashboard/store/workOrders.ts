@@ -41,7 +41,15 @@ export type WorkOrderState = {
     orderId: string,
     body: { leaderAccountId: string; members: { accountId: string; duties: string[] }[]; expectedRevision: number },
   ) => Promise<WorkOrderDetail>;
-  setStatus: (orderId: string, action: WorkOrderAction, expectedRevision?: number) => Promise<WorkOrderDetail>;
+  /** 返回整个响应：`knowledge` 是服务端顺带做的事（归档 → 登进知识库），没有就是 null */
+  setStatus: (
+    orderId: string,
+    action: WorkOrderAction,
+    expectedRevision?: number,
+  ) => Promise<{
+    detail: WorkOrderDetail;
+    knowledge?: { assetId?: string; created?: boolean; revision?: number; jobId?: string | null; error?: string } | null;
+  }>;
   saveEnvironment: (
     orderId: string,
     body: Parameters<typeof api.saveWorkOrderEnvironment>[1],
@@ -130,7 +138,8 @@ export const useWorkOrderStore = create<WorkOrderState>()((set, get) => ({
     const result = await api.setWorkOrderStatus(orderId, action, expectedRevision);
     set({ detail: result.detail });
     await get().refresh();
-    return result.detail;
+    /* 整个响应都交回调用方：归档会顺带登进知识库，页面要能把这件事说出来 */
+    return result;
   },
 
   async saveEnvironment(orderId, body) {

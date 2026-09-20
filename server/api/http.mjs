@@ -54,6 +54,7 @@ import {
   queryAssets,
 } from "../services/knowledge-store.mjs";
 import { readAssetDetail, readGraph, readOverview, searchKnowledge } from "../services/knowledge-query.mjs";
+import { ingestArchivedWorkOrder } from "../services/knowledge-ingest.mjs";
 import { parseJson } from "../storage/db.mjs";
 import { proxyScreen, screenStatus } from "../services/capture-screen.mjs";
 import { CART_ACTIONS } from "../services/cart.mjs";
@@ -532,7 +533,31 @@ export function createApi({ db, hub, bridge, devices = null, workOrders = null, 
       action: ctx.body?.action,
       expectedRevision: ctx.body?.expectedRevision ?? null,
     });
-    return { ok: true, order, detail: orders.detailFor(ctx.params.orderId, ctx.actor) };
+    const detail = orders.detailFor(ctx.params.orderId, ctx.actor);
+    /*
+      工单归档 → 当场登进知识库（用户 2026-09-19：「最后工单结束得能归档进去」）。
+      记录文本由工单实体**现算**（services/knowledge-ingest.mjs），登记完建索引任务、
+      交给 knowledgeRunner 推进 —— 与 /api/commands 同一条口径：命令只建任务。
+      只有「归档」这一个动作写知识库，其余流程动作不碰它。
+
+      登记失败**不回滚归档**：工单已经归档是既成事实，把它退回去比"知识库少一条记录"更糟。
+      所以这里兜住异常、把原因回给页面与日志，归档结果照常返回。
+    */
+    let knowledge = null;
+    if (order.status === "已归档") {
+      try {
+        knowledge = ingestArchivedWorkOrder(db, DEFAULT_SESSION_ID, {
+          detail,
+          actorId: ctx.actor,
+          actorLabel: orders.displayLabel(ctx.actor),
+        });
+        if (knowledge.jobId && knowledgeRunner) knowledgeRunner.start(knowledge.jobId);
+      } catch (cause) {
+        knowledge = { error: String(cause?.message ?? cause) };
+        logger.error?.(`[知识库] 工单 ${order.orderNo} 归档登记失败：${knowledge.error}`);
+      }
+    }
+    return { ok: true, order, detail, knowledge };
   });
 
   route("PUT", "/api/work-orders/:orderId/environment-draft", async (ctx) => {

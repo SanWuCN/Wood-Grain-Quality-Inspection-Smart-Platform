@@ -289,7 +289,19 @@ export default function Orders() {
       setStatus: async (action: WorkOrderAction) => {
         if (!serverDetail) return;
         await runAction(async () => {
-          await useWorkOrderStore.getState().setStatus(serverDetail.order.id, action);
+          const next = await useWorkOrderStore.getState().setStatus(serverDetail.order.id, action);
+          /*
+            归档会顺带把这张单登进知识库（服务端 `services/knowledge-ingest.mjs`）。
+            **只在服务端真回了资产号时才说** —— 登记失败或旧版服务端没这个字段就不提，
+            不能凭"点了归档"就宣称知识库里有了（防幻觉）。
+
+            ⚠ 这句话必须走 `toast`，**不是 `pushEvent`**：`pushEvent` 只往内部事件表里记一条
+            （页面上只体现为页脚的 seq 计数），现场根本看不见 —— 第一版就是写成 pushEvent，
+            验收时"页面上什么都没发生"（2026-09-20 实测）。
+          */
+          if (action === "archive" && next?.knowledge?.assetId) {
+            toast(`已归档；本单记录已登进知识库（${next.knowledge.assetId}），可在知识库检索`, "ok");
+          }
         });
       },
       remove: async () => {

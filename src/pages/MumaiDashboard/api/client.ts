@@ -1121,8 +1121,18 @@ export const api = {
     );
   },
 
+  /**
+   * 流程动作。除了工单详情，服务端还会带回**这次动作顺带做了什么** ——
+   * 目前只有「归档」会顺带把这张单登进知识库（`services/knowledge-ingest.mjs`），
+   * 字段形如 `{ assetId, created, revision, jobId }`；登记失败时是 `{ error }`，
+   * 老的响应里则没有这个字段，所以调用方一律按可选处理。
+   */
   setWorkOrderStatus(orderId: string, action: WorkOrderAction, expectedRevision?: number) {
-    return apiRequest<{ ok: boolean; detail: WorkOrderDetail }>(
+    return apiRequest<{
+      ok: boolean;
+      detail: WorkOrderDetail;
+      knowledge?: { assetId?: string; created?: boolean; revision?: number; jobId?: string | null; error?: string } | null;
+    }>(
       `/api/work-orders/${encodeURIComponent(orderId)}/status`,
       { method: "POST", body: JSON.stringify({ action, expectedRevision }) },
     );
