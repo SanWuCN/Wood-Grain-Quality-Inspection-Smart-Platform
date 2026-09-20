@@ -805,16 +805,10 @@ export default function XiaomuDock() {
               {queueDepth > 0 ? `待处理 ${queueDepth} 条` : reply?.intentId ?? (listening ? "常驻唤醒已开" : "待命")}
             </span>
             {/*
-              「一条龙」走到第几条（用户口径 2026-09-17：「ctrl加shift加z，25个对话循环播放，
-              按一下播放一个」）。这一格只在用一条龙键走流程时出现：
-              按一下就走一条，走到第几条必须看得见 —— 否则那一条正在思考时，
-              演示人分不清"没按上"还是"已经在走"。
+              (2026-10-02 用户口径：「小木气泡的一条龙显示也去掉」——原来这里有一格
+              「一条龙 N/25」，已删。Ctrl+Shift+Z 本身照旧可用：按一下走一条、25 条循环，
+              游标逻辑在 useScriptShortcut / store.ts 里没动，只是气泡上不再显示走到第几条。)
             */}
-            {agent.walk ? (
-              <span className="xd__walk" title="一条龙：按一下走一条，走完 25 条回到第 1 条">
-                一条龙 {agent.walk.index + 1}/{agent.walk.total}
-              </span>
-            ) : null}
             <button type="button" className="xd__icon-btn" onClick={close} aria-label="关闭小木（Esc）" title="关闭（Esc）">
               ×
             </button>
