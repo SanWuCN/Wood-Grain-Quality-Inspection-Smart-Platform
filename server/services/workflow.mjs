@@ -496,9 +496,15 @@ const HANDLERS = {
 
     const day = /^WO-(\d{8})-\d+$/.exec(String(orderNo ?? ""))?.[1] ?? null;
     const prefix = day ? `TK-${day}-` : "TK-";
+    /*
+      ⚠ 取当天**已有编号的最大值 + 1**，不能取 COUNT(*)：任务卡被清掉几张之后，
+      COUNT 会回退，新卡就会撞上已存在的 id（与工单号 2026-09-20 踩到的是同一个坑）。
+    */
     const used =
       ctx.db
-        .prepare("SELECT COUNT(*) AS n FROM entities WHERE session_id=? AND kind='taskCard' AND id LIKE ?")
+        .prepare(
+          "SELECT MAX(CAST(substr(id, -2) AS INTEGER)) AS n FROM entities WHERE session_id=? AND kind='taskCard' AND id LIKE ?",
+        )
         .get(ctx.sessionId, `${prefix}%`)?.n ?? 0;
 
     const created = cards.map((card, index) => {
@@ -1051,9 +1057,12 @@ function nextCruiseTaskNo(ctx, orderNo) {
   const day = /^WO-(\d{8})-\d+$/.exec(String(orderNo ?? ""))?.[1] ?? null;
   if (!day) return `MS-${Date.now().toString(36).toUpperCase()}`;
   const prefix = `CR-${day}-`;
+  /* 同工单号那个坑：取最大值 + 1（巡航任务会被撤销/删除，COUNT 会回退） */
   const used =
     ctx.db
-      .prepare("SELECT COUNT(*) AS n FROM entities WHERE session_id=? AND kind='mission' AND id LIKE ?")
+      .prepare(
+        "SELECT MAX(CAST(substr(id, -2) AS INTEGER)) AS n FROM entities WHERE session_id=? AND kind='mission' AND id LIKE ?",
+      )
       .get(ctx.sessionId, `${prefix}%`)?.n ?? 0;
   return `${prefix}${String(used + 1).padStart(2, "0")}`;
 }

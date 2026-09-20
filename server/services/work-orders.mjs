@@ -556,9 +556,20 @@ export function createWorkOrderService({ db, hub = null, devices = null, session
     const stamp = shanghaiParts(now).stamp;
 
     return inTransaction(db, () => {
-      // 单号按「当天已有多少单」顺序生成；在事务里数，避免两次触发撞号
-      const seq = (db.prepare("SELECT COUNT(*) AS n FROM work_orders WHERE order_no LIKE ?").get(`WO-${stamp}-%`)?.n ?? 0) + 1;
-      const serial = String(seq).padStart(4, "0");
+      /*
+        序号取「当天**已有单号的最大值** + 1」，**不能**取 `COUNT(*) + 1`。
+
+        ⚠ 2026-09-20 实测踩到：现场把当天试出来的单清掉（删了 0007，剩 0001–0006、0008）之后，
+        COUNT = 7，下一张单又生成 `WO-…-0008` —— 直接撞上已存在的
+        `work_orders.order_no UNIQUE`，建单接口回 500「服务内部错误」，
+        表现就是**小木接单当场失效**（快捷键按下去什么都不发生）。
+        单号是"只增不减"的编号，删除不该让它回退；这里在事务里取 MAX，顺带避免两次触发撞号。
+      */
+      const maxSerial =
+        db
+          .prepare("SELECT MAX(CAST(substr(order_no, -4) AS INTEGER)) AS n FROM work_orders WHERE order_no LIKE ?")
+          .get(`WO-${stamp}-%`)?.n ?? 0;
+      const serial = String(maxSerial + 1).padStart(4, "0");
       const id = `wo-${stamp}-${serial}`;
       const orderNo = `WO-${stamp}-${serial}`;
       const at = nowIso();
@@ -1546,8 +1557,12 @@ export function createWorkOrderService({ db, hub = null, devices = null, session
     if (!ledger) throw error(422, "UNKNOWN_DEVICE", `设备台账里没有 ${deviceId}，不能作为下发目标`);
 
     const stamp = shanghaiParts(new Date()).stamp;
-    const seq = (db.prepare("SELECT COUNT(*) AS n FROM work_order_dispatches WHERE bundle_id LIKE ?").get(`BND-${stamp}-%`)?.n ?? 0) + 1;
-    const bundleId = `BND-${stamp}-${String(seq).padStart(4, "0")}`;
+    /* 同一个坑：包号也取当天最大值 + 1（COUNT(*) 在删过下发记录后会回退撞号） */
+    const maxBundle =
+      db
+        .prepare("SELECT MAX(CAST(substr(bundle_id, -4) AS INTEGER)) AS n FROM work_order_dispatches WHERE bundle_id LIKE ?")
+        .get(`BND-${stamp}-%`)?.n ?? 0;
+    const bundleId = `BND-${stamp}-${String(maxBundle + 1).padStart(4, "0")}`;
     const issuedAt = nowIso();
     const expiresAt = new Date(Date.now() + DISPATCH_TTL_MS).toISOString();
     const subjects = subjectRows(row.id);
