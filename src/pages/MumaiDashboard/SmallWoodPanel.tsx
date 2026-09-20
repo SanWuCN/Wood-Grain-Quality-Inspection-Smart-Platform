@@ -535,9 +535,13 @@ export default function SmallWoodPanel() {
                     <em>就绪</em>
                   </span>
                 ))}
-                {turn.intent.voice !== "—" ? (
-                  <span className="xm__voice">{turn.intent.voice}</span>
-                ) : null}
+                {/*
+                  ⚠ 这里原来还渲染 `turn.intent.voice`（「AI语音1」这种语音包编号）。
+                  用户 2026-10-01：「气泡里对话一览这种也不要，容易露馅」—— 语音包编号是
+                  **给开发/排练看的**：它等于告诉观众"这句话是按编号放的录音"。
+                  面板是观众看得到的（点浮标就打开），所以一并去掉；要核对语音编号去
+                  **排练控制台**（VoiceConsole），那里照旧显示。
+                */}
               </div>
 
               <ol className="xm__steps">
