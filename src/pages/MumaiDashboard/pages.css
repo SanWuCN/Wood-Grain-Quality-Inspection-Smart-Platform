@@ -3099,6 +3099,71 @@
   align-items: stretch;
 }
 
+/*
+  ㉑「调用本批次分析流程」逐段推进（状态在 `fusionReveal.ts`）：还没跑到的段先不显示。
+  这个类**只在脚本登记了推进计划时**才挂上 —— 人自己打开融合页时四块照旧全在。
+  用 `display:none` 而不是条件渲染：那四块面板各自几十行，包一层条件会把整段 JSX
+  缩进重排、改动面大且容易碰坏；而"隐藏"与"不渲染"对观众是一样的。
+*/
+.adapt-grid--fusion .tech-panel.is-flow-pending {
+  display: none;
+}
+
+/* 推进中的阶段条：只在脚本推流程时出现，说明"跑到哪一段了" */
+.fusion-flow {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--ma-line);
+  background: var(--bg-page);
+  font-size: var(--fs-aux);
+  color: var(--ma-text-2);
+}
+
+.fusion-flow b {
+  color: var(--ma-text);
+  font-weight: 600;
+}
+
+.fusion-flow ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fusion-flow li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fusion-flow li::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ma-text-3);
+}
+
+.fusion-flow li.is-done {
+  color: var(--ma-text);
+}
+
+.fusion-flow li.is-done::before {
+  background: var(--ma-ok);
+}
+
+.fusion-flow li.is-running::before {
+  background: var(--ma-warn);
+}
+
 .adapt-col {
   display: flex;
   flex-direction: column;

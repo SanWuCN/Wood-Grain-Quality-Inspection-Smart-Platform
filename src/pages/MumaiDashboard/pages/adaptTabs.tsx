@@ -34,6 +34,24 @@ import { DatasetCleanFlow, type CleanVersionResult } from "./DatasetCleanFlow";
 import { DEFAULT_THRESHOLDS, runClean } from "../cleanLogic";
 import { Panel } from "../Panel";
 import {
+  FUSION_FLOW_SECTIONS,
+  useFusionReveal,
+  type FusionSection,
+} from "../fusionReveal";
+
+/**
+ * 四段的中文名（与 `FUSION_FLOW_SECTIONS` 一一对应）。
+ *
+ * 放在组件文件里而不是 `fusionReveal.ts`：那边是**状态**（谁被点亮），
+ * 这里是**文案**（显示成什么字），两件事改动的理由不同。
+ */
+const FUSION_SECTION_LABELS: Record<FusionSection, string> = {
+  completeness: "输入校验",
+  visual: "图像标注",
+  radar: "雷达分析",
+  fusion: "测区融合",
+};
+import {
   Btn,
   DataTable,
   SourceTag,
@@ -387,6 +405,14 @@ export function FusionTab() {
   const calibrationRows = useMemo(() => buildCalibrationRows(FUSION_RECORD), []);
   const evidenceMatches = useMemo(() => buildEvidenceMatches(FUSION_RECORD), []);
   const calibration = useMemo(() => calibrationSummary(FUSION_RECORD), []);
+  /*
+    ㉑「调用本批次分析流程」：四块按拍依次出现（用户 2026-10-01：
+    「针对一些只有跳转不太合适的对话加上特殊页面或操作」）。
+    `null` = 没有计划 → 四块照旧全在（人自己打开这一页时看不到任何差别）；
+    数组 = 脚本正在推流程 → 只显示已经跑到的那几段。
+  */
+  const flowed = useFusionReveal();
+  const show = (section: FusionSection) => flowed === null || flowed.includes(section);
 
   return (
     /*
@@ -399,8 +425,32 @@ export function FusionTab() {
       两列底部齐平，同级面板的标题高度与间距本来就统一（都走 .tech-panel）。
     */
     <div className="adapt-grid adapt-grid--fusion">
+      {/*
+        ㉑ 推流程时才出现的阶段条：四段的名字与 `FUSION_FLOW_SECTIONS` 一一对应，
+        当前跑到哪一段由 `flowed` 决定（`null` = 没有计划 → 整条不出现）。
+      */}
+      {flowed === null ? null : (
+        <div className="fusion-flow" role="status" aria-label="本批次分析流程进度">
+          <b>本批次分析流程</b>
+          <ol>
+            {FUSION_FLOW_SECTIONS.map((section) => {
+              const done = flowed.includes(section);
+              const running = !done && FUSION_FLOW_SECTIONS.indexOf(section) === flowed.length;
+              return (
+                <li key={section} className={done ? "is-done" : running ? "is-running" : ""}>
+                  {FUSION_SECTION_LABELS[section]}
+                </li>
+              );
+            })}
+          </ol>
+          <span className="muted">
+            已完成 {flowed.length}/{FUSION_FLOW_SECTIONS.length}
+          </span>
+        </div>
+      )}
       <div className="adapt-col">
         <Panel
+          className={show("completeness") ? "" : "is-flow-pending"}
           title="数据完整性"
           /* 融合前的输入校验：PRD §5「校验使用业务图标」 */
           icon="biz-package-verify"
@@ -427,6 +477,7 @@ export function FusionTab() {
 
         <Panel
           ref={visualEvidenceRef}
+          className={show("visual") ? "" : "is-flow-pending"}
           title="视觉标定"
           icon="biz-manual-mark"
           extra={<SourceTag label="归档标注 JSON" />}>
@@ -453,7 +504,7 @@ export function FusionTab() {
           <p className="note">当前归档只支持构件与测区级关联，未提供相机内参、畸变系数或毫米级比例，页面不补写这些参数。</p>
         </Panel>
 
-        <Panel ref={radarEvidenceRef} title="雷达特征">
+        <Panel ref={radarEvidenceRef} className={show("radar") ? "" : "is-flow-pending"} title="雷达特征">
           <DataTable
             head={["响应段", "测区", "幅值", "质量"]}
             rows={FUSION_RECORD.radarFeatures.map((item) => [
@@ -469,7 +520,10 @@ export function FusionTab() {
 
       {/* 规则条数是从种子现算的状态量；原来这里挂的
           「明确规则，非分数相加」是在向读者解释这套融合是怎么设计的（§5 判据） */}
-      <Panel title="融合规则与结果" extra={<span className="muted">{FUSION_RULES.length} 条规则</span>}>
+      <Panel
+        className={show("fusion") ? "" : "is-flow-pending"}
+        title="融合规则与结果"
+        extra={<span className="muted">{FUSION_RULES.length} 条规则</span>}>
         <h4 className="sub">图像疑点匹配</h4>
         <ol className="fusion-match-list" aria-label="图像疑点与雷达特征匹配结果">
           {evidenceMatches.map((item, index) => {

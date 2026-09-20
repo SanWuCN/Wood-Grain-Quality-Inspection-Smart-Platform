@@ -117,10 +117,11 @@ export type ScriptRound = {
      *   · `order-detail`    —— 工单详情页按「组」逐段展开（②③④⑳㉓㉔㉕）；
      *   · `clean-flow`      —— 数据清洗流程页按「阶段」逐拍推进到人工核验（⑰）；
      *   · `workbench-cards` —— 执行工作台的任务卡按「槽位」逐张铺开（⑥⑮，位置编号 c1…c4）；
-     *   · `twin-components` —— 三维场景顶部的四柱构件条按「构件号」逐柱点亮（⑪，Z01…Z04）。
-     * 四者共用 `ordersReveal.runRevealTimeline` 的时间线，只是应用对象不同。
+     *   · `twin-components` —— 三维场景顶部的四柱构件条按「构件号」逐柱点亮（⑪，Z01…Z04）；
+     *   · `fusion-flow`     —— 融合分析页四块按「段」依次跑出来（㉑，见 `fusionReveal.ts`）。
+     * 五者共用 `ordersReveal.runRevealTimeline` 的时间线，只是应用对象不同。
      */
-    target: "order-detail" | "clean-flow" | "workbench-cards" | "twin-components";
+    target: "order-detail" | "clean-flow" | "workbench-cards" | "twin-components" | "fusion-flow";
     sections: string[];
     beats: string[][];
     /**
@@ -1058,6 +1059,22 @@ export const SCRIPT_ROUNDS: ScriptRound[] = [
     nav: {
       route: "/firmware",
       tab: "fusion",
+    },
+    /*
+      ── 2026-10-01 加"流程跑起来"（用户：「针对一些只有跳转不太合适的对话加上
+         特殊页面或操作」）────────────────────────────────────────────────
+      这一轮的动词是「**调用**本批次分析流程」——可融合页一打开四块结果就全在，
+      观众看不到流程被调用的过程。现在四块按三小句依次出现：
+        「分析完成」                        → 输入校验（completeness）
+        「图像标注与雷达结果已关联到 Z04 测区」→ 图像标注 + 雷达分析（visual / radar）
+        「融合视图已生成」                   → 测区融合（fusion）
+      段名与 `fusionReveal.ts` 的 `FUSION_FLOW_SECTIONS` 一一对应；
+      融合页在人自己打开时（没有计划）**照旧四块全在**，看不到任何差别。
+    */
+    reveal: {
+      target: "fusion-flow",
+      sections: ["completeness", "visual", "radar", "fusion"],
+      beats: [["completeness"], ["visual", "radar"], ["fusion"]],
     },
   },
   {

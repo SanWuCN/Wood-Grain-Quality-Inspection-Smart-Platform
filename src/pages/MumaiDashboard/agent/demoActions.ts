@@ -437,8 +437,16 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
   },
   {
     roundNo: "㉑",
-    title: "展开三路数据时间轴并生成融合记录卡",
+    /*
+      ⚠ 2026-10-01 改成 revealOnly（用户：「针对一些只有跳转不太合适的对话加上
+        特殊页面或操作」）：这一轮的可见动作现在是**页面本身** ——
+        融合分析页四块跟着台词逐段跑出来（`script.ts` 的 reveal: fusion-flow，
+        状态在 `fusionReveal.ts`，页面侧是 `adaptTabs.tsx` 的 FusionTab）。
+        页面已经在演"流程被调用"，再叠一张浮层就是两处讲同一件事（同 ②③④⑥⑪⑰）。
+    */
+    title: "融合分析页逐段跑出：输入校验 → 图像标注 → 雷达分析 → 测区融合",
     surface: "fusion",
+    revealOnly: true,
     dataKeys: [
       "fusion.recordId",
       "fusion.radarFrames",

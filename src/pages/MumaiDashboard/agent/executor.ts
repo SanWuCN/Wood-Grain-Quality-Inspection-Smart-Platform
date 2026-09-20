@@ -58,6 +58,12 @@ import {
   workbenchMounted,
 } from "../workbenchReveal";
 import { advanceTwinReveal, beginTwinReveal, cancelTwinReveal, twinMounted } from "../twinReveal";
+import {
+  advanceFusionReveal,
+  beginFusionReveal,
+  cancelFusionReveal,
+  fusionMounted,
+} from "../fusionReveal";
 import { commissionBinding } from "../commissionBinding";
 import { announceRound } from "./roundSync";
 import { useWorkOrderStore } from "../store/workOrders";
@@ -620,6 +626,9 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
   } else if (round.reveal?.target === "twin-components") {
     /* ⑪：三维场景顶部的四柱构件条跟着播报**逐柱点亮**（Z04 亮起时打出「建议优先复核」） */
     startTwinReveal(round, entities.order ?? "", spoken);
+  } else if (round.reveal?.target === "fusion-flow") {
+    /* ㉑：融合分析页的四块**逐段跑出来**（输入校验 → 图像标注 → 雷达分析 → 测区融合） */
+    startFusionReveal(round, spoken);
   }
   /*
     四柱构件条是"上一轮讲到哪根"的临时状态：**下一轮开始就交回给人** ——
@@ -629,6 +638,11 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
       各有自己的结束语义（见 cleanFlowReveal 里"推完不得解除"那条注释）。
   */
   if (round.reveal?.target !== "twin-components") cancelTwinReveal();
+  /*
+    融合页那份"逐段推进"的计划同理：只有 ㉑ 需要它，别的轮次一开始就交回给人 ——
+    否则它会在 TTL 到期前一直压着融合页（人再打开那一页只看见一段）。
+  */
+  if (round.reveal?.target !== "fusion-flow") cancelFusionReveal();
 
   /*
     ── 演示表面（工作清单 v1.0 §10 阶段 C/D）──────────────────────────
@@ -856,6 +870,32 @@ function startCleanFlowReveal(round: ScriptRound, spoken?: unknown): void {
     clear: () => cancelCleanFlowReveal(),
     spoken,
     mountReady: cleanFlowMounted,
+  });
+}
+
+/**
+ * ㉑（本批次分析流程）：融合分析页**跟着播报逐段跑出来**。
+ *
+ * 台词是「**调用**本批次分析流程，完成图像标注和雷达分析，再按测区融合结果」——
+ * 三小句正好对应三段推进：`分析完成`（输入校验都过了）→
+ * `图像标注与雷达结果已关联到 Z04 测区`（标注 + 雷达两段一起亮）→
+ * `融合视图已生成`（结论那一段亮）。
+ *
+ * 「跑流程」这件事在原实现里是缺失的：融合页一打开四块结果就全在，
+ * 观众看不到"流程被调用"的过程（用户 2026-10-01：「针对一些只有跳转不太合适的
+ * 对话加上特殊页面或操作」）。
+ */
+function startFusionReveal(round: ScriptRound, spoken?: unknown): void {
+  const reveal = round.reveal;
+  if (!reveal || reveal.sections.length === 0) return;
+  beginFusionReveal(reveal.sections);
+  runRevealTimeline({
+    segments: splitClauses(mainLineOf(round)),
+    beats: reveal.beats,
+    apply: (sections) => advanceFusionReveal(sections),
+    clear: () => cancelFusionReveal(),
+    spoken,
+    mountReady: fusionMounted,
   });
 }
 
