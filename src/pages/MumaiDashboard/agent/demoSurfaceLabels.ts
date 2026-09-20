@@ -79,6 +79,16 @@ export const FIELD_LABELS: Record<string, FieldLabel> = {
   "siteEnv.windSpeedMs": { label: "现场风速", unit: "m/s" },
   "siteEnv.distanceToZ04M": { label: "测点距 Z04", unit: "m" },
   "siteEnv.heightAboveGroundM": { label: "测点离地高", unit: "m" },
+  /*
+    ── ⑦「按设备编号核对数据来源」的五行 ──────────────────────────────
+    这一轮原来挂的是素材清单（段数 / 分辨率 / 构件编号），屏幕上没有
+    "设备编号 / 来源 / 核对结论"—— 而这一轮的动词是"核对"（用户 2026-10-01）。
+  */
+  "handheld.deviceId": { label: "设备编号" },
+  "handheld.batchId": { label: "本次采集批次" },
+  "handheld.source": { label: "数据来源" },
+  "handheld.recordedAt": { label: "平台记录时间" },
+  "handheld.verdict": { label: "核对结论" },
   "material.videoCount": { label: "视频段数", unit: "段" },
   "material.durationText": { label: "素材时长" },
   "material.resolutionText": { label: "分辨率" },

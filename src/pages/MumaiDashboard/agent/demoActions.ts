@@ -47,6 +47,7 @@ export const SURFACE_KINDS = [
   "params", // 参数对比卡（⑤：环境补偿参数建议）
   "channels", // 通道状态（⑥：地图与视频）
   "evidence", // 证据查看器（⑨⑲）
+  "deviceSource", // 设备与数据来源核对（⑦）
 ] as const;
 
 export type SurfaceKind = (typeof SURFACE_KINDS)[number];
@@ -218,12 +219,24 @@ export const DEMO_ACTIONS: readonly DemoAction[] = Object.freeze([
     /*
       用户文档第 7 条：「我按设备编号核对数据来源，确认平台显示的是本次设备数据，
       不串数据。发现异常立即叫停。」
-      展示面用 `material`（本次采集的设备数据：段数 / 分辨率 / 构件编号）——
-      正是"平台显示的这批数据"本身。
+
+      ⚠ 2026-10-01 换内容（用户：「针对一些只有跳转不太合适的对话加上特殊页面或操作」）：
+        原来挂的是 `material`（本次采集的设备数据：段数 / 分辨率 / 构件编号）——
+        可这一轮的动词是**核对**，屏幕上必须有"设备编号 / 本次批次 / 数据来源 / 核对结论"，
+        否则观众看到的只是一个素材清单，跟台词对不上。
+        现在五行取自 `DEMO_SCENARIO_V3.handheld`（设备号 = 平台台账那台，
+        批次 = 本批次采集批次，来源 = 扫描仪终端上报，结论 = 按设备身份与批次绑定校验的结果）。
     */
-    title: "按设备编号核对数据来源，确认是本次数据",
-    surface: "material",
-    dataKeys: ["material.videoCount", "material.resolutionText", "components.codes"],
+    title: "按设备编号核对数据来源：设备号 / 本次批次 / 来源 / 核对结论",
+    surface: "deviceSource",
+    dataKeys: [
+      "handheld.deviceId",
+      "handheld.batchId",
+      "handheld.source",
+      "handheld.recordedAt",
+      "handheld.verdict",
+      "components.codes",
+    ],
     simulated: true,
   },
   {

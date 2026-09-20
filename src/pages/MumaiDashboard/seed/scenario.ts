@@ -22,6 +22,8 @@ import {
   type Reflector,
   type SpectrumResult,
 } from "./radarEcho.ts";
+/* ⑦「按设备编号核对数据来源」要显示**平台台账里那台**设备号：直接引它，不抄一份字面量 */
+import { HANDHELD_DEVICE_ID } from "../device/types.ts";
 import type {
   AnomalyEvent,
   ArchiveItem,
@@ -234,6 +236,29 @@ export const DEMO_SCENARIO_V3 = Object.freeze({
   }),
 
   /**
+   * 手持扫描仪与数据来源（⑦「我按设备编号核对数据来源，确认平台显示的是本次设备数据，不串数据」）。
+   *
+   * 用户 2026-10-01：「针对一些只有跳转不太合适的对话加上特殊页面或操作」——
+   * ⑦ 原来挂的是**素材清单**（段数 / 分辨率 / 构件编号），屏幕上根本没有
+   * "设备编号 / 数据来源 / 核对结论"，而这一轮的动词偏偏是"核对"。
+   *
+   * 五个值都不是新编的：
+   *   · `deviceId` —— 平台台账里那台（`device/types.ts` 的 `HANDHELD_DEVICE_ID`）；
+   *   · `batchId`  —— 与本批次采集批次同源（= `anomaly.batchId`，`validateScenario()` 核对相等）；
+   *   · `recordedAt` —— 由业务日期派生（不读系统时间）；
+   *   · `source`   —— 数据是怎么进平台的（扫描仪终端上报），不是第三方接口名；
+   *   · `verdict`  —— 核对结论：陈述的是**平台按设备身份与批次绑定校验**的结果，
+   *                  不是对检测结论的判定（§11.2：只标采集异常，不出病害结论）。
+   */
+  handheld: Object.freeze({
+    deviceId: HANDHELD_DEVICE_ID,
+    batchId: "scan-Z04-001",
+    source: "扫描仪终端上报",
+    recordedAt: `${DEMO_BUSINESS_DATE} 09:40`,
+    verdict: "与本次设备一致，未串数据",
+  }),
+
+  /**
    * 异常采集（§6.3）。
    *
    * `missingFrames` 与计划/收到并列为数据，而**自洽性由 `validateScenario()` 保证**
@@ -362,6 +387,21 @@ export function validateScenario(): string[] {
   if (n(v.anomaly.missingFrames) !== n(v.anomaly.plannedFrames - v.anomaly.receivedFrames)) {
     problems.push(
       `异常采集不自洽：缺失帧 ${v.anomaly.missingFrames} ≠ 计划 ${v.anomaly.plannedFrames} − 收到 ${v.anomaly.receivedFrames}`,
+    );
+  }
+  /*
+    ⑦ 核对卡上的"本次批次"必须就是本批次的采集批次 —— 两处各写一个号会让观众
+    在⑦看到 A、在⑭看到 B（核对类界面最忌讳这个）。用 `n()` 拓宽类型再比（同上）。
+  */
+  if (n(v.handheld.batchId) !== n(v.anomaly.batchId)) {
+    problems.push(
+      `设备来源核对卡的批次与采集批次不一致：handheld.batchId ${v.handheld.batchId} ≠ anomaly.batchId ${v.anomaly.batchId}`,
+    );
+  }
+  /* ⑦ 卡上的记录时间必须落在业务日期当天（不能出现"今天的单、昨天的数据"） */
+  if (!n(v.handheld.recordedAt).startsWith(n(v.clock.businessDate))) {
+    problems.push(
+      `设备来源核对卡的记录时间 ${v.handheld.recordedAt} 不在业务日期 ${v.clock.businessDate} 当天`,
     );
   }
   if (n(v.clean.excludedCount) !== n(v.clean.rawCount - v.clean.keptCount)) {
