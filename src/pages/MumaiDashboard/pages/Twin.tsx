@@ -767,6 +767,12 @@ const TOUR_INTERVAL_MS = 5200;
           <span>工单</span>
           <select value={orderId} onChange={(event) => setOrderId(event.target.value)} aria-label="选择工单">
             {ORDERS.map((item) => (
+              /*
+                ⚠ 显示**站名**（`item.site`），不是区县：工单页的列表用站名
+                （「示例寺 / 寒山寺 / 报国寺 / 灵隐寺 / 崇圣寺三塔 / 应县木塔」），
+                这里原来写的是 `district`（「上海市松江区 / 江苏省苏州市…」），
+                于是同一张单在两页上名字不一样（用户口径：工单与数字孪生名称保持一致）。
+              */
               <option key={item.id} value={item.id}>
                 {item.id} · {item.site}
               </option>
