@@ -155,35 +155,23 @@ try {
   await askOnA("对比四根木柱", "11");
   const twinOnB = await waitHash(B, "/twin", 20_000);
   check("A 说⑪ → B 跟到三维场景", String(twinOnB).includes("/twin"), `B hash=${twinOnB}`);
-  /* 先看中间态（证明是"逐柱"而不是一次性全亮），再等最终态 */
-  let partial = 0;
-  for (let i = 0; i < 30; i += 1) {
-    await sleep(400);
-    const count = await B.evaluate(`document.querySelectorAll('.twin-col').length`);
-    if (count > 0 && count < 4) {
-      partial = count;
-      break;
-    }
-    if (count === 4) break;
-  }
+  /*
+    ⚠ 2026-10-02 用户口径：「数字孪生上面 4 个大标签直接删」——四柱构件条（`.twin-col`）已删。
+    所以这里不再查"逐柱点亮"，改成查**第二台机器也跟到了 ⑪ 的落点与读数**：
+    构件选择器 = Z04、屏上有重点区域文案（跟随切页与展示都还在）。
+  */
   const twinFinal = await B.waitFor(
     `(() => {
-      const cols = [...document.querySelectorAll('.twin-col')];
       const text = document.body.innerText || '';
-      const current = (document.querySelector('.twin-col.is-current .twin-col__id')?.textContent || '').trim();
-      return cols.length === 4 && /建议优先复核/.test(text) && current === 'Z04' ? { count: cols.length } : null;
+      const picker = document.querySelector('select[aria-label^="选择构件"]');
+      return picker && picker.value === 'Z04' && /建议优先复核/.test(text) ? { value: picker.value } : null;
     })()`,
     { timeoutMs: 25_000 },
   );
   check(
-    "B 上的四柱构件条**逐柱点亮**（揭示跟随，不是一次性全亮）",
-    partial > 0,
-    partial > 0 ? `采样到中间态：${partial} 根` : "没采到中间态（可能采晚了，看下一条最终态）",
-  );
-  check(
-    "  ↳ B 最终四根都在、重点构件高亮、选中 Z04（与讲解机同一画面）",
+    "A 说⑪ → **B 也落在 Z04 且重点区域文案跟着显示**（构件条已按用户要求删除）",
     Boolean(twinFinal),
-    twinFinal ? `${twinFinal.count} 根` : "25 秒内没等到最终态",
+    twinFinal ? `B 构件选择器=${twinFinal.value}` : "B 上没等到 Z04 与重点区域文案",
   );
 
   /* ---------- ④ 关掉跟随就不再跟随 ---------- */

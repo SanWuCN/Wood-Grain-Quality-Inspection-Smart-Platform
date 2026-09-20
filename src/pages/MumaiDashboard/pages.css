@@ -10673,3 +10673,16 @@
     flex-direction: column;
   }
 }
+
+/* 「建议优先复核 · Z04 下部区域」这一句（原在四柱构件条上，构件条删除后放进热点详情面板） */
+.twin-focus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 6px 9px;
+  border-left: 2px solid var(--tone-warn, #ffb020);
+  background: rgba(255, 176, 32, 0.08);
+  color: var(--ma-text-2);
+  font-size: var(--fs-aux);
+}

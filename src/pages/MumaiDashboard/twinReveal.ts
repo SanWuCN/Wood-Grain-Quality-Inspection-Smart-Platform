@@ -132,9 +132,9 @@ export function useTwinReveal(): string[] | null {
 /**
  * 页面挂载探针：等孪生页真的渲染出来再补拍点。
  *
- * 判据用 `.twin-cols`（四柱构件条本身）—— 它只在这一页出现，且是揭示的作用对象；
+ * 判据用 `.twin-layout`（数字孪生页的主布局容器）—— 四柱构件条已按用户口径删除，容器仍在；
  * 用更外层的容器当判据会把"数据还没到、构件条还没渲染"也算成已挂载。
  */
 export function twinMounted(): boolean {
-  return typeof document !== "undefined" && document.querySelector(".twin-cols") !== null;
+  return typeof document !== "undefined" && document.querySelector(".twin-layout") !== null;
 }

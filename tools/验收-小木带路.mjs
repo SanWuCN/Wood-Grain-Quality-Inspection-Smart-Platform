@@ -490,31 +490,36 @@ try {
         );
       }
       /*
-        ⚠ 分两步等：先等构件条出现（证明页内定位到了三维场景），
-        再等**最终态**（四根都在 + 重点构件高亮 + 选中 Z04）。
-        为什么不等"中间态"：⑪ 那一轮是**跟着播报逐柱点亮**的，最后一根要等台词念完
-        （88 字约 16 秒）由收尾补拍点亮；6 秒的窗口只能看到前三根。
+        ⚠ 2026-10-02 用户口径：「数字孪生上面 4 个大标签直接删」——四柱构件条（`.twin-col`）已删。
+        ⑪ 这一轮仍然要能证明"页内定位到了三维场景、且选中 Z04、重点区域标注在屏上"，
+        所以判据改成看**构件选择器 + 热点详情面板**（同一条信息，只是不再用那排大卡片）：
+          · 顶部构件选择器的值 = Z04；
+          · 屏上有「建议优先复核」与重点区域文案（来自数据包 components.focusRegion）。
       */
-      const first = await machine.waitFor(
-        `(() => { const n = document.querySelectorAll('.twin-col').length; return n > 0 ? n : null; })()`,
-        { timeoutMs: 8000 },
-      );
-      check(`  ↳ 四柱构件条渲染出来`, Boolean(first), first ? `出现 ${first} 根` : "构件条没渲染出来");
       const content = await machine.waitFor(
         `(() => {
-          const cols = [...document.querySelectorAll('.twin-col')];
           const text = document.body.innerText || '';
-          const current = (document.querySelector('.twin-col.is-current .twin-col__id')?.textContent || '').trim();
-          return cols.length === 4 && /建议优先复核/.test(text) && /Z04 下部区域/.test(text) && current === 'Z04'
-            ? { count: cols.length, ids: cols.map((n) => (n.querySelector('.twin-col__id')?.textContent || '').trim()) }
+          /* 构件选择器：aria-label 以「选择构件」开头的那个 select（页面第一个 select 是工单，别取错） */
+          const picker = document.querySelector('select[aria-label^="选择构件"]');
+          const value = picker ? picker.value : '';
+          return value === 'Z04' && /建议优先复核/.test(text) && /Z04 下部区域/.test(text)
+            ? { value, region: true }
             : null;
         })()`,
         { timeoutMs: 25_000 },
       );
+      /* 红的时候把三个条件的实测值打出来（否则只剩"没等到"三个字，查不动） */
+      const diag = content
+        ? null
+        : await machine.evaluate(`(() => {
+            const text = document.body.innerText || '';
+            const picker = document.querySelector('select[aria-label^="选择构件"]');
+            return { hash: location.hash, picker: picker ? picker.value : null, chip: /建议优先复核/.test(text), region: /Z04 下部区域/.test(text), focusEl: Boolean(document.querySelector('.twin-focus')) };
+          })()`);
       check(
-        `  ↳ 最终四根都在、重点构件带「建议优先复核」、且选中 Z04`,
+        `  ↳ ⑪ 落在 Z04 且重点区域标注在屏上（四柱构件条已按用户要求删除）`,
         Boolean(content),
-        content ? `${content.count} 根：${content.ids.join(" ")}` : "25 秒内没等到最终态（逐柱点亮的收尾没发生？）",
+        content ? `构件选择器=${content.value} · 重点区域文案在` : `25 秒内没等到 · 诊断=${JSON.stringify(diag)}`,
       );
     }
 

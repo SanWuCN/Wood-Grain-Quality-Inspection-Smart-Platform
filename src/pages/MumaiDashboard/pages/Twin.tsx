@@ -58,7 +58,7 @@ import {
   /* 「打开标注原图」（剧本 §141）：按图片编号取标注框，取不到就不显示 */
   annotationsOfImage,
 } from "../seed/scenario";
-import { cancelTwinReveal, useTwinReveal } from "../twinReveal";
+import { cancelTwinReveal } from "../twinReveal";
 /* 内部点云：数据与口径在 internalPointCloud.ts（纯函数、可单测），这里只用它的合计 */
 import { buildInternalCloud } from "./internalPointCloud";
 /**
@@ -354,9 +354,9 @@ export default function Twin() {
     四柱构件条的揭示状态：计划按**工单**绑（换工单就不该继续点上一张单的柱子）。
     `null` = 没有计划 → 四根都显示。
   */
-  const revealed = useTwinReveal();
-  /** 重点构件与重点区域来自数据包（`components.focus` / `focusRegion`），页面不写死 */
-  const focusId = DEMO_SCENARIO_V3.components.focus;
+  
+  
+  
   const hotspot = useMemo(() => HOTSPOTS.find((item) => item.componentId === selected) ?? null, [selected]);
   /**
    * ── 这张原图对应的**标注框**（剧本 §140–141）─────────────────────────
@@ -823,47 +823,12 @@ const TOUR_INTERVAL_MS = 5200;
       </Toolbar>
 
       {/*
-        四柱构件条（剧本 ⑪ 的落点）：
-        史在三维场景里「提交四根木柱对应的原始关键帧」，小木「分析比较这四组标记的木构件」，
-        然后报出「当前 Z04 视角可见较明显的表面缺损和孔洞状疑点，建议优先复核 Z04 下部测区」。
-        这一条就是那"四组标记"的可点入口：点一下就切到该构件的视角与热点详情；
-        小木播报时它**跟着台词逐柱点亮**（`twinReveal.ts`），最后在重点构件上打出「建议优先复核」。
-        ⚠ 没有计划时（用户自己点进来、刷新、换工单）四根都在 —— 演示效果不会传染成"页面坏了"。
+        ⚠ 2026-10-02 用户口径：「数字孪生上面 4 个大标签直接删」——
+        原来这里是一排四张构件大卡片（Z01–Z04，剧本 ⑪ 的落点），已按口径删除。
+        构件仍在**顶部构件选择器**里选（`构件 Z01 · 檐柱下部 …`），⑪ 的重点构件与重点区域
+        由「热点详情」面板 + 画面上的热点表达；`twinReveal` 的 ⑪ 计划保留但不再有对应的
+        页内门控（`demoActions.test.ts` 仍要求 revealOnly 轮次有 reveal 声明）。
       */}
-      <div className="twin-cols" role="tablist" aria-label="四根木柱">
-        {COMPONENTS.filter((item) => (revealed === null ? true : revealed.includes(item.id))).map((item) => {
-          const risks = CURRENT_RISKS.filter((risk) => risk.componentId === item.id);
-          const isFocus = item.id === focusId;
-          const hot = HOTSPOTS.some((spot) => spot.componentId === item.id);
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={item.id === selected}
-              className={`twin-col${item.id === selected ? " is-current" : ""}${isFocus ? " is-focus" : ""}`}
-              title={`${item.name} · ${item.visibleNote}`}
-              onClick={() => setComponent(item.id)}>
-              <span className="twin-col__id">{item.id}</span>
-              <span className="twin-col__name">
-                {item.name}
-                <small>{item.part}</small>
-              </span>
-              <span className="twin-col__meta">
-                {risks.length ? (
-                  <StatusChip text={`${risks.length} 项风险`} tone={risks.some((risk) => risk.priority === "优先复核") ? "warn" : "info"} />
-                ) : (
-                  <StatusChip text="本轮无异常" tone="muted" />
-                )}
-                {hot ? <StatusChip text="有热点" tone="info" /> : null}
-              </span>
-              {/* 重点构件与重点区域也是数据包里的值（`components.focus` / `focusRegion`），不在这里写死 */}
-              {isFocus ? <em className="twin-col__focus">建议优先复核 · {DEMO_SCENARIO_V3.components.focusRegion}</em> : null}
-            </button>
-          );
-        })}
-      </div>
-
       <div className="twin-layout">
         {/*
           ⚠ 页签必须待在 `.twin-stage` **外面**（用户 2026-10-01 问"3D 点云图去哪儿看"）：
@@ -1301,6 +1266,18 @@ const TOUR_INTERVAL_MS = 5200;
                 </Btn>
               </span>
             }>
+            {/*
+              ⚠ 2026-10-02：「四柱构件条」删掉后，那一排卡片上原有的
+              「建议优先复核 · Z04 下部区域」这句话**不能跟着丢** —— 小木 ⑪ 的台词就是
+              「建议优先复核 Z04 下部测区」，屏幕上要有对应读数（值仍取自数据包
+              `components.focus` / `focusRegion`，页面不写死；当前构件就是重点构件时才显示）。
+            */}
+            {DEMO_SCENARIO_V3.components.focus === selected ? (
+              <p className="twin-focus">
+                <StatusChip text="建议优先复核" tone="warn" />
+                <span>{DEMO_SCENARIO_V3.components.focusRegion}</span>
+              </p>
+            ) : null}
             {hotspot ? (
               <>
                 <ul className="hotspot-brief">
