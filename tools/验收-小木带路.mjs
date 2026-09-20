@@ -546,6 +546,22 @@ try {
         */
         { timeoutMs: 45_000 },
       );
+      /*
+        用户 2026-10-02（截图）：「这个对话，页面保持检索中没东西就没意思了」——
+        检索要时间（实测 4 秒左右），这期间的检查：页面上**必须有内容**，
+        要么是「正在检索」那块面板（问题 + 已等待秒数 + 服务版本），要么已经出了结果。
+      */
+      const notBlank = await machine.evaluate(`(() => {
+        const text = (document.body.innerText || '').replace(/\\s+/g, ' ');
+        const searching = /正在检索/.test(text);
+        const done = /检索结果/.test(text);
+        return { searching, done, ok: searching || done };
+      })()`);
+      check(
+        `  ↳ ① 检索期间页面也有内容（不是停在「检索中」的空白页）`,
+        Boolean(notBlank?.ok),
+        `正在检索=${notBlank?.searching} 已出结果=${notBlank?.done}`,
+      );
       check(
         `  ↳ ① 知识库页面上真的跑出了这一问（问题在框里 + 有命中 + 右侧详情）`,
         Boolean(kb && kb.query.length >= 2 && kb.hits >= 3),

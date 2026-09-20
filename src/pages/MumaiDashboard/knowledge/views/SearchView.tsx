@@ -60,6 +60,12 @@ export function SearchView({
   const [query, setQuery] = useState(initialQuery);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showLow, setShowLow] = useState(false);
+  /**
+   * 检索已等待多少秒（只在跑的时候跳秒）。
+   * 为什么要它：索引正在更新或第一次检索偏慢时，页面上原来只有按钮上的「检索中…」，
+   * 观众看到的是一张空页 —— 现在至少有一个在动的读数，说明平台在干活。
+   */
+  const [waited, setWaited] = useState(0);
 
   const hits = useMemo(() => result?.hits ?? [], [result]);
   const selected = useMemo(
@@ -76,6 +82,17 @@ export function SearchView({
     setShowLow(false);
     void onSearch(text).then(() => setSelectedId(null));
   }
+
+  /* 跑起来就每秒跳一次，停下清零（不跑的时候不留读数） */
+  useEffect(() => {
+    if (!running) {
+      setWaited(0);
+      return;
+    }
+    const started = Date.now();
+    const timer = window.setInterval(() => setWaited(Math.round((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [running]);
 
   /*
     URL 带来的问题**自动跑一次**（小木第①轮代问）。
@@ -132,6 +149,32 @@ export function SearchView({
       ) : null}
 
       {error ? <StateBlock kind="error" title="检索失败" hint={error} /> : null}
+
+      {/*
+        检索进行中：给一块**有内容的**面板（问题 + 已等待秒数 + 当前服务版本）。
+        超过 8 秒补一句「索引可能正在更新，会自动出结果，不必刷新」——
+        这些值都来自平台自己的读数，不编进度条、也不假报命中了几成。
+      */}
+      {running && !result ? (
+        <KbPanel
+          title="正在检索"
+          note={
+            <span className="kb-muted">
+              {waited >= 8
+                ? "索引可能正在更新，完成后这里会自动出结果，不必刷新"
+                : "检索返回的是证据本身：来源资产、版本与原文定位"}
+            </span>
+          }>
+          <p className="kb-detail-footnote">
+            问题「{query.trim()}」已发出 · 已等待 <b>{waited}</b> 秒
+            {currentServingVersion ? ` · 当前服务版本 ${currentServingVersion}` : ""}
+          </p>
+          <ul className="kb-example-list">
+            <li>正在比对资产库与 RAG 索引（索引只保存可检索的派生内容，原始事实仍在资产库）</li>
+            <li>命中后会列出证据片段、来源资产与原文定位；未命中会如实说「未检索到匹配证据」</li>
+          </ul>
+        </KbPanel>
+      ) : null}
 
       {!result && !running ? (
         <KbPanel title="工作场景示例" note={<span className="kb-muted">选择一条即可执行检索</span>}>
