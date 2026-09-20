@@ -36,7 +36,6 @@ import {
   buildDeliveryWorkflow,
   buildReceiveFileRows,
   resolveDeliveryScript,
-  DELIVERY_UNLINKED_NOTE,
   type DeliveryWorkflow,
   type ReceiveResult,
 } from "./deliveryWorkflow";
@@ -858,7 +857,8 @@ export function DeliveryTab() {
     原实现无条件传 `distillScript`，于是「交付作业」那行对**任何**产物都显示
     蒸馏作业号 run-20260911-0244，量化/复测/封装三格也永远来自那个脚本 ——
     种子产物其实是 `EXP-2026-0911`、人工上传是 `null`，都不出自蒸馏作业。
-    现在先按 `fromJob` 匹配；匹配不到就传 `null`，页面统一显示 `DELIVERY_UNLINKED_NOTE`。
+    现在先按 `fromJob` 匹配；匹配不到就传 `null` —— 页面上**不显示作业号、三格明细留空**
+    （只报自己的状态，不借用别的作业的结论；也不再写"本页没有记录"那种自揭短的说明）。
   */
   const scriptFor = useCallback(
     (item: SharedEntity<ArtifactEntity> | null) =>
@@ -892,10 +892,8 @@ export function DeliveryTab() {
           <div className="dl-track__head">
             <b>{current.data.name}</b>
             <span>
-              {current.data.target} · {current.data.modelVersion} ·{" "}
-              {workflow.runId
-                ? `作业 ${workflow.runId} · ${workflow.command}`
-                : DELIVERY_UNLINKED_NOTE}
+              {current.data.target} · {current.data.modelVersion}
+              {workflow.runId ? ` · 作业 ${workflow.runId} · ${workflow.command}` : null}
             </span>
           </div>
           <ol className="dl-track">

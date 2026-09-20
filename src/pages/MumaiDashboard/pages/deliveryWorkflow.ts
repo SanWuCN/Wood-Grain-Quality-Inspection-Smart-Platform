@@ -71,19 +71,23 @@ export function resolveDeliveryScript<T extends { runId: string }>(
 }
 
 /**
- * 产物没有量化作业记录时，页面对观众的统一说法。
+ * 产物没有量化作业记录时，三格明细与轨道标题都**留空**。
  *
- * ── 为什么是一句常量而不是各处各写 ──────────────────────────────────
+ * ── 为什么是一处常量而不是各处各写 ──────────────────────────────────
  * 同一件事（这个产物没有量化/复测记录）在页面上出现两处：**交付轨道标题**与
  * **量化/复测/封装三格的明细**。两处各写一句就会出现"标题说 A、格子说 B"，
  * 观众读到的是自相矛盾的两句话 —— 实测就发生过（标题写"非量化作业产物"，
- * 格子仍写"未关联交付作业"）。
+ * 格子仍写"未关联交付作业"）。所以两处共用这一个值。
  *
- * 措辞刻意**不承诺任何动作**：本页的产品形态是"提交 / 取用"，
- * 没有量化作业的提交入口，所以不能写"请重新提交作业后回填"那种做不到的话。
+ * ⚠ 2026-10 用户口径（现场指着屏幕提出）：原来那句
+ * 「非量化作业产物 —— 本页没有该产物的量化与复测记录，不显示其它作业的结论」
+ * 是**对着观众自揭短**：观众读到的是"这个平台连记录都没有"，四个格子连成一片，
+ * 当场穿帮。现在改成：**状态由格子的「等待」表达，不再解释"本页为什么没有"**。
+ *
+ * ⚠ 别把这次改动理解成"可以借用别的作业的结论"：三格仍然只报自己的状态、
+ * 不填任何来自其它脚本的量化/复测明细 —— 那是**防幻觉**，与文案无关。
  */
-export const DELIVERY_UNLINKED_NOTE =
-  "非量化作业产物 —— 本页没有该产物的量化与复测记录，不显示其它作业的结论";
+export const DELIVERY_UNLINKED_DETAIL = "";
 
 /** 从既有终端脚本的输出中提取交付页需要的四类记录，不重新生成数字。 */
 export function buildDeliveryWorkflow(
@@ -100,8 +104,8 @@ export function buildDeliveryWorkflow(
   const packageLine = linkedToScript
     ? lastMatching(script!, /pack: (?:Output|Manifest written)/i)
     : null;
-  /* 未关联作业时的说明统一取常量，见上方说明 */
-  const unlinked = DELIVERY_UNLINKED_NOTE;
+  /* 未关联作业时三格明细留空（口径见上方说明），不写任何自揭短的说明 */
+  const unlinked = DELIVERY_UNLINKED_DETAIL;
   const receipts = artifact.data.receipts ?? [];
   const passedReceipts = receipts.filter((receipt) => receipt.pass).length;
   const downloaded = (artifact.data.downloadCount ?? 0) > 0;

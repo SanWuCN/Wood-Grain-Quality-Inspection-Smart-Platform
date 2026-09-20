@@ -1,9 +1,9 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { ArtifactEntity, SharedEntity } from "../api/client.ts";
 import type { TerminalScript } from "./terminalScripts.ts";
-import { buildDeliveryWorkflow, buildReceiveFileRows, DELIVERY_UNLINKED_NOTE } from "./deliveryWorkflow.ts";
+import { buildDeliveryWorkflow, buildReceiveFileRows, DELIVERY_UNLINKED_DETAIL } from "./deliveryWorkflow.ts";
 
 const distillScript: TerminalScript = {
   key: "distill",
@@ -115,7 +115,9 @@ test("产物未登记同一作业号时，不借用其它脚本的量化与复�
     workflow.steps.slice(0, 3).map((step) => step.state),
     ["等待", "等待", "等待"],
   );
-  assert.equal(workflow.steps[0]?.detail, DELIVERY_UNLINKED_NOTE);
+  assert.equal(workflow.steps[0]?.detail, DELIVERY_UNLINKED_DETAIL);
+  assert.ok(!/INT8|PASSED|Engine export/.test(workflow.steps[0]?.detail ?? ""),
+    "作业号对不上时不得把别的脚本的量化结论填进来");
 });
 
 /*
@@ -138,7 +140,9 @@ test("产物作业号与脚本不一致时，不得把该脚本的作业号挂�
     workflow.steps.slice(0, 3).map((step) => step.state),
     ["等待", "等待", "等待"],
   );
-  assert.equal(workflow.steps[0]?.detail, DELIVERY_UNLINKED_NOTE);
+  assert.equal(workflow.steps[0]?.detail, DELIVERY_UNLINKED_DETAIL);
+  assert.ok(!/INT8|PASSED|Engine export/.test(workflow.steps[0]?.detail ?? ""),
+    "作业号对不上时不得把别的脚本的量化结论填进来");
 });
 
 test("产物作业号与脚本一致时才显示该作业号，且明细仍取自该脚本", () => {
@@ -150,22 +154,35 @@ test("产物作业号与脚本一致时才显示该作业号，且明细仍取�
     "作业号一致时明细必须来自脚本，不能变成一句占位说明");
 });
 
-test("未关联作业的那句话必须全页统一（标题与三格明细同一字符串）", () => {
+test("未关联作业时三格明细都留空，且屏幕上不再出现自揭短的说明", () => {
   /*
-    实测踩过：交付轨道标题换成"非量化作业产物…"之后，
-    量化/复测/封装三格仍写着旧的"未关联交付作业" —— 同一件事在屏幕上
-    出现两种说法，观众读到的是自相矛盾的两句。所以两处必须共用同一常量。
+    ── 2026-10 用户口径（现场指着交付页顶部说的）────────────────────────
+    原来那句「非量化作业产物 —— 本页没有该产物的量化与复测记录，不显示其它作业的
+    结论」在标题与三格里一共出现四次，观众读到的是"这个平台连记录都没有"，当场穿帮。
+    现在：**状态由格子的「等待」表达，不再解释"本页为什么没有"**。
+
+    这条同时钉两件事：
+      · 三格与标题都不再出现那句说明（防回退：谁把它抄回来就红）；
+      · 三格明细**一致**（要么都空、要么同一个值）—— 同一件事不能有两种说法。
   */
   const workflow = buildDeliveryWorkflow(null, artifact({ fromJob: "EXP-2026-0911" }));
 
-  for (const step of workflow.steps.slice(0, 3)) {
-    assert.equal(step.detail, DELIVERY_UNLINKED_NOTE,
-      `「${step.label}」的说明与全页统一说法不一致`);
+  const details = workflow.steps.slice(0, 3).map((step) => step.detail);
+  for (const [index, detail] of details.entries()) {
+    assert.equal(detail, DELIVERY_UNLINKED_DETAIL,
+      `「${workflow.steps[index]?.label}」的说明与全页口径不一致`);
   }
-  assert.ok(DELIVERY_UNLINKED_NOTE.length > 0, "统一说法不能是空串");
-  /* 措辞不得承诺做不到的动作：本页没有量化作业的提交入口 */
-  assert.ok(!/重新提交作业/.test(DELIVERY_UNLINKED_NOTE),
-    "不得写「重新提交作业后回填」——本页没有该入口，属于做不到的承诺");
+  assert.equal(new Set(details).size, 1, "三格说明必须同一口径，不能一格一个说法");
+  assert.equal(DELIVERY_UNLINKED_DETAIL, "",
+    "这句话本身就不该有内容：状态由格子的「等待」表达，不再解释本页为什么没有记录");
+
+  const onScreen = [workflow.runId, workflow.command, ...details].join(" ");
+  for (const banned of ["非量化作业产物", "本页没有", "不显示其它作业", "未关联交付作业"]) {
+    assert.ok(
+      !onScreen.includes(banned),
+      `交付轨道上不得再出现自揭短的说明「${banned}」——观众读到的是"平台没数据"，当场穿帮`,
+    );
+  }
 });
 
 test("接收文件列表只使用服务端登记文件和本次会话下载结果", () => {
