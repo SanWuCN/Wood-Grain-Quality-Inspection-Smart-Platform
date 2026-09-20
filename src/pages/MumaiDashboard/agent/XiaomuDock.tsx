@@ -923,25 +923,24 @@ export default function XiaomuDock() {
                 </div>
               ) : null}
 
-              {/* 本轮实际生成时间（来自 turn.at，不是渲染时刻） */}
+              {/*
+                气泡底部**只留一个时间**。
+
+                用户 2026-10-01（现场指着屏幕上这块）：「气泡里对话一览这种也不要，容易露馅」，
+                并逐字贴出了当时屏幕上的四行：`21:04:47` / `AI语音1` / `重播` /
+                `剧本命中：讲解人指定轮次，未经语音匹配｜工单档案 /orders?order=…`。
+                后面三样都是**给开发/排练看的元信息**，投在幕布上等于当场告诉观众
+                "这话是按编号放的录音、还能重播、而且是按剧本命中直接指定轮次的"：
+                  · `reply.voice` —— 语音包编号（AI语音N）；
+                  · 「重播」按钮 —— 排练用的回放口子（**Alt+R 仍然可用**，只是屏幕上不出现）；
+                  · `reply.note` —— 命中原因 + 页面落点。
+                这三样在**排练控制台**（VoiceConsole）里照旧看得到，讲解人要核对去那里看。
+                时间戳留着：正常对话气泡都有时间，不是破绽。
+              */}
               <footer className="xd__foot">
                 <time>{reply.at}</time>
-                <span>{reply.voice}</span>
                 {reply.level !== "rule" && reply.confidence > 0 ? <span>置信度 {reply.confidence.toFixed(3)}</span> : null}
-                {/*
-                  ⚠ 标签里**不写「（Alt+R）」**（用户 2026-10-01：「小木气泡快捷键显示删了」）：
-                  气泡是投影给观众看的，屏幕上不出现组合键。键位改到 title（悬停才看得到），
-                  讲解人自己知道；Alt+R 本身照旧生效（见本文件顶部的按键处理）。
-                */}
-                <button
-                  type="button"
-                  className="xd__link"
-                  title="重播上一句（Alt+R）"
-                  onClick={() => runtimeRef.current.speak(reply.mainAnswer)}>
-                  重播
-                </button>
               </footer>
-              {reply.note ? <p className="xd__note">{reply.note}</p> : null}
             </div>
           ) : null}
 
