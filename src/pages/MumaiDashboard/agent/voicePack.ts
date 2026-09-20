@@ -79,15 +79,130 @@ async function load(): Promise<VoicePack> {
 /**
  * 这段文本有没有对应的预生成音频？
  *
- * 返回 `null` 表示"没录/没命中"，调用方应当回退到 `speechSynthesis`。
+ * 返回 `null` 表示"没录/没命中"，调用方**不再回退浏览器合成音**（见 `tts.ts` 的
+ * `SYNTHESIS_FALLBACK_ENABLED`）：用户口径是「播放的都是音频而非合成音」。
  * 这是异步的（要取 manifest）：**成功后**只在首次真正读一次，之后走内存缓存；
  * 读取失败不缓存，下一次播报会重试（见 `load()` 的缓存语义说明）。
  */
 export async function audioUrlForText(text: string): Promise<string | null> {
   if (!text) return null;
   const pack = await load();
-  const hit = pack[normalize(text)];
-  return hit ?? null;
+  return resolveAudio(pack, text);
+}
+
+/**
+ * 匹配判据：两句的**最长公共子序列**要占到其中较长那句的这么多。
+ *
+ * ── 为什么是 LCS 而不是前缀/编辑距离（2026-10-01 量的）────────────────
+ * 实测七组真实句对，只有 LCS 能一刀切开"同一句漂移"和"不是同一句"：
+ *
+ * | 组 | 占较长句 | 结论 |
+ * |---|---|---|
+ * | 同一句 · 末尾取值漂移（91%→86%、执行中→idle） | 83% | 认 |
+ * | 同一句 · 中间插入目标（`{goal}` 由 planner 现算） | 74% | 认 |
+ * | 同一句 · 状态词漂移 | 84% | 认 |
+ * | **不是**同一句 · 只说了半句（"已开始执行巡检任务" vs 整句录音） | 13% | 不认 |
+ * | **不是**同一句 · 同开头不同事 | 6% | 不认 |
+ * | **不是**同一句 · 六字短句 | 33% | 不认 |
+ *
+ * 编辑距离那条路走不通：末尾漂移 16.7%（可认）与六字短句 66.7%（不能认）之间
+ * 没有安全地带；前缀那条更差（数字一出现前缀就断在 18 个字）。
+ */
+export const AUDIO_MATCH_RATIO = 0.6;
+
+/**
+ * 录音键比运行时文本**最长**能多多少（比例）。
+ *
+ * 为什么需要这条：短句不该去认领一条长录音 —— 那是"说了半句就开始念别的"。
+ * LCS 判据对"半句 vs 整句"本来就会因为分母是长句而落到 13%，这条是第二道闸。
+ */
+export const AUDIO_LENGTH_SLACK = 1.6;
+
+/** 两句文本的公共前缀长度（按字符；输入是已归一化、无空白的文本） */
+export function commonPrefixLength(a: string, b: string): number {
+  const max = Math.min(a.length, b.length);
+  let index = 0;
+  while (index < max && a[index] === b[index]) index += 1;
+  return index;
+}
+
+/** 两句文本的公共后缀长度（按字符） */
+export function commonSuffixLength(a: string, b: string): number {
+  const max = Math.min(a.length, b.length);
+  let index = 0;
+  while (index < max && a[a.length - 1 - index] === b[b.length - 1 - index]) index += 1;
+  return index;
+}
+
+/**
+ * 最长公共子序列长度（滚动数组，O(n·m)）。
+ *
+ * 本句与录音键都在 100 字以内，一次匹配要跑约 90 个候选 —— 几万次操作，
+ * 相对一次播报的开销可以忽略；换来的是"取值漂移也能认回录音"。
+ */
+export function lcsLength(a: string, b: string): number {
+  if (!a.length || !b.length) return 0;
+  let prev = new Array<number>(b.length + 1).fill(0);
+  let curr = new Array<number>(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i += 1) {
+    curr[0] = 0;
+    for (let j = 1; j <= b.length; j += 1) {
+      curr[j] = a[i - 1] === b[j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], curr[j - 1]);
+    }
+    const swap = prev;
+    prev = curr;
+    curr = swap;
+  }
+  return prev[b.length];
+}
+
+/**
+ * 两句是不是"同一句、只有一小段取值不同"。
+ *
+ * 判据（三条同时成立才认）：
+ *   ① LCS ≥ 较长那句的 `AUDIO_MATCH_RATIO`；
+ *   ② 录音不比本句长太多（`AUDIO_LENGTH_SLACK`）—— 说了半句不许去念一整段；
+ *   ③ 逐字相同当然直接算同一句。
+ */
+export function looksLikeSameSentence(spoken: string, recorded: string): boolean {
+  if (spoken === recorded) return true;
+  if (recorded.length > spoken.length * AUDIO_LENGTH_SLACK) return false;
+  const lcs = lcsLength(spoken, recorded);
+  return lcs >= Math.max(spoken.length, recorded.length) * AUDIO_MATCH_RATIO;
+}
+
+/**
+ * 在语音包里找这一句对应的音频：**先逐字，再认"同一句、取值漂移"**。
+ *
+ * ── 为什么需要这一步（2026-10-01 实测出来的真缺口）──────────────────
+ * 录音是**按当时的演示取值**录的，而这些句子里带着会变的东西：
+ *   · 录音：「…（电池 **91%**），到位后任务状态为 **执行中**。」
+ *   · 现在：「…（电池 **86%**），到位后任务状态为 **idle**。」
+ * 两句只差取值，但逐字匹配必然落空 —— 语音包里有这条录音却用不上，
+ * 现场听到的就是"没声音"（关掉合成音之后）或"机器音"（以前）。
+ * 判据见 `looksLikeSameSentence`；两条并列最高（分不出是哪句）时**不猜**。
+ */
+export function resolveAudio(pack: VoicePack, text: string): string | null {
+  const key = normalize(text);
+  if (!key) return null;
+  /* ① 逐字命中：这是常态，也优先 */
+  const exact = pack[key];
+  if (exact) return exact;
+
+  /* ② 同一句、取值漂移：按 LCS 最高取，并列就不猜 */
+  let best: { url: string; score: number } | null = null;
+  let tied = 0;
+  for (const [candidate, url] of Object.entries(pack)) {
+    if (!looksLikeSameSentence(key, candidate)) continue;
+    const score = lcsLength(candidate, key);
+    if (!best || score > best.score) {
+      best = { url, score };
+      tied = 1;
+    } else if (score === best.score) {
+      tied += 1;
+    }
+  }
+  return best && tied === 1 ? best.url : null;
 }
 
 /** 给验收/运维看的：语音包里有多少条（不触发网络请求也要能读到缓存） */

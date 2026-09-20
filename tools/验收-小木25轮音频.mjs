@@ -268,6 +268,57 @@ try {
     );
   }
 
+  /* ---------- ② 意图问答那一路（剧本 25 轮之外的自由问答）----------
+     用户口径 2026-10-01：「确保小木播放的都是音频而非合成音」。
+     25 轮走的是剧本台词，问答走的是 `intents.ts` 的模板 + 实时取值 ——
+     那些句子更长、带值，最容易"没录音"。这一组的判据只有一条硬要求：
+     **不许出现合成音**（有录音就播录音；没录音就只显示字幕，见 tts.ts 的口径）。
+  */
+  const QUESTIONS = [
+    "小车现在电量多少",
+    "设备链路自检",
+    "打开Z04下部的记录",
+    "对比两个模型",
+    "清洗这批数据",
+    "生成工单草稿",
+  ];
+  console.log("\n  意图问答（判据：不出合成音）：");
+  let questionSynth = 0;
+  let spokenWithAudio = 0;
+  let spokenSilent = 0;
+  for (const question of QUESTIONS) {
+    await evaluate(`(window.__voice.synth = 0, window.__voice.played = [], 1)`);
+    await evaluate(
+      `window.dispatchEvent(new CustomEvent('mumai:xiaomu-ask', { detail: { question: ${JSON.stringify(question)}, interactionId: 'audio-' + Date.now() } })); 1`,
+    );
+    /* 等到这一轮说完（有音频等它起播；没有音频等回答出现） */
+    let played = [];
+    let answer = "";
+    for (let i = 0; i < 40; i += 1) {
+      await sleep(400);
+      played = (await evaluate(`window.__voice.played`)) ?? [];
+      answer = await evaluate(
+        `(document.querySelector('.xd__panel .xd__answer')?.textContent || '').trim()`,
+      );
+      if (played.some((url) => String(url).includes("/voice/"))) break;
+      if (answer && i > 6) break;
+    }
+    const synth = Number(await evaluate(`window.__voice.synth`)) || 0;
+    questionSynth += synth;
+    if (played.some((url) => String(url).includes("/voice/"))) spokenWithAudio += 1;
+    else spokenSilent += 1;
+    console.log(
+      `    ${synth === 0 ? "✓" : "✗"} 「${question}」　${
+        played.filter((url) => String(url).includes("/voice/")).map((url) => String(url).split("/").pop()).join("、") || "（无录音 → 只显示字幕）"
+      }　合成音 ${synth} 次`,
+    );
+  }
+  check(
+    "意图问答全程没有回退浏览器合成音",
+    questionSynth === 0,
+    questionSynth === 0 ? `${QUESTIONS.length} 句：${spokenWithAudio} 句有录音、${spokenSilent} 句只显示字幕` : `合成音被调用 ${questionSynth} 次`,
+  );
+
   /* ---------- 汇总 ---------- */
   const startedAll = report.filter((r) => r.okStart).length;
   const playedAll = report.filter((r) => r.okStart && r.okProgress).length;

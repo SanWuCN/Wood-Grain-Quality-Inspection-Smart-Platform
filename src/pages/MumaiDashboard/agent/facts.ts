@@ -405,6 +405,13 @@ export function evaluateFacts(intent: Intent, ctx: FactContext): FactSet {
   table.componentZone = target.zoneId;
   table.targetPart = target.part;
   table.targetZone = target.zoneId;
+  /*
+    `{zoneId}` 这个键是 `open_evidence` 的模板在用的（`intents.ts`：两处
+    「已打开 {componentName}（{zoneId}）…」），但事实表里只有 `targetZone` ——
+    于是渲染出来的是「金柱 Z04（）」，而且 `missing` 判据会把这句降级成未命中话术。
+    2026-10-01 补：键名与模板对齐（同一份值，不再各叫一个名字）。
+  */
+  table.zoneId = target.zoneId;
   table.targetArchive = target.archive;
   table.targetVisible = target.visibleNote;
   table.waypointLabel = targetWaypoint ? `${targetWaypoint.id} · ${targetWaypoint.label}` : "暂无对应观察点";

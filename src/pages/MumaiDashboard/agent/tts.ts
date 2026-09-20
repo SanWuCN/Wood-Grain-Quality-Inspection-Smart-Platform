@@ -45,6 +45,24 @@ type SpeechSynthesisLike = {
 /** 预录音频探测结果缓存：同一个路径只探测一次，避免重复网络请求（**只缓存有结论的**，见 `decideProbe`） */
 const audioProbe = new Map<string, boolean>();
 
+/**
+ * 语音包没命中时，**允许**回退浏览器合成音吗？
+ *
+ * ── 硬口径（用户 2026-10-01）────────────────────────────────────────
+ * 「确保小木播放的都是音频而非合成音」。
+ *
+ * 所以默认是 **false**：没录音的句子**只出字幕，不出声**。
+ * 为什么宁可静音也不合成：
+ *   · 合成音与录音是**两个人的音色**。现场只要冒出一次，观众听到的就是
+ *     "刚才那个是真人录的，这个是机器念的" —— 这一句比没声音更伤；
+ *   · 而"没声音"当场一眼看得出来（字幕还在），也便于事后按 `[tts]` 那条 warn 定位。
+ *
+ * 回退路径本身**保留**（下面 `speakWithSynthesis` 整段都还在）：以后要是
+ * 决定在某些场合允许合成（例如没有麦克风的讲解机环境），把这个常量改成 true 即可，
+ * 不用重写播报逻辑。`tts.test.ts` 会核对"这个常量与 `speak()` 的行为一致"。
+ */
+export const SYNTHESIS_FALLBACK_ENABLED = false;
+
 function synthesis(): SpeechSynthesisLike | null {
   if (typeof window === "undefined") return null;
   const scope = window as Window & { speechSynthesis?: SpeechSynthesisLike };
@@ -250,6 +268,24 @@ export class VoiceOutput {
   /** 播报一段文本；优先播放**预生成语音包**里的音频，其次 audioUrl，最后 speechSynthesis */
   async speak(text: string, audioUrl?: string): Promise<void> {
     if (this.muted || !text) return;
+    /**
+     * ⚠ 代次必须在**最前面**推进，不能等 `playAudio()`（2026-09-19 现场修）。
+     *
+     * `speak()` 里有两次 `await`（查语音包清单 + 探音频），期间它**什么都没作废**：
+     *   · 旧的 `silenceCurrent()` 只能掐掉"已经在响的 <audio>"，
+     *     掐不掉**还停在探测阶段**的那一次；
+     *   · 旧代码把 `generation += 1` 放在 `playAudio()` 里 —— 那是探测**之后**，
+     *     窗口早就过去了。
+     *
+     * 于是连着按两次快捷键（剧本一条龙 / 快速连按）时：
+     *   第一轮的 `speak()` 还挂在探测上 → 第二轮的 `silenceCurrent()` 收了个空
+     *   → 第一轮探测完照样 `play()` → **两段录音同时响**。
+     *
+     * 同理，探测超时会让这一轮回退合成音（用户听到的"有时候是机器的"）：
+     * 令牌在入口就推进之后，作废的那一轮会在两个检查点安静收场 ——
+     * 既不叠音，也不会补一遍合成音去盖住正在播的新录音。
+     */
+    const token = ++this.generation;
     // 新一段接替旧一段：先把还在响的 <audio> 收掉，避免两段声音叠在一起
     this.silenceCurrent();
     /**
@@ -258,20 +294,56 @@ export class VoiceOutput {
      * "气泡写 A、喇叭念 B"）。放在这里而不是各个调用点，是为了让
      * 气泡与控制台两条播报路径共用同一份规则。
      */
-    const resolved = audioUrl ?? (await audioUrlForText(text)) ?? undefined;
-    if (resolved && (await probeAudio(resolved))) {
-      const played = await this.playAudio(resolved, text);
-      if (played) return;
+    const resolved = (audioUrl || (await audioUrlForText(text))) || undefined;
+    /* 查清单这几毫秒里可能已经有新的一段接替（连按快捷键）：作废就安静收场 */
+    if (token !== this.generation) return;
+    /**
+     * ⚠ **不再让"探测"挡住已知存在的音频**（2026-09-20 现场修）。
+     *
+     * 旧写法是 `if (resolved && (await probeAudio(resolved)))` —— 探测有 1.2 秒预算
+     * （超时再审一次，共约 3.8 秒）。现场踩到的是**首屏那一次**：
+     * 页面冷启动时 JS 正忙、音频还没进缓存，`canplaythrough` 在预算内没来 →
+     * 探测判"没素材" → **这一轮直接回退浏览器合成音**，而文件其实存在；
+     * 之后再按同一轮就好了 —— 用户看到的就是"有时候是合成音"，且毫无规律。
+     *
+     * 现在分两种情况，各用各的判据：
+     *   · **清单里指明了音频**（`audioUrl` 显式给了，或语音包命中）→ 直接播，
+     *     慢就慢一点，让 `onerror` 来决定"真的没有"（真没有时它会回退合成音）；
+     *   · **没有明确 URL** → 保留探测：它省掉一次注定失败的请求，也避免
+     *     浏览器因为 404 在控制台记一笔（仓库的验收判据里有"console error = 0"）。
+     */
+    if (resolved) {
+      const playedDirect = await this.playAudio(resolved, text, token);
+      if (playedDirect) return;
     }
-    this.speakWithSynthesis(text);
+    /*
+      ── 走到这里 = 这一句没有可用音频（语音包没这条键 / 文件放不出来）──
+      用户口径（2026-10-01）：「确保小木播放的都是音频而非合成音」。
+      所以默认**不合成**：只留字幕，并记一条 warn 便于定位（"哪句没录音"是可查的事实，
+      而不是靠耳朵猜）。要恢复旧行为把 `SYNTHESIS_FALLBACK_ENABLED` 改成 true。
+    */
+    if (!SYNTHESIS_FALLBACK_ENABLED) {
+      if (token !== this.generation) return;
+      console.warn(`[tts] 没有对应音频，按口径不出合成音（只显示字幕）：${text.slice(0, 40)}…`);
+      this.setSpeaking(false);
+      return;
+    }
+    this.speakWithSynthesis(text, token);
   }
 
-  private playAudio(url: string, text = ""): Promise<boolean> {
+  private playAudio(url: string, text = "", token = this.generation): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       try {
         const audio = new Audio(url);
-        this.generation += 1;
-        const token = this.generation;
+        /*
+          令牌由 `speak()` 在入口发放（见那里的说明）。这里**不再自增**：
+          自增会让"第二轮已经作废第一轮"这件事在探测结束前失效。
+          被顶掉的那一轮由 `finish()` 的 `token !== this.generation` 分支安静收场。
+        */
+        if (token !== this.generation) {
+          resolve(true);
+          return;
+        }
         this.current = audio;
         this.setSpeaking(true);
         const finish = (ok: boolean) => {
@@ -338,14 +410,57 @@ export class VoiceOutput {
         };
         audio.onended = () => finish(true);
         audio.onerror = () => finish(false);
-        void audio.play().catch(() => finish(false));
+        /**
+         * ⚠ 这里**不再一句 `.catch(() => finish(false))` 就回退合成音**（2026-09-19 现场修）。
+         *
+         * `play()` 的拒绝与"文件不存在"是两件事，而 `speak()` 里那个 `finish(false)`
+         * 会把两者都当成"没录到"，去走 `speakWithSynthesis()`：
+         *   · 文件不存在 —— 早被 `probeAudio()` 拦掉了，根本走不到这里；
+         *   · `play()` 被拒  —— 自动播放策略（页面还没发生过用户手势）、
+         *     音频输出设备切换、标签页被节流、元素被别的播放抢占，
+         *     都是**可以被下一次重试或下一次播报解决的临时状态**。
+         *
+         * 真实现场（用户听到的"大幅度那句变成合成音 / 合成音和录音一起响"）：
+         * 两轮挨得近时，`play()` 的拒绝是异步来的，落到 `finish(false)` 上，
+         * 于是**旧文本的合成音**被补了一遍，压在新录音上。
+         *
+         * 所以：确认存在过的文件，`play()` 失败**先重试一次**；仍然失败就安静收场
+         * （只记一条 warn）。宁可这一句没声音，也不要错误的音色盖在录音上 ——
+         * "没声音"现场一眼看得出来，"错的音色"会被当成"语音包又坏了"。
+         */
+        const started = (attempt: number): void => {
+          /* 已被新的一段顶掉：安静收场，什么都不做 */
+          if (token !== this.generation) return;
+          try {
+            void audio.play().catch(() => {
+              if (token !== this.generation) return; /* 重试期间被顶掉：安静 */
+              if (attempt === 0) {
+                /* 一次重试：自动播放策略 / 设备切换 / 元素被抢占多半是临时的 */
+                started(1);
+                return;
+              }
+              console.warn(`[tts] 预录音频播放被浏览器拒绝（文件已确认存在，按"没放成"处理，不回退合成音）：${url}`);
+              finish(false);
+            });
+          } catch {
+            /* 同步抛出（元素状态已坏）：同样不回退合成音 */
+            console.warn(`[tts] 预录音频起播失败（文件已确认存在，不回退合成音）：${url}`);
+            finish(false);
+          }
+        };
+        started(0);
       } catch {
         resolve(false);
       }
     });
   }
 
-  private speakWithSynthesis(text: string) {
+  private speakWithSynthesis(text: string, token = this.generation) {
+    /*
+      令牌同样由 `speak()` 在入口发放。被新一段顶掉的这一轮**连合成音也不许补**：
+      否则用户听到的正是"录音和合成音一起响"（旧文本的合成音盖在新录音上）。
+    */
+    if (token !== this.generation) return;
     const synth = synthesis();
     if (!synth) {
       // 静默降级：字幕继续显示，不抛错（PRD 17）。
@@ -361,8 +476,10 @@ export class VoiceOutput {
       utterance.pitch = 1;
       const voice = pickVoice(synth);
       if (voice) utterance.voice = voice;
-      this.generation += 1;
-      const token = this.generation;
+      /*
+        令牌已在 `speak()` 入口发放（这里**不再自增**）：自增会让"这一轮已被新一段
+        顶掉"的判定失去依据，被顶掉的旧 utterance 反倒会把自己的代次认成最新的。
+      */
       const finish = () => {
         // cancel() / stop() 之后旧 utterance 的 end / error 事件可能迟到，
         // 代次不匹配就丢弃（否则它会把新一段的 speaking 提前压回 false）
