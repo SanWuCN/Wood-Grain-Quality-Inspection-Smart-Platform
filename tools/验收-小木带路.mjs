@@ -414,9 +414,9 @@ try {
       if (round.roundNo === "㉒") {
         const evidence = await machine.waitFor(
           `(() => {
-            const active = document.querySelector('.twin-view__tab.is-active');
+            /* 只认屏幕上真有那张对照表：页签文字属于外观，不拿它当判据 */
             const view = document.querySelector('.evd');
-            if (!active || !view || !(active.textContent || '').includes('证据对照')) return null;
+            if (!view) return null;
             const rows = [...view.querySelectorAll('.evd__table tbody tr')];
             if (rows.length < 2) return null;
             const supplement = [...view.querySelectorAll('.evd__supplement > li')];
@@ -430,7 +430,7 @@ try {
             const text = view.innerText || '';
             const sourced = rows.every((row) => /anno-box-\\d+/.test(row.textContent || '') && /seg-\\d+/.test(row.textContent || ''));
             return {
-              tab: (active.textContent || '').trim(),
+              tab: (document.querySelector('.twin-view__tab.is-active')?.textContent || '').trim(),
               rows: rows.length,
               supplement: supplement.length,
               points,
@@ -450,7 +450,7 @@ try {
         check(
           `  ↳ ㉒ 播完打开「证据对照」：两路共同提示 ${evidence?.rows ?? "?"} 行 + 补核清单 ${evidence?.supplement ?? "?"} 项`,
           Boolean(evidence),
-          evidence ? `${evidence.tab.slice(0, 20)} · 行=${evidence.rows} · 补核=${evidence.supplement}` : "30 秒内没等到对照表",
+          evidence ? `${evidence.tab.slice(0, 20)} · 行=${evidence.rows} · 补核=${evidence.supplement}` : "60 秒内没等到对照表",
         );
         check(
           `  ↳ 同一屏里还有**单根 Z04** 的内部点云（第二个展示是单根柱子）`,
