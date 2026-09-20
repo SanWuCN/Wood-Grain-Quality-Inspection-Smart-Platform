@@ -22,6 +22,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { SCRIPT_ROUNDS } from "./script.ts";
+import { NAV_OPS, NAV_OP_ROUTES } from "./navOp.ts";
 
 const PAGES = new URL("../pages/", import.meta.url);
 const readPage = (name: string) => readFileSync(new URL(name, PAGES), "utf8");
@@ -110,4 +111,32 @@ test("环境记录页的轮次（⑤ 天气、⑧ 参数建议）落在同一张
   const advice = SCRIPT_ROUNDS.find((round) => round.roundNo === "⑧")?.nav;
   assert.deepEqual(weather, advice, "⑤ 与 ⑧ 应当落在同一张环境记录页上");
   assert.equal(weather?.tab, "env", "环境记录页的页签 key 应当是 env（Hardware.tsx 的 TABS）");
+});
+
+test("页面内操作（nav.op）必须在词表里，且跳的页面就是兑现它的那一页", () => {
+  /*
+    用户 2026-10-01：「针对一些只有跳转不太合适的对话加上特殊页面或操作」。
+    这类"跳过去之后还要做一件事"的轮次，最容易出的错不是崩溃，而是**静默失效**：
+    名字拼错、或者跳到了不会处理这个操作的页面 —— 现场表现都是"小木念完了，屏幕上什么都没发生"。
+  */
+  const withOp = SCRIPT_ROUNDS.filter((round) => round.nav?.op);
+  assert.ok(withOp.length > 0, "至少应当有一轮声明了页面内操作（⑱ 归档验证摘要）");
+
+  for (const round of withOp) {
+    const nav = round.nav!;
+    const op = nav.op!;
+    assert.ok(
+      (NAV_OPS as readonly string[]).includes(op),
+      `第 ${round.roundNo} 轮的操作「${op}」不在词表里（写了也不会有人处理）：${NAV_OPS.join(" / ")}`,
+    );
+    assert.equal(
+      nav.route,
+      NAV_OP_ROUTES[op as (typeof NAV_OPS)[number]],
+      `第 ${round.roundNo} 轮跳 ${nav.route}，但「${op}」是在另一页上兑现的 —— 跳错页 = 那一下永远不发生`,
+    );
+  }
+  /* ⑱ 是这次新增用例：归档验证摘要落在**报告归档页**（那一页才有交付清单与校验结果） */
+  const archive = SCRIPT_ROUNDS.find((round) => round.roundNo === "⑱")?.nav;
+  assert.equal(archive?.route, "/archive", "⑱ 归档验证摘要应当落在报告归档页");
+  assert.equal(archive?.op, "archive-verify", "⑱ 要带上「跳过去自动跑一次交付文件校验」这个操作");
 });

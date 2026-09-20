@@ -34,6 +34,7 @@ import { requestMapMode, useDashboardStore } from "../map/store";
 import { api } from "../api/client";
 import { formatDistance, routeDistance } from "./lib/geo";
 import { routeSatisfied } from "./navigateTarget";
+import { runNavOp, type NavOp } from "./navOp";
 import { defaultPillar, normalizePillar, resolvePillar } from "./lib/entities";
 import type { EntityBag } from "./types";
 
@@ -168,6 +169,10 @@ export const TOOLS: ToolDef[] = [
         component: { type: "string", description: "构件编号，用于数字孪生页" },
         view: { type: "string", description: "页内主视图 key，例如 training 页的 compare（新旧对比）" },
         q: { type: "string", description: "带进页面的检索问题（知识库检索验证页会直接执行它）" },
+        op: {
+          type: "string",
+          description: "跳转之后在页面里执行的操作（词表见 agent/navOp.ts，例如 archive-verify）",
+        },
       },
       required: ["route"],
     },
@@ -176,6 +181,13 @@ export const TOOLS: ToolDef[] = [
     run: (args, ctx): ToolResult => {
       const route = withQuery(args.route || "/", args, ["tab", "batch", "component", "view", "q"]);
       if (!ctx.navigate) return { ok: false, summary: "当前不在路由上下文内，无法跳转" };
+      /*
+        页面内操作（`op`）：跳转之后在目标页面里做的那一件事 —— 见 `navOp.ts`。
+        ⑱ 用它把归档页的**交付文件校验真的跑一遍**（那一页默认写着「尚未运行校验」，
+        光跳过去屏幕上什么都没有）。先请求、再跳：`runNavOp` 会把操作记成待领取，
+        页面挂载时补领，所以"事件早于挂载"这一种也不会丢。
+      */
+      if (args.op) runNavOp(args.op as NavOp);
       /*
         ⚠ **已经在目标页就不跳**（用户 2026-10-01：「正常已经到数字孪生页面展示了，
         触发对话原地跳转一下反而导致数字孪生重新加载」）。

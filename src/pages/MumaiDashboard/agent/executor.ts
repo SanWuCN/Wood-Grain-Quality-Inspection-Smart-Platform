@@ -568,6 +568,12 @@ async function applyScriptAction(round: ScriptRound, runtime: Runtime, spoken?: 
     if (round.nav.batch) args.batch = round.nav.batch;
     /* 检索问题（第①轮）：带进 URL，让知识库检索验证页打开就把这一问跑出来 */
     if (round.nav.q) args.q = round.nav.q;
+    /*
+      跳转之后的**页面内操作**（⑱ 归档验证摘要 = 跳过去自动跑一次交付文件校验）。
+      与上面的定位参数一起交给 `navigate_page`：那一支在导航之后派发操作事件，
+      页面用 `useNavOp()` 领取 —— 剧本这一层只说"做什么"，不碰 DOM。
+    */
+    if (round.nav.op) args.op = round.nav.op;
     if (tool) {
       try {
         await runTool(tool, args, runtime, entities, false);

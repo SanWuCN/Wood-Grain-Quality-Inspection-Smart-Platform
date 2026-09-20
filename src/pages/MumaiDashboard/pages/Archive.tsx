@@ -20,6 +20,7 @@ import { api, isApiError } from "../api/client";
 import { archiveItems as archiveItemsOf, isOnline, useSharedStore } from "../store/shared";
 import { useMumai } from "../context";
 import { buildArchiveReportHtml } from "../lib";
+import { useNavOp } from "../agent/useNavOp";
 import type { ArchiveCheckResult, ArchiveCheckRow } from "../lib";
 import type { ArchiveItem } from "../seed/types";
 
@@ -125,6 +126,24 @@ export default function Archive() {
       setRunning(false);
     }
   };
+
+  /**
+   * ⑱「归档验证摘要」跳过来之后**自动跑的那一下**（`script.ts` 的 `nav.op`）。
+   *
+   * 为什么需要：这一页默认写着「尚未运行校验」，小木说"同时打开归档版本的验证摘要"
+   * 时跳过来屏幕上什么都没有 —— 只跳转是不够的（用户 2026-10-01：
+   * 「针对一些只有跳转不太合适的对话加上特殊页面或操作」）。
+   * 跑的是**同一个** `runCheck`（按钮走的就是它），所以是真实的服务端逐项比对，
+   * 不是另做一份演示数据；跑完把校验结果那块滚进视野，摘要就摆在观众面前。
+   */
+  useNavOp("archive-verify", () => {
+    void runCheck().then(() => {
+      /* 等这一帧渲染完再滚：校验结果是刚刚 setCheck 出来的 */
+      window.setTimeout(() => {
+        document.querySelector(".ar-layout")?.scrollIntoView({ block: "start", behavior: "smooth" });
+      }, 260);
+    });
+  });
 
   /**
    * 补传 / 重选副本（评审 F11 要求「提供补传或重选副本入口；完成后能全部通过」）。
