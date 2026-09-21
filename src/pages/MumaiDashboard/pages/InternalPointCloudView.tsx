@@ -27,8 +27,8 @@
  * ⚠ 取景跟着"你在看什么"走（`FrameCamera`）：只看一根时按这一根取景。
  *   光改 `<Canvas camera>` 是没用的 —— R3F 只在创建相机时读它，见 `FrameCamera` 的说明。
  */
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { useEffect, useMemo, useState } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
 import { Grid, OrbitControls, Line } from "@react-three/drei";
 import { Box3, Vector3 } from "three";
 
@@ -36,11 +36,14 @@ import {
   DEFECT_STYLE,
   INTERNAL_CLOUD_SOURCE_NOTE,
   buildInternalCloud,
+  cloudRefinement,
+  columnPointBudget,
   fitGroupDistance,
   type CloudDefect,
   type ColumnCloud,
   type ColumnSpec,
 } from "./internalPointCloud";
+import { ColumnSplats, HoleMarks, SceneHandle, SparkRendererSlot } from "./columnSplats";
 import "./internalPointCloud.css";
 
 export type InternalPointCloudViewProps = {
@@ -52,11 +55,19 @@ export type InternalPointCloudViewProps = {
   onPickDefect?: (defect: { componentId: string; defect: CloudDefect }) => void;
 };
 
-/** 外壳 / 芯的点材质参数（同一个材质给四根柱子复用，省一遍编译） */
-const SHELL_COLOR = "#d8b98a";
-const CORE_COLOR = "#6b4b2c";
-const FOCUS_SHELL_COLOR = "#f3d9a8";
-
+/**
+ * 配色（用户 2026-09-20：「点云目前色彩太花了」→ 2026-10-01：「外壳像高斯泼溅的，内部缺陷也得真实点」）。
+ *
+ * ── 花在哪 ──────────────────────────────────────────────────────────
+ * 原来柱面米黄 `#d8b98a`、内部深棕 `#6b4b2c`、高亮又是亮奶油 `#f3d9a8` ——
+ * **三个不同色相**；而壳与芯都是半透明的，两层叠在一起互相串色，
+ * 再叠上三类缺陷的半透明色（橙 / 洋红 / 蓝灰）与虫蛀那层淡球，整根柱子成了拼色。
+ *
+ * ── 现在：颜色**全部由几何层逐点给**，这里一个颜色常量都不留 ──────────
+ * 材质给一个平涂色 + 硬边圆盘 = 一团彩色噪点，形状做得再准也读不出"洞 / 缝 / 断面"。
+ * 所以只保留了一个配色常量 `DEFECT_STYLE`（**界面图例**用的名字与色标，
+ * 与屏幕上点云的颜色不再是一回事 —— 点云的颜色在 `internalPointCloud.ts` 里按深度算）。
+ */
 /** 相机竖向视场角（度）—— 建相机与算取景距离必须是同一个数 */
 const CAMERA_FOV_DEG = 34;
 /**
@@ -67,66 +78,22 @@ const CAMERA_FOV_DEG = 34;
  */
 const CAMERA_DIR = { x: 0.62, y: 0.16, z: 0.78 } as const;
 
-/** 一个点集：BufferGeometry + PointsMaterial（three 最小用法，不引额外封装） */
-function PointSet({
-  positions,
-  color,
-  size,
-  opacity = 1,
-}: {
-  positions: Float32Array;
-  color: string;
-  size: number;
-  opacity?: number;
-}) {
-  return (
-    <points>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
-      </bufferGeometry>
-      <pointsMaterial color={color} size={size} sizeAttenuation transparent opacity={opacity} depthWrite={false} />
-    </points>
-  );
-}
-
-function Column({ cloud, focused, onlyDefects }: { cloud: ColumnCloud; focused: boolean; onlyDefects: boolean }) {
+function Column({ cloud, onlyDefects }: { cloud: ColumnCloud; onlyDefects: boolean }) {
   return (
     <group>
       {/*
         ⚠ 三段分开画（用户口径：「木柱内部都是点云，破损可视化之类的」）：
-          ① 壳：亮一点、点大一点，看得出柱形；
-          ② 内部木料：**按体积填满**（实心点云柱），点小一点、暗一点，不抢缺陷；
-          ③ 缺陷：大点 + 各自的颜色；虫蛀空腔上再套一层淡球，让"洞"读得出来。
+          ① 外壳：贴在柱面上的一层软高斯（读得出柱形与木纹）；
+          ② 内部木料：**按体积填满**的各向同性小高斯，暗一档，不抢缺陷；
+          ③ 缺陷：虫蛀腔壁 / 裂口两面 / 磕碰断面，各自带深度明暗。
         「只看破损」把 ①② 收掉，只剩 ③ —— 那时屏幕上就是"哪里有伤"。
+
+        ── 为什么交给 `ColumnSplats`（Spark 泼溅）而不是继续用点 ─────────
+        用户口径 2026-10-01：「外壳像高斯泼溅的，内部缺陷也得真实点」。
+        `gl.POINTS` 画出来是**硬边圆盘**，加密到 3.5 mm 也还是一颗颗分得清；
+        泼溅的基元是**有朝向的软高斯**，交叠成面。差别不在点数，在基元形状。
       */}
-      {onlyDefects ? null : (
-        <>
-          <PointSet
-            positions={cloud.shell}
-            color={focused ? FOCUS_SHELL_COLOR : SHELL_COLOR}
-            size={0.01}
-            opacity={focused ? 0.34 : 0.2}
-          />
-          {/* 内部木料：点比壳小、比壳暗 —— 实心但不抢缺陷；透明度留出"看得见里面"的余地 */}
-          <PointSet positions={cloud.volume} color={CORE_COLOR} size={0.0075} opacity={focused ? 0.3 : 0.16} />
-        </>
-      )}
-      {cloud.defects.map((defect) => (
-        <group key={`${defect.kind}-${defect.label}`}>
-          <PointSet
-            positions={defect.points}
-            color={DEFECT_STYLE[defect.kind].color}
-            size={defect.kind === "crack" ? 0.016 : 0.024}
-          />
-          {/* 虫蛀空洞加一层半透明球：空腔是"里面被掏空"，只靠一圈点看着像一撮火星 */}
-          {defect.kind === "borer" ? (
-            <mesh position={[defect.centroid.x, defect.centroid.y, defect.centroid.z]}>
-              <sphereGeometry args={[0.075, 20, 16]} />
-              <meshBasicMaterial color={DEFECT_STYLE.borer.color} transparent opacity={0.16} depthWrite={false} />
-            </mesh>
-          ) : null}
-        </group>
-      ))}
+      <ColumnSplats cloud={cloud} showShell={!onlyDefects} showVolume={!onlyDefects} showDefects />
     </group>
   );
 }
@@ -164,8 +131,49 @@ function FrameCamera({ frame }: { frame: FrameTarget }) {
       fovDeg: CAMERA_FOV_DEG,
       aspect,
     });
-    /* 机位方向：斜前上方看过去（水平分量约等于 1，所以 distance 就是水平退开的米数） */
-    camera.position.set(cx + distance * CAMERA_DIR.x, cy + distance * CAMERA_DIR.y, cz + distance * CAMERA_DIR.z);
+    /*
+      ⚠ 基准机位**必须与加探针之前逐位一致**（`distance × CAMERA_DIR`）：
+      `CAMERA_DIR` 的约定是"水平分量的模约等于 1"，所以 distance 就是水平退开的米数。
+      本轮第一次改这段时用 `polar/azimuth` 反算方向、又自己归一，默认机位跑了两次飞
+      （一次柱子躺着、一次相机飞到 58 米）—— 都是**回归**。
+      现在：先落到基准机位，再只对探针做**绕注视点的球面旋转**（相对量，不动基准）。
+    */
+    const baseX = cx + distance * CAMERA_DIR.x;
+    const baseY = cy + distance * CAMERA_DIR.y;
+    const baseZ = cz + distance * CAMERA_DIR.z;
+    let probe: { polar?: number; azimuth?: number; scale?: number } | null = null;
+    try {
+      const raw = window.sessionStorage?.getItem("ipcProbePose");
+      if (raw) {
+        probe = JSON.parse(raw) as { polar?: number; azimuth?: number; scale?: number };
+        /*
+          ⚠ **只生效一次**：读完立刻删掉。
+          这个键是给工装出"近看 / 俯视"样张用的，但它是会话级的 ——
+          留在里面会让**下次打开这一屏**还是那个探针机位
+          （本轮出过一次"验收截图是俯视角"，差点拿它当默认视角的证据）。
+        */
+        window.sessionStorage.removeItem("ipcProbePose");
+      }
+    } catch {
+      /* sessionStorage 不可用（隐私模式等）时按产品取景走 */
+    }
+    if (probe) {
+      /* 把基准机位换算成"绕注视点的球坐标"，再按探针给的 polar / azimuth / scale 重摆 */
+      const dx = baseX - cx;
+      const dy = baseY - cy;
+      const dz = baseZ - cz;
+      const baseRadius = Math.hypot(dx, dy, dz);
+      const radius = baseRadius * (typeof probe.scale === "number" ? probe.scale : 1);
+      const polar = typeof probe.polar === "number" ? probe.polar : Math.acos(dy / Math.max(1e-6, baseRadius));
+      const azimuth = typeof probe.azimuth === "number" ? probe.azimuth : Math.atan2(dz, dx);
+      camera.position.set(
+        cx + radius * Math.sin(polar) * Math.cos(azimuth),
+        cy + radius * Math.cos(polar),
+        cz + radius * Math.sin(polar) * Math.sin(azimuth),
+      );
+    } else {
+      camera.position.set(baseX, baseY, baseZ);
+    }
     if (controls?.target) {
       controls.target.set(cx, cy, cz);
       controls.update();
@@ -173,28 +181,6 @@ function FrameCamera({ frame }: { frame: FrameTarget }) {
       camera.lookAt(new Vector3(cx, cy, cz));
     }
   }, [camera, controls, cx, cy, cz, columns, size.width, size.height]);
-  return null;
-}
-
-/**
- * 把渲染器**这一帧真正提交的点数**报给页面（写进 `data-points`）。
- *
- * 为什么要一直报、而不是第一帧报一次：切"只看破损"之后木料整层收掉，屏幕上的点数
- * 会掉到千级 —— 那个数字要是还挂着 23 万，它就不再是"画出来了多少"的证据了。
- * 所以按 0.5 s 一次、且变化超过 2% 才 setState（不然每帧都渲染一次 React）。
- */
-function PointCounter({ onChange }: { onChange: (points: number) => void }) {
-  const lastRef = useRef({ at: 0, points: 0 });
-  useFrame(({ gl, clock }) => {
-    const points = gl.info.render.points;
-    const last = lastRef.current;
-    const now = clock.elapsedTime * 1000;
-    if (now - last.at < 500) return;
-    if (points === last.points) return;
-    if (last.points > 0 && Math.abs(points - last.points) / Math.max(points, last.points) < 0.02) return;
-    lastRef.current = { at: now, points };
-    onChange(points);
-  });
   return null;
 }
 
@@ -210,7 +196,18 @@ export default function InternalPointCloudView({ focusComponentId = "", onlyComp
     if (!soloComponent || !focusComponentId) return onlyComponentIds;
     return [focusComponentId];
   }, [soloComponent, focusComponentId, onlyComponentIds]);
-  const cloud = useMemo(() => buildInternalCloud(visibleIds), [visibleIds]);
+  /**
+   * 剖开看内部（用户口径 2026-10-02：「根本看不出内部问题，内部得有虫蛀之类的孔洞」）。
+   *
+   * 默认机位是斜前方，柱子朝相机那一面全是外皮 —— 内部有没有虫蛀、空到什么程度，
+   * 从外面读不出来。勾上之后把朝相机那一面的扇形壳与木料收掉（生成期剖切，
+   * 见 `internalPointCloud.ts` 的 `CUTAWAY_SPAN`），腔壁与虫道直接露出来。
+   *
+   * ⚠ `cutaway` 必须进 `useMemo` 依赖：构建结果按 `visibleIds` 缓存，
+   * 只改模块里的开关不会触发重算（切一下屏幕上什么都不会变）。
+   */
+  const [cutaway, setCutaway] = useState(false);
+  const cloud = useMemo(() => buildInternalCloud(visibleIds, cutaway), [visibleIds, cutaway]);
   /**
    * 两种"怎么看"的开关：
    *   · `showShell` —— 要不要画木料（壳 + 内部体积）。关掉就只剩缺陷点；
@@ -221,13 +218,22 @@ export default function InternalPointCloudView({ focusComponentId = "", onlyComp
   const showMaterial = materialView !== "defects";
   const [pickedComponent, setPickedComponent] = useState<string>("");
   /**
-   * 渲染器**实际画出来的点数**（`gl.info.render.points`，由画布里的 `PointCounter` 持续上报）。
+   * **屏幕上这一刻真在画的高斯颗数**（用户 2026-10-01：「外壳像高斯泼溅的」之后，
+   * 这一屏画的已经不是 `gl.POINTS` 而是泼溅基元，所以 `gl.info.render.points`
+   * 恒为 0 —— 那个读数已经不适用了）。
    *
-   * 为什么要把这个数字写到 DOM 上：这一屏的可见结果就是"点"，而 WebGL 画布
-   * 在验收里没法用 `innerText` 判断画没画（黑底和"没画"长得一样）。
-   * 有了它，工装可以断言"真的画了一万多个点"，而不是"画布在那儿"。
+   * 写在 `data-splats` 上给工装断言，而且必须跟着**可见范围**变：
+   * 「只看 Z04」与「只看破损」两个开关都会改变屏幕上画了多少 ——
+   * 写成一个与开关无关的常量，那两条判据就永远看不出变化（等于没测）。
    */
-  const [drawnPoints, setDrawnPoints] = useState(0);
+  const splatCount = useMemo(
+    () =>
+      cloud.columns.reduce((sum, column) => {
+        const defects = column.defectSplats.reduce((inner, defect) => inner + defect.count, 0);
+        return sum + (showMaterial ? column.shellSplats.count + column.volumeSplats.count + column.hollowSplats.count : 0) + defects;
+      }, 0),
+    [cloud, showMaterial],
+  );
 
   /* 外框盒：用 SPLAT_BOUNDS 画 —— "按原有外形生成"的参照 */
   const boxLines = useMemo(() => {
@@ -304,14 +310,63 @@ export default function InternalPointCloudView({ focusComponentId = "", onlyComp
     if (focusComponentId) setPickedComponent(focusComponentId);
   }, [focusComponentId]);
 
+  /**
+   * 精度读数（`refinementOf`）：环向/轴向点距与体密度。
+   *
+   * 为什么要显示出来：用户要的是"更精细、轮廓能对上单根那根" ——
+   * 把"精细"落成**毫米数**，现场才能一眼说清这是多细，而不是靠感觉；
+   * 单测与验收工装也读同一份数字（`data-arc-mm` / `data-level-mm`）。
+   */
+  const refinement = useMemo(() => cloudRefinement(cloud), [cloud]);
+  const coarsest = useMemo(
+    () => refinement.reduce((worst, item) => (item.arcSpacingMm > worst.arcSpacingMm ? item : worst), refinement[0]),
+    [refinement],
+  );
+  const budget = useMemo(() => cloud.columns.reduce((sum, column) => sum + columnPointBudget(column), 0), [cloud.columns]);
+
   return (
     <div className="ipc">
-      <div className="ipc__stage" data-points={drawnPoints} data-defects={defects.length}>
+      <div
+        className="ipc__stage"
+        data-defects={defects.length}
+        /* 精度读数也挂到 DOM 上：工装据此断言"点云到底多细"，不靠看图 */
+        data-arc-mm={coarsest ? coarsest.arcSpacingMm.toFixed(2) : ""}
+        data-level-mm={coarsest ? coarsest.levelSpacingMm.toFixed(2) : ""}
+        data-budget={budget}
+        /*
+          这一屏画的是**高斯泼溅基元**（`gl.POINTS` 已经不用了），所以
+          `data-points`（渲染器自报的 points）会一直是 0，工装要看的是 `data-splats`：
+          屏幕上这一刻真在画的高斯颗数（跟着「只看 Z04」「只看破损」变）。
+          `data-shell` 固定 `splat` —— 外壳本身就是泼溅，
+          不再有"真实柱面 / 程序化兜底"两条路（那份 4.2 万点的资产经复核是噪声区）。
+        */
+        data-splats={splatCount}
+        data-shell="splat">
         <Canvas
           camera={cameraProps}
           dpr={[1, 1.75]}
           gl={{ antialias: true }}>
           <color attach="background" args={["#080b11"]} />
+          {/* 泼溅渲染器：与主视图「高斯场景」同一套（`SplatStage.tsx`），外观才同源 */}
+          <SparkRendererSlot />
+          {/* 场景句柄：只给工装诊断"到底有几份泼溅在画"用 */}
+          <SceneHandle />
+          {/*
+            洞心的屏幕坐标（只给工装用）：工装据此量"洞口有多暗、多大"，
+            不再在工装里写死坐标（机位 / 柱径 / 洞口方位角都会变）。
+            洞口半径取 `defect.carve.radius`；`centroid` 是洞心。
+          */}
+          <HoleMarks
+            columns={cloud.columns.map((column) => ({
+              componentId: column.spec.componentId,
+              axis: { x: column.spec.x, z: column.spec.z },
+              defects: column.defects.map((defect) => ({
+                label: defect.label,
+                centroid: defect.centroid,
+                radius: defect.carve.kind === "borer" ? defect.carve.radius : 0.06,
+              })),
+            }))}
+          />
           <ambientLight intensity={1.1} />
           <Grid
             args={[20, 20]}
@@ -334,14 +389,12 @@ export default function InternalPointCloudView({ focusComponentId = "", onlyComp
             <Column
               key={column.spec.componentId}
               cloud={column}
-              focused={!pickedComponent || pickedComponent === column.spec.componentId}
               onlyDefects={!showMaterial}
             />
           ))}
           <OrbitControls makeDefault enablePan target={frame.center} />
-          {/* 取景与点数都跟着"你在看什么"走：切构件 / 切木料三态时重算 */}
+          {/* 取景跟着"你在看什么"走：切构件 / 切木料三态时重算 */}
           <FrameCamera frame={frame} />
-          <PointCounter onChange={setDrawnPoints} />
         </Canvas>
 
         <div className="ipc__viewhint">左键拖动旋转 · 滚轮缩放 · 右键平移</div>
@@ -350,6 +403,40 @@ export default function InternalPointCloudView({ focusComponentId = "", onlyComp
       <aside className="ipc__side">
         <h4 className="sub">这一屏是什么</h4>
         <p className="ipc__note">{INTERNAL_CLOUD_SOURCE_NOTE}</p>
+
+        {/*
+          精度读数（用户 2026-10：「3d 点云做得更精细一些，轮廓要能对上单根那根」）。
+          「精细」在这里落成两个毫米数 + 一个体密度，读的就是生成器自己报的值
+          （`cloudRefinement`），页面不另算一套 —— 免得显示的数字与画出来的点对不上。
+        */}
+        <h4 className="sub">
+          点云精度
+          <span className="muted">共 {budget.toLocaleString("zh-CN")} 点</span>
+        </h4>
+        <ul className="ipc__legend ipc__legend--precision">
+          <li>
+            柱面环向点距
+            <span className="muted">
+              {coarsest ? `${coarsest.arcSpacingMm.toFixed(2)} mm（最粗的 ${coarsest.componentId}）` : "—"}
+            </span>
+          </li>
+          <li>
+            柱身轴向点距
+            <span className="muted">{coarsest ? `${coarsest.levelSpacingMm.toFixed(2)} mm` : "—"}</span>
+          </li>
+          <li>
+            内部木料密度
+            <span className="muted">
+              {coarsest ? `${Math.round(coarsest.volumePerM3 / 1000)}k 点/m³` : "—"}
+            </span>
+          </li>
+          <li>
+            柱面采样
+            <span className="muted">
+              {coarsest ? `环向 ${coarsest.shellRings} 点 × 轴向 ${coarsest.shellLevels} 层` : "—"}
+            </span>
+          </li>
+        </ul>
 
         <div className="ipc__row">
           {/* 三态：木料全显 → 只看内部（收壳）→ 只看破损（木料整层收掉） */}
@@ -382,6 +469,18 @@ export default function InternalPointCloudView({ focusComponentId = "", onlyComp
               {soloComponent ? `只看 ${focusComponentId}（已开）` : `只看 ${focusComponentId}`}
             </button>
           ) : null}
+          {/*
+            剖开看内部（用户口径 2026-10-02：「根本看不出内部问题」）：
+            朝相机那一面的外壳与木料收掉，腔壁、虫道与道口直接露出来。
+            只在「木料全显」时有意义 —— 「只看内部/只看破损」本来就把壳收掉了。
+          */}
+          <button
+            type="button"
+            className={`ipc__toggle${cutaway ? " is-on" : ""}`}
+            title="把朝镜头那一面的外壳与木料剖掉，直接看腔壁与虫道（不改变缺陷本身）"
+            onClick={() => setCutaway((value) => !value)}>
+            {cutaway ? "剖开看内部（已开）" : "剖开看内部"}
+          </button>
           <button type="button" className={`ipc__toggle${pickedComponent ? "" : " is-on"}`} onClick={() => setPickedComponent("")}>
             四根都亮
           </button>

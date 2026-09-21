@@ -91,20 +91,101 @@ try {
   );
   check("点完真的切到内部点云", tabOpened === true, tabOpened === true ? "" : "10 秒内没切过去");
 
+  /*
+    ⚠ 这条判据 2026-10-01 从"渲染器自报点数"改成"进 GPU 的高斯颗数"：
+    这一屏现在画的是高斯泼溅基元（`SplatMesh`），不再走 `gl.POINTS`，
+    所以 `gl.info.render.points` 恒为 0 —— 旧判据会永远红，而且红得没道理。
+    `data-splats` 由几何层算出（壳 + 木料 + 缺陷三层求和），是屏幕上真画的东西。
+  */
   const drawn = await machine.waitFor(
     `(() => {
       const stage = document.querySelector('.ipc__stage');
       if (!stage) return null;
-      const points = Number(stage.getAttribute('data-points') || 0);
+      const splats = Number(stage.getAttribute('data-splats') || 0);
       const canvas = stage.querySelector('canvas');
-      return points > 0 && canvas && canvas.width > 100 ? { points, width: canvas.width, height: canvas.height } : null;
+      return splats > 0 && canvas && canvas.width > 100 ? { splats, width: canvas.width, height: canvas.height } : null;
     })()`,
     { timeoutMs: 25_000 },
   );
   check(
-    `画布真的画出了点（渲染器自报点数）`,
-    Boolean(drawn && drawn.points > 10_000),
-    drawn ? `${drawn.points} 个点 · 画布 ${drawn.width}×${drawn.height}` : "25 秒内没等到点数（WebGL 没画出来？）",
+    `画布真的画出了高斯泼溅（几何层报的颗数）`,
+    Boolean(drawn && drawn.splats > 100_000),
+    drawn ? `${drawn.splats} 颗高斯 · 画布 ${drawn.width}×${drawn.height}` : "25 秒内没等到颗数（泼溅没建起来？）",
+  );
+
+  /* ---------- ②b 精度读数（用户 2026-10：「3d 点云做得更精细一些」）----------
+     判据取自阶段节点上的 `data-arc-mm` / `data-level-mm` / `data-budget`，
+     它们由生成器的 `cloudRefinement()` 算出（页面不另算一套）。
+     环向 ≤ 7 mm 是"轮廓能对上单根那根"的门槛：单根取景距离 6.54 m 时，
+     再粗就看成多边形；轴向 ≤ 13 mm 是为了柱身不出现横向条纹。
+  */
+  const precision = await machine.evaluate(`(() => {
+    const stage = document.querySelector('.ipc__stage');
+    if (!stage) return null;
+    return {
+      arcMm: Number(stage.getAttribute('data-arc-mm') || 0),
+      levelMm: Number(stage.getAttribute('data-level-mm') || 0),
+      budget: Number(stage.getAttribute('data-budget') || 0),
+      text: (stage.closest('.ipc')?.innerText || '').replace(/\\s+/g, ' '),
+    };
+  })()`);
+  check(
+    `柱面环向点距够细（≤ 7 mm，实得 ${precision ? precision.arcMm.toFixed(2) : "—"} mm）`,
+    Boolean(precision && precision.arcMm > 0 && precision.arcMm <= 7),
+    precision ? `四根里最粗的那根 ${precision.arcMm.toFixed(2)} mm` : "读不到精度读数",
+  );
+  check(
+    `柱身轴向点距够细（≤ 13 mm，实得 ${precision ? precision.levelMm.toFixed(2) : "—"} mm）`,
+    Boolean(precision && precision.levelMm > 0 && precision.levelMm <= 13),
+  );
+  /*
+    ⚠ 上界 2026-10-01 从 70 万提到 120 万：为了"看得出是一颗颗点"
+    （单颗点缩到间距以下、点之间露空隙），点距必须更密，否则柱子会发虚。
+    修法是加密而不是把点调回大尺寸 —— 后者就是用户否掉的"纯棕色木柱"。
+  */
+  check(
+    `点数预算在合理量级（实得 ${precision ? precision.budget : "—"} 颗高斯）`,
+    Boolean(precision && precision.budget > 300_000 && precision.budget < 1_600_000),
+  );
+  check(
+    "精度那一栏在屏上（讲解时能指着说这是多细）",
+    Boolean(precision && /柱面环向点距/.test(precision.text) && /点\/m³/.test(precision.text)),
+  );
+
+  /*
+    ---------- ②c 外壳必须是**真高斯泼溅**（用户口径 2026-10-01）----------
+    「外壳像高斯泼溅的，内部缺陷也得真实点」。
+
+    ⚠ 这条判据在 2026-10-01 改过口径，旧版是错的：
+    旧版断言"外壳用的是从 gs.sog 切出来的真实柱面"（`data-shell-points`）。
+    那一份 4.2 万点的资产后来经复核是**均匀噪声区**（那份泼溅里根本没有一根
+    能单独取出的木柱，证据与脚本见 `internalPointCloud.ts` 里 `shellGrainColor` 的注释），
+    所以它已经被撤掉；现在外壳是**程序化柱面 + 真高斯泼溅渲染**（Spark）。
+    判据换成"进 GPU 的高斯颗数"（`data-splats`）：点渲染时代那个数是 0。
+  */
+  let shell = null;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    shell = await machine.evaluate(`(() => {
+      const stage = document.querySelector('.ipc__stage');
+      if (!stage) return null;
+      return {
+        mode: stage.getAttribute('data-shell'),
+        splats: Number(stage.getAttribute('data-splats') || 0),
+        budget: Number(stage.getAttribute('data-budget') || 0),
+      };
+    })()`);
+    if (shell && shell.splats > 0) break;
+    await sleep(500);
+  }
+  check(
+    `外壳是**真高斯泼溅**（实得 ${shell ? shell.mode : "读不到"} · ${shell ? shell.splats : 0} 颗高斯）`,
+    Boolean(shell && shell.mode === "splat" && shell.splats > 100_000),
+    shell ? `${shell.splats} 颗（壳 + 木料 + 缺陷三层一起）` : "读不到 stage",
+  );
+  check(
+    "高斯颗数与几何层的点数预算一致（屏幕上的读数不是另算一份）",
+    Boolean(shell && shell.budget === shell.splats),
+    shell ? `data-budget ${shell.budget} vs data-splats ${shell.splats}` : "读不到 stage",
   );
 
   /* ---------- ③ 三类缺陷与来源 ---------- */
@@ -152,30 +233,23 @@ try {
 
   /*
     ---------- ⑦ 「只看破损」真的把木料收掉了 ----------
-    这一条判的是**屏幕上的点**（渲染器自报），不是按钮上那行字：木料整层收掉之后，
-    点数应当掉到原来的一成上下；再切回「木料全显」又要涨回来。
+    这一条判的是**屏幕上这一刻真在画的高斯颗数**（`data-splats`），
+    不是按钮上那行字：木料整层收掉之后，颗数应当掉到原来的一成上下；
+    再切回「木料全显」又要涨回来。
 
-    ⚠ 取数必须等它**稳下来**：点数按 0.5 s 一帧上报，点完按钮立刻读会读到上一个状态的
-      值（第一版就这么假红了一次 —— "只看 Z04"读到的是四根的 238515，于是"涨回来"永远不成立）。
+    ⚠ 判据 2026-10-01 改过：旧版读 `data-points`（渲染器自报的 `gl.POINTS` 数），
+    这一屏改成泼溅之后那个数恒为 0，而且 `data-splats` 必须**跟着开关变**
+    （写成一个与开关无关的常量，这两条就永远看不出变化 —— 等于没测）。
+    这里只比**方向**：切过去要明显变小、切回来要明显回升。
   */
-  const pointsNow = () =>
-    machine.evaluate(`Number(document.querySelector('.ipc__stage')?.getAttribute('data-points') || 0)`);
-  const stablePoints = async () => {
-    let previous = await pointsNow();
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      await sleep(900);
-      const current = await pointsNow();
-      if (current === previous) return current;
-      previous = current;
-    }
-    return previous;
-  };
+  const splatsNow = () =>
+    machine.evaluate(`Number(document.querySelector('.ipc__stage')?.getAttribute('data-splats') || 0)`);
 
-  const woodPoints = await stablePoints();
+  const woodSplats = await splatsNow();
   check(
-    `只看一根时画的点明显少于四根`,
-    Boolean(soloState) && woodPoints > 0 && Boolean(drawn) && woodPoints < drawn.points * 0.9,
-    `四根 ${drawn?.points ?? "?"} → 只看 Z04 ${woodPoints} 个点`,
+    `只看一根时画的明显少于四根`,
+    Boolean(soloState) && woodSplats > 0 && Boolean(drawn) && woodSplats < drawn.splats * 0.9,
+    `四根 ${drawn?.splats ?? "?"} → 只看 Z04 ${woodSplats} 颗`,
   );
 
   const onlyDefect = await machine.evaluate(`(() => {
@@ -184,28 +258,34 @@ try {
     button.click();
     return true;
   })()`);
-  const defectPoints = await machine.waitFor(
+  const defectSplats = await machine.waitFor(
     `(() => {
-      const points = Number(document.querySelector('.ipc__stage')?.getAttribute('data-points') || 0);
-      return points > 0 && points < ${Math.round(woodPoints * 0.5)} ? points : null;
+      const splats = Number(document.querySelector('.ipc__stage')?.getAttribute('data-splats') || 0);
+      return splats > 0 && splats < ${Math.round(woodSplats * 0.5)} ? splats : null;
     })()`,
     { timeoutMs: 10_000 },
   );
   check(
-    `「只看破损」把木料收掉（屏幕上只剩缺陷点）`,
-    onlyDefect === true && defectPoints !== null,
-    defectPoints !== null ? `木料 ${woodPoints} → 破损 ${defectPoints} 个点` : `10 秒内点数没掉下来（还是 ${woodPoints}？）`,
+    `「只看破损」把木料收掉（屏幕上只剩缺陷）`,
+    onlyDefect === true && defectSplats !== null,
+    defectSplats !== null ? `木料 ${woodSplats} → 破损 ${defectSplats} 颗` : `10 秒内颗数没掉下来（还是 ${woodSplats}？）`,
   );
   await machine.evaluate(`(() => {
     const button = [...document.querySelectorAll('.ipc__toggle')].find((node) => (node.textContent || '').trim() === '木料全显');
     button?.click();
     return Boolean(button);
   })()`);
-  const backPoints = await stablePoints();
+  const backSplats = await machine.waitFor(
+    `(() => {
+      const splats = Number(document.querySelector('.ipc__stage')?.getAttribute('data-splats') || 0);
+      return splats > ${Math.round(woodSplats * 0.9)} ? splats : null;
+    })()`,
+    { timeoutMs: 10_000 },
+  );
   check(
-    `切回「木料全显」点数涨回来（这个开关是双向的，不是一次性的）`,
-    backPoints > woodPoints * 0.9,
-    `${backPoints} 个点（收回前 ${woodPoints}）`,
+    `切回「木料全显」颗数涨回来（这个开关是双向的，不是一次性的）`,
+    backSplats !== null,
+    `${backSplats ?? "?"} 颗（收回前 ${woodSplats}）`,
   );
 
   /*
@@ -229,13 +309,56 @@ try {
     })()`,
     { timeoutMs: 20_000 },
   );
-  /* 同上：切过来之后等点数稳下来再读，免得把这之前的数当成"切过来画出的点" */
-  const autoPoints = await stablePoints();
-  check(
-    `㉒ 的事件能把主视图切到内部点云（并画出点）`,
-    opened === true && Boolean(autoView && autoPoints > 10_000),
-    autoView ? `${autoView.tab} · ${autoPoints} 个点` : "20 秒内没切过去",
+  const autoSplats = await machine.waitFor(
+    `(() => {
+      const stage = document.querySelector('.ipc__stage');
+      const splats = Number(stage?.getAttribute('data-splats') || 0);
+      return splats > 10_000 ? splats : null;
+    })()`,
+    { timeoutMs: 15_000 },
   );
+  check(
+    `㉒ 的事件能把主视图切到内部点云（并画出高斯泼溅）`,
+    opened === true && Boolean(autoView) && autoSplats !== null,
+    autoView ? `${autoView.tab} · ${autoSplats ?? 0} 颗` : "20 秒内没切过去",
+  );
+
+  /* ---------- ⑩ 剖开看内部（用户口径 2026-10-02：「根本看不出内部问题」）----------
+     默认机位是斜前方，柱子朝相机那一面全是外皮 —— 内部有没有虫蛀、空到什么程度，
+     从外面读不出来。这一条要证三件事：
+       · 开关在、点得动；
+       · 点下去**屏幕上的颗数明显变少**（壳与木料被剖掉一层）；
+       · 剖掉的是木料，**腔壁/虫道那一层还在**（否则就是把要给人看的东西也收掉了）。
+  */
+  const cutBefore = Number(await machine.evaluate(`document.querySelector('.ipc__stage')?.getAttribute('data-splats') || 0`));
+  const cutClicked = await machine.evaluate(`(() => {
+    const chip = [...document.querySelectorAll('button')].find((el) => (el.textContent || '').trim() === '剖开看内部');
+    if (!chip) return 'no-chip';
+    if (!chip.className.includes('is-on')) chip.click();
+    return 'clicked';
+  })()`);
+  const cutAfter = await machine.waitFor(
+    `(() => {
+      const stage = document.querySelector('.ipc__stage');
+      const chip = [...document.querySelectorAll('button')].find((el) => (el.textContent || '').includes('剖开看内部'));
+      const splats = Number(stage?.getAttribute('data-splats') || 0);
+      return chip && chip.className.includes('is-on') && splats > 0 && splats < ${cutBefore} ? splats : null;
+    })()`,
+    { timeoutMs: 20_000 },
+  );
+  check(
+    "有「剖开看内部」开关，点下去屏幕上的木料明显变少（真的剖开了）",
+    cutClicked === "clicked" && cutAfter !== null,
+    cutClicked === "no-chip" ? "没找到开关" : `${cutBefore} → ${cutAfter ?? "没变少"}`,
+  );
+  const cutShot = await machine.shot("内部点云-剖开看内部");
+  if (cutShot) console.log(`  剖切截图：${cutShot}`);
+  /* 收工复位：这个开关留在页面上的话，后面再跑这一屏的人会以为默认就是剖开的 */
+  await machine.evaluate(`(() => {
+    const chip = [...document.querySelectorAll('button')].find((el) => (el.textContent || '').includes('剖开看内部'));
+    if (chip && chip.className.includes('is-on')) chip.click();
+    return true;
+  })()`);
 
   const shot = await machine.shot("内部点云");
   if (shot) console.log(`  截图：${shot}`);

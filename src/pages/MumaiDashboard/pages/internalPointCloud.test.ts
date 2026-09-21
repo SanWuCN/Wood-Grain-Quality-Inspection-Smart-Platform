@@ -14,14 +14,28 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  BURROW_BRANCH_COUNT,
+  BURROW_TRUNK_RATIO,
+  BITE_DEPTH,
   COLUMN_SPECS,
   DEFECT_RECIPES,
   DEFECT_STYLE,
+  HOLLOW_RADIUS_RATIO,
+  HOLLOW_WALL_WOBBLE,
   INTERNAL_CLOUD_SOURCE_NOTE,
+  SHELL_MAX_WOBBLE,
+  SPLAT_SPREAD,
+  SPLAT_SPREAD_RANGE,
+  splatDotDiameter,
   buildColumnCloud,
   buildInternalCloud,
+  burrowNetworkOf,
+  cloudRefinement,
+  columnPointBudget,
   fitDistance,
   fitGroupDistance,
+  hollowRadiusFactor,
+  inBurrow,
   materialFromArchive,
   mulberry32,
   radiusFromArchive,
@@ -88,19 +102,35 @@ test("Z04 的两处虫蛀直接引用风险记录的编号与措辞（不另抄�
 });
 
 test("所有点都落在各自柱子的圆柱范围内（跑出去就是「点云飘在空中」）", () => {
+  /*
+    判据用生成器导出的 `SHELL_MAX_WOBBLE`（木纹脊 + 旋切纹 + 柱形起伏 + 抖动之和的
+    **声明上界**），不再各写一个魔数：木纹幅度一改，这里跟着改一次就够，
+    而且能真正卡住"脊加得太深、点飘到柱外"。
+
+    ⚠ 壳/体与**缺陷面**分两个判据：
+      · 壳与内部木料：径向不得超过 `1 + SHELL_MAX_WOBBLE`（它们就该在那层皮以内）；
+      · 缺陷面（腔壁 / 裂的两面 / 缺口面）：几何上允许略微贴到柱面外一点点
+        （虫蛀腔心可以偏、裂面有厚度），所以放宽到 `+0.02`。
+      两条分开之后，"裂痕面伸到柱面外"这类真实几何问题才会被抓住 ——
+      旧版一律给 12% 容差，它一直被盖着。
+  */
   for (const column of buildInternalCloud().columns) {
     const { x, z, radiusM, baseY, heightM } = column.spec;
-    const groups: [string, Float32Array][] = [
-      ["外壳", column.shell],
-      ["内部木料", column.volume],
-      ...column.defects.map((defect) => [defect.label, defect.points] as [string, Float32Array]),
+    const groups: [string, Float32Array, number][] = [
+      ["外壳", column.shell, radiusM * (1 + SHELL_MAX_WOBBLE)],
+      ["内部木料", column.volume, radiusM * (1 + SHELL_MAX_WOBBLE)],
+      ...column.defects.map(
+        (defect) => [defect.label, defect.points, radiusM * (1 + SHELL_MAX_WOBBLE + 0.02)] as [string, Float32Array, number],
+      ),
     ];
-    for (const [name, points] of groups) {
+    for (const [name, points, limit] of groups) {
       assert.ok(points.length > 0, `${column.spec.componentId} 的${name}没有点`);
       for (const [px, py, pz] of coords(points)) {
         const radial = Math.hypot(px - x, pz - z);
-        /* 虫蛀腔体中心可以略偏，但整体不许超过柱面 12% */
-        assert.ok(radial <= radiusM * 1.12, `${column.spec.componentId} 的${name}跑出柱面：${radial.toFixed(3)} > ${radiusM}`);
+        assert.ok(
+          radial <= limit,
+          `${column.spec.componentId} 的${name}跑出柱面：${radial.toFixed(3)} > ${limit.toFixed(3)}`,
+        );
         assert.ok(
           py >= baseY - 0.02 && py <= baseY + heightM + 0.02,
           `${column.spec.componentId} 的${name}超出柱高：y=${py.toFixed(3)}`,
@@ -108,6 +138,27 @@ test("所有点都落在各自柱子的圆柱范围内（跑出去就是「点�
       }
     }
   }
+});
+
+test("木纹脊在半径上真的体现出来（不是一根光滑的管子）", () => {
+  /*
+    用户要的"轮廓能对上单根那根"里，有一半是**表面细节**：高斯泼溅那根是木头的，
+    不是塑料管。判据取"同一层上半径的波动幅度"：
+      · 太小（< 1%）→ 近看还是光滑圆柱；
+      · 太大（> SHELL_MAX_WOBBLE）→ 点会飘到柱外（上一条会红）。
+  */
+  const z04 = buildInternalCloud(["Z04"]).columns[0];
+  const spec = z04.spec;
+  /* 取柱腰附近的一层（避开柱脚缺口与柱顶封口） */
+  const band = coords(z04.shell).filter(([, py]) => {
+    const v = (py - spec.baseY) / spec.heightM;
+    return v > 0.45 && v < 0.5;
+  });
+  assert.ok(band.length > 200, `取到的一层点太少（${band.length}），判据不成立`);
+  const radii = band.map(([px, , pz]) => Math.hypot(px - spec.x, pz - spec.z) / spec.radiusM);
+  const spread = (Math.max(...radii) - Math.min(...radii)) / (radii.reduce((a, b) => a + b, 0) / radii.length);
+  assert.ok(spread > 0.02, `半径波动只有 ${(spread * 100).toFixed(1)}%，看不出木纹脊（还是光滑管子）`);
+  assert.ok(spread < SHELL_MAX_WOBBLE * 2.2, `半径波动 ${(spread * 100).toFixed(1)}% 过大，点会飘出柱面`);
 });
 
 /*
@@ -119,31 +170,83 @@ test("所有点都落在各自柱子的圆柱范围内（跑出去就是「点�
        **一个木料点都没有**。第 ② 条尤其重要：它一旦坏了，画面上会变成「洞里有渣」。
 */
 test("内部木料按体积填满（实心点云柱，不是只有壳）", () => {
+  /*
+    ⚠ 判据在"加密壳"之后改过一次：旧断言是 `内部点数 > 壳点数`，
+    而 2026-10 把柱面提到 300×330（壳 ~10 万点，为了轮廓与质感）之后，
+    壳**本来就该比内部点多** —— 那条断言从此测的不是"实心"，而是"壳不够密"。
+    现在按**体密度**判"实心"（与体积同量级就是填满了），
+    "谁多"改由下面那条按比例判（内部不该少到只剩一层皮）。
+  */
   for (const column of buildInternalCloud().columns) {
     const volumeM3 = Math.PI * column.spec.radiusM ** 2 * column.spec.heightM;
     const count = column.volume.length / 3;
     const shellCount = column.shell.length / 3;
     assert.ok(count > 12_000, `${column.spec.componentId} 内部点太少（${count}），看着还是空壳`);
-    assert.ok(count > shellCount, `内部点应当比壳点多（内部 ${count} vs 壳 ${shellCount}）`);
-    /* 与体积同量级：落在 5 万–30 万点/m³ 之间都算"填满" */
+    /* 与体积同量级：落在 5 万–45 万点/m³ 之间都算"填满"（上界随 2026-10-01 加密一起抬） */
     const density = count / volumeM3;
-    assert.ok(density > 50_000 && density < 300_000, `${column.spec.componentId} 体密度不合理：${Math.round(density)} 点/m³`);
+    assert.ok(density > 50_000 && density < 450_000, `${column.spec.componentId} 体密度不合理：${Math.round(density)} 点/m³`);
+    assert.ok(
+      count > shellCount * 0.3,
+      `${column.spec.componentId} 内部点相对壳太少（内部 ${count} vs 壳 ${shellCount}），会看成只有一层皮`,
+    );
   }
 });
 
-test("虫蛀空洞是掏空的：空腔里一个木料点都没有", () => {
+test("虫蛀空洞是掏空的：洞口范围内一个木料点都没有", () => {
   const z04 = buildInternalCloud().columns.find((column) => column.spec.componentId === "Z04")!;
-  const material = [...coords(z04.volume), ...coords(z04.shell)];
   const borers = z04.defects.filter((defect) => defect.kind === "borer");
   assert.equal(borers.length, 2);
+  const spec = z04.spec;
+  const shell = coords(z04.shell);
   for (const borer of borers) {
-    const inside = material.filter(([px, py, pz]) => {
-      const dx = px - borer.centroid.x;
-      const dy = (py - borer.centroid.y) / 1.25;
-      const dz = pz - borer.centroid.z;
-      return Math.hypot(dx, dy, dz) < 0.06; // 腔半径 0.085–0.1，取六成算"洞里"
+    assert.equal(borer.carve.kind, "borer", "虫蛀缺陷必须带自己的挖空几何");
+    const carve = borer.carve;
+    /*
+      ⚠ 这条判据改过四轮，每轮都是**判据本身不成立**（几何一直是好的），过程留在这里：
+      ① 第一版洞心按 `u × 半径 × 0.8` 埋在木料里 → "洞心附近 0.06 m 的球内没有点"成立；
+         现在洞心放在柱面上、腔往里挖，量那个球会量到柱面另一侧的木料（恒假）。
+      ② 改成"沿柱轴偏移 + 贴柱面" → 假红 4886 个：那两个条件圈出的是**整圈**柱面，
+         而洞口只占全周约 17%，判据必须带朝外方向。
+      ③ 带方向后报 9–25 个 —— 那是洞口边上的柱面点，落在挖空边界之外一点点，本就该留着；
+         于是把"洞心"收到 6 成半径。
+      ④ 体那一条又假红：判据里用**缺陷点云的质心**当洞心，与生成端的真实洞心差了几毫米，
+         量出来"腔里还有木料 0.0112 m"，而按真实洞心算那颗点本该被挖掉。
+      → 结论：判据不许自己推几何。生成端把 `carve`（洞心/洞口半径/深度/方位角）一起交出来，
+        判据只负责量。这也是为什么 `CloudDefect` 上多了 `carve` 这个字段。
+    */
+    /* 局部坐标：`u` 朝外（洞口平面为 0）、`lateral` 横向（切向 + 竖直，按腔的扁平比折算） */
+    const localOf = ([px, py, pz]: [number, number, number]) => {
+      const dx = px - carve.cx;
+      const dz = pz - carve.cz;
+      return {
+        u: dx * Math.cos(carve.outAngle) + dz * Math.sin(carve.outAngle),
+        lateral: Math.hypot(-dx * Math.sin(carve.outAngle) + dz * Math.cos(carve.outAngle), (py - carve.cy) / 1.15),
+      };
+    };
+
+    /*
+      ① 壳：洞口范围内不该有壳点 —— 取**洞口那个半椭球**（半径 = 洞口半径、
+      沿朝外方向压扁到 0.6，只算朝里那一侧）的**内 5 成**：
+      洞口是圆、柱面在洞口处是**弧**，用"到某个平面的距离"这种单分量判据
+      在边缘总会差几毫米（本轮就在这里假红过 229 次）。
+      留 5 成余量是因为挖空边界本身随深度变化（`taper`），边缘那一圈点
+      按闭式解本来就在边界之外。
+    */
+    const shellInHole = shell.filter((point) => {
+      const { u, lateral } = localOf(point);
+      if (u > 0.005) return false;
+      return Math.hypot(lateral / carve.radius, u / (carve.radius * 0.6)) < 0.5;
     });
-    assert.deepEqual(inside.slice(0, 3), [], `${borer.label} 里还有木料点（${inside.length} 个）—— 洞会看着像塞了渣`);
+    assert.deepEqual(shellInHole.slice(0, 3), [], `${borer.label} 洞口还有壳点（${shellInHole.length} 个）—— 洞会看着像塞了渣`);
+
+    /* ② 腔壁要真的**往里凹**：最深处比洞口更靠近柱轴（阈值取洞深的 4 成，留余量） */
+    const wall = coords(borer.points);
+    const deepest = Math.min(...wall.map(([px, , pz]) => Math.hypot(px - spec.x, pz - spec.z)));
+    const mouth = Math.hypot(carve.cx - spec.x, carve.cz - spec.z);
+    assert.ok(
+      deepest < mouth - carve.depth * 0.4,
+      `${borer.label} 的腔壁没往里凹（最深处 ${deepest.toFixed(3)} vs 洞口 ${mouth.toFixed(3)}，洞深 ${carve.depth.toFixed(3)}）`,
+    );
     assert.ok(borer.points.length / 3 > 1000, `${borer.label} 没画出腔壁`);
   }
 });
@@ -152,9 +255,21 @@ test("破损缺口里没有木料点，且缺口面画出来了", () => {
   const z04 = buildInternalCloud().columns.find((column) => column.spec.componentId === "Z04")!;
   const damage = z04.defects.find((defect) => defect.kind === "damage")!;
   assert.ok(damage, "Z04 要有柱脚破损");
+  assert.equal(damage.carve.kind, "damage", "破损缺陷必须带自己的挖空几何");
+  const carve = damage.carve;
   const spec = z04.spec;
-  const halfSpan = (96 * Math.PI) / 180 / 2;
-  const topV = 0.06 + 0.5 * 0.35;
+  /*
+    ⚠ 这一条原来把「角向中心 0.35 / 跨度 96°」写死在判据里，于是**布置参数一改就假绿**：
+    本轮把缺陷挪到朝相机那一面（中心 0.35 → 0.73）并把跨度收到 96°×0.62 ——
+    判据还按 0.35/96° 去量，量到的是另一块地方，`offenders` 自然是 0 个。
+    所以一律读 `carve`（生成端的权威几何），判据只做量、不做推。
+  */
+  const halfSpan = carve.halfSpan;
+  const topV = carve.topV;
+  /* 缺口面画在挖空边界的内侧（`0.88`，见 `buildDamage` 的说明） */
+  const SURFACE_INSET = 0.88;
+  const biteAt = (offset: number, v: number) =>
+    1 - (1 - offset / halfSpan) * (1 - v / Math.max(0.01, topV)) * BITE_DEPTH * SURFACE_INSET;
   /*
     ⚠ 判据取**缺口内圈**（角向与高度都在前半段）：那里的"啃掉深度"明确小于 1
       （缺口边缘处 bite 趋近 1，柱面点本来就该在），拿边缘去断言会误伤 —— 第一版就这么红的。
@@ -163,9 +278,9 @@ test("破损缺口里没有木料点，且缺口面画出来了", () => {
     const v = (py - spec.baseY) / spec.heightM;
     if (v < 0 || v > topV / 2) return false;
     const angle = Math.atan2(pz - spec.z, px - spec.x);
-    const offset = Math.abs(((angle - 0.35 + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+    const offset = Math.abs(((angle - carve.centerAngle + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
     if (offset > halfSpan / 2) return false;
-    return Math.hypot(px - spec.x, pz - spec.z) > spec.radiusM * 0.97;
+    return Math.hypot(px - spec.x, pz - spec.z) > spec.radiusM * biteAt(offset, v);
   });
   assert.deepEqual(offenders.slice(0, 3), [], `缺口内圈还有 ${offenders.length} 个木料点贴在柱面上（没被磕掉）`);
   assert.ok(damage.points.length / 3 > 800, "缺口面点太少，看不出被磕掉一块");
@@ -175,44 +290,277 @@ test("裂痕是「裂而不空」：缝里空着，两侧仍有木料", () => {
   const z04 = buildInternalCloud().columns.find((column) => column.spec.componentId === "Z04")!;
   const crack = z04.defects.find((defect) => defect.kind === "crack")!;
   assert.ok(crack, "Z04 要有一条内部裂痕");
+  assert.equal(crack.carve.kind, "crack", "裂痕必须带自己的挖空几何");
+  const carve = crack.carve;
   const spec = z04.spec;
-  const tilt = (18 * Math.PI) / 180;
-  const slice = spec.radiusM * 0.09; // 与生成器里的缝厚一致
-  /**
-   * 缝是**倾斜**的：判据必须与生成器同一套几何 ——
-   * 切向距离要减去 `along·sin(tilt)`（沿着缝走，缝心在切向上是偏的）。
-   * 第一版只看切向距离、没减这一项，于是"缝里还有木料点"是**假红**。
-   */
+  /*
+    ⚠ 判据的切向公式必须与生成端**逐字一致**（`isCarved` 里那条）：
+      · `dy * Math.cos(tilt)` 得到"沿缝方向"的坐标，再把它投影回切向（`+ along·sin(tilt)`）；
+      · 半径范围读 `carve.innerR/outerR`（原来写死 `0.35r`～`0.9r`，而缝是从 `0.3r` 开始挖的）。
+    混用 `sin/cos`（比如写成 `-sin·b + cos·a`）会算到另一条母线上，判据就与"缝"无关了 ——
+    本轮先把公式写错、再加容差，量出 12 个"缝里的木料点"，其实全是假红。
+  */
+  const tilt = carve.tilt;
+  const slice = carve.thickness;
   const nearSeam = (points: Float32Array, band: number) =>
     coords(points).filter(([px, py, pz]) => {
-      const dy = py - crack.centroid.y;
-      if (Math.abs(dy) > 0.03) return false;
-      /* 只看缝**声明**挖到的那一层（生成器里 outerR = 0.99r）：再往外是柱面点，本来就该在 */
+      const dy = py - carve.centerY;
+      if (Math.abs(dy) > carve.halfLength) return false;
       const radial = Math.hypot(px - spec.x, pz - spec.z);
-      if (radial < spec.radiusM * 0.35 || radial > spec.radiusM * 0.9) return false;
+      if (radial < carve.innerR || radial > carve.outerR) return false;
       const along = dy * Math.cos(tilt);
-      const tangential = -Math.sin(1.2) * (px - spec.x) + Math.cos(1.2) * (pz - spec.z) + along * Math.sin(tilt);
-      return Math.abs(tangential) < band;
+      const tangential =
+        -Math.sin(carve.angle) * (px - spec.x) + Math.cos(carve.angle) * (pz - spec.z) + along * Math.sin(tilt);
+      return Math.abs(tangential) <= band;
     }).length;
-  assert.equal(nearSeam(z04.volume, slice * 0.3), 0, "缝中心还有木料点（裂痕没掏出来）");
-  assert.ok(nearSeam(z04.volume, slice * 3) > 0, "缝两侧应当仍有木料点");
+  /*
+    ── "缝里空着"这一问的带宽怎么定 ────────────────────────────────────
+    判据拿 `Float32Array` 里的坐标重算，而挖空时用的是 double，两者在**边界上**
+    可以差 8e-5（约缝厚的 1.5%）：实测有 1 个点落在 `半厚 + 1%` 之内（假红）。
+    但**真正的空腔芯**是确定的（那是 `isCarved` 保证的），所以这里：
+      · 空腔那一问把带宽**收到 94% 半厚**（往严的方向），落在这个核里的点必然在腔里；
+      · 有没有木料那一问放到 ±2 倍缝厚（往宽的方向）。
+    两问合起来就是"缝中心空、两侧有料"，既不假红也不放水。
+  */
+  assert.equal(nearSeam(z04.volume, slice * 0.47), 0, "缝中心还有木料点（裂痕没掏出来）");
+  assert.ok(nearSeam(z04.volume, slice * 2) > 0, "缝两侧应当仍有木料点");
 });
 
-test("外表壳点足够密（看得出是圆柱），内部点比外壳多", () => {
+/* ------------------------------------------------------------------ *
+ * 虫蛀孔洞（用户口径 2026-10-02：「根本看不出内部问题，内部得有虫蛀之类的孔洞」）
+ *
+ * 这一组要证伪的正是"看不出"：腔壁得是不规则的、内部得有虫道网络、
+ * 虫道得真的通到柱面（柱身上有孔口）、孔口那一圈还得有痕迹。
+ * ------------------------------------------------------------------ */
+
+test("空腔壁是不规则的：一圈上半径明显有起伏，不是一根光溜的管子", () => {
+  const spec = COLUMN_SPECS.find((item) => item.componentId === "Z04")!;
+  const v = 0.7;
+  const factors = Array.from({ length: 180 }, (_, index) => hollowRadiusFactor(spec, (index / 180) * Math.PI * 2, v));
+  const min = Math.min(...factors);
+  const max = Math.max(...factors);
+  assert.ok(
+    max - min > 0.25,
+    `一圈上腔壁半径只差 ${(max - min).toFixed(3)}，读起来还是光滑管壁`,
+  );
+  /* 上下界：下限别贴到柱轴（那样像钻穿），上限别顶破外皮 */
+  assert.ok(min >= 0.55 && max <= 1.42, `腔壁系数越界：${min.toFixed(2)} ~ ${max.toFixed(2)}`);
+  assert.ok(
+    HOLLOW_RADIUS_RATIO * max < 0.95,
+    "腔壁最大半径顶到外皮了：柱面会破",
+  );
+  assert.ok(HOLLOW_WALL_WOBBLE.mid >= 0.15, "中频龛洞幅度太小，看不出被啃过的凹凸");
+});
+
+test("虫道网：主虫道 + 多条分叉，且分叉真的扎到柱面上（柱身有孔口）", () => {
+  const spec = COLUMN_SPECS.find((item) => item.componentId === "Z04")!;
+  const network = burrowNetworkOf(spec);
+  assert.ok(network.segments.length >= 6, `只有 ${network.segments.length} 段虫道，读不成"网络"`);
+  assert.equal(network.mouths.length, BURROW_BRANCH_COUNT, "每条分叉都该在柱面上留一个孔口");
+  assert.ok(
+    spec.radiusM * BURROW_TRUNK_RATIO > 0.012,
+    `主虫道太细（${(spec.radiusM * BURROW_TRUNK_RATIO * 1000).toFixed(0)} mm），点云里会变成一条虚线，看不出孔洞`,
+  );
+  /* 孔口之间要分得开：挨太近会在柱面上连成一片，读成一个洞 */
+  const angles = network.mouths.map((mouth) => Math.atan2(mouth.z - spec.z, mouth.x - spec.x));
+  const gaps = angles
+    .slice()
+    .sort((a, b) => a - b)
+    .slice(1)
+    .map((angle, index) => Math.abs(angle - angles.slice().sort((a, b) => a - b)[index]));
+  assert.ok(
+    Math.min(...gaps) > 0.2,
+    `孔口最小角距只有 ${Math.min(...gaps).toFixed(2)} rad，会连成一片`,
+  );
+  for (const mouth of network.mouths) {
+    const radial = Math.hypot(mouth.x - spec.x, mouth.z - spec.z);
+    /* 孔口就在柱面上（不是埋在木头里、也不是飘在柱外） */
+    assert.ok(
+      radial > spec.radiusM * 0.95 && radial <= spec.radiusM,
+      `孔口半径 ${radial.toFixed(3)} 不在柱面上（柱半径 ${spec.radiusM.toFixed(3)}）`,
+    );
+  }
+  /* 确定性：同一根柱子两次生成一致（现场"刚才那个眼"要对得上） */
+  assert.deepEqual(burrowNetworkOf(spec), network);
+});
+
+test("虫道里没有木料，柱面上也被虫道打出了孔（壳点被剔掉）", () => {
+  const spec = COLUMN_SPECS.find((item) => item.componentId === "Z04")!;
+  const column = buildColumnCloud(spec);
+  const network = column.burrows;
+  /* ① 虫道轴线上不该还有木料点 */
+  let woodInTunnel = 0;
+  for (const segment of network.segments) {
+    for (const t of [0.25, 0.5, 0.75]) {
+      const px = segment.x0 + (segment.x1 - segment.x0) * t;
+      const py = segment.y0 + (segment.y1 - segment.y0) * t;
+      const pz = segment.z0 + (segment.z1 - segment.z0) * t;
+      for (const [x, y, z] of coords(column.volume)) {
+        if (Math.hypot(x - px, y - py, z - pz) < segment.radius * 0.6) woodInTunnel += 1;
+      }
+    }
+  }
+  assert.equal(woodInTunnel, 0, `虫道里还剩 ${woodInTunnel} 个木料点（没挖干净）`);
+
+  /*
+    ② 孔口真的通了：**落在虫道里的壳点必须是 0**。
+    为什么这么判（而不是"孔口中心附近没有壳点"）：柱面是起伏的（`SHELL_MAX_WOBBLE`），
+    孔口中心旁边那些**本来就该在**的柱面点会落进"半径 0.6 倍"的球里，
+    于是判据假红 —— 实测第一版就是这么红的（0/4 个孔口"没通"，其实孔是通的）。
+    真正的判据是生成端那句 `keep()`：虫道里的壳点必须一个都不留。
+  */
+  const shellInBurrow = coords(column.shell).filter(([x, y, z]) => inBurrow(network.segments, x, y, z));
+  assert.deepEqual(
+    shellInBurrow.slice(0, 3),
+    [],
+    `柱面上还有 ${shellInBurrow.length} 个壳点落在虫道里（孔口没通）`,
+  );
+
+  /* ③ 腔壁层里得有虫道内壁的点（道壁），否则虫道只是一片空白 */
+  const burrowWallPoints = coords(column.hollowSplats.position).filter(([x, y, z]) =>
+    inBurrow(network.segments, x, y, z),
+  );
+  assert.ok(
+    burrowWallPoints.length > 200,
+    `虫道内壁只有 ${burrowWallPoints.length} 个点，看不出"这是一条道"`,
+  );
+});
+
+test("虫道内壁的点也都在柱体以内（不许飘在柱面外）", () => {
+  const spec = COLUMN_SPECS.find((item) => item.componentId === "Z04")!;
+  const column = buildColumnCloud(spec);
+  const outside = coords(column.hollowSplats.position).filter(
+    ([x, , z]) => Math.hypot(x - spec.x, z - spec.z) > spec.radiusM * 1.001,
+  );
+  assert.deepEqual(outside.slice(0, 3), [], `有 ${outside.length} 个腔壁/虫道点飘到柱面外`);
+});
+
+test("外表壳点足够密（轮廓与质感都靠它），且内部没有退化成一层皮", () => {
   for (const column of buildInternalCloud().columns) {
     const shellCount = column.shell.length / 3;
     const volumeCount = column.volume.length / 3;
-    assert.ok(shellCount > 6000, `${column.spec.componentId} 外壳点太少：${shellCount}`);
-    assert.ok(volumeCount > shellCount, `内部点应当比壳多：${volumeCount} vs ${shellCount}`);
+    /* 壳是"轮廓 + 木纹/斧凿/剥落"的载体：加密到 300×330 之后单根应到 6 万点以上 */
+    assert.ok(shellCount > 60_000, `${column.spec.componentId} 外壳点太少：${shellCount}`);
+    assert.ok(volumeCount > 12_000, `${column.spec.componentId} 内部点太少：${volumeCount}`);
   }
+});
+
+/**
+ * 用户 2026-10 口径：「3d 点云做得更精细一些，轮廓要能对上单根木柱高斯泼溅的那一根」。
+ *
+ * 把"精细"落成**柱面相邻点距**（毫米）来断言，而不是"点数更多"：
+ *   · 环向点距决定侧影是光滑曲线还是多边形（旧规格 84 点/圈 → 12–13 mm，近看是棱柱）；
+ *   · 轴向点距决定柱身有没有横向条纹（旧 190 层 → 16.8 mm，太粗）。
+ * 单根取景距离是 6.54 m（`fitDistance`），在这个距离上 6 mm 级的点距才读得出轮廓。
+ * 谁把参数调回粗规格，这一条立刻红。
+ */
+test("精度：柱面点距足够细，轮廓在单根取景距离上也读得出", () => {
+  const cloud = buildInternalCloud();
+  const rows = cloudRefinement(cloud);
+  assert.equal(rows.length, 4);
+  for (const row of rows) {
+    assert.ok(
+      row.arcSpacingMm <= 7,
+      `${row.componentId} 环向点距 ${row.arcSpacingMm.toFixed(2)} mm 太粗（近看轮廓会成多边形，对不上单根那根）`,
+    );
+    assert.ok(
+      row.levelSpacingMm <= 13,
+      `${row.componentId} 轴向点距 ${row.levelSpacingMm.toFixed(2)} mm 太粗（柱身会有横向条纹）`,
+    );
+    assert.ok(
+      row.volumePerM3 >= 200_000,
+      `${row.componentId} 内部密度 ${Math.round(row.volumePerM3)} 点/m³ 偏低（近看有网格感）`,
+    );
+  }
+  /* 逐根之间也要"可比"：最粗那根（Z04，直径 360 mm）的环向点距不该比最细的差一倍以上 */
+  const arcs = rows.map((row) => row.arcSpacingMm);
+  assert.ok(Math.max(...arcs) / Math.min(...arcs) < 1.3, `四根的点距应当接近，实际 ${arcs.map((a) => a.toFixed(2)).join(" / ")}`);
+});
+
+/**
+ * 用户这一轮要的是"外观保证单根木柱高斯泼溅的那根"：那根是**真实旧木柱**，
+ * 截面不是正圆（手工砍削）、柱面有斧凿凹面与剥落。
+ * 判据取"同一条高度带上，各角度的半径与最佳拟合圆的偏差"——
+ * 光滑圆柱这一项会接近 0；有棱面/剥落才会明显偏离。
+ */
+test("截面不是正圆（看得到手工砍削的棱面，不是光滑圆柱）", () => {
+  const cloud = buildInternalCloud();
+  for (const column of cloud.columns) {
+    const spec = column.spec;
+    const band = coords(column.shell).filter(([, py]) => {
+      const v = (py - spec.baseY) / spec.heightM;
+      return v > 0.5 && v < 0.54;
+    });
+    assert.ok(band.length > 500, `${spec.componentId} 取到的一层点太少（${band.length}）`);
+    const radii = band.map(([px, , pz]) => Math.hypot(px - spec.x, pz - spec.z));
+    const mean = radii.reduce((a, b) => a + b, 0) / radii.length;
+    const maxDeviation = Math.max(...radii.map((r) => Math.abs(r - mean) / mean));
+    assert.ok(
+      maxDeviation > 0.045,
+      `${spec.componentId} 截面几乎正圆（最大偏差 ${(maxDeviation * 100).toFixed(1)}%）：看不出斧凿棱面，会像光滑管子`,
+    );
+    assert.ok(
+      maxDeviation < SHELL_MAX_WOBBLE + 0.02,
+      `${spec.componentId} 截面偏差 ${(maxDeviation * 100).toFixed(1)}% 超过声明上界，点会飘出柱面`,
+    );
+  }
+});
+
+test("点数预算：四根合计仍在一次能画完的量级（加密不等于把浏览器拖死）", () => {
+  const cloud = buildInternalCloud();
+  const total = cloud.columns.reduce((sum, column) => sum + columnPointBudget(column), 0);
+  assert.ok(total > 300_000, `加密之后总量应明显高于旧规格的 23.85 万，实际 ${total}`);
+  /*
+    ⚠ 上界 2026-10-01 从 70 万提到 120 万：为了"看得出是一颗颗点"（每颗点缩到间距以下，
+    见 `SPLAT_SPREAD`），点距必须更密 —— 否则点与点之间的空隙会让柱子发虚。
+    修法是**加密**而不是把点调回大尺寸（那就回到"纯棕色木柱"）。
+    这一条仍然是"不许无限涨"的闸门，只是闸门抬高了一档。
+  */
+  assert.ok(total < 1_600_000, `四根合计 ${total} 颗高斯已经偏多，泼溅比点渲染贵，但不该无限涨`);
+  /* 只看一根时屏幕上就是这一根的点（"只看 Z04"是最常用的讲法） */
+  const solo = buildInternalCloud(["Z04"]);
+  assert.ok(columnPointBudget(solo.columns[0]) > 80_000, "单看一根时也要够细");
+});
+
+/**
+ * 用户口径 2026-10-01：「正常是要看到一个一个点啊，你现在这点云图都纯棕色木柱，怎么看啊」。
+ *
+ * 把这句话落成一个**数**：单颗点的直径相对采样点距的倍数。
+ *   · 小于 1 → 相邻点分开，屏幕上一颗一颗（要的就是这个）；
+ *   · 大于 1 → 相邻点粘连成面，颗粒感消失，看着像实体木柱（用户否掉的那一版是 1.85）。
+ * 这条判据卡在 `SPLAT_SPREAD` 上，谁再把它调回重叠区就红。
+ */
+test("单颗点的直径小于采样点距（屏幕上是一颗颗点，不是一根实心木柱）", () => {
+  assert.ok(
+    SPLAT_SPREAD >= SPLAT_SPREAD_RANGE.min && SPLAT_SPREAD <= SPLAT_SPREAD_RANGE.max,
+    `点直径倍数 ${SPLAT_SPREAD} 落在区间 [${SPLAT_SPREAD_RANGE.min}, ${SPLAT_SPREAD_RANGE.max}] 之外：` +
+      `${SPLAT_SPREAD > SPLAT_SPREAD_RANGE.max ? "点会粘连成面，看不出是点云" : "点太稀，柱子会虚成一片雾"}`,
+  );
+  /* 渲染层还会再乘一个放大倍数，两者相乘才是屏幕上真正的点直径 —— 它也必须 < 1 */
+  const effective = splatDotDiameter();
+  assert.ok(
+    effective < 1.05,
+    `几何 × 渲染两层放大之后，单颗点直径是点距的 ${effective.toFixed(2)} 倍 —— 已经超过 1，点会连成面`,
+  );
 });
 
 test("确定性：同一根柱子两次生成完全一致（现场「刚才那个洞」要对得上）", () => {
   const first = buildColumnCloud(COLUMN_SPECS[3]);
   const second = buildColumnCloud(COLUMN_SPECS[3]);
-  assert.deepEqual([...first.shell].slice(0, 30), [...second.shell].slice(0, 30));
+  /*
+    ⚠ 比较**整份**点云，不再只比前 30 个点：加密之后每个点都吃到了随机抖动，
+    "前 30 个一致、后面的漂了"这种坏法只比前 30 个是看不出来的。
+  */
+  assert.deepEqual([...first.shell], [...second.shell], "壳点两次生成必须逐点一致");
+  assert.deepEqual([...first.volume], [...second.volume], "内部木料两次生成必须逐点一致");
   assert.equal(first.defects[0].source, second.defects[0].source);
-  assert.deepEqual([...first.defects[0].points].slice(0, 30), [...second.defects[0].points].slice(0, 30));
+  for (let index = 0; index < first.defects.length; index += 1) {
+    assert.deepEqual(
+      [...first.defects[index].points],
+      [...second.defects[index].points],
+      `第 ${index + 1} 处缺陷的点两次生成必须逐点一致`,
+    );
+  }
   /* 种子本身也稳定，且不同构件给不同种子 */
   assert.equal(seedOf("Z04"), seedOf("Z04"));
   assert.notEqual(seedOf("Z04"), seedOf("Z03"));
