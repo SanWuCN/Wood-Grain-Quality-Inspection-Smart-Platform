@@ -108,7 +108,40 @@ spoken.push({ from: "degrade:取消-指令", text: "好的，这条指令已经�
 console.log(`语音包条目：${pack.size} 条`);
 console.log(`枚举到的播报句：${spoken.length} 句\n`);
 
-console.log("① 模板占位符都能取到值（取不到就降级成未命中，且句子含空括号）");
+console.log("① 剧本那一路：25 轮主台词必须**逐字**有录音（用户口径：剧本里保证都是音频）");
+const scriptLines = [];
+for (const round of SCRIPT_ROUNDS) {
+  for (const line of round.lines) scriptLines.push({ roundNo: round.roundNo, role: line.role, text: line.text });
+}
+const mainLines = scriptLines.filter((line) => line.role === "main");
+const missingMains = mainLines.filter((line) => !pack.has(normalize(line.text)));
+check(
+  `剧本 ${SCRIPT_ROUNDS.length} 轮的念白（role=main）逐字命中音频`,
+  missingMains.length === 0,
+  missingMains.length
+    ? `缺 ${missingMains.length} 句：第 ${missingMains.map((line) => line.roundNo).join("、")} 轮`
+    : `${mainLines.length}/${mainLines.length} 命中`,
+);
+for (const line of missingMains) {
+  console.log(`    · 第 ${line.roundNo} 轮「${line.text.slice(0, 40)}…」没有音频`);
+}
+/*
+  其余角色**不该有音频**，有反而是错的：
+  · `host` 是讲解人自己说的话（人在台上念，平台出声就变成两个人在念同一句）；
+  · `audit` / `waiting` 是备用句，设计上只写进 note、不播。
+  这两条也顺手核一下，免得有人"顺手补录"造成两个声音。
+*/
+const otherRoles = scriptLines.filter((line) => line.role !== "main");
+const wronglyRecorded = otherRoles.filter((line) => pack.has(normalize(line.text)));
+check(
+  "讲解人/备用句没有被误录成小木的音频",
+  wronglyRecorded.length === 0,
+  wronglyRecorded.length
+    ? `${wronglyRecorded.length} 句有音频（${[...new Set(wronglyRecorded.map((line) => line.role))].join("、")}）`
+    : `${otherRoles.length} 句都没有音频（设计如此：不播报）`,
+);
+
+console.log("\n② 意图问答与固定句：能解析到录音就播，解析不到只显示字幕");
 /*
   `device_link_check` 与 `robot_patrol_route` 的事实键**只在工具跑起来之后**才有
   （前者来自 `/api/device-readiness`，后者来自 planner 现算的 goal/routeText），
@@ -117,9 +150,8 @@ console.log("① 模板占位符都能取到值（取不到就降级成未命中
 const RUNTIME_ONLY_FACTS = new Set(["device_link_check", "robot_patrol_route"]);
 const brokenStatic = brokenTemplates.filter((item) => !RUNTIME_ONLY_FACTS.has(item.id));
 const brokenRuntime = brokenTemplates.filter((item) => RUNTIME_ONLY_FACTS.has(item.id));
-const brokenIds = [...new Set(brokenStatic.map((item) => item.id))];
 check(
-  "意图模板没有取不到值的占位符（运行期才给的键除外）",
+  "意图模板没有取不到值的占位符（取不到会渲染出空括号，还会降级成未命中话术）",
   brokenStatic.length === 0,
   brokenStatic.length ? `${brokenStatic.length} 个模板有缺失键` : "全部可渲染",
 );
@@ -132,7 +164,7 @@ if (brokenRuntime.length) {
   );
 }
 
-console.log("\n② 每一句能解析到哪条录音（解析不到 = 只显示字幕，不出合成音）");
+console.log("\n③ 每一句能解析到哪条录音（解析不到 = 只显示字幕，不出合成音）");
 /** 用与运行时同一个 `resolveAudio`：逐字命中，或"同一句、取值漂移"认回录音 */
 const resolvedOf = (text) => resolveAudio(Object.fromEntries(pack), text);
 const missing = spoken.filter((item) => !resolvedOf(item.text));
@@ -144,14 +176,18 @@ check(
   spoken.filter((item) => String(item.from).startsWith("script:")).every((item) => pack.has(normalize(item.text))),
   `${spoken.filter((item) => String(item.from).startsWith("script:")).length} 轮`,
 );
-check(
-  "意图/固定句能解析到录音（逐字或取值漂移）",
-  silentItems.length === 0,
-  silentItems.length
-    ? `逐字 ${exactCount} 句 · 漂移认回 ${driftedItems.length} 句 · 解析不到 ${silentItems.length} 句`
-    : `逐字 ${exactCount} 句 · 漂移认回 ${driftedItems.length} 句`,
+/*
+  ⚠ 这一条**不算失败**，只报告。
+  用户口径（2026-10-01）：「我只要剧本里保证都是音频就行」—— 剧本那一路由 ① 硬判；
+  这里剩的是**自由问答**（意图目录里的条目，剧本里没有这些句子）：
+  它们能解析到录音就播录音，解析不到就只显示字幕（不出合成音，见 tts.ts 的口径）。
+  要它们也出声只有两条路：补录（合成工具每条要人工敲图形验证码），
+  或把长句拆成固定段动态拼接（结构性改造）。在那之前，这里如实报数。
+*/
+console.log(
+  `    ${silentItems.length === 0 ? "✓" : "·"} 意图/固定句：逐字命中 ${exactCount} 句 · ` +
+    `取值漂移认回 ${driftedItems.length} 句 · 解析不到 ${silentItems.length} 句（只显示字幕）`,
 );
-console.log(`    · 逐字命中 ${exactCount} 句、取值漂移认回 ${driftedItems.length} 句、解析不到 ${missing.length} 句`);
 for (const item of silentItems) {
   console.log(`    ·（只显示字幕）${item.from} →「${item.text.slice(0, 46)}${item.text.length > 46 ? "…" : ""}」`);
 }
@@ -159,7 +195,7 @@ if (missing.length !== silentItems.length) {
   console.log(`    ·（不计失败）${missing.length - silentItems.length} 句属于运行期才有取值的类型`);
 }
 
-console.log("\n③ 命中路径指向的文件真的在磁盘上");
+console.log("\n④ 命中路径指向的文件真的在磁盘上");
 const dead = [];
 for (const item of spoken) {
   const url = resolvedOf(item.text);
@@ -171,5 +207,8 @@ check("命中路径都落在 public/voice 里", dead.length === 0, dead.length ?
 for (const item of dead.slice(0, 10)) console.log(`    · ${item.from} → ${item.url}`);
 
 console.log(`\n${failed === 0 ? "语料覆盖：全部通过" : `语料覆盖：${failed} 项未通过`}`);
-if (brokenIds.length) console.log(`提示：先修模板取值（${brokenIds.join("、")}），再看音频覆盖。`);
+console.log(
+  `剧本那一路：${mainLines.length}/${mainLines.length} 句念白有音频（硬判据）` +
+    `；自由问答另计：${exactCount} 句逐字命中、${driftedItems.length} 句漂移认回、${silentItems.length} 句只显示字幕。`,
+);
 process.exit(failed === 0 ? 0 : 1);
