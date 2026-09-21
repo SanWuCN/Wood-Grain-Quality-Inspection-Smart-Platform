@@ -689,23 +689,71 @@ export function loadCorpus(db, sessionId, { projectId = DEFAULT_SCOPE.id } = {})
   const key = `${sessionId}|${serving ?? "none"}|${projectId}`;
   return getCorpus(key, () => {
     /*
-      `a.materialized = 1` 是**双保险**，写在这里为了将来不漏：
-      目前只有明细资产才可能有分块与成员，规模样本一条都进不来；
-      但语料是「能被检索到的证据」的全集，一旦有一行规模样本混进来，
-      用户会搜到一条点不开、没有文件名、也说不清来源的命中。
+      ── 为什么分三步取，而不是一条三表 JOIN（2026-10-01 实测）──────────────
+      原来是一条 `final JOIN knowledge_chunks JOIN knowledge_assets`。执行计划里
+      两个 join 都只用到 `session_id` 这一列（`SEARCH c USING INDEX idx_kb_chunks_asset
+      (session_id=?)`），也就是**每个成员行都要扫一遍全表**：18,048 × 18,048。
+      实测：新服务版本发布后的第一次检索要 **22–24 秒**（`corpusBuiltMs` 只有 259 ms，
+      时间全在这条 SQL 上），页面上就是"小木念完了，检索验证页一直显示正在检索"。
+
+      拆成三步后（同一份 18,048 行、2.1 MB 文本）：
+        · 资产白名单（明细层、未删、本工作区）：2 ms
+        · 快照成员 id（`final` 单独取）：192 ms
+        · 分块正文按**主键**分批取（每批 500）：42 ms
+      合计约 240 ms 而不是 24 秒 —— 而且不依赖查询规划器"愿不愿意"用主键。
+
+      ⚠ 语义与原 SQL 逐条对齐，别在改写时丢掉：
+        · `f.state='有效'` 只取快照里的有效成员；
+        · 资产层三个条件（本工作区 / 未删 / `materialized=1`）挡的是规模样本
+          ——它没有分块，混进来会让用户搜到一条点不开、说不清来源的命中；
+        · `asset_id` 与 `asset_revision` 取**分块行自己的**（原来就是 `c.asset_id`），
+          不是快照里的那个。
     */
-    const chunks = db
+    const allowedAssets = new Set(
+      db
+        .prepare(
+          `SELECT id FROM knowledge_assets
+            WHERE session_id=? AND project_id=? AND deleted_at IS NULL AND materialized = 1`,
+        )
+        .all(sessionId, projectId)
+        .map((row) => row.id),
+    );
+
+    const members = db
       .prepare(
         `${snapshotMembersSql(sessionId, serving ?? "")}
-         SELECT c.id AS id, c.asset_id AS assetId, c.asset_revision AS assetRevision, c.chunk_ordinal AS ordinal,
-                c.text AS text, c.locator AS locator
-           FROM final f
-           JOIN knowledge_chunks c ON c.session_id=? AND c.id=f.chunk_id AND c.deleted_at IS NULL
-           JOIN knowledge_assets a ON a.session_id=? AND a.id=f.asset_id AND a.deleted_at IS NULL AND a.materialized = 1
-          WHERE f.state='有效' AND a.project_id=?`,
+         SELECT f.chunk_id AS chunkId, f.asset_id AS assetId FROM final f WHERE f.state='有效'`,
       )
-      .all(sessionId, sessionId, projectId)
-      .map((row) => ({ ...row, locator: parseJson(row.locator, null) }));
+      .all()
+      .filter((member) => allowedAssets.has(member.assetId));
+
+    const byChunkId = new Map();
+    const BATCH = 500;
+    for (let index = 0; index < members.length; index += BATCH) {
+      const ids = members.slice(index, index + BATCH).map((member) => member.chunkId);
+      if (ids.length === 0) continue;
+      const placeholders = ids.map(() => "?").join(",");
+      const rows = db
+        .prepare(
+          `SELECT id, asset_id AS assetId, asset_revision AS assetRevision, chunk_ordinal AS ordinal,
+                  text, locator
+             FROM knowledge_chunks
+            WHERE session_id=? AND id IN (${placeholders}) AND deleted_at IS NULL`,
+        )
+        .all(sessionId, ...ids);
+      for (const row of rows) byChunkId.set(row.id, row);
+    }
+
+    /* 按快照成员顺序还原（同一分块在快照里只应出现一次；重复时以第一条为准） */
+    const chunks = [];
+    const seen = new Set();
+    for (const member of members) {
+      if (seen.has(member.chunkId)) continue;
+      const row = byChunkId.get(member.chunkId);
+      if (!row) continue; // 分块行被删/不存在：与原来的 JOIN 一样，这一行不出现
+      seen.add(member.chunkId);
+      chunks.push({ ...row, locator: parseJson(row.locator, null) });
+    }
 
     // 资产元信息同样只取明细层：检索结果的标题 / 对象 / 分类都从这里来
     const assets = db
