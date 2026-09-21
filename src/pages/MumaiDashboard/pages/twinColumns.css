@@ -117,6 +117,42 @@
   text-overflow: ellipsis;
 }
 
+/* 结论摘要：一行六个数，窄屏自动换行 */
+.report-viewer__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--space-4);
+  margin-top: 4px;
+}
+
+/* 每项之间给一条细分隔，读的时候不会把「入网率」和上一个数字连起来念 */
+.report-viewer__fact + .report-viewer__fact {
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--border-subtle);
+}
+
+.report-viewer__fact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.report-viewer__fact em {
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  /* 标签与值之间留一丝缝：DOM 文本连成「照片数量452 张」不好读 */
+  margin-right: 2px;
+}
+
+.report-viewer__fact b {
+  color: var(--text-primary);
+  font-family: var(--font-data-muted, ui-monospace, monospace);
+  font-size: var(--fs-aux);
+  font-weight: 600;
+}
+
 .report-viewer__actions {
   display: flex;
   align-items: center;
@@ -141,6 +177,57 @@
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
   background: #ffffff;
+}
+
+/*
+  页图排版（"里面排版优化一下"）：
+  · 一列居中，A4 比例不拉伸（`width: 100%; height: auto`）；
+  · 每页上面一条页签（第 N 页 / 共 M 页 + 这一页讲什么），页与页之间留白；
+  · 页码用等宽数字，滚动时对齐好看。
+*/
+.report-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-5);
+  margin: 0;
+  padding: 0 0 var(--space-6);
+  list-style: none;
+}
+
+.report-pages__item {
+  width: min(1100px, 100%);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.report-pages__meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+}
+
+.report-pages__no {
+  color: var(--text-accent, #70c4ff);
+  font-family: var(--font-data-muted, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.report-pages__title {
+  color: var(--text-secondary);
+}
+
+.report-pages__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: #ffffff;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
 }
 
 .report-viewer__fallback {
