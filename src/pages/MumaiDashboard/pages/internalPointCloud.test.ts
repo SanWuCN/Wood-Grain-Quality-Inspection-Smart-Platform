@@ -576,6 +576,15 @@ test("来源说明与图例文案齐备（口径要求：必须写明「按外�
   assert.match(INTERNAL_CLOUD_SOURCE_NOTE, /按构件外形与档案记录生成/, "要写明是生成的");
   assert.match(INTERNAL_CLOUD_SOURCE_NOTE, /不是实测点云/, "要写明不是实测的");
   assert.match(INTERNAL_CLOUD_SOURCE_NOTE, /预置结果/, "缺陷要标成预置结果");
+  /*
+    用户 2026-10-02：「『这一屏是什么 … 缺陷位置为预置结果。』这个东西不要有」——
+    压成一句话之后口径三件事仍在，但**不许再写成一段解释**（超过 40 字就该回去看需求）。
+  */
+  assert.ok(
+    INTERNAL_CLOUD_SOURCE_NOTE.length <= 40,
+    `来源说明又写长了（${INTERNAL_CLOUD_SOURCE_NOTE.length} 字）：现场要的是一行角标，不是一段解释`,
+  );
+  assert.ok(!INTERNAL_CLOUD_SOURCE_NOTE.includes("这一屏"), "不许再出现「这一屏是什么」那套自我解释的标题");
   assert.deepEqual(
     Object.keys(DEFECT_STYLE).sort(),
     ["borer", "crack", "damage"],

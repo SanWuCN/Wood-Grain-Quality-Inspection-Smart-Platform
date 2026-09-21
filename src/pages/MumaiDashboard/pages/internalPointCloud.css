@@ -51,6 +51,18 @@
   overflow: auto;
 }
 
+/*
+  来源角标（用户 2026-10-02 要求把「这一屏是什么」那一整块去掉之后改成的样子）：
+  一行小字，跟在「点云精度」标题下面 —— 口径还在，但不再占一屏来解释自己。
+  原来的 `.ipc__note`（带左侧色条的一段话）保留给别处用。
+*/
+.ipc__sourcetag {
+  margin: 0 0 2px;
+  color: var(--ma-text-3, #8b98ab);
+  font-size: var(--fs-aux, 12.5px);
+  line-height: 1.5;
+}
+
 .ipc__note {
   margin: 0;
   padding: 6px 8px;

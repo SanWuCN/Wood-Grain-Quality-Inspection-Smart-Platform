@@ -401,8 +401,14 @@ export default function InternalPointCloudView({ focusComponentId = "", onlyComp
       </div>
 
       <aside className="ipc__side">
-        <h4 className="sub">这一屏是什么</h4>
-        <p className="ipc__note">{INTERNAL_CLOUD_SOURCE_NOTE}</p>
+        {/*
+          ── 原来这里是一块「这一屏是什么」+ 整段来源说明（用户 2026-10-02 要求去掉）──
+          用户原话：「『这一屏是什么 … 缺陷位置为预置结果。』这个东西不要有」。
+          去掉的是**那一块标题 + 整段话**，口径本身不能丢（PRD 要求写明
+          "按外形与档案记录生成、不是实测点云、缺陷为预置结果"），
+          所以压成精度栏标题旁的一行小字 `ipc__sourcetag`：
+          同样的三件事都还在，但不再占一屏的位置去解释自己。
+        */}
 
         {/*
           精度读数（用户 2026-10：「3d 点云做得更精细一些，轮廓要能对上单根那根」）。
@@ -413,6 +419,9 @@ export default function InternalPointCloudView({ focusComponentId = "", onlyComp
           点云精度
           <span className="muted">共 {budget.toLocaleString("zh-CN")} 点</span>
         </h4>
+        <p className="ipc__sourcetag" title={INTERNAL_CLOUD_SOURCE_NOTE}>
+          {INTERNAL_CLOUD_SOURCE_NOTE}
+        </p>
         <ul className="ipc__legend ipc__legend--precision">
           <li>
             柱面环向点距
