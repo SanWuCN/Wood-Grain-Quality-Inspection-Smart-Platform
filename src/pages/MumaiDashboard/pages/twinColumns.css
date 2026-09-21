@@ -66,6 +66,100 @@
   text-decoration: none;
 }
 
+/*
+  报告阅览窗口（用户口径 2026-10-02：「直接展开在平台上的窗口，可以点开关闭，
+  然后里面排版优化一下」）。
+  排版上的四条取舍：
+    · **几乎占满屏幕**：A4 页面按宽度铺开才读得清，620/880px 的通用弹窗只能看到半页；
+    · 顶部一条**工具条**（标题 + 新标签打开 + 关闭），正文区不再放任何按钮 —— 读文件时
+      屏幕上不该有别的可点东西；
+    · 正文区给**深色底 + 内嵌留白**：PDF 页是白的，深底把页面衬出来（与平台整体深色一致），
+      同时避免整屏刺眼；
+    · 页宽交给浏览器 PDF 阅读器自己排版（缩放/翻页/检索都在它手里），平台不重复造一套。
+*/
+.report-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 460; /* 高于通用弹窗（遮罩 400），低于全屏语音控制台 */
+  display: flex;
+  flex-direction: column;
+  background: rgba(2, 7, 17, 0.92);
+}
+
+.report-viewer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--panel-surface);
+}
+
+.report-viewer__title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.report-viewer__title b {
+  color: var(--text-primary);
+  font-size: var(--fs-title, 16px);
+  font-weight: 600;
+}
+
+.report-viewer__title i {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.report-viewer__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+}
+
+.report-viewer__actions .btn {
+  text-decoration: none;
+}
+
+.report-viewer__body {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-3);
+  background: #0b0f16;
+}
+
+.report-viewer__frame {
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: #ffffff;
+}
+
+.report-viewer__fallback {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: var(--space-2);
+  height: 100%;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.report-viewer__fallback code {
+  margin: 0 4px;
+  color: var(--text-accent, #70c4ff);
+  font-family: var(--font-data-muted, ui-monospace, monospace);
+  font-size: var(--fs-aux);
+}
+
 .twin-col {
   display: grid;
   grid-template-columns: auto 1fr;

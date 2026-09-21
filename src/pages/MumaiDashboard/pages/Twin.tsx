@@ -83,6 +83,8 @@ import { TWIN_EVIDENCE_EVENT, TWIN_INTERNAL_CLOUD_EVENT } from "./twinViewAction
 import { annotatedPhotoFor } from "./annotatedPhotos";
 /** 成果质量报告（给项目经理的高斯泼溅报告）的登记表：页面、静态托管、工装共用一份地址 */
 import { GAUSSIAN_REPORT } from "./reportPack";
+/** 报告的平台内阅览窗口（点开在平台里展开、可关闭；关闭即卸载 iframe） */
+import { ReportViewer } from "./ReportViewer";
 import "./twinColumns.css";
 /**
  * 泼溅渲染舞台（`SplatStage`）**异步加载**。
@@ -276,6 +278,12 @@ export default function Twin() {
     [],
   );
   const [uploadOpen, setUploadOpen] = useState(false);
+  /**
+   * 成果质量报告的**阅览窗口**开着没有（用户口径 2026-10-02：「直接展开在平台上的窗口，
+   * 可以点开关闭」）。关掉时 `ReportViewer` 整个卸载，里面那个 iframe 一起没 ——
+   * 下次点开是一次干净加载（藏起来的话关了再开还是上次那页）。
+   */
+  const [reportOpen, setReportOpen] = useState(false);
   const [fitNonce, setFitNonce] = useState(0);
   const [splatError, setSplatError] = useState<string | null>(null);
   const [sceneBusy, setSceneBusy] = useState<string | null>(null);
@@ -1256,11 +1264,11 @@ const TOUR_INTERVAL_MS = 5200;
 
           {/*
             ── 成果质量报告（用户口径 2026-10-02）─────────────────────────
-            「作为高斯泼溅的报告，是给项目经理看的，放在数字孪生那块」。
-            这份 PDF 是重建成果的质量报告（项目经理交付物），放在数字孪生页
-            与"这一版场景"并排 —— 评审要"看成果"，看的就是这里的场景 + 报告。
-            入口用新标签打开（`target="_blank" rel="noreferrer"`）：报告是给人读的，
-            不该把讲解用的孪生页导航走。文件走静态托管 `/reports/…`（已加 PDF 类型）。
+            「作为高斯泼溅的报告，是给项目经理看的，放在数字孪生那块」，
+            以及「不是点击下载，直接展开在平台上的窗口，可以点开关闭」——
+            所以这里是**开关**：点「展开报告」在平台内开一个阅览窗口（`ReportViewer`），
+            再点关闭即收起（关闭时连 iframe 一起卸掉，不是藏起来）。
+            报告是给人读的，不该把讲解用的孪生页导航走，所以另留一个"新标签打开"的出口。
           */}
           <Panel
             title="成果质量报告"
@@ -1273,20 +1281,16 @@ const TOUR_INTERVAL_MS = 5200;
                     {GAUSSIAN_REPORT.subtitle} · {GAUSSIAN_REPORT.sizeText} · {GAUSSIAN_REPORT.date}
                   </i>
                 </span>
-                <a
-                  className="btn btn--primary"
-                  href={GAUSSIAN_REPORT.href}
-                  target="_blank"
-                  rel="noreferrer"
-                  title="在新标签里打开这份质量报告（可下载 / 可打印）">
-                  打开报告
-                </a>
+                <button
+                  type="button"
+                  className={`btn btn--primary${reportOpen ? " is-active" : ""}`}
+                  aria-expanded={reportOpen}
+                  title={reportOpen ? "收起报告窗口" : "在平台内展开这份质量报告（可随时关闭）"}
+                  onClick={() => setReportOpen((value) => !value)}>
+                  {reportOpen ? "收起报告" : "展开报告"}
+                </button>
               </li>
             </ul>
-            <p className="note">
-              报告针对本次高斯泼溅重建成果：场景版本、覆盖构件与风险点、重建前后对照与遗留项。
-              原始文件按 <code>{GAUSSIAN_REPORT.href}</code> 存放在平台静态目录，任何登录账号都能直接打开。
-            </p>
           </Panel>
 
           <Panel
@@ -1605,6 +1609,9 @@ const TOUR_INTERVAL_MS = 5200;
           </div>
         </Modal>
       ) : null}
+
+      {/* 成果质量报告：平台内的阅览窗口（点开关闭，关闭即卸载 iframe） */}
+      {reportOpen ? <ReportViewer onClose={() => setReportOpen(false)} /> : null}
     </div>
   );
 }
