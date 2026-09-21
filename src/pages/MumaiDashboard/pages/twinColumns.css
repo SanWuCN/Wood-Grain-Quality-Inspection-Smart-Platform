@@ -13,6 +13,59 @@
   margin: 0 0 var(--space-3);
 }
 
+/*
+  成果质量报告那一行（数字孪生侧栏，用户口径 2026-10-02）：
+  左边是文件名 + 说明，右边是「打开报告」。链接挂的是 `.btn` 的样式
+  （页面里其它按钮都是 `Btn` 组件，这里必须是原生 `<a>` —— 报告要新标签打开）。
+*/
+.report-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.report-list > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--primary);
+  border-radius: 6px;
+  background: var(--fill-weak);
+}
+
+.report-list__name {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.report-list__name b {
+  color: var(--text-primary);
+  font-size: var(--fs-table);
+  font-weight: 600;
+}
+
+.report-list__name i {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--fs-aux);
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 原生 <a> 挂 .btn：去掉下划线，其余交给 .btn 的样式 */
+.report-list .btn {
+  flex: none;
+  text-decoration: none;
+}
+
 .twin-col {
   display: grid;
   grid-template-columns: auto 1fr;

@@ -1,5 +1,5 @@
 {
-  "_comment": "放到 <仓库>/server/data/capture-screen.json。这一路（采集设备画面）是可选的，没配就黑屏并提示信号中断。",
-  "url": "http://192.168.31.60:8766",
+  "_comment": "放到 <仓库>/server/data/capture-screen.json。这一路（采集设备画面）是可选的，没配就黑屏并提示信号中断。地址与密钥按你自己那台采集设备填 —— 例子里的地址只是某一台的（2026-10-02 该设备已从 .60 换到 .12）。",
+  "url": "http://192.168.31.12:8766",
   "token": "REPLACE_WITH_SCREEN_SERVICE_TOKEN"
 }

@@ -81,6 +81,8 @@ import { ORIGINAL_PHOTO_EVENT } from "./originalPhotoAction";
 import { TWIN_EVIDENCE_EVENT, TWIN_INTERNAL_CLOUD_EVENT } from "./twinViewAction";
 /* ⑫ 窗口里那张真实原片（照片批次里的人工标注原片） */
 import { annotatedPhotoFor } from "./annotatedPhotos";
+/** 成果质量报告（给项目经理的高斯泼溅报告）的登记表：页面、静态托管、工装共用一份地址 */
+import { GAUSSIAN_REPORT } from "./reportPack";
 import "./twinColumns.css";
 /**
  * 泼溅渲染舞台（`SplatStage`）**异步加载**。
@@ -1250,6 +1252,41 @@ const TOUR_INTERVAL_MS = 5200;
                 {currentSceneEntity.data.checkResult ? null : <li className="is-muted">尚未运行检查</li>}
               </ul>
             ) : null}
+          </Panel>
+
+          {/*
+            ── 成果质量报告（用户口径 2026-10-02）─────────────────────────
+            「作为高斯泼溅的报告，是给项目经理看的，放在数字孪生那块」。
+            这份 PDF 是重建成果的质量报告（项目经理交付物），放在数字孪生页
+            与"这一版场景"并排 —— 评审要"看成果"，看的就是这里的场景 + 报告。
+            入口用新标签打开（`target="_blank" rel="noreferrer"`）：报告是给人读的，
+            不该把讲解用的孪生页导航走。文件走静态托管 `/reports/…`（已加 PDF 类型）。
+          */}
+          <Panel
+            title="成果质量报告"
+            extra={<span className="muted">给项目经理 · PDF</span>}>
+            <ul className="report-list">
+              <li>
+                <span className="report-list__name">
+                  <b>{GAUSSIAN_REPORT.title}</b>
+                  <i>
+                    {GAUSSIAN_REPORT.subtitle} · {GAUSSIAN_REPORT.sizeText} · {GAUSSIAN_REPORT.date}
+                  </i>
+                </span>
+                <a
+                  className="btn btn--primary"
+                  href={GAUSSIAN_REPORT.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="在新标签里打开这份质量报告（可下载 / 可打印）">
+                  打开报告
+                </a>
+              </li>
+            </ul>
+            <p className="note">
+              报告针对本次高斯泼溅重建成果：场景版本、覆盖构件与风险点、重建前后对照与遗留项。
+              原始文件按 <code>{GAUSSIAN_REPORT.href}</code> 存放在平台静态目录，任何登录账号都能直接打开。
+            </p>
           </Panel>
 
           <Panel

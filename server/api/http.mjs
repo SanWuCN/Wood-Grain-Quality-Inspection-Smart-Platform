@@ -1634,16 +1634,32 @@ const STATIC_TYPES = {
   ".ttf": "font/ttf",
   ".sog": "application/octet-stream",
   ".glb": "model/gltf-binary",
+  /* PDF 给正确类型：浏览器才**内嵌预览**而不是下载一个 .bin（数字孪生里的成果质量报告用它） */
+  ".pdf": "application/pdf",
 };
 
 async function serveStatic(req, res, root, pathname) {
   if (req.method !== "GET" && req.method !== "HEAD") return false;
-  const safe = normalize(pathname).replace(/^(\.\.[/\\])+/, "");
+  /*
+    ⚠ 静态路径**必须先解码**（2026-10-02 实测踩到）：
+    `url.pathname` 是**百分号编码**的，而仓库里有中文名的静态素材
+    （`public/reports/成果质量报告-….pdf`、照片批次的对照表），
+    不解码就是拿 `%E6%88%90…` 去磁盘上找文件 —— 必然 404，
+    而且这条路径在 SPA 兜底之前，浏览器那边只看到"文件不存在"。
+    `decodeURIComponent` 对非法编码会抛，所以兜一层：抛了就用原串（宁可 404，不要 500）。
+  */
+  let decoded = pathname;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    /* 非法百分号编码：按原样处理 */
+  }
+  const safe = normalize(decoded).replace(/^(\.\.[/\\])+/, "");
   let filePath = resolve(root, `.${safe}`);
   if (!filePath.startsWith(resolve(root))) return false; // 目录穿越
   if (!existsSync(filePath) || statSync(filePath).isDirectory()) {
     // SPA 兜底：非资源请求一律回 index.html（HashRouter 下其实很少用到）
-    if (extname(pathname)) return false;
+    if (extname(decoded)) return false;
     filePath = join(root, "index.html");
     if (!existsSync(filePath)) return false;
   }
